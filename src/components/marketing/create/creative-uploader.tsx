@@ -3,6 +3,8 @@
 import { useState, useRef } from "react";
 import { Upload, X, Image, Film, Loader2, CheckCircle } from "lucide-react";
 
+const FB_API_BASE = "https://graph.facebook.com/v21.0";
+
 interface CreativeUploaderProps {
   type: "image" | "video";
   adAccountId: string;
@@ -61,48 +63,64 @@ export function CreativeUploader({
     setUploading(true);
 
     try {
-      // Send file as raw binary with metadata in headers
-      // This avoids Next.js FormData parsing issues with large files
-      const fileBuffer = await file.arrayBuffer();
-
-      const res = await fetch("/api/facebook/create/upload", {
-        method: "POST",
-        headers: {
-          "x-account-id": adAccountId,
-          "x-upload-type": type,
-          "x-file-name": file.name,
-          "x-file-content-type": file.type,
-        },
-        body: fileBuffer,
-      });
-
-      const text = await res.text();
-      if (!text) throw new Error("Empty response from server — file may be too large");
-
-      let json: Record<string, unknown>;
-      try {
-        json = JSON.parse(text);
-      } catch {
-        // Non-JSON response usually means the file exceeded the server size limit
-        if (text.includes("Request Entity Too Large") || text.includes("413") || res.status === 413) {
-          throw new Error("File is too large. Please use a smaller file (max ~4.5MB on Vercel free tier).");
-        }
-        throw new Error(`Upload failed: ${text.slice(0, 100)}`);
+      // Get FB token from our API (small request, no size issues)
+      const tokenRes = await fetch("/api/facebook/token");
+      if (!tokenRes.ok) {
+        const tokenErr = await tokenRes.json();
+        throw new Error(tokenErr.error || "Failed to get token");
       }
-      if (!res.ok) throw new Error((json.error as string) || `Upload failed (${res.status})`);
+      const { token } = await tokenRes.json();
 
-      // Create local preview for images
-      let localPreview: string | null = null;
+      // Upload directly to Facebook from the browser (bypasses Vercel size limit)
+      const fbForm = new FormData();
+      fbForm.append("access_token", token);
+
       if (type === "image") {
-        localPreview = URL.createObjectURL(file);
-      }
+        fbForm.append("filename", file);
 
-      onUploaded({
-        image_hash: (json.image_hash as string) || null,
-        video_id: (json.video_id as string) || null,
-        file_name: file.name,
-        file_preview_url: localPreview || (json.url as string) || null,
-      });
+        const res = await fetch(`${FB_API_BASE}/${adAccountId}/adimages`, {
+          method: "POST",
+          body: fbForm,
+        });
+
+        const json = await res.json();
+        if (!res.ok) {
+          const fbErr = json.error as Record<string, unknown> | undefined;
+          throw new Error((fbErr?.message as string) || `FB API error: ${res.status}`);
+        }
+
+        const images = json.images as Record<string, { hash: string; url: string }>;
+        const firstKey = Object.keys(images)[0];
+        const imageData = images[firstKey];
+
+        onUploaded({
+          image_hash: imageData.hash,
+          video_id: null,
+          file_name: file.name,
+          file_preview_url: URL.createObjectURL(file),
+        });
+      } else {
+        fbForm.append("source", file);
+        fbForm.append("title", file.name);
+
+        const res = await fetch(`${FB_API_BASE}/${adAccountId}/advideos`, {
+          method: "POST",
+          body: fbForm,
+        });
+
+        const json = await res.json();
+        if (!res.ok) {
+          const fbErr = json.error as Record<string, unknown> | undefined;
+          throw new Error((fbErr?.message as string) || `FB API error: ${res.status}`);
+        }
+
+        onUploaded({
+          image_hash: null,
+          video_id: json.id as string,
+          file_name: file.name,
+          file_preview_url: null,
+        });
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed");
     } finally {
