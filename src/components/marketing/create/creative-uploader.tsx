@@ -78,8 +78,18 @@ export function CreativeUploader({
 
       const text = await res.text();
       if (!text) throw new Error("Empty response from server — file may be too large");
-      const json = JSON.parse(text);
-      if (!res.ok) throw new Error(json.error || `Upload failed (${res.status})`);
+
+      let json: Record<string, unknown>;
+      try {
+        json = JSON.parse(text);
+      } catch {
+        // Non-JSON response usually means the file exceeded the server size limit
+        if (text.includes("Request Entity Too Large") || text.includes("413") || res.status === 413) {
+          throw new Error("File is too large. Please use a smaller file (max ~4.5MB on Vercel free tier).");
+        }
+        throw new Error(`Upload failed: ${text.slice(0, 100)}`);
+      }
+      if (!res.ok) throw new Error((json.error as string) || `Upload failed (${res.status})`);
 
       // Create local preview for images
       let localPreview: string | null = null;
@@ -88,10 +98,10 @@ export function CreativeUploader({
       }
 
       onUploaded({
-        image_hash: json.image_hash || null,
-        video_id: json.video_id || null,
+        image_hash: (json.image_hash as string) || null,
+        video_id: (json.video_id as string) || null,
         file_name: file.name,
-        file_preview_url: localPreview || json.url || null,
+        file_preview_url: localPreview || (json.url as string) || null,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed");
