@@ -71,10 +71,10 @@ export default function DataDeletionPage() {
           <li>
             Send an email to{" "}
             <a
-              href="mailto:privacy@astrobiz.ph"
+              href="mailto:japcidro@gmail.com"
               className="text-blue-400 hover:text-blue-300 underline"
             >
-              privacy@astrobiz.ph
+              japcidro@gmail.com
             </a>
           </li>
           <li>
@@ -139,10 +139,10 @@ export default function DataDeletionPage() {
           <br />
           Email:{" "}
           <a
-            href="mailto:privacy@astrobiz.ph"
+            href="mailto:japcidro@gmail.com"
             className="text-blue-400 hover:text-blue-300 underline"
           >
-            privacy@astrobiz.ph
+            japcidro@gmail.com
           </a>
         </p>
       </section>

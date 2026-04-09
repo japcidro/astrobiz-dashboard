@@ -185,10 +185,10 @@ export default function TermsOfServicePage() {
           <br />
           Email:{" "}
           <a
-            href="mailto:support@astrobiz.ph"
+            href="mailto:japcidro@gmail.com"
             className="text-blue-400 hover:text-blue-300 underline"
           >
-            support@astrobiz.ph
+            japcidro@gmail.com
           </a>
         </p>
       </section>

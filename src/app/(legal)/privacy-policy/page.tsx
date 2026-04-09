@@ -200,10 +200,10 @@ export default function PrivacyPolicyPage() {
           <br />
           Email:{" "}
           <a
-            href="mailto:privacy@astrobiz.ph"
+            href="mailto:japcidro@gmail.com"
             className="text-blue-400 hover:text-blue-300 underline"
           >
-            privacy@astrobiz.ph
+            japcidro@gmail.com
           </a>
         </p>
       </section>
