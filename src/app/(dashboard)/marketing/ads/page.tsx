@@ -56,9 +56,6 @@ interface AccountInfo {
   account_id: string;
   status: string;
   is_active: boolean;
-  amount_spent: number;
-  spend_cap: number | null;
-  currency: string;
 }
 
 interface BudgetInfo {
@@ -591,52 +588,6 @@ export default function AdsPage() {
         </div>
       </div>
 
-      {/* Account Spend Summary */}
-      {accounts.length > 0 && (
-        <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {accounts.filter(a => a.is_active).map((a) => {
-            const spent = a.amount_spent || 0;
-            const cap = a.spend_cap || null;
-            const pct = cap ? (spent / cap) * 100 : null;
-            const isWarning = pct !== null && pct >= 80;
-            const isDanger = pct !== null && pct >= 95;
-            return (
-              <div
-                key={a.id}
-                className={`bg-gray-800/50 border rounded-xl p-3 ${
-                  isDanger ? "border-red-700/50" : isWarning ? "border-yellow-700/50" : "border-gray-700/50"
-                }`}
-              >
-                <p className="text-xs text-gray-400 truncate">{a.name} <span className="text-gray-600">· this month</span></p>
-                <div className="flex items-baseline gap-1.5 mt-1">
-                  <span className="text-lg font-semibold text-white">
-                    {(a.currency || "PHP") === "PHP" ? "₱" : "$"}
-                    {spent.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                  {cap ? (
-                    <span className="text-xs text-gray-500">
-                      / {(a.currency || "PHP") === "PHP" ? "₱" : "$"}
-                      {cap.toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-gray-600">no cap</span>
-                  )}
-                </div>
-                {pct !== null && (
-                  <div className="mt-2 h-1.5 bg-gray-700 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all ${
-                        isDanger ? "bg-red-500" : isWarning ? "bg-yellow-500" : "bg-green-500"
-                      }`}
-                      style={{ width: `${Math.min(pct, 100)}%` }}
-                    />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
 
       {/* Action error toast */}
       {actionError && (

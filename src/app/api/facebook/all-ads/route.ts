@@ -75,9 +75,6 @@ interface AccountInfo {
   account_status: number;
   status_label: string;
   is_active: boolean;
-  amount_spent: number;
-  spend_cap: number | null;
-  currency: string;
 }
 
 export async function GET(request: Request) {
@@ -141,46 +138,15 @@ export async function GET(request: Request) {
       name: string;
       account_id: string;
       account_status: number;
-      amount_spent?: string;
-      spend_cap?: string;
-      currency?: string;
     }>(`/me/adaccounts`, token, {
-      fields: "id,name,account_id,account_status,amount_spent,spend_cap,currency",
+      fields: "id,name,account_id,account_status",
       limit: "100",
     });
-
-    // Fetch account-level insights (this month's spend) in parallel
-    const accountSpendMap = new Map<string, number>();
-    await Promise.all(
-      accountsRaw.filter((a) => a.account_status === 1).map(async (a) => {
-        try {
-          const spendParams = new URLSearchParams({
-            access_token: token,
-            fields: "spend",
-            date_preset: "this_month",
-          });
-          const spendRes = await fetch(
-            `${FB_API_BASE}/${a.id}/insights?${spendParams}`,
-            { cache: "no-store" }
-          );
-          if (spendRes.ok) {
-            const spendJson = await spendRes.json();
-            const spend = parseFloat(spendJson.data?.[0]?.spend || "0");
-            accountSpendMap.set(a.id, spend);
-          }
-        } catch {
-          // Silently skip — spend will show as 0
-        }
-      })
-    );
 
     const allAccounts: AccountInfo[] = accountsRaw.map((a) => ({
       ...a,
       status_label: ACCOUNT_STATUS_MAP[a.account_status] || "UNKNOWN",
       is_active: a.account_status === 1,
-      amount_spent: accountSpendMap.get(a.id) || 0,
-      spend_cap: a.spend_cap && a.spend_cap !== "0" ? parseInt(a.spend_cap) / 100 : null,
-      currency: a.currency || "PHP",
     }));
 
     // Apply settings-level filter (only show selected accounts)
