@@ -11,7 +11,7 @@ interface PageInfo {
 
 interface PageSelectorProps {
   selectedPageId: string;
-  onChange: (pageId: string) => void;
+  onChange: (pageId: string, pageName: string) => void;
 }
 
 export function PageSelector({ selectedPageId, onChange }: PageSelectorProps) {
@@ -29,7 +29,7 @@ export function PageSelector({ selectedPageId, onChange }: PageSelectorProps) {
           setPages(json.data);
           // Auto-select first page if none selected
           if (!selectedPageId && json.data.length > 0) {
-            onChange(json.data[0].id);
+            onChange(json.data[0].id, json.data[0].name);
           }
         }
       })
@@ -88,7 +88,7 @@ export function PageSelector({ selectedPageId, onChange }: PageSelectorProps) {
           return (
             <button
               key={page.id}
-              onClick={() => onChange(page.id)}
+              onClick={() => onChange(page.id, page.name)}
               className={`w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-all cursor-pointer ${
                 isSelected
                   ? "border-white bg-white/5"

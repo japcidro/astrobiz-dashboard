@@ -141,6 +141,7 @@ export type CTAType =
 export interface AdFormData {
   name: string;
   page_id: string;
+  page_name: string;
   creative_type: "image" | "video";
   image_hash: string | null;
   video_id: string | null;

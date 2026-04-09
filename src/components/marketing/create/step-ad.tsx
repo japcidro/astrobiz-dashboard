@@ -46,7 +46,7 @@ export function StepAd({ data, adAccountId, onUpdate }: StepAdProps) {
       <div className="max-w-lg">
         <PageSelector
           selectedPageId={data.page_id}
-          onChange={(pageId) => onUpdate({ page_id: pageId })}
+          onChange={(pageId, pageName) => onUpdate({ page_id: pageId, page_name: pageName })}
         />
       </div>
 

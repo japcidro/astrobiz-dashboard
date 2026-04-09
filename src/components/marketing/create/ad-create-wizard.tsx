@@ -36,11 +36,17 @@ const defaultCampaign: CampaignFormData = {
   bid_strategy: "LOWEST_COST_WITHOUT_CAP",
 };
 
+function getTomorrowDate(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return `${d.toISOString().split("T")[0]}T00:00:00+08:00`;
+}
+
 const defaultAdSet: AdSetFormData = {
   name: "",
   daily_budget: 500,
   lifetime_budget: null,
-  start_time: "",
+  start_time: getTomorrowDate(),
   end_time: null,
   optimization_goal: "OFFSITE_CONVERSIONS",
   billing_event: "IMPRESSIONS",
@@ -56,6 +62,7 @@ const defaultAdSet: AdSetFormData = {
 const defaultAd: AdFormData = {
   name: "",
   page_id: "",
+  page_name: "",
   creative_type: "image",
   image_hash: null,
   video_id: null,
@@ -295,6 +302,7 @@ export function AdCreateWizard() {
           <StepAdset
             data={state.adset}
             adAccountId={state.adAccountId}
+            pageName={state.ad.page_name}
             onUpdate={(updates) =>
               dispatch({ type: "SET_ADSET", payload: updates })
             }

@@ -60,10 +60,11 @@ const GENDER_OPTIONS = [
 interface StepAdsetProps {
   data: AdSetFormData;
   adAccountId: string;
+  pageName: string;
   onUpdate: (updates: Partial<AdSetFormData>) => void;
 }
 
-export function StepAdset({ data, adAccountId, onUpdate }: StepAdsetProps) {
+export function StepAdset({ data, adAccountId, pageName, onUpdate }: StepAdsetProps) {
   const [pixels, setPixels] = useState<PixelInfo[]>([]);
   const [loadingPixels, setLoadingPixels] = useState(false);
   const [automaticPlacement, setAutomaticPlacement] = useState(true);
@@ -77,12 +78,21 @@ export function StepAdset({ data, adAccountId, onUpdate }: StepAdsetProps) {
       .then((json) => {
         if (json.data) {
           setPixels(json.data);
-          // Auto-select first pixel if none selected
+          // Auto-select pixel: match by page name, fallback to first
           if (!data.promoted_object.pixel_id && json.data.length > 0) {
+            let bestPixel = json.data[0];
+            if (pageName) {
+              const pageWords = pageName.toLowerCase().split(/\s+/);
+              const match = json.data.find((p: PixelInfo) => {
+                const pixelName = p.name.toLowerCase();
+                return pageWords.some((word: string) => word.length > 2 && pixelName.includes(word));
+              });
+              if (match) bestPixel = match;
+            }
             onUpdate({
               promoted_object: {
                 ...data.promoted_object,
-                pixel_id: json.data[0].id,
+                pixel_id: bestPixel.id,
               },
             });
           }
@@ -91,6 +101,25 @@ export function StepAdset({ data, adAccountId, onUpdate }: StepAdsetProps) {
       .finally(() => setLoadingPixels(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adAccountId]);
+
+  // Re-match pixel when page name changes
+  useEffect(() => {
+    if (!pageName || pixels.length === 0) return;
+    const pageWords = pageName.toLowerCase().split(/\s+/);
+    const match = pixels.find((p) => {
+      const pixelName = p.name.toLowerCase();
+      return pageWords.some((word) => word.length > 2 && pixelName.includes(word));
+    });
+    if (match && match.id !== data.promoted_object.pixel_id) {
+      onUpdate({
+        promoted_object: {
+          ...data.promoted_object,
+          pixel_id: match.id,
+        },
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageName]);
 
   const updateTargeting = (
     updates: Partial<AdSetFormData["targeting"]>
