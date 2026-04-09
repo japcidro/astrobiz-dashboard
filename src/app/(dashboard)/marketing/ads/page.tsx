@@ -607,7 +607,7 @@ export default function AdsPage() {
                   isDanger ? "border-red-700/50" : isWarning ? "border-yellow-700/50" : "border-gray-700/50"
                 }`}
               >
-                <p className="text-xs text-gray-400 truncate">{a.name}</p>
+                <p className="text-xs text-gray-400 truncate">{a.name} <span className="text-gray-600">· this month</span></p>
                 <div className="flex items-baseline gap-1.5 mt-1">
                   <span className="text-lg font-semibold text-white">
                     {(a.currency || "PHP") === "PHP" ? "₱" : "$"}

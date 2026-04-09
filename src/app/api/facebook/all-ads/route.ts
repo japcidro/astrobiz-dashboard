@@ -149,11 +149,36 @@ export async function GET(request: Request) {
       limit: "100",
     });
 
+    // Fetch account-level insights (this month's spend) in parallel
+    const accountSpendMap = new Map<string, number>();
+    await Promise.all(
+      accountsRaw.filter((a) => a.account_status === 1).map(async (a) => {
+        try {
+          const spendParams = new URLSearchParams({
+            access_token: token,
+            fields: "spend",
+            date_preset: "this_month",
+          });
+          const spendRes = await fetch(
+            `${FB_API_BASE}/${a.id}/insights?${spendParams}`,
+            { cache: "no-store" }
+          );
+          if (spendRes.ok) {
+            const spendJson = await spendRes.json();
+            const spend = parseFloat(spendJson.data?.[0]?.spend || "0");
+            accountSpendMap.set(a.id, spend);
+          }
+        } catch {
+          // Silently skip — spend will show as 0
+        }
+      })
+    );
+
     const allAccounts: AccountInfo[] = accountsRaw.map((a) => ({
       ...a,
       status_label: ACCOUNT_STATUS_MAP[a.account_status] || "UNKNOWN",
       is_active: a.account_status === 1,
-      amount_spent: a.amount_spent ? parseInt(a.amount_spent) / 100 : 0,
+      amount_spent: accountSpendMap.get(a.id) || 0,
       spend_cap: a.spend_cap && a.spend_cap !== "0" ? parseInt(a.spend_cap) / 100 : null,
       currency: a.currency || "PHP",
     }));
