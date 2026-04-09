@@ -68,10 +68,10 @@ export default function OrdersPage() {
         _t: Date.now().toString(),
       });
       if (dateFilter === "custom" && customFrom) {
-        params.set("from", customFrom);
+        params.set("date_from", `${customFrom}T00:00:00+08:00`);
       }
       if (dateFilter === "custom" && customTo) {
-        params.set("to", customTo);
+        params.set("date_to", `${customTo}T23:59:59+08:00`);
       }
 
       const res = await fetch(`/api/shopify/orders?${params}`);
@@ -81,6 +81,10 @@ export default function OrdersPage() {
       setOrders(json.orders || []);
       setSummary(json.summary || defaultSummary);
       if (json.stores) setStores(json.stores);
+      // Show warnings from failed stores
+      if (json.warnings?.length > 0) {
+        setError(`Warning: ${json.warnings.join("; ")}`);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load orders");
     } finally {
