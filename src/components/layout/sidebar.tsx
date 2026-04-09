@@ -53,7 +53,6 @@ const navItems: NavItem[] = [
     href: "/va/orders",
     icon: <Truck size={20} />,
     roles: ["admin", "va"],
-    comingSoon: true,
   },
   {
     label: "Inventory",

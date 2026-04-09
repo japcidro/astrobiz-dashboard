@@ -2,6 +2,8 @@ import { getEmployee } from "@/lib/supabase/get-employee";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { TokenManager } from "@/components/marketing/token-manager";
+import { StoreManager } from "@/components/orders/store-manager";
+import type { ShopifyStore } from "@/lib/shopify/types";
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
 
@@ -32,7 +34,7 @@ export default async function SettingsPage() {
 
   const supabase = await createClient();
 
-  const [{ data: tokenSetting }, { data: selectedSetting }] = await Promise.all([
+  const [{ data: tokenSetting }, { data: selectedSetting }, { data: shopifyStores }] = await Promise.all([
     supabase
       .from("app_settings")
       .select("value, updated_at")
@@ -43,6 +45,10 @@ export default async function SettingsPage() {
       .select("value")
       .eq("key", "fb_selected_accounts")
       .single(),
+    supabase
+      .from("shopify_stores")
+      .select("*")
+      .order("name"),
   ]);
 
   const token = tokenSetting?.value || "";
@@ -97,6 +103,14 @@ export default async function SettingsPage() {
         fetchError={fetchError}
         selectedAccountIds={selectedAccountIds}
       />
+
+      <div className="mt-10">
+        <h2 className="text-lg font-semibold text-white mb-1">Shopify Stores</h2>
+        <p className="text-gray-400 text-sm mb-4">
+          Add your Shopify stores to view orders in the dashboard.
+        </p>
+        <StoreManager stores={(shopifyStores as ShopifyStore[]) || []} />
+      </div>
     </div>
   );
 }
