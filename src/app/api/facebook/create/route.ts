@@ -80,6 +80,10 @@ export async function POST(request: Request) {
     return Response.json({ error: "Missing required fields" }, { status: 400 });
   }
 
+  if (!ad_data.page_id) {
+    return Response.json({ error: "No Facebook Page selected. Please go back to the Ad step and select a page." }, { status: 400 });
+  }
+
   const supabase = await createClient();
 
   const { data: tokenSetting } = await supabase
