@@ -302,9 +302,7 @@ export async function POST(request: Request) {
     };
 
     if (ad_data.url_parameters) {
-      adParams.tracking_specs = JSON.stringify([
-        { "action.type": ["offsite_conversion"], fb_pixel: [ad_data.page_id] },
-      ]);
+      adParams.url_tags = ad_data.url_parameters;
     }
 
     const adResult = await fbPost(`/${ad_account_id}/ads`, token, adParams);
