@@ -35,9 +35,13 @@ async function fbPost(
 
   if (!res.ok) {
     const fbErr = json.error as Record<string, unknown> | undefined;
-    throw new Error(
-      (fbErr?.message as string) || `FB API error: ${res.status}`
-    );
+    const msg = (fbErr?.error_user_msg as string)
+      || (fbErr?.message as string)
+      || `FB API error: ${res.status}`;
+    const detail = fbErr?.error_user_title
+      ? `${fbErr.error_user_title}: ${msg}`
+      : msg;
+    throw new Error(detail);
   }
   return json;
 }
