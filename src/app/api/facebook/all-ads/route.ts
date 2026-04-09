@@ -141,9 +141,9 @@ export async function GET(request: Request) {
       name: string;
       account_id: string;
       account_status: number;
-      amount_spent: string;
-      spend_cap: string;
-      currency: string;
+      amount_spent?: string;
+      spend_cap?: string;
+      currency?: string;
     }>(`/me/adaccounts`, token, {
       fields: "id,name,account_id,account_status,amount_spent,spend_cap,currency",
       limit: "100",
@@ -153,8 +153,8 @@ export async function GET(request: Request) {
       ...a,
       status_label: ACCOUNT_STATUS_MAP[a.account_status] || "UNKNOWN",
       is_active: a.account_status === 1,
-      amount_spent: parseInt(a.amount_spent || "0") / 100,
-      spend_cap: a.spend_cap ? parseInt(a.spend_cap) / 100 : null,
+      amount_spent: a.amount_spent ? parseInt(a.amount_spent) / 100 : 0,
+      spend_cap: a.spend_cap && a.spend_cap !== "0" ? parseInt(a.spend_cap) / 100 : null,
       currency: a.currency || "PHP",
     }));
 

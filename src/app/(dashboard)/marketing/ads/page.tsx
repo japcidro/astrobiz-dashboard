@@ -595,7 +595,9 @@ export default function AdsPage() {
       {accounts.length > 0 && (
         <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {accounts.filter(a => a.is_active).map((a) => {
-            const pct = a.spend_cap ? (a.amount_spent / a.spend_cap) * 100 : null;
+            const spent = a.amount_spent || 0;
+            const cap = a.spend_cap || null;
+            const pct = cap ? (spent / cap) * 100 : null;
             const isWarning = pct !== null && pct >= 80;
             const isDanger = pct !== null && pct >= 95;
             return (
@@ -608,13 +610,13 @@ export default function AdsPage() {
                 <p className="text-xs text-gray-400 truncate">{a.name}</p>
                 <div className="flex items-baseline gap-1.5 mt-1">
                   <span className="text-lg font-semibold text-white">
-                    {a.currency === "PHP" ? "₱" : "$"}
-                    {a.amount_spent.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {(a.currency || "PHP") === "PHP" ? "₱" : "$"}
+                    {spent.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </span>
-                  {a.spend_cap ? (
+                  {cap ? (
                     <span className="text-xs text-gray-500">
-                      / {a.currency === "PHP" ? "₱" : "$"}
-                      {a.spend_cap.toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                      / {(a.currency || "PHP") === "PHP" ? "₱" : "$"}
+                      {cap.toLocaleString("en-PH", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
                     </span>
                   ) : (
                     <span className="text-xs text-gray-600">no cap</span>
