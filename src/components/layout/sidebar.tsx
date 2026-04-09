@@ -14,6 +14,7 @@ import {
   X,
   Settings,
   PlusCircle,
+  Layers,
   FileText,
 } from "lucide-react";
 import { useState } from "react";
@@ -71,6 +72,12 @@ const navItems: NavItem[] = [
     label: "Create Ad",
     href: "/marketing/create",
     icon: <PlusCircle size={20} />,
+    roles: ["admin", "marketing"],
+  },
+  {
+    label: "Bulk Create",
+    href: "/marketing/bulk-create",
+    icon: <Layers size={20} />,
     roles: ["admin", "marketing"],
   },
   {
