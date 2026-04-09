@@ -75,6 +75,9 @@ interface AccountInfo {
   account_status: number;
   status_label: string;
   is_active: boolean;
+  amount_spent: number;
+  spend_cap: number | null;
+  currency: string;
 }
 
 export async function GET(request: Request) {
@@ -138,8 +141,11 @@ export async function GET(request: Request) {
       name: string;
       account_id: string;
       account_status: number;
+      amount_spent: string;
+      spend_cap: string;
+      currency: string;
     }>(`/me/adaccounts`, token, {
-      fields: "id,name,account_id,account_status",
+      fields: "id,name,account_id,account_status,amount_spent,spend_cap,currency",
       limit: "100",
     });
 
@@ -147,6 +153,9 @@ export async function GET(request: Request) {
       ...a,
       status_label: ACCOUNT_STATUS_MAP[a.account_status] || "UNKNOWN",
       is_active: a.account_status === 1,
+      amount_spent: parseInt(a.amount_spent || "0") / 100,
+      spend_cap: a.spend_cap ? parseInt(a.spend_cap) / 100 : null,
+      currency: a.currency || "PHP",
     }));
 
     // Apply settings-level filter (only show selected accounts)
