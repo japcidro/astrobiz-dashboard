@@ -41,7 +41,7 @@ async function fbPost(
     const detail = fbErr?.error_user_title
       ? `${fbErr.error_user_title}: ${msg}`
       : msg;
-    throw new Error(detail);
+    throw new Error(`${detail} [endpoint: ${endpoint}, code: ${fbErr?.code}, subcode: ${fbErr?.error_subcode}]`);
   }
   return json;
 }
@@ -347,6 +347,9 @@ export async function POST(request: Request) {
         .eq("id", draft_id);
     }
 
-    return Response.json({ error: message }, { status: 500 });
+    return Response.json({
+      error: message,
+      debug: { page_id: ad_data.page_id, ad_account_id, mode },
+    }, { status: 500 });
   }
 }

@@ -127,7 +127,10 @@ export function StepReview({
       });
 
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error);
+      if (!res.ok) {
+        const debugInfo = json.debug ? ` | page_id: ${json.debug.page_id}, account: ${json.debug.ad_account_id}` : "";
+        throw new Error(`${json.error}${debugInfo}`);
+      }
 
       setSuccess({
         fb_campaign_id: json.fb_campaign_id,
