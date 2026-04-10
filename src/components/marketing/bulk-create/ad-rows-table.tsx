@@ -9,6 +9,7 @@ const FB_API_BASE = "https://graph.facebook.com/v21.0";
 
 export interface BulkAdRow {
   id: string;
+  adset_name: string;
   ad_name: string;
   creative_type: "image" | "video";
   image_hash: string | null;
@@ -230,8 +231,9 @@ export function AdRowsTable({
           <thead>
             <tr className="border-b border-gray-700 bg-gray-800/80 text-gray-400 text-xs uppercase tracking-wide">
               <th className="px-2 py-2 w-8">#</th>
-              <th className="px-2 py-2 w-40">Ad Name</th>
-              <th className="px-2 py-2 w-40">Creative</th>
+              <th className="px-2 py-2 w-44">Adset Name</th>
+              <th className="px-2 py-2 w-36">Ad Name</th>
+              <th className="px-2 py-2 w-36">Creative</th>
               <th className="px-2 py-2">Primary Text</th>
               <th className="px-2 py-2 w-40">Headline</th>
               <th className="px-2 py-2 w-40">Description</th>
@@ -249,12 +251,25 @@ export function AdRowsTable({
                   {idx + 1}
                 </td>
 
+                {/* Adset Name */}
+                <td className="px-2 py-1.5 bg-gray-800/50">
+                  <input
+                    type="text"
+                    value={row.adset_name}
+                    placeholder={`Adset ${idx + 1}`}
+                    onChange={(e) =>
+                      onUpdateRow(row.id, { adset_name: e.target.value })
+                    }
+                    className="w-full rounded border border-gray-600 bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+                  />
+                </td>
+
                 {/* Ad Name */}
                 <td className="px-2 py-1.5 bg-gray-800/50">
                   <input
                     type="text"
                     value={row.ad_name}
-                    placeholder={`Creative ${idx + 1}`}
+                    placeholder={`Ad ${idx + 1}`}
                     onChange={(e) =>
                       onUpdateRow(row.id, { ad_name: e.target.value })
                     }

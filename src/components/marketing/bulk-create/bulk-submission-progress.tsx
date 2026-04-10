@@ -6,6 +6,7 @@ import type { CampaignFormData, AdSetFormData, AdFormData } from "@/lib/facebook
 
 export interface BulkAdRow {
   id: string;
+  adset_name: string;
   ad_name: string;
   creative_type: "image" | "video";
   image_hash: string | null;
@@ -75,9 +76,7 @@ export function BulkSubmissionProgress({
 
   const buildAdSetData = (row: BulkAdRow, index: number) => ({
     ...adsetTemplate,
-    name:
-      `${adsetTemplate.name} - ${row.ad_name}`.trim() ||
-      `${adsetTemplate.name} - Creative ${index + 1}`,
+    name: row.adset_name || `${adsetTemplate.name} - Creative ${index + 1}`,
   });
 
   const submitRows = useCallback(

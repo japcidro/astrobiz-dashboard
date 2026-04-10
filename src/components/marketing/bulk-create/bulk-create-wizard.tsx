@@ -32,6 +32,7 @@ interface CampaignInfo {
 
 export interface BulkAdRow {
   id: string;
+  adset_name: string;
   ad_name: string;
   creative_type: "image" | "video";
   image_hash: string | null;
@@ -67,6 +68,7 @@ function getTomorrowDate(): string {
 function makeEmptyRow(): BulkAdRow {
   return {
     id: crypto.randomUUID(),
+    adset_name: "",
     ad_name: "",
     creative_type: "image",
     image_hash: null,
@@ -514,6 +516,52 @@ export function BulkCreateWizard() {
                   Video
                 </button>
               </div>
+            </div>
+          </div>
+
+          {/* Default Copy (fill all rows) */}
+          <div className="mb-4 bg-gray-700/20 border border-gray-700/50 rounded-lg p-4">
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-sm text-gray-400">Default ad copy (optional — fills all empty rows)</p>
+              <button
+                type="button"
+                onClick={() => {
+                  const defaultText = (document.getElementById("bulk-default-text") as HTMLTextAreaElement)?.value || "";
+                  const defaultHeadline = (document.getElementById("bulk-default-headline") as HTMLInputElement)?.value || "";
+                  const defaultDesc = (document.getElementById("bulk-default-desc") as HTMLInputElement)?.value || "";
+                  setRows((prev) =>
+                    prev.map((r) => ({
+                      ...r,
+                      primary_text: r.primary_text || defaultText,
+                      headline: r.headline || defaultHeadline,
+                      description: r.description || defaultDesc,
+                    }))
+                  );
+                }}
+                className="text-xs bg-gray-600 hover:bg-gray-500 text-white px-3 py-1 rounded transition-colors cursor-pointer"
+              >
+                Fill Empty Rows
+              </button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <textarea
+                id="bulk-default-text"
+                rows={2}
+                placeholder="Default primary text..."
+                className="rounded border border-gray-600 bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none resize-none"
+              />
+              <input
+                id="bulk-default-headline"
+                type="text"
+                placeholder="Default headline..."
+                className="rounded border border-gray-600 bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+              />
+              <input
+                id="bulk-default-desc"
+                type="text"
+                placeholder="Default description..."
+                className="rounded border border-gray-600 bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+              />
             </div>
           </div>
 
