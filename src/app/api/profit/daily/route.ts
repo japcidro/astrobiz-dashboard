@@ -481,6 +481,76 @@ export async function GET(request: Request) {
     warnings.push(`J&T: ${message}`);
   }
 
+  // --- 5b. RTS worst-case rule: assume 25% RTS until 200+ delivered parcels per store ---
+  // Fetch total delivered count per store (ALL TIME, not just date range)
+  const rtsMinRate = 0.25; // 25% worst case
+  const rtsMinDelivered = 200; // threshold to use actual rate
+
+  try {
+    const { data: jtAllTime } = await supabase
+      .from("jt_deliveries")
+      .select("store_name, is_delivered, is_returned, item_value");
+
+    if (jtAllTime && jtAllTime.length > 0) {
+      // Per-store totals
+      const storeStats = new Map<string, { delivered: number; returned: number; totalItemValue: number }>();
+      for (const row of jtAllTime) {
+        const store = row.store_name || "UNKNOWN";
+        if (!storeStats.has(store)) storeStats.set(store, { delivered: 0, returned: 0, totalItemValue: 0 });
+        const s = storeStats.get(store)!;
+        s.totalItemValue += parseFloat(row.item_value) || 0;
+        if (row.is_delivered) s.delivered++;
+        if (row.is_returned) s.returned++;
+      }
+
+      // For each store, if delivered < 200, override returns to be at least 25% of revenue
+      // Apply this to the date-range returns data
+      for (const [store, stats] of storeStats) {
+        if (stats.delivered < rtsMinDelivered) {
+          // Calculate what 25% RTS would look like for this store in the date range
+          // Sum revenue for this store in the date range
+          let storeRevenue = 0;
+          for (const [key, value] of revenueByDateStore) {
+            if (key.endsWith(`::${store}`)) storeRevenue += value;
+          }
+
+          const worstCaseReturns = storeRevenue * rtsMinRate;
+
+          // Sum actual returns for this store in date range
+          let actualReturns = 0;
+          for (const [key, value] of returnsByDateStore) {
+            if (key.endsWith(`::${store}`)) actualReturns += value;
+          }
+
+          // If worst case is higher, distribute the difference across the store's dates
+          if (worstCaseReturns > actualReturns && storeRevenue > 0) {
+            const diff = worstCaseReturns - actualReturns;
+            // Find all dates this store has revenue
+            const storeDates: string[] = [];
+            for (const key of revenueByDateStore.keys()) {
+              if (key.endsWith(`::${store}`)) storeDates.push(key);
+            }
+            if (storeDates.length > 0) {
+              // Distribute proportionally by revenue
+              for (const key of storeDates) {
+                const dateRevenue = revenueByDateStore.get(key) || 0;
+                const proportion = dateRevenue / storeRevenue;
+                const addedReturns = diff * proportion;
+                returnsByDateStore.set(
+                  key,
+                  (returnsByDateStore.get(key) || 0) + addedReturns
+                );
+              }
+            }
+            warnings.push(`${store}: Using 25% worst-case RTS (${stats.delivered}/${rtsMinDelivered} delivered)`);
+          }
+        }
+      }
+    }
+  } catch {
+    // Non-critical — continue with actual returns data
+  }
+
   // --- 6. Aggregate per day ---
   const allDates = new Set<string>();
   const allStoreNames = new Set<string>();
