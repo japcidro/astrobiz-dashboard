@@ -24,18 +24,18 @@ export function matchAdToStore(
 
 /**
  * Normalize a J&T sender name to a standard store name.
+ * Uses contains-based matching to handle variations like
+ * "Ilovepatches", "ILOVEPATCHES", "I Love Patches", etc.
  */
 export function matchSenderToStore(senderName: string): string {
-  const SENDER_MAP: Record<string, string> = {
-    ILOVEPATCHES: "I LOVE PATCHES",
-    "I LOVE PATCH": "I LOVE PATCHES",
-    ILOVEPATCH: "I LOVE PATCHES",
-    "I LOVE PATCHES": "I LOVE PATCHES",
-    CAPSULED: "CAPSULED",
-    HIBI: "HIBI",
-    SERINA: "SERINA",
-  };
+  const upper = senderName.toUpperCase().trim().replace(/\s+/g, " ");
 
-  const upper = senderName.toUpperCase().trim();
-  return SENDER_MAP[upper] || senderName.trim();
+  // Check contains — order matters (specific first)
+  if (upper.includes("ILOVEPATCHES") || upper.includes("I LOVE PATCHES") || upper.includes("I LOVE PATCH") || upper.includes("ILOVEPATCH"))
+    return "I LOVE PATCHES";
+  if (upper.includes("CAPSULED")) return "CAPSULED";
+  if (upper.includes("HIBI")) return "HIBI";
+  if (upper.includes("SERINA")) return "SERINA";
+
+  return senderName.trim();
 }
