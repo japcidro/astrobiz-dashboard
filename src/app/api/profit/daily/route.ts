@@ -456,8 +456,10 @@ export async function GET(request: Request) {
       warnings.push(`J&T data: ${jtError.message}`);
     } else {
       for (const row of jtData || []) {
-        const dateStr = row.submission_date;
-        if (!dateStr) continue;
+        if (!row.submission_date) continue;
+        const d = new Date(row.submission_date);
+        if (isNaN(d.getTime())) continue;
+        const dateStr = d.toISOString().split("T")[0];
         const key = `${dateStr}::${row.store_name || "UNKNOWN"}`;
 
         if (row.is_delivered) {

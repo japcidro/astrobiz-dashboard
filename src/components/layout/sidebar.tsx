@@ -18,6 +18,9 @@ import {
   FileText,
   DollarSign,
   Calculator,
+  ChevronDown,
+  ChevronRight,
+  BarChart3,
 } from "lucide-react";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -31,7 +34,20 @@ interface NavItem {
   comingSoon?: boolean;
 }
 
-const navItems: NavItem[] = [
+interface NavGroup {
+  label: string;
+  icon: React.ReactNode;
+  roles: UserRole[];
+  children: NavItem[];
+}
+
+type NavEntry = NavItem | NavGroup;
+
+function isGroup(entry: NavEntry): entry is NavGroup {
+  return "children" in entry;
+}
+
+const navEntries: NavEntry[] = [
   {
     label: "Dashboard",
     href: "/dashboard",
@@ -51,16 +67,29 @@ const navItems: NavItem[] = [
     roles: ["admin"],
   },
   {
-    label: "Net Profit",
-    href: "/admin/profit",
-    icon: <DollarSign size={20} />,
+    label: "P&L",
+    icon: <BarChart3 size={20} />,
     roles: ["admin"],
-  },
-  {
-    label: "COGS",
-    href: "/admin/cogs",
-    icon: <Calculator size={20} />,
-    roles: ["admin"],
+    children: [
+      {
+        label: "Net Profit",
+        href: "/admin/profit",
+        icon: <DollarSign size={18} />,
+        roles: ["admin"],
+      },
+      {
+        label: "COGS",
+        href: "/admin/cogs",
+        icon: <Calculator size={18} />,
+        roles: ["admin"],
+      },
+      {
+        label: "J&T Dashboard",
+        href: "/admin/jt-dashboard",
+        icon: <Truck size={18} />,
+        roles: ["admin"],
+      },
+    ],
   },
   {
     label: "Orders & Parcels",
@@ -121,10 +150,19 @@ interface SidebarProps {
 export function Sidebar({ employeeName, employeeRole }: SidebarProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
-  const filteredItems = navItems.filter((item) =>
-    item.roles.includes(employeeRole)
+  const filteredEntries = navEntries.filter((entry) =>
+    entry.roles.includes(employeeRole)
   );
+
+  const toggleGroup = (label: string) => {
+    setOpenGroups((prev) => ({ ...prev, [label]: !prev[label] }));
+  };
+
+  // Auto-open group if current path matches a child
+  const isGroupActive = (group: NavGroup) =>
+    group.children.some((c) => pathname === c.href || pathname.startsWith(c.href + "/"));
 
   const handleLogout = async () => {
     const supabase = createClient();
@@ -142,7 +180,56 @@ export function Sidebar({ employeeName, employeeRole }: SidebarProps) {
 
       {/* Nav */}
       <nav className="flex-1 p-4 space-y-1">
-        {filteredItems.map((item) => {
+        {filteredEntries.map((entry) => {
+          if (isGroup(entry)) {
+            const active = isGroupActive(entry);
+            const expanded = openGroups[entry.label] ?? active;
+            return (
+              <div key={entry.label}>
+                <button
+                  onClick={() => toggleGroup(entry.label)}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+                    active
+                      ? "text-white bg-white/5"
+                      : "text-gray-400 hover:text-white hover:bg-white/5"
+                  }`}
+                >
+                  {entry.icon}
+                  {entry.label}
+                  <span className="ml-auto">
+                    {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  </span>
+                </button>
+                {expanded && (
+                  <div className="ml-4 mt-1 space-y-0.5">
+                    {entry.children
+                      .filter((child) => child.roles.includes(employeeRole))
+                      .map((child) => {
+                        const childActive =
+                          pathname === child.href || pathname.startsWith(child.href + "/");
+                        return (
+                          <Link
+                            key={child.href}
+                            href={child.href}
+                            onClick={() => setMobileOpen(false)}
+                            className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                              childActive
+                                ? "bg-white/10 text-white font-medium"
+                                : "text-gray-500 hover:text-white hover:bg-white/5"
+                            }`}
+                          >
+                            {child.icon}
+                            {child.label}
+                          </Link>
+                        );
+                      })}
+                  </div>
+                )}
+              </div>
+            );
+          }
+
+          const item = entry as NavItem;
           if (item.comingSoon) {
             return (
               <div
