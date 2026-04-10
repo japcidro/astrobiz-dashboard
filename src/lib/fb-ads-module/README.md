@@ -18,6 +18,7 @@ Copy this entire folder into your project's `src/lib/` directory.
 | `fb-api.ts` | Core FB Graph API helpers (POST, GET, upload) |
 | `create-ad.ts` | Create a single ad (campaign + adset + creative + ad) |
 | `bulk-create.ts` | Create N ads in bulk (1 campaign, N adsets, N ads) |
+| `fetch-performance.ts` | Fetch ad performance data (accounts, campaigns, ads + insights) |
 | `index.ts` | Re-exports everything |
 
 ## Quick Start
@@ -139,6 +140,31 @@ import { uploadFileClient } from "@/lib/fb-ads-module";
 const result = await uploadFileClient(file, "act_123456789", "your_token");
 // result = { image_hash: "abc123" } for images
 // result = { video_id: "456789" } for videos
+```
+
+### 4. Fetch Ad Performance
+
+```ts
+import { fetchAdPerformance } from "@/lib/fb-ads-module";
+
+const result = await fetchAdPerformance({
+  token: "your_fb_access_token",
+  datePreset: "last_7d",
+  accountFilter: "ALL", // or specific account ID
+  selectedAccountIds: [], // optional pre-filter
+});
+
+console.log(result.totals);
+// { count, spend, link_clicks, purchases, add_to_cart, reach, impressions, cpa, roas, ctr }
+
+console.log(result.data);
+// AdRow[] — each ad with: account, campaign, adset, ad, status, spend, roas, cpa, etc.
+
+console.log(result.accounts);
+// AccountInfo[] — id, name, status, is_active
+
+console.log(result.budgets);
+// { [entityId]: { daily_budget, lifetime_budget } }
 ```
 
 ## How to Get a Token

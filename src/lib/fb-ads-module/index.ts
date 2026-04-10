@@ -12,6 +12,9 @@ export { createAd } from "./create-ad";
 // Bulk ad creation
 export { bulkCreateAds } from "./bulk-create";
 
+// Ad performance fetching
+export { fetchAdPerformance } from "./fetch-performance";
+
 // All types
 export type {
   // Campaign
@@ -38,3 +41,15 @@ export type {
   BulkCreateRequest,
   BulkCreateResult,
 } from "./types";
+
+// Performance types
+export type {
+  DatePreset,
+  AccountInfo,
+  AdRow,
+  PerformanceTotals,
+  BudgetInfo,
+  FetchPerformanceRequest,
+  FetchPerformanceResult,
+} from "./fetch-performance";
+
