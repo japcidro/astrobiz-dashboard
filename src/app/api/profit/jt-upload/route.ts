@@ -89,12 +89,14 @@ export async function POST(request: Request) {
       const tierCutoff = province ? getProvinceCutoff(province) : null;
       const isDelivered = classification === "Delivered";
       const isReturned =
-        classification === "Returned" || classification === "Returned (Aged)";
+        classification === "Returned" ||
+        classification === "For Return" ||
+        classification === "Returned (Aged)";
 
       // Extract submission date (date only) for filtering
       const submitParsed = parseJtDate(row.submission_time);
       const submissionDate = submitParsed
-        ? submitParsed.toISOString().split("T")[0]
+        ? submitParsed.toISOString()
         : null;
 
       const signingParsed = parseJtDate(row.signing_time);

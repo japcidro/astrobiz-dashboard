@@ -123,8 +123,9 @@ export default function JtDashboardPage() {
 
   // Delivery rate
   const deliveryRate = useMemo(() => {
-    const denom = summary.delivered + summary.returned + summary.aged;
-    return denom > 0 ? ((summary.delivered / denom) * 100).toFixed(1) : "0.0";
+    // Settled = delivered + returned + for_return + aged (same as Apps Script)
+    const settled = summary.delivered + summary.returned + summary.for_return + summary.aged;
+    return settled > 0 ? ((summary.delivered / settled) * 100).toFixed(1) : "0.0";
   }, [summary]);
 
   // Store breakdown
@@ -141,17 +142,18 @@ export default function JtDashboardPage() {
       if (d.classification === "Delivered") {
         entry.delivered++;
         entry.cod_collected += d.cod_amount;
-      } else if (d.classification === "Returned") {
+      } else if (d.classification === "Returned" || d.classification === "For Return") {
         entry.returned++;
       } else if (d.classification === "Returned (Aged)") {
         entry.aged++;
-      } else if (d.classification === "In Transit" || d.classification === "For Return") {
+      } else {
         entry.in_transit++;
       }
     }
     for (const entry of map.values()) {
-      const denom = entry.delivered + entry.returned + entry.aged;
-      entry.delivery_rate = denom > 0 ? (entry.delivered / denom) * 100 : 0;
+      // Settled = delivered + returned + for_return + aged (same as Apps Script)
+      const settled = entry.delivered + entry.returned + entry.aged;
+      entry.delivery_rate = settled > 0 ? (entry.delivered / settled) * 100 : 0;
     }
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
   }, [deliveries]);
