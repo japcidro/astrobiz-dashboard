@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
+import * as XLSX from "xlsx";
 import {
   Plus,
   Trash2,
@@ -96,53 +97,70 @@ export function CogsManager({ initialItems }: Props) {
     }
   };
 
-  const handleCsvUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     setImporting(true);
     setError(null);
     try {
-      const text = await file.text();
-      const lines = text.trim().split("\n");
-      if (lines.length < 2) throw new Error("CSV must have a header row and at least one data row");
+      let parsedRows: Record<string, string>[] = [];
+      const isXlsx = file.name.match(/\.xlsx?$/i);
 
-      const headers = lines[0].split(",").map((h) => h.trim().toLowerCase());
-      const storeIdx = headers.indexOf("store_name");
-      const skuIdx = headers.indexOf("sku");
-      const nameIdx = headers.indexOf("product_name");
-      const cogsIdx = headers.indexOf("cogs_per_unit");
-
-      if (skuIdx === -1 || cogsIdx === -1) {
-        throw new Error("CSV must have 'sku' and 'cogs_per_unit' columns");
+      if (isXlsx) {
+        // Parse XLSX/XLS using SheetJS
+        const buffer = await file.arrayBuffer();
+        const wb = XLSX.read(buffer, { type: "array" });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        parsedRows = XLSX.utils.sheet_to_json<Record<string, string>>(sheet, { defval: "" });
+      } else {
+        // Parse CSV
+        const text = await file.text();
+        const lines = text.trim().split("\n");
+        if (lines.length < 2) throw new Error("File must have a header row and at least one data row");
+        const headers = lines[0].split(",").map((h) => h.trim());
+        parsedRows = lines.slice(1).map((line) => {
+          const cols = line.split(",").map((c) => c.trim());
+          const row: Record<string, string> = {};
+          headers.forEach((h, i) => { row[h] = cols[i] || ""; });
+          return row;
+        });
       }
 
-      const csvItems = lines.slice(1).map((line) => {
-        const cols = line.split(",").map((c) => c.trim());
-        return {
-          store_name: storeIdx >= 0 ? cols[storeIdx] : "",
-          sku: cols[skuIdx],
-          product_name: nameIdx >= 0 ? cols[nameIdx] : null,
-          cogs_per_unit: parseFloat(cols[cogsIdx]) || 0,
+      if (parsedRows.length === 0) throw new Error("No data rows found in file");
+
+      // Map columns (case-insensitive)
+      const items = parsedRows.map((row) => {
+        const keys = Object.keys(row);
+        const get = (target: string) => {
+          const key = keys.find((k) => k.toLowerCase().trim() === target);
+          return key ? String(row[key]).trim() : "";
         };
-      });
+        return {
+          store_name: get("store_name") || get("store"),
+          sku: get("sku"),
+          product_name: get("product_name") || get("product") || null,
+          cogs_per_unit: parseFloat(get("cogs_per_unit") || get("cogs") || get("cost")) || 0,
+        };
+      }).filter((item) => item.sku); // skip rows without SKU
+
+      if (items.length === 0) throw new Error("No valid rows found. File must have 'sku' and 'cogs_per_unit' (or 'cogs' or 'cost') columns.");
 
       const res = await fetch("/api/profit/cogs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: csvItems }),
+        body: JSON.stringify({ items }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to import");
 
-      showSuccess(`${csvItems.length} items imported`);
-      // Refresh items
+      showSuccess(`${items.length} items imported`);
       const refreshRes = await fetch("/api/profit/cogs");
       const refreshJson = await refreshRes.json();
       if (refreshRes.ok && refreshJson.items) {
         setItems(refreshJson.items);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to import CSV");
+      setError(e instanceof Error ? e.message : "Failed to import file");
     } finally {
       setImporting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -309,18 +327,18 @@ export function CogsManager({ initialItems }: Props) {
           </div>
         )}
 
-        {/* CSV Upload */}
+        {/* File Upload (CSV or XLSX) */}
         <div className="mb-6 bg-gray-700/30 border border-gray-600/50 rounded-lg p-4">
-          <p className="text-sm text-gray-300 mb-2 font-medium">CSV Upload</p>
+          <p className="text-sm text-gray-300 mb-2 font-medium">Import from File</p>
           <p className="text-xs text-gray-500 mb-3">
-            Expected columns: store_name, sku, product_name, cogs_per_unit
+            Upload CSV or XLSX with columns: store_name, sku, product_name, cogs_per_unit
           </p>
           <div className="flex items-center gap-3">
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv"
-              onChange={handleCsvUpload}
+              accept=".csv,.xlsx,.xls"
+              onChange={handleFileUpload}
               className="text-sm text-gray-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-sm file:bg-gray-700 file:text-white hover:file:bg-gray-600 file:cursor-pointer"
             />
             {importing && (
@@ -332,7 +350,7 @@ export function CogsManager({ initialItems }: Props) {
         {/* Table */}
         {filteredItems.length === 0 ? (
           <div className="py-6 text-center text-gray-500 text-sm">
-            No COGS items yet. Add items manually, upload a CSV, or scan from Shopify.
+            No COGS items yet. Add items manually, upload a file (CSV/XLSX), or scan from Shopify.
           </div>
         ) : (
           <div className="overflow-x-auto mb-6">
