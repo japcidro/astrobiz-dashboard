@@ -140,18 +140,29 @@ export async function POST(request: Request) {
     );
   }
 
-  const { data, error } = await supabase
-    .from("jt_deliveries")
-    .upsert(dbRows, { onConflict: "waybill" })
-    .select("waybill");
+  // Upsert in chunks of 50 to avoid timeout
+  const CHUNK_SIZE = 50;
+  let totalUpserted = 0;
 
-  if (error) {
-    return Response.json({ error: error.message }, { status: 500 });
+  for (let i = 0; i < dbRows.length; i += CHUNK_SIZE) {
+    const chunk = dbRows.slice(i, i + CHUNK_SIZE);
+    const { data, error } = await supabase
+      .from("jt_deliveries")
+      .upsert(chunk, { onConflict: "waybill" })
+      .select("waybill");
+
+    if (error) {
+      return Response.json({
+        error: `Chunk ${Math.floor(i / CHUNK_SIZE) + 1} failed: ${error.message}`,
+        partial: { upserted: totalUpserted, total: dbRows.length },
+      }, { status: 500 });
+    }
+    totalUpserted += data?.length || 0;
   }
 
   return Response.json({
-    inserted: data?.length || 0,
-    updated: 0, // Supabase upsert doesn't distinguish; total is accurate
+    inserted: totalUpserted,
+    updated: 0,
     total: dbRows.length,
     summary,
     errors: errors.length > 0 ? errors : undefined,
