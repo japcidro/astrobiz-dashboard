@@ -59,7 +59,6 @@ const navItems: NavItem[] = [
     href: "/fulfillment/inventory",
     icon: <Package size={20} />,
     roles: ["admin", "fulfillment"],
-    comingSoon: true,
   },
   {
     label: "Ad Performance",

@@ -83,3 +83,57 @@ export interface OrdersSummary {
   aging_warning_count: number;
   aging_danger_count: number;
 }
+
+// --- Inventory types ---
+
+export interface InventoryVariant {
+  id: number;
+  title: string;
+  sku: string | null;
+  barcode: string | null;
+  price: string;
+  inventory_quantity: number;
+  inventory_item_id: number;
+  position: number;
+}
+
+export interface InventoryProduct {
+  id: number;
+  title: string;
+  status: string;
+  product_type: string;
+  vendor: string;
+  image_url: string | null;
+  store_name: string;
+  store_id: string;
+  variants: InventoryVariant[];
+  total_inventory: number;
+}
+
+export interface InventoryRow {
+  product_id: number;
+  product_title: string;
+  variant_id: number;
+  variant_title: string;
+  sku: string | null;
+  barcode: string | null;
+  price: string;
+  stock: number;
+  stock_status: "in_stock" | "low_stock" | "out_of_stock";
+  store_name: string;
+  store_id: string;
+  product_type: string;
+  vendor: string;
+  image_url: string | null;
+  status: string;
+}
+
+export type InventoryStockFilter = "all" | "in_stock" | "low_stock" | "out_of_stock";
+
+export interface InventorySummary {
+  total_products: number;
+  total_variants: number;
+  out_of_stock_count: number;
+  low_stock_count: number;
+  total_units: number;
+}
