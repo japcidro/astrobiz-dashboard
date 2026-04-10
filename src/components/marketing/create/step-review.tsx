@@ -155,8 +155,8 @@ export function StepReview({
           Ad Created Successfully!
         </h2>
         <p className="text-gray-400 text-sm mb-6">
-          Your ad has been created in <strong>PAUSED</strong> state. Go to Ad
-          Performance to review and activate it.
+          Your ad has been created and is <strong>ACTIVE</strong>. It will start
+          running on the scheduled date.
         </p>
         <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4 max-w-sm mx-auto mb-6 text-left">
           <div className="space-y-2 text-sm">
@@ -206,8 +206,8 @@ export function StepReview({
         </h2>
         <p className="text-gray-400 text-sm">
           Review your ad settings before submitting. All ads are created as{" "}
-          <strong className="text-yellow-400">PAUSED</strong> — you can activate
-          them from the Ad Performance page.
+          <strong className="text-green-400">ACTIVE</strong> — ads will start
+          running on their scheduled date.
         </p>
       </div>
 
@@ -382,7 +382,7 @@ export function StepReview({
           )}
         </button>
         <p className="text-xs text-gray-500">
-          Ad will be created as PAUSED
+          Ad will be created as ACTIVE
         </p>
       </div>
     </div>

@@ -273,6 +273,9 @@ export function BulkCreateWizard() {
 
   const allRowsHaveAdsetName = rows.length > 0 && rows.every((r) => !!r.adset_name.trim());
   const allRowsHaveAdName = rows.length > 0 && rows.every((r) => !!r.ad_name.trim());
+  const allRowsHaveCopy = rows.length > 0 && rows.every((r) =>
+    !!r.primary_text.trim() && !!r.headline.trim() && !!r.description.trim()
+  );
 
   // Build missing items list for the submit section
   const missingItems: string[] = [];
@@ -285,6 +288,7 @@ export function BulkCreateWizard() {
   if (!allRowsHaveAdsetName) missingItems.push("Enter adset name for every row");
   if (!allRowsHaveAdName) missingItems.push("Enter ad name for every row");
   if (!allRowsHaveCreatives) missingItems.push("Upload creative for every row");
+  if (!allRowsHaveCopy) missingItems.push("Enter primary text, headline, and description for every row");
 
   const canSubmit =
     !!adAccountId &&
@@ -293,6 +297,7 @@ export function BulkCreateWizard() {
     allRowsHaveCreatives &&
     allRowsHaveAdsetName &&
     allRowsHaveAdName &&
+    allRowsHaveCopy &&
     (mode === "new" ? !!campaign.name : !!existingCampaignId) &&
     !!adset.name;
 

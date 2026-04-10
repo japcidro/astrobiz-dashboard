@@ -116,7 +116,7 @@ export async function POST(request: Request) {
       const campaignParams: Record<string, string> = {
         name: campaign_data.name,
         objective: campaign_data.objective,
-        status: "PAUSED",
+        status: "ACTIVE",
         special_ad_categories: JSON.stringify(
           campaign_data.special_ad_categories
         ),
@@ -158,7 +158,7 @@ export async function POST(request: Request) {
       const adsetParams: Record<string, string> = {
         name: adset_data.name,
         campaign_id: fbCampaignId,
-        status: "PAUSED",
+        status: "ACTIVE",
         optimization_goal: adset_data.optimization_goal,
         billing_event: adset_data.billing_event,
         bid_strategy: "LOWEST_COST_WITHOUT_CAP",
@@ -298,7 +298,7 @@ export async function POST(request: Request) {
       name: ad_data.name,
       adset_id: fbAdsetId,
       creative: JSON.stringify({ creative_id: fbCreativeId }),
-      status: "PAUSED",
+      status: "ACTIVE",
     };
 
     if (ad_data.url_parameters) {

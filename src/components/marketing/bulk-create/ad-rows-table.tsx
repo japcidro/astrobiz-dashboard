@@ -353,7 +353,9 @@ export function AdRowsTable({
                     onChange={(e) =>
                       onUpdateRow(row.id, { primary_text: e.target.value })
                     }
-                    className="w-full resize-none rounded border border-gray-600 bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+                    className={`w-full resize-none rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
+                      !row.primary_text.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
+                    }`}
                   />
                 </td>
 
@@ -366,7 +368,9 @@ export function AdRowsTable({
                     onChange={(e) =>
                       onUpdateRow(row.id, { headline: e.target.value })
                     }
-                    className="w-full rounded border border-gray-600 bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+                    className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
+                      !row.headline.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
+                    }`}
                   />
                 </td>
 
@@ -379,7 +383,9 @@ export function AdRowsTable({
                     onChange={(e) =>
                       onUpdateRow(row.id, { description: e.target.value })
                     }
-                    className="w-full rounded border border-gray-600 bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+                    className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
+                      !row.description.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
+                    }`}
                   />
                 </td>
 
