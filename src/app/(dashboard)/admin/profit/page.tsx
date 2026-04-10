@@ -38,7 +38,7 @@ export default function ProfitPage() {
   const [missingCogsSkus, setMissingCogsSkus] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [dateFilter, setDateFilter] = useState<ProfitDateFilter>("last_7d");
+  const [dateFilter, setDateFilter] = useState<ProfitDateFilter>("today");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [storeFilter, setStoreFilter] = useState("ALL");

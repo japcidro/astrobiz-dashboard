@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef } from "react";
-import * as XLSX from "xlsx";
 import {
   Plus,
   Trash2,
@@ -107,7 +106,8 @@ export function CogsManager({ initialItems }: Props) {
       const isXlsx = file.name.match(/\.xlsx?$/i);
 
       if (isXlsx) {
-        // Parse XLSX/XLS using SheetJS
+        // Parse XLSX/XLS using SheetJS (dynamic import to avoid SSR issues)
+        const XLSX = await import("xlsx");
         const buffer = await file.arrayBuffer();
         const wb = XLSX.read(buffer, { type: "array" });
         const sheet = wb.Sheets[wb.SheetNames[0]];

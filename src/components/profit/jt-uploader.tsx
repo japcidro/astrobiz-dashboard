@@ -2,7 +2,6 @@
 
 import { useState, useRef, useCallback } from "react";
 import { Upload, RefreshCw, CheckCircle, AlertCircle, FileSpreadsheet } from "lucide-react";
-import * as XLSX from "xlsx";
 import type { JtUploadResult } from "@/lib/profit/types";
 
 const COLUMN_MAP: Record<string, string> = {
@@ -44,6 +43,7 @@ export function JtUploader() {
     setResult(null);
     setPreview(null);
     try {
+      const XLSX = await import("xlsx");
       const arrayBuffer = await file.arrayBuffer();
       const workbook = XLSX.read(arrayBuffer, { type: "array" });
       const sheetName = workbook.SheetNames[0];
