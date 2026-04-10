@@ -487,26 +487,29 @@ export async function GET(request: Request) {
   const rtsMinDelivered = 200; // threshold to use actual rate
 
   try {
-    const { data: jtAllTime } = await supabase
+    // Lightweight query: just count delivered per store (not all rows)
+    const { data: deliveredCounts } = await supabase
       .from("jt_deliveries")
-      .select("store_name, is_delivered, is_returned, item_value");
+      .select("store_name")
+      .eq("is_delivered", true);
 
-    if (jtAllTime && jtAllTime.length > 0) {
-      // Per-store totals
-      const storeStats = new Map<string, { delivered: number; returned: number; totalItemValue: number }>();
-      for (const row of jtAllTime) {
+    if (deliveredCounts && deliveredCounts.length > 0) {
+      // Count delivered per store
+      const storeDelivered = new Map<string, number>();
+      for (const row of deliveredCounts) {
         const store = row.store_name || "UNKNOWN";
-        if (!storeStats.has(store)) storeStats.set(store, { delivered: 0, returned: 0, totalItemValue: 0 });
-        const s = storeStats.get(store)!;
-        s.totalItemValue += parseFloat(row.item_value) || 0;
-        if (row.is_delivered) s.delivered++;
-        if (row.is_returned) s.returned++;
+        storeDelivered.set(store, (storeDelivered.get(store) || 0) + 1);
       }
 
       // For each store, if delivered < 200, override returns to be at least 25% of revenue
-      // Apply this to the date-range returns data
-      for (const [store, stats] of storeStats) {
-        if (stats.delivered < rtsMinDelivered) {
+      const allStoresInData = new Set<string>();
+      for (const key of revenueByDateStore.keys()) {
+        allStoresInData.add(key.split("::")[1]);
+      }
+
+      for (const store of allStoresInData) {
+        const delivered = storeDelivered.get(store) || 0;
+        if (delivered < rtsMinDelivered) {
           // Calculate what 25% RTS would look like for this store in the date range
           // Sum revenue for this store in the date range
           let storeRevenue = 0;
@@ -542,7 +545,7 @@ export async function GET(request: Request) {
                 );
               }
             }
-            warnings.push(`${store}: Using 25% worst-case RTS (${stats.delivered}/${rtsMinDelivered} delivered)`);
+            warnings.push(`${store}: Using 25% worst-case RTS (${delivered}/${rtsMinDelivered} delivered)`);
           }
         }
       }
