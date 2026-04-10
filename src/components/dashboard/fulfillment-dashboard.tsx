@@ -37,8 +37,7 @@ export function FulfillmentDashboard({
   const [summary, setSummary] = useState<InventorySummary | null>(null);
 
   useEffect(() => {
-    const t = Date.now();
-    fetch(`/api/shopify/inventory?store=ALL&_t=${t}`)
+    fetch("/api/shopify/inventory?store=ALL")
       .then((r) => r.json())
       .then((data) => setSummary(data?.summary ?? null))
       .catch(() => setSummary(null))

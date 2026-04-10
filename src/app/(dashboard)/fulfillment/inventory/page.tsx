@@ -44,14 +44,14 @@ export default function InventoryPage() {
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
   const [role, setRole] = useState<string>("");
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (forceRefresh = false) => {
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams({
         store: storeFilter,
-        _t: Date.now().toString(),
       });
+      if (forceRefresh) params.set("refresh", "1");
 
       const res = await fetch(`/api/shopify/inventory?${params}`);
       const json = await res.json();
@@ -155,7 +155,7 @@ export default function InventoryPage() {
           </p>
         </div>
         <button
-          onClick={() => fetchData()}
+          onClick={() => fetchData(true)}
           disabled={loading}
           className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm px-3 py-2 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
         >

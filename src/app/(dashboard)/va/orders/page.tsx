@@ -60,7 +60,7 @@ export default function OrdersPage() {
   const [role, setRole] = useState<string>("");
   const [selectedOrder, setSelectedOrder] = useState<ShopifyOrder | null>(null);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (forceRefresh = false) => {
     setLoading(true);
     setError(null);
     try {
@@ -68,8 +68,8 @@ export default function OrdersPage() {
         date_filter: dateFilter,
         store: storeFilter,
         status: statusFilter,
-        _t: Date.now().toString(),
       });
+      if (forceRefresh) params.set("refresh", "1");
       if (dateFilter === "custom" && customFrom) {
         params.set("date_from", `${customFrom}T00:00:00+08:00`);
       }
@@ -162,7 +162,7 @@ export default function OrdersPage() {
           </p>
         </div>
         <button
-          onClick={() => fetchData()}
+          onClick={() => fetchData(true)}
           disabled={loading}
           className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm px-3 py-2 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
         >

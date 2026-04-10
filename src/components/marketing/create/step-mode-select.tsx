@@ -64,7 +64,7 @@ export function StepModeSelect({
     if (!adAccountId || mode === "new") return;
     setLoadingCampaigns(true);
     fetch(
-      `/api/facebook/all-ads?date_preset=last_30d&account=${adAccountId}&_t=${Date.now()}`
+      `/api/facebook/all-ads?date_preset=last_30d&account=${adAccountId}`
     )
       .then((r) => r.json())
       .then((json) => {
@@ -91,7 +91,7 @@ export function StepModeSelect({
     if (!existingCampaignId || mode !== "existing_adset") return;
     setLoadingAdsets(true);
     fetch(
-      `/api/facebook/all-ads?date_preset=last_30d&account=${adAccountId}&_t=${Date.now()}`
+      `/api/facebook/all-ads?date_preset=last_30d&account=${adAccountId}`
     )
       .then((r) => r.json())
       .then((json) => {

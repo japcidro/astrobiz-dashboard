@@ -12,7 +12,7 @@ const SHOPIFY_API_VERSION = "2024-01";
 
 // In-memory cache — survives across requests while server is running
 const cache = new Map<string, { data: unknown; timestamp: number }>();
-const CACHE_TTL = 3 * 60 * 1000; // 3 minutes
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 interface RawShopifyProduct {
   id: number;
@@ -80,11 +80,12 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const storeFilter = searchParams.get("store") || "ALL";
+  const forceRefresh = searchParams.get("refresh") === "1";
 
   // Check cache first (ignore _t timestamp param for cache key)
   const cacheKey = `inventory-${storeFilter}`;
   const cached = cache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+  if (!forceRefresh && cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return Response.json({
       ...(cached.data as Record<string, unknown>),
       role: employee.role,

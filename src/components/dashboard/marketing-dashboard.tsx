@@ -42,8 +42,7 @@ export function MarketingDashboard({
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    const t = Date.now();
-    fetch(`/api/facebook/all-ads?date_preset=today&_t=${t}`)
+    fetch("/api/facebook/all-ads?date_preset=today")
       .then((r) => {
         if (!r.ok) throw new Error("Failed");
         return r.json();

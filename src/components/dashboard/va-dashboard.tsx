@@ -36,8 +36,7 @@ export function VADashboard({
   const [summary, setSummary] = useState<OrdersSummary | null>(null);
 
   useEffect(() => {
-    const t = Date.now();
-    fetch(`/api/shopify/orders?date_filter=today&store=ALL&_t=${t}`)
+    fetch("/api/shopify/orders?date_filter=today&store=ALL")
       .then((r) => r.json())
       .then((data) => setSummary(data?.summary ?? null))
       .catch(() => setSummary(null))

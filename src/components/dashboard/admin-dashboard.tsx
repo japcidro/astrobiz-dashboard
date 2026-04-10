@@ -72,22 +72,12 @@ export function AdminDashboard({
   const [inventory, setInventory] = useState<InventorySummary | null>(dashboardCache.inventory);
 
   useEffect(() => {
-    const t = Date.now();
-
     Promise.allSettled([
-      fetch(`/api/shopify/orders?date_filter=today&store=ALL&_t=${t}`).then(
-        (r) => r.json()
-      ),
-      fetch(
-        `/api/shopify/orders?date_filter=this_month&store=ALL&_t=${t}`
-      ).then((r) => r.json()),
-      fetch(`/api/facebook/all-ads?date_preset=today&_t=${t}`).then((r) =>
-        r.json()
-      ),
-      fetch(`/api/facebook/all-ads?date_preset=this_month&_t=${t}`).then((r) =>
-        r.json()
-      ),
-      fetch(`/api/shopify/inventory?store=ALL&_t=${t}`).then((r) => r.json()),
+      fetch("/api/shopify/orders?date_filter=today&store=ALL").then((r) => r.json()),
+      fetch("/api/shopify/orders?date_filter=this_month&store=ALL").then((r) => r.json()),
+      fetch("/api/facebook/all-ads?date_preset=today").then((r) => r.json()),
+      fetch("/api/facebook/all-ads?date_preset=this_month").then((r) => r.json()),
+      fetch("/api/shopify/inventory?store=ALL").then((r) => r.json()),
     ]).then(([todayOrd, monthOrd, todayAd, monthAd, inv]) => {
       const to = todayOrd.status === "fulfilled" ? todayOrd.value?.summary ?? null : null;
       const mo = monthOrd.status === "fulfilled" ? monthOrd.value?.summary ?? null : null;

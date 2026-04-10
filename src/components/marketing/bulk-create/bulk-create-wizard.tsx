@@ -214,7 +214,7 @@ export function BulkCreateWizard() {
     setExistingCampaignId(null);
 
     fetch(
-      `/api/facebook/all-ads?date_preset=last_30d&account=${adAccountId}&_t=${Date.now()}`
+      `/api/facebook/all-ads?date_preset=last_30d&account=${adAccountId}`
     )
       .then((r) => r.json())
       .then((json) => {
