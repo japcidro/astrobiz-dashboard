@@ -274,11 +274,28 @@ export function BulkCreateWizard() {
     return !!r.video_id;
   });
 
+  const allRowsHaveAdsetName = rows.length > 0 && rows.every((r) => !!r.adset_name.trim());
+  const allRowsHaveAdName = rows.length > 0 && rows.every((r) => !!r.ad_name.trim());
+
+  // Build missing items list for the submit section
+  const missingItems: string[] = [];
+  if (!adAccountId) missingItems.push("Select an ad account");
+  if (mode === "new" && !campaign.name) missingItems.push("Enter a campaign name");
+  if (mode === "existing_campaign" && !existingCampaignId) missingItems.push("Select an existing campaign");
+  if (!pageId) missingItems.push("Select a Facebook Page");
+  if (!websiteUrl) missingItems.push("Enter a website URL");
+  if (rows.length === 0) missingItems.push("Add at least one row");
+  if (!allRowsHaveAdsetName) missingItems.push("Enter adset name for every row");
+  if (!allRowsHaveAdName) missingItems.push("Enter ad name for every row");
+  if (!allRowsHaveCreatives) missingItems.push("Upload creative for every row");
+
   const canSubmit =
     !!adAccountId &&
     !!pageId &&
     !!websiteUrl &&
     allRowsHaveCreatives &&
+    allRowsHaveAdsetName &&
+    allRowsHaveAdName &&
     (mode === "new" ? !!campaign.name : !!existingCampaignId) &&
     !!adset.name;
 
@@ -590,10 +607,16 @@ export function BulkCreateWizard() {
             >
               Submit All to Facebook
             </button>
-            {!canSubmit && (
-              <p className="text-gray-500 text-xs">
-                Fill in all required fields and upload creatives for every row.
-              </p>
+            {!canSubmit && missingItems.length > 0 && (
+              <div className="text-xs space-y-1">
+                <p className="text-gray-500 font-medium">Missing:</p>
+                {missingItems.map((item) => (
+                  <p key={item} className="text-red-400 flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
+                    {item}
+                  </p>
+                ))}
+              </div>
             )}
           </div>
         </Section>

@@ -260,7 +260,9 @@ export function AdRowsTable({
                     onChange={(e) =>
                       onUpdateRow(row.id, { adset_name: e.target.value })
                     }
-                    className="w-full rounded border border-gray-600 bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+                    className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
+                      !row.adset_name.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
+                    }`}
                   />
                 </td>
 
@@ -273,7 +275,9 @@ export function AdRowsTable({
                     onChange={(e) =>
                       onUpdateRow(row.id, { ad_name: e.target.value })
                     }
-                    className="w-full rounded border border-gray-600 bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+                    className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
+                      !row.ad_name.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
+                    }`}
                   />
                 </td>
 
@@ -314,13 +318,22 @@ export function AdRowsTable({
                         </span>
                       </span>
                     )}
-                    {(row.status === "pending" || row.status === "error") && (
+                    {row.status === "pending" && !row.file_name && (
+                      <button
+                        type="button"
+                        onClick={() => rowInputRefs.current[row.id]?.click()}
+                        className="rounded bg-red-900/30 border border-red-500/50 px-2 py-0.5 text-xs text-red-300 hover:bg-red-900/50 transition-colors"
+                      >
+                        Upload required
+                      </button>
+                    )}
+                    {row.status === "error" && (
                       <button
                         type="button"
                         onClick={() => rowInputRefs.current[row.id]?.click()}
                         className="rounded bg-gray-700 px-2 py-0.5 text-xs text-gray-300 hover:bg-gray-600 transition-colors"
                       >
-                        Choose
+                        Retry
                       </button>
                     )}
                   </div>
