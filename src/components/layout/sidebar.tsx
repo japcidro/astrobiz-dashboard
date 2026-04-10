@@ -16,6 +16,8 @@ import {
   PlusCircle,
   Layers,
   FileText,
+  DollarSign,
+  Calculator,
 } from "lucide-react";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -46,6 +48,18 @@ const navItems: NavItem[] = [
     label: "Attendance",
     href: "/admin/attendance",
     icon: <Users size={20} />,
+    roles: ["admin"],
+  },
+  {
+    label: "Net Profit",
+    href: "/admin/profit",
+    icon: <DollarSign size={20} />,
+    roles: ["admin"],
+  },
+  {
+    label: "COGS",
+    href: "/admin/cogs",
+    icon: <Calculator size={20} />,
     roles: ["admin"],
   },
   {
