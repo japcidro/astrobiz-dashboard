@@ -109,24 +109,29 @@ export function AdRowsTable({
   const bulkInputRef = useRef<HTMLInputElement>(null);
   const rowInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
-  // Upload a single file for a given row
+  // Upload a single file for a given row — detect type from file MIME
   const uploadFileForRow = useCallback(
     async (file: File, rowId: string, token: string) => {
       onUpdateRow(rowId, { status: "uploading", error: null });
+      const isVideo = file.type.startsWith("video/");
       try {
-        if (creativeType === "image") {
-          const { image_hash } = await uploadImage(file, adAccountId, token);
+        if (isVideo) {
+          const { video_id } = await uploadVideo(file, adAccountId, token);
           onUpdateRow(rowId, {
-            image_hash,
+            video_id,
+            image_hash: null,
             file_name: file.name,
+            creative_type: "video",
             status: "done",
             error: null,
           });
         } else {
-          const { video_id } = await uploadVideo(file, adAccountId, token);
+          const { image_hash } = await uploadImage(file, adAccountId, token);
           onUpdateRow(rowId, {
-            video_id,
+            image_hash,
+            video_id: null,
             file_name: file.name,
+            creative_type: "image",
             status: "done",
             error: null,
           });
@@ -138,7 +143,7 @@ export function AdRowsTable({
         });
       }
     },
-    [adAccountId, creativeType, onUpdateRow],
+    [adAccountId, onUpdateRow],
   );
 
   // Bulk upload: match files to rows by position
@@ -196,7 +201,7 @@ export function AdRowsTable({
     [uploadFileForRow, onUpdateRow],
   );
 
-  const accept = creativeType === "image" ? "image/*" : "video/*";
+  const accept = "image/*,video/*";
 
   return (
     <div className="space-y-3">
