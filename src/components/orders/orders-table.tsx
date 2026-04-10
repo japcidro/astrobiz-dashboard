@@ -6,13 +6,14 @@ interface Props {
   sortKey: string;
   sortDir: "asc" | "desc";
   onSort: (key: string) => void;
+  isAdmin: boolean;
 }
 
-const COLUMNS: { key: string; label: string }[] = [
+const ALL_COLUMNS: { key: string; label: string; adminOnly?: boolean }[] = [
   { key: "name", label: "Order #" },
   { key: "store_name", label: "Store" },
   { key: "customer_name", label: "Customer" },
-  { key: "total_price", label: "Total (₱)" },
+  { key: "total_price", label: "Total (₱)", adminOnly: true },
   { key: "financial_status", label: "Payment" },
   { key: "fulfillment_status", label: "Fulfillment" },
   { key: "age_days", label: "Age" },
@@ -118,7 +119,8 @@ function AgeBadge({
   return <span className={cls}>{days}d</span>;
 }
 
-export function OrdersTable({ orders, sortKey, sortDir, onSort }: Props) {
+export function OrdersTable({ orders, sortKey, sortDir, onSort, isAdmin }: Props) {
+  const COLUMNS = ALL_COLUMNS.filter((c) => !c.adminOnly || isAdmin);
   if (orders.length === 0) {
     return (
       <div className="text-center py-16 text-gray-500">
@@ -174,9 +176,11 @@ export function OrdersTable({ orders, sortKey, sortDir, onSort }: Props) {
                 <td className="px-4 py-3 text-gray-300 whitespace-nowrap">
                   {order.customer_name}
                 </td>
-                <td className="px-4 py-3 text-white font-medium whitespace-nowrap">
-                  {formatCurrency(order.total_price)}
-                </td>
+                {isAdmin && (
+                  <td className="px-4 py-3 text-white font-medium whitespace-nowrap">
+                    {formatCurrency(order.total_price)}
+                  </td>
+                )}
                 <td className="px-4 py-3 whitespace-nowrap">
                   <PaymentBadge
                     status={order.financial_status}

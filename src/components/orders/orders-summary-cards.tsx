@@ -1,6 +1,5 @@
 import {
   Package,
-  DollarSign,
   AlertTriangle,
   CheckCircle,
   XCircle,
@@ -11,9 +10,10 @@ import type { OrdersSummary } from "@/lib/shopify/types";
 interface Props {
   summary: OrdersSummary;
   loading: boolean;
+  isAdmin: boolean;
 }
 
-export function OrdersSummaryCards({ summary, loading }: Props) {
+export function OrdersSummaryCards({ summary, loading, isAdmin }: Props) {
   const formatCurrency = (val: number) =>
     `₱${val.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -37,13 +37,17 @@ export function OrdersSummaryCards({ summary, loading }: Props) {
       bg: "bg-blue-600/20",
       accent: "",
     },
-    {
-      label: "Revenue",
-      value: formatCurrency(summary.total_revenue),
-      icon: <DollarSign size={20} className="text-green-400" />,
-      bg: "bg-green-600/20",
-      accent: "",
-    },
+    ...(isAdmin
+      ? [
+          {
+            label: "Revenue",
+            value: formatCurrency(summary.total_revenue),
+            icon: <span className="text-green-400 font-bold text-lg leading-none">₱</span>,
+            bg: "bg-green-600/20",
+            accent: "",
+          },
+        ]
+      : []),
     {
       label: "Unfulfilled",
       value: formatNumber(summary.unfulfilled_count),

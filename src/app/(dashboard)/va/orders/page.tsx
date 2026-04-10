@@ -56,6 +56,7 @@ export default function OrdersPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortKey, setSortKey] = useState("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [role, setRole] = useState<string>("");
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -81,6 +82,7 @@ export default function OrdersPage() {
       setOrders(json.orders || []);
       setSummary(json.summary || defaultSummary);
       if (json.stores) setStores(json.stores);
+      if (json.role) setRole(json.role);
       // Show warnings from failed stores
       if (json.warnings?.length > 0) {
         setError(`Warning: ${json.warnings.join("; ")}`);
@@ -259,7 +261,7 @@ export default function OrdersPage() {
 
       {/* Summary Cards */}
       <div className="mb-4">
-        <OrdersSummaryCards summary={summary} loading={loading} />
+        <OrdersSummaryCards summary={summary} loading={loading} isAdmin={role === "admin"} />
       </div>
 
       {/* Aging Danger Banner */}
@@ -288,6 +290,7 @@ export default function OrdersPage() {
           sortKey={sortKey}
           sortDir={sortDir}
           onSort={handleSort}
+          isAdmin={role === "admin"}
         />
       )}
     </div>
