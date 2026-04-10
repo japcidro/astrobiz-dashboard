@@ -269,10 +269,7 @@ export function BulkCreateWizard() {
   );
 
   // ─── Validation ───
-  const allRowsHaveCreatives = rows.length > 0 && rows.every((r) => {
-    if (r.creative_type === "image" || creativeType === "image") return !!r.image_hash;
-    return !!r.video_id;
-  });
+  const allRowsHaveCreatives = rows.length > 0 && rows.every((r) => !!r.image_hash || !!r.video_id);
 
   const allRowsHaveAdsetName = rows.length > 0 && rows.every((r) => !!r.adset_name.trim());
   const allRowsHaveAdName = rows.length > 0 && rows.every((r) => !!r.ad_name.trim());
