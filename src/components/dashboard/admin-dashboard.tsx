@@ -42,6 +42,15 @@ interface InventorySummary {
   low_stock_count: number;
 }
 
+// Module-level cache — survives navigation, cleared on full page reload
+let dashboardCache: {
+  todayOrders: OrdersSummary | null;
+  monthOrders: OrdersSummary | null;
+  todayAds: AdsTotals | null;
+  monthAds: AdsTotals | null;
+  inventory: InventorySummary | null;
+} = { todayOrders: null, monthOrders: null, todayAds: null, monthAds: null, inventory: null };
+
 function formatCurrency(num: number): string {
   return `₱${num.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
@@ -55,13 +64,12 @@ export function AdminDashboard({
   teamTotalHours,
   teamNotClockedIn,
 }: Props) {
-  const [loading, setLoading] = useState(true);
-  const [todayOrders, setTodayOrders] = useState<OrdersSummary | null>(null);
-  const [monthOrders, setMonthOrders] = useState<OrdersSummary | null>(null);
-  const [todayAds, setTodayAds] = useState<AdsTotals | null>(null);
-  const [monthAds, setMonthAds] = useState<AdsTotals | null>(null);
-  const [inventory, setInventory] = useState<InventorySummary | null>(null);
-  const [debugInfo, setDebugInfo] = useState<string>("");
+  const [loading, setLoading] = useState(!dashboardCache.todayOrders);
+  const [todayOrders, setTodayOrders] = useState<OrdersSummary | null>(dashboardCache.todayOrders);
+  const [monthOrders, setMonthOrders] = useState<OrdersSummary | null>(dashboardCache.monthOrders);
+  const [todayAds, setTodayAds] = useState<AdsTotals | null>(dashboardCache.todayAds);
+  const [monthAds, setMonthAds] = useState<AdsTotals | null>(dashboardCache.monthAds);
+  const [inventory, setInventory] = useState<InventorySummary | null>(dashboardCache.inventory);
 
   useEffect(() => {
     const t = Date.now();
@@ -81,41 +89,20 @@ export function AdminDashboard({
       ),
       fetch(`/api/shopify/inventory?store=ALL&_t=${t}`).then((r) => r.json()),
     ]).then(([todayOrd, monthOrd, todayAd, monthAd, inv]) => {
-      const debug: string[] = [];
+      const to = todayOrd.status === "fulfilled" ? todayOrd.value?.summary ?? null : null;
+      const mo = monthOrd.status === "fulfilled" ? monthOrd.value?.summary ?? null : null;
+      const ta = todayAd.status === "fulfilled" ? todayAd.value?.totals ?? null : null;
+      const ma = monthAd.status === "fulfilled" ? monthAd.value?.totals ?? null : null;
+      const iv = inv.status === "fulfilled" ? inv.value?.summary ?? null : null;
 
-      if (todayOrd.status === "fulfilled") {
-        const v = todayOrd.value;
-        debug.push(`todayOrders: ${v?.error || "ok"}, keys: ${Object.keys(v || {}).join(",")}, summary: ${JSON.stringify(v?.summary)?.slice(0, 100)}`);
-        setTodayOrders(v?.summary ?? null);
-      } else {
-        debug.push(`todayOrders: REJECTED`);
-      }
+      setTodayOrders(to);
+      setMonthOrders(mo);
+      setTodayAds(ta);
+      setMonthAds(ma);
+      setInventory(iv);
 
-      if (monthOrd.status === "fulfilled") {
-        const v = monthOrd.value;
-        debug.push(`monthOrders: ${v?.error || "ok"}, summary: ${JSON.stringify(v?.summary)?.slice(0, 100)}`);
-        setMonthOrders(v?.summary ?? null);
-      }
-
-      if (todayAd.status === "fulfilled") {
-        const v = todayAd.value;
-        debug.push(`todayAds: ${v?.error || "ok"}, totals: ${JSON.stringify(v?.totals)?.slice(0, 100)}`);
-        setTodayAds(v?.totals ?? null);
-      }
-
-      if (monthAd.status === "fulfilled") {
-        const v = monthAd.value;
-        debug.push(`monthAds: ${v?.error || "ok"}, totals: ${JSON.stringify(v?.totals)?.slice(0, 100)}`);
-        setMonthAds(v?.totals ?? null);
-      }
-
-      if (inv.status === "fulfilled") {
-        const v = inv.value;
-        debug.push(`inventory: ${v?.error || "ok"}, summary: ${JSON.stringify(v?.summary)?.slice(0, 100)}`);
-        setInventory(v?.summary ?? null);
-      }
-
-      setDebugInfo(debug.join(" | "));
+      // Cache in module scope so navigating back shows data instantly
+      dashboardCache = { todayOrders: to, monthOrders: mo, todayAds: ta, monthAds: ma, inventory: iv };
       setLoading(false);
     });
   }, []);
@@ -131,13 +118,6 @@ export function AdminDashboard({
 
   return (
     <div>
-      {/* Debug - remove after fixing */}
-      {debugInfo && (
-        <div className="mb-4 p-3 bg-gray-800 border border-gray-600 rounded-lg text-xs text-gray-400 font-mono whitespace-pre-wrap break-all">
-          {debugInfo}
-        </div>
-      )}
-
       {/* Today's Highlights */}
       <div className="mb-8">
         <h2 className="text-lg font-semibold text-white mb-4">
