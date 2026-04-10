@@ -146,10 +146,9 @@ export async function POST(request: Request) {
 
   for (let i = 0; i < dbRows.length; i += CHUNK_SIZE) {
     const chunk = dbRows.slice(i, i + CHUNK_SIZE);
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from("jt_deliveries")
-      .upsert(chunk, { onConflict: "waybill" })
-      .select("waybill");
+      .upsert(chunk, { onConflict: "waybill", ignoreDuplicates: false });
 
     if (error) {
       return Response.json({
@@ -157,7 +156,7 @@ export async function POST(request: Request) {
         partial: { upserted: totalUpserted, total: dbRows.length },
       }, { status: 500 });
     }
-    totalUpserted += data?.length || 0;
+    totalUpserted += chunk.length;
   }
 
   return Response.json({
