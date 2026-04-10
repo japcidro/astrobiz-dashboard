@@ -2,7 +2,9 @@ export interface ShopifyStore {
   id: string;
   name: string;
   store_url: string;
-  api_token: string;
+  api_token: string | null;
+  client_id: string | null;
+  client_secret: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;

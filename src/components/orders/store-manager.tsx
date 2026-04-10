@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Store,
   Plus,
@@ -10,7 +11,9 @@ import {
   ToggleRight,
   RefreshCw,
   CheckCircle,
+  ExternalLink,
   X,
+  AlertCircle,
 } from "lucide-react";
 import type { ShopifyStore } from "@/lib/shopify/types";
 import {
@@ -18,7 +21,6 @@ import {
   updateShopifyStore,
   deleteShopifyStore,
   toggleShopifyStore,
-  testShopifyConnection,
 } from "@/lib/shopify/actions";
 
 interface Props {
@@ -28,24 +30,29 @@ interface Props {
 interface FormState {
   name: string;
   store_url: string;
-  api_token: string;
+  client_id: string;
+  client_secret: string;
 }
 
-const emptyForm: FormState = { name: "", store_url: "", api_token: "" };
+const emptyForm: FormState = {
+  name: "",
+  store_url: "",
+  client_id: "",
+  client_secret: "",
+};
 
 export function StoreManager({ stores: initialStores }: Props) {
+  const searchParams = useSearchParams();
+  const shopifyError = searchParams.get("shopify_error");
+  const shopifySuccess = searchParams.get("shopify_success");
+
   const [stores, setStores] = useState<ShopifyStore[]>(initialStores);
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [isPending, startTransition] = useTransition();
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [testResult, setTestResult] = useState<{
-    ok: boolean;
-    message: string;
-  } | null>(null);
-  const [testLoading, setTestLoading] = useState(false);
+  const [error, setError] = useState<string | null>(shopifyError);
+  const [success, setSuccess] = useState<string | null>(shopifySuccess);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
 
@@ -53,37 +60,12 @@ export function StoreManager({ stores: initialStores }: Props) {
     setForm(emptyForm);
     setShowAdd(false);
     setEditingId(null);
-    setTestResult(null);
     setError(null);
   };
 
-  const showSuccess = (msg: string) => {
+  const showSuccessMsg = (msg: string) => {
     setSuccess(msg);
-    setTimeout(() => setSuccess(null), 3000);
-  };
-
-  const handleTestConnection = async () => {
-    if (!form.store_url || !form.api_token) {
-      setTestResult({ ok: false, message: "Store URL and API token are required" });
-      return;
-    }
-    setTestLoading(true);
-    setTestResult(null);
-    try {
-      const result = await testShopifyConnection(form.store_url, form.api_token);
-      if (result.error) {
-        setTestResult({ ok: false, message: result.error });
-      } else {
-        setTestResult({
-          ok: true,
-          message: `Connected! Shop: ${result.shop_name}`,
-        });
-      }
-    } catch {
-      setTestResult({ ok: false, message: "Failed to test connection" });
-    } finally {
-      setTestLoading(false);
-    }
+    setTimeout(() => setSuccess(null), 5000);
   };
 
   const handleAdd = () => {
@@ -91,15 +73,16 @@ export function StoreManager({ stores: initialStores }: Props) {
     const formData = new FormData();
     formData.set("name", form.name);
     formData.set("store_url", form.store_url);
-    formData.set("api_token", form.api_token);
+    formData.set("client_id", form.client_id);
+    formData.set("client_secret", form.client_secret);
 
     startTransition(async () => {
       const result = await addShopifyStore(formData);
       if (result.error) {
         setError(result.error);
-      } else {
-        showSuccess("Store added successfully");
-        window.location.reload();
+      } else if (result.store_id) {
+        // Redirect to Shopify OAuth to get the token
+        window.location.href = `/api/shopify/auth?store_id=${result.store_id}`;
       }
     });
   };
@@ -110,17 +93,22 @@ export function StoreManager({ stores: initialStores }: Props) {
     const formData = new FormData();
     formData.set("name", form.name);
     formData.set("store_url", form.store_url);
-    formData.set("api_token", form.api_token);
+    formData.set("client_id", form.client_id);
+    formData.set("client_secret", form.client_secret);
 
     startTransition(async () => {
       const result = await updateShopifyStore(editingId, formData);
       if (result.error) {
         setError(result.error);
       } else {
-        showSuccess("Store updated successfully");
+        showSuccessMsg("Store updated");
         window.location.reload();
       }
     });
+  };
+
+  const handleReconnect = (storeId: string) => {
+    window.location.href = `/api/shopify/auth?store_id=${storeId}`;
   };
 
   const handleDelete = async (id: string) => {
@@ -133,7 +121,7 @@ export function StoreManager({ stores: initialStores }: Props) {
         setError(result.error);
       } else {
         setStores((prev) => prev.filter((s) => s.id !== id));
-        showSuccess("Store deleted");
+        showSuccessMsg("Store deleted");
       }
     } catch {
       setError("Failed to delete store");
@@ -155,7 +143,7 @@ export function StoreManager({ stores: initialStores }: Props) {
             s.id === id ? { ...s, is_active: !currentActive } : s
           )
         );
-        showSuccess(`Store ${!currentActive ? "activated" : "deactivated"}`);
+        showSuccessMsg(`Store ${!currentActive ? "activated" : "deactivated"}`);
       }
     } catch {
       setError("Failed to toggle store");
@@ -170,9 +158,9 @@ export function StoreManager({ stores: initialStores }: Props) {
     setForm({
       name: store.name,
       store_url: store.store_url,
-      api_token: store.api_token,
+      client_id: store.client_id || "",
+      client_secret: "",
     });
-    setTestResult(null);
     setError(null);
   };
 
@@ -189,7 +177,7 @@ export function StoreManager({ stores: initialStores }: Props) {
                 Shopify Stores ({stores.length})
               </h2>
               <p className="text-sm text-gray-400">
-                Manage your connected Shopify stores
+                Connect your Shopify stores via OAuth
               </p>
             </div>
           </div>
@@ -198,7 +186,6 @@ export function StoreManager({ stores: initialStores }: Props) {
               onClick={() => {
                 setShowAdd(true);
                 setForm(emptyForm);
-                setTestResult(null);
                 setError(null);
               }}
               className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
@@ -217,7 +204,8 @@ export function StoreManager({ stores: initialStores }: Props) {
         )}
 
         {error && (
-          <div className="mb-4 p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-sm">
+          <div className="mb-4 p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-sm flex items-center gap-2">
+            <AlertCircle size={16} />
             {error}
           </div>
         )}
@@ -253,18 +241,41 @@ export function StoreManager({ stores: initialStores }: Props) {
                       {store.store_url}
                     </td>
                     <td className="px-3 py-3">
-                      <span
-                        className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
+                      {store.api_token ? (
+                        <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
                           store.is_active
                             ? "bg-green-900/30 text-green-400"
                             : "bg-gray-700/50 text-gray-400"
-                        }`}
-                      >
-                        {store.is_active ? "Active" : "Inactive"}
-                      </span>
+                        }`}>
+                          {store.is_active ? "Connected" : "Inactive"}
+                        </span>
+                      ) : (
+                        <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-yellow-900/30 text-yellow-400">
+                          Not connected
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-3">
                       <div className="flex items-center justify-end gap-1">
+                        {!store.api_token && (
+                          <button
+                            onClick={() => handleReconnect(store.id)}
+                            className="flex items-center gap-1 px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded transition-colors cursor-pointer"
+                            title="Connect to Shopify"
+                          >
+                            <ExternalLink size={12} />
+                            Connect
+                          </button>
+                        )}
+                        {store.api_token && (
+                          <button
+                            onClick={() => handleReconnect(store.id)}
+                            className="p-1.5 text-gray-400 hover:text-white transition-colors cursor-pointer"
+                            title="Reconnect"
+                          >
+                            <RefreshCw size={14} />
+                          </button>
+                        )}
                         <button
                           onClick={() => startEdit(store)}
                           className="p-1.5 text-gray-400 hover:text-white transition-colors cursor-pointer"
@@ -273,22 +284,15 @@ export function StoreManager({ stores: initialStores }: Props) {
                           <Pencil size={14} />
                         </button>
                         <button
-                          onClick={() =>
-                            handleToggle(store.id, store.is_active)
-                          }
+                          onClick={() => handleToggle(store.id, store.is_active)}
                           disabled={togglingId === store.id}
                           className="p-1.5 text-gray-400 hover:text-white transition-colors cursor-pointer disabled:opacity-50"
-                          title={
-                            store.is_active ? "Deactivate" : "Activate"
-                          }
+                          title={store.is_active ? "Deactivate" : "Activate"}
                         >
                           {togglingId === store.id ? (
                             <RefreshCw size={14} className="animate-spin" />
                           ) : store.is_active ? (
-                            <ToggleRight
-                              size={14}
-                              className="text-green-400"
-                            />
+                            <ToggleRight size={14} className="text-green-400" />
                           ) : (
                             <ToggleLeft size={14} />
                           )}
@@ -336,10 +340,8 @@ export function StoreManager({ stores: initialStores }: Props) {
               <input
                 type="text"
                 value={form.name}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, name: e.target.value }))
-                }
-                placeholder="My Store"
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="I Love Patches"
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
@@ -351,65 +353,70 @@ export function StoreManager({ stores: initialStores }: Props) {
               <input
                 type="text"
                 value={form.store_url}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, store_url: e.target.value }))
-                }
-                placeholder="my-store.myshopify.com"
+                onChange={(e) => setForm((f) => ({ ...f, store_url: e.target.value }))}
+                placeholder="ilovepatches.myshopify.com"
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
 
             <div>
               <label className="block text-sm text-gray-300 mb-1.5">
-                API Token
+                Client ID
+                <span className="text-gray-500 ml-1">(from Shopify Dev Dashboard → App → Settings)</span>
+              </label>
+              <input
+                type="text"
+                value={form.client_id}
+                onChange={(e) => setForm((f) => ({ ...f, client_id: e.target.value }))}
+                placeholder="5db6a43ec3a87588310cd8b1a8630343"
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm text-gray-300 mb-1.5">
+                Client Secret
+                <span className="text-gray-500 ml-1">(starts with shpss_)</span>
               </label>
               <input
                 type="password"
-                value={form.api_token}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, api_token: e.target.value }))
-                }
-                placeholder="shpat_xxxxx..."
+                value={form.client_secret}
+                onChange={(e) => setForm((f) => ({ ...f, client_secret: e.target.value }))}
+                placeholder="shpss_xxxxx..."
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
 
-            {testResult && (
-              <div
-                className={`p-3 rounded-lg text-sm ${
-                  testResult.ok
-                    ? "bg-green-900/30 border border-green-700/50 text-green-300"
-                    : "bg-red-900/30 border border-red-700/50 text-red-300"
-                }`}
-              >
-                {testResult.message}
-              </div>
-            )}
+            <p className="text-xs text-gray-500">
+              After saving, you&apos;ll be redirected to Shopify to approve the connection.
+              Make sure your Shopify app has this redirect URL configured:
+              <br />
+              <code className="text-gray-400">
+                {typeof window !== "undefined" ? window.location.origin : "https://your-domain.vercel.app"}
+                /api/shopify/auth/callback
+              </code>
+            </p>
 
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={handleTestConnection}
-                disabled={testLoading}
-                className="flex-1 flex items-center justify-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-white font-medium py-2.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
-              >
-                <RefreshCw
-                  size={14}
-                  className={testLoading ? "animate-spin" : ""}
-                />
-                {testLoading ? "Testing..." : "Test Connection"}
-              </button>
-              <button
-                type="button"
                 onClick={editingId ? handleUpdate : handleAdd}
-                disabled={isPending}
-                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+                disabled={isPending || !form.name || !form.store_url || !form.client_id || !form.client_secret}
+                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
               >
-                {isPending
-                  ? "Saving..."
-                  : editingId
-                    ? "Update Store"
-                    : "Save Store"}
+                {isPending ? (
+                  <>
+                    <RefreshCw size={14} className="animate-spin" />
+                    {editingId ? "Updating..." : "Saving & connecting..."}
+                  </>
+                ) : editingId ? (
+                  "Update Store"
+                ) : (
+                  <>
+                    <ExternalLink size={14} />
+                    Save & Connect to Shopify
+                  </>
+                )}
               </button>
             </div>
           </div>

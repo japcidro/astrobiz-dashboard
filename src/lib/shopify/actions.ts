@@ -12,26 +12,33 @@ export async function addShopifyStore(formData: FormData) {
 
   const name = formData.get("name") as string;
   const store_url = formData.get("store_url") as string;
-  const api_token = formData.get("api_token") as string;
+  const client_id = formData.get("client_id") as string;
+  const client_secret = formData.get("client_secret") as string;
 
-  if (!name || !store_url || !api_token) {
-    return { error: "Name, store URL, and API token are required" };
+  if (!name || !store_url || !client_id || !client_secret) {
+    return { error: "Name, store URL, Client ID, and Client Secret are required" };
   }
 
   const supabase = await createClient();
 
-  const { error } = await supabase.from("shopify_stores").insert({
-    name,
-    store_url,
-    api_token,
-  });
+  const { data, error } = await supabase
+    .from("shopify_stores")
+    .insert({
+      name,
+      store_url,
+      client_id,
+      client_secret,
+      api_token: null, // will be filled after OAuth
+    })
+    .select("id")
+    .single();
 
   if (error) {
     return { error: error.message };
   }
 
   revalidatePath("/admin/settings");
-  return { success: true };
+  return { success: true, store_id: data.id };
 }
 
 export async function updateShopifyStore(id: string, formData: FormData) {
@@ -42,21 +49,22 @@ export async function updateShopifyStore(id: string, formData: FormData) {
 
   const name = formData.get("name") as string;
   const store_url = formData.get("store_url") as string;
-  const api_token = formData.get("api_token") as string;
+  const client_id = formData.get("client_id") as string;
+  const client_secret = formData.get("client_secret") as string;
 
-  if (!name || !store_url || !api_token) {
-    return { error: "Name, store URL, and API token are required" };
+  if (!name || !store_url) {
+    return { error: "Name and store URL are required" };
   }
+
+  const updates: Record<string, string | null> = { name, store_url };
+  if (client_id) updates.client_id = client_id;
+  if (client_secret) updates.client_secret = client_secret;
 
   const supabase = await createClient();
 
   const { error } = await supabase
     .from("shopify_stores")
-    .update({
-      name,
-      store_url,
-      api_token,
-    })
+    .update(updates)
     .eq("id", id);
 
   if (error) {
@@ -107,41 +115,4 @@ export async function toggleShopifyStore(id: string, isActive: boolean) {
 
   revalidatePath("/admin/settings");
   return { success: true };
-}
-
-export async function testShopifyConnection(
-  storeUrl: string,
-  apiToken: string
-) {
-  const employee = await getEmployee();
-  if (!employee || employee.role !== "admin") {
-    return { error: "Unauthorized" };
-  }
-
-  if (!storeUrl || !apiToken) {
-    return { error: "Store URL and API token are required" };
-  }
-
-  try {
-    const response = await fetch(
-      `https://${storeUrl}/admin/api/2024-01/shop.json`,
-      {
-        method: "GET",
-        headers: {
-          "X-Shopify-Access-Token": apiToken,
-        },
-      }
-    );
-
-    if (!response.ok) {
-      return { error: `Shopify API returned ${response.status}: ${response.statusText}` };
-    }
-
-    const data = await response.json();
-    return { success: true, shop_name: data.shop.name };
-  } catch (err) {
-    return {
-      error: err instanceof Error ? err.message : "Failed to connect to Shopify",
-    };
-  }
 }
