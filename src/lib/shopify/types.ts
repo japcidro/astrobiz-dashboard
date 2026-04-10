@@ -10,6 +10,15 @@ export interface ShopifyStore {
   updated_at: string;
 }
 
+export interface ShopifyOrderLineItem {
+  id: number;
+  title: string;
+  variant_title: string | null;
+  quantity: number;
+  price: string;
+  sku: string | null;
+}
+
 export interface ShopifyOrder {
   id: number;
   name: string; // "#1001"
@@ -17,17 +26,33 @@ export interface ShopifyOrder {
   store_id: string;
   created_at: string;
   total_price: string;
+  subtotal_price: string;
+  shipping_price: string;
+  total_tax: string;
+  total_discounts: string;
   currency: string;
   financial_status: string;
   fulfillment_status: string | null; // null = unfulfilled
   customer_name: string;
+  customer_email: string;
+  customer_phone: string | null;
+  customer_orders_count: number;
+  customer_total_spent: string;
+  shipping_address: string | null; // full formatted address
   province: string;
   age_days: number;
   age_level: "normal" | "warning" | "danger";
-  line_items_count: number;
+  line_items: ShopifyOrderLineItem[];
   tracking_number: string | null;
+  tracking_url: string | null;
+  tracking_company: string | null;
+  fulfilled_at: string | null;
   is_cod: boolean;
   cancelled_at: string | null;
+  gateway: string;
+  note: string | null;
+  tags: string;
+  discount_codes: { code: string; amount: string; type: string }[];
 }
 
 export type OrderDateFilter =

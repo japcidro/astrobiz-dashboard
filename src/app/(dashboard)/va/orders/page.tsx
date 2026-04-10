@@ -10,6 +10,7 @@ import type {
 } from "@/lib/shopify/types";
 import { OrdersSummaryCards } from "@/components/orders/orders-summary-cards";
 import { OrdersTable } from "@/components/orders/orders-table";
+import { OrderDetailPanel } from "@/components/orders/order-detail-panel";
 
 const DATE_PRESETS: { label: string; value: OrderDateFilter }[] = [
   { label: "Today", value: "today" },
@@ -57,6 +58,7 @@ export default function OrdersPage() {
   const [sortKey, setSortKey] = useState("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [role, setRole] = useState<string>("");
+  const [selectedOrder, setSelectedOrder] = useState<ShopifyOrder | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -291,6 +293,16 @@ export default function OrdersPage() {
           sortDir={sortDir}
           onSort={handleSort}
           isAdmin={role === "admin"}
+          onSelectOrder={setSelectedOrder}
+        />
+      )}
+
+      {/* Order Detail Panel */}
+      {selectedOrder && (
+        <OrderDetailPanel
+          order={selectedOrder}
+          isAdmin={role === "admin"}
+          onClose={() => setSelectedOrder(null)}
         />
       )}
     </div>

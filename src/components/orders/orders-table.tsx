@@ -7,6 +7,7 @@ interface Props {
   sortDir: "asc" | "desc";
   onSort: (key: string) => void;
   isAdmin: boolean;
+  onSelectOrder: (order: ShopifyOrder) => void;
 }
 
 const ALL_COLUMNS: { key: string; label: string; adminOnly?: boolean }[] = [
@@ -119,7 +120,7 @@ function AgeBadge({
   return <span className={cls}>{days}d</span>;
 }
 
-export function OrdersTable({ orders, sortKey, sortDir, onSort, isAdmin }: Props) {
+export function OrdersTable({ orders, sortKey, sortDir, onSort, isAdmin, onSelectOrder }: Props) {
   const COLUMNS = ALL_COLUMNS.filter((c) => !c.adminOnly || isAdmin);
   if (orders.length === 0) {
     return (
@@ -163,7 +164,8 @@ export function OrdersTable({ orders, sortKey, sortDir, onSort, isAdmin }: Props
             return (
               <tr
                 key={order.id}
-                className={`border-b border-gray-800 hover:bg-gray-800/30 ${
+                onClick={() => onSelectOrder(order)}
+                className={`border-b border-gray-800 hover:bg-gray-800/30 cursor-pointer ${
                   idx % 2 === 0 ? "bg-gray-900/20" : ""
                 }`}
               >
