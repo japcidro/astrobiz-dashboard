@@ -40,7 +40,7 @@ export function FulfillmentDashboard({
     const t = Date.now();
     fetch(`/api/shopify/inventory?store=ALL&_t=${t}`)
       .then((r) => r.json())
-      .then((data) => setSummary(data))
+      .then((data) => setSummary(data?.summary ?? null))
       .catch(() => setSummary(null))
       .finally(() => setLoading(false));
   }, []);

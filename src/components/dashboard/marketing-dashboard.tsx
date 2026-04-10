@@ -48,7 +48,7 @@ export function MarketingDashboard({
         if (!r.ok) throw new Error("Failed");
         return r.json();
       })
-      .then((data) => setTotals(data))
+      .then((data) => setTotals(data?.totals ?? null))
       .catch(() => {
         setTotals(null);
         setError(true);

@@ -39,7 +39,7 @@ export function VADashboard({
     const t = Date.now();
     fetch(`/api/shopify/orders?date_filter=today&store=ALL&_t=${t}`)
       .then((r) => r.json())
-      .then((data) => setSummary(data))
+      .then((data) => setSummary(data?.summary ?? null))
       .catch(() => setSummary(null))
       .finally(() => setLoading(false));
   }, []);

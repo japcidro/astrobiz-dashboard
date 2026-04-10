@@ -80,15 +80,11 @@ export function AdminDashboard({
       ),
       fetch(`/api/shopify/inventory?store=ALL&_t=${t}`).then((r) => r.json()),
     ]).then(([todayOrd, monthOrd, todayAd, monthAd, inv]) => {
-      setTodayOrders(
-        todayOrd.status === "fulfilled" ? todayOrd.value : null
-      );
-      setMonthOrders(
-        monthOrd.status === "fulfilled" ? monthOrd.value : null
-      );
-      setTodayAds(todayAd.status === "fulfilled" ? todayAd.value : null);
-      setMonthAds(monthAd.status === "fulfilled" ? monthAd.value : null);
-      setInventory(inv.status === "fulfilled" ? inv.value : null);
+      if (todayOrd.status === "fulfilled") setTodayOrders(todayOrd.value?.summary ?? null);
+      if (monthOrd.status === "fulfilled") setMonthOrders(monthOrd.value?.summary ?? null);
+      if (todayAd.status === "fulfilled") setTodayAds(todayAd.value?.totals ?? null);
+      if (monthAd.status === "fulfilled") setMonthAds(monthAd.value?.totals ?? null);
+      if (inv.status === "fulfilled") setInventory(inv.value?.summary ?? null);
       setLoading(false);
     });
   }, []);
