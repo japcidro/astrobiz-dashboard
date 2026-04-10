@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { RefreshCw, AlertTriangle, Upload } from "lucide-react";
+import { RefreshCw, AlertTriangle } from "lucide-react";
 import type {
   DailyPnlRow,
   ProfitSummary,
@@ -9,7 +9,6 @@ import type {
 } from "@/lib/profit/types";
 import { ProfitSummaryCards } from "@/components/profit/profit-summary-cards";
 import { ProfitDailyTable } from "@/components/profit/profit-daily-table";
-import { JtUploader } from "@/components/profit/jt-uploader";
 
 const DATE_PRESETS: { label: string; value: ProfitDateFilter }[] = [
   { label: "Today", value: "today" },
@@ -45,7 +44,6 @@ export default function ProfitPage() {
   const [storeFilter, setStoreFilter] = useState("ALL");
   const [sortKey, setSortKey] = useState("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [showJtUploader, setShowJtUploader] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -267,17 +265,6 @@ export default function ProfitPage() {
         />
       )}
 
-      {/* J&T Upload Section */}
-      <div className="mt-6">
-        <button
-          onClick={() => setShowJtUploader((v) => !v)}
-          className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm px-3 py-2 rounded-lg transition-colors cursor-pointer mb-4"
-        >
-          <Upload size={14} />
-          {showJtUploader ? "Hide J&T Upload" : "Upload J&T Data"}
-        </button>
-        {showJtUploader && <JtUploader />}
-      </div>
     </div>
   );
 }
