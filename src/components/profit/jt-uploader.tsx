@@ -111,9 +111,21 @@ export function JtUploader() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rows: preview.rows }),
       });
+
+      // Handle non-JSON responses (Vercel timeout returns HTML)
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        throw new Error(`Server error (${res.status}). The upload may have timed out — try uploading fewer rows.`);
+      }
+
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to upload");
-      setResult(json as JtUploadResult);
+      setResult({
+        inserted: json.inserted || 0,
+        updated: json.updated || 0,
+        total: json.total || 0,
+        errors: json.errors || [],
+      });
       setPreview(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to upload");
@@ -147,7 +159,7 @@ export function JtUploader() {
         <div className="p-3 bg-green-900/30 border border-green-700/50 rounded-lg text-green-300 text-sm flex items-center gap-2">
           <CheckCircle size={16} />
           Upload complete: {result.inserted} inserted, {result.updated} updated ({result.total} total)
-          {result.errors.length > 0 && (
+          {result.errors && result.errors.length > 0 && (
             <span className="text-yellow-300 ml-2">
               ({result.errors.length} errors)
             </span>

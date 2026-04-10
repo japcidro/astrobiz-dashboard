@@ -24,16 +24,28 @@ interface JtUploadRow {
   signing_time: string;
 }
 
-function parseJtDate(value: string | Date | null | undefined): Date | null {
+function parseJtDate(value: unknown): Date | null {
   if (!value) return null;
   if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
 
+  // Handle Excel serial date numbers (e.g., 46113.5 = some date)
+  if (typeof value === "number") {
+    // Excel epoch is 1899-12-30
+    const excelEpoch = new Date(1899, 11, 30);
+    const d = new Date(excelEpoch.getTime() + value * 86400000);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
   const str = String(value).trim();
-  if (!str) return null;
+  if (!str || str === "NaN" || str === "--") return null;
 
   // Handle "2026-04-01 14:30:00" format
   const d = new Date(str.replace(" ", "T") + (str.includes("+") || str.includes("Z") ? "" : "+08:00"));
-  return isNaN(d.getTime()) ? null : d;
+  if (!isNaN(d.getTime())) return d;
+
+  // Fallback: try native Date parse
+  const d2 = new Date(str);
+  return isNaN(d2.getTime()) ? null : d2;
 }
 
 function computeDaysSinceSubmit(submissionTime: string | Date | null | undefined): number | null {
@@ -77,6 +89,12 @@ export async function POST(request: Request) {
 
   for (const row of rows) {
     try {
+      // Skip rows without waybill
+      const waybill = String(row.waybill || "").trim();
+      if (!waybill) {
+        errors.push("Skipped row with empty waybill");
+        continue;
+      }
       const storeName = matchSenderToStore(row.sender_name || "");
       const daysSinceSubmit = computeDaysSinceSubmit(row.submission_time);
       const province = (row.province || "").trim();
@@ -102,7 +120,7 @@ export async function POST(request: Request) {
       const signingParsed = parseJtDate(row.signing_time);
 
       dbRows.push({
-        waybill: row.waybill,
+        waybill,
         order_status: row.order_status || "",
         classification,
         submission_date: submissionDate,
@@ -164,7 +182,7 @@ export async function POST(request: Request) {
     updated: 0,
     total: dbRows.length,
     summary,
-    errors: errors.length > 0 ? errors : undefined,
+    errors,
   });
 }
 
