@@ -1,151 +1,115 @@
 # Astrobiz Dashboard — Changelog
 
-## TODO: Pre-Deployment Fixes (Before Team Rollout)
+## 2026-04-10: Major Feature Release
 
-### Critical — Must Fix Before Deploy
+### Net Profit / Daily P&L (CEO Only)
+- **Net Profit page** (`/admin/profit`) — full P&L dashboard
+  - Formula: `Net Profit = Revenue - COGS - Ad Spend - Shipping - Returns`
+  - 6 summary cards: Revenue, COGS, Ad Spend, Shipping, Returns, Net Profit
+  - Daily P&L table with totals row, margin %, green/red profit coloring
+  - Date filters: Today, Yesterday, Last 7/30/90 Days, This Month, Custom
+  - Store filter: ALL or per-store
+  - 25% worst-case RTS rule until store reaches 200+ delivered parcels
+  - Missing COGS warning with link to COGS page
+- **COGS Management** (`/admin/cogs`) — cost of goods per SKU
+  - CSV/XLSX file upload for bulk import
+  - "Scan from Shopify" to auto-populate SKUs
+  - Inline editing per row
+- **J&T Dashboard** (`/admin/jt-dashboard`) — delivery tracking
+  - Upload J&T Express .xlsx reports
+  - 7 summary cards: Total, Delivered, In Transit, For Return, Returned, Aged, COD
+  - Store breakdown table with delivery rate %
+  - RTS table: all returned/aging parcels sorted by urgency
+  - Province tier cutoffs: Luzon 5d, VisMin 8d
+  - Sender name normalization (ILOVEPATCHES → I LOVE PATCHES)
+- **Database**: `cogs_items` + `jt_deliveries` tables with RLS
+- **Sidebar**: Collapsible P&L group (Net Profit, COGS, J&T Dashboard)
 
-1. **TypeScript Build Error**
-   - File: `src/app/(dashboard)/marketing/ads/page.tsx` line 261
-   - Problem: `AdRow` can't be cast directly to `Record<string, unknown>`
-   - Fix: Change to `row as unknown as Record<string, unknown>`
-   - Impact: `npm run build` fails — cannot deploy to Vercel
+### Inventory Dashboard
+- **Inventory page** (`/fulfillment/inventory`) — stock levels across all Shopify stores
+  - 5 summary cards: Total Products, Variants, Out of Stock, Low Stock, Total Units
+  - Sortable table by stock level (lowest first)
+  - Color-coded: green (10+), yellow (1-9), red (0)
+  - Click product → slide-out detail panel with all variants, SKU, barcode
+  - Filters: store, stock status, product type, search
+  - Price column admin-only
+  - Uses existing `read_products` Shopify scope (no reconnection needed)
 
-2. **Missing `app_settings` Table in Schema**
-   - Problem: Code references `app_settings` everywhere (FB token, selected accounts) but table is NOT in `supabase/schema.sql`
-   - Impact: New environments will break — table only exists because it was created manually
-   - Fix: Add CREATE TABLE + RLS policies to migration file
+### Role-Based Dashboard
+- **Admin/CEO**: Today's revenue/orders/ad spend/unfulfilled/team hours + This Month totals + Action items
+- **VA**: Hours + today's order stats + unfulfilled/aging alerts
+- **Marketing**: Hours + ad spend/ROAS/CPA/purchases
+- **Fulfillment**: Hours + out-of-stock/low stock/total units
+- Each role fetches only the APIs it needs
+- Dashboard client cache for instant back-navigation
 
-3. **Remove Debug Logging**
-   - Files: `src/app/api/facebook/create/route.ts`, `src/app/api/facebook/create/upload/route.ts`
-   - Problem: Writing logs to `/tmp/create-debug.log` and `/tmp/upload-debug.log`
-   - Fix: Remove `fs.writeFileSync` debug lines (won't work on Vercel anyway)
+### Shopify OAuth Integration
+- Replaced manual token input with OAuth flow (Client ID + Secret → Connect → approve)
+- Multi-store support via OAuth per store
+- Store management in Settings (add/edit/remove/toggle active)
 
-### High — Security & Auth
+### Orders & Parcels
+- **Orders page** (`/va/orders`) — all orders across 4+ Shopify stores
+  - Date filters, store filter, status filter, search
+  - 6 summary cards with aging warnings
+  - Age tracking: 3+ days yellow, 5+ days red
+  - COD detection, payment/fulfillment badges
+  - Click order → slide-out detail panel with customer info, line items, tracking, totals
+  - Revenue/price hidden from non-admin users
 
-4. **Add Root Middleware for Auth Protection**
-   - Problem: Auth check is only at page level, not middleware level — API routes are unprotected
-   - Fix: Create `src/middleware.ts` that registers the Supabase auth middleware
-   - Impact: Without this, someone could call `/api/facebook/*` directly without logging in
+### Bulk Ad Creation
+- **Bulk Create** (`/marketing/bulk-create`) — create N ads at once
+  - Per-row adset name (1 adset = 1 ad for split testing)
+  - Bulk file upload (auto-detects image/video from MIME type)
+  - Default copy fill for all rows + per-row override
+  - Sequential submission with progress overlay + retry failed
+  - Visual indicators for missing required fields (red borders, checklist)
+  - Ads created as ACTIVE (not PAUSED) — auto-starts on scheduled date
 
-5. **Facebook Token Storage**
-   - Problem: System User token stored in plain text in `app_settings` table
-   - Consider: Using Supabase Vault or encrypted column
+### Ad Creation Improvements
+- Adset start date defaults to tomorrow
+- Pixel auto-matches page name (fuzzy word match)
+- Upload directly to Facebook from browser (bypasses Vercel 4.5MB limit)
+- Detailed Facebook API error messages with endpoint/code/subcode
 
-### Medium — Cleanup
+### Performance Optimization
+- Server cache TTL increased to 5 minutes (was 3)
+- Removed `_t` cache-buster from all auto-fetches (was defeating cache)
+- Manual Refresh button sends `refresh=1` to bypass cache
+- Dashboard module-level client cache for instant back-navigation
 
-6. **Remove Unused/Legacy Files**
-   - `src/components/marketing/fb-token-form.tsx` — duplicate of token-manager
-   - `src/components/marketing/ads-table.tsx` — superseded by inline table in ads/page.tsx
-   - `src/lib/proxy.ts` — empty/unused
-   - `src/app/api/facebook/route.ts` — old multi-action route, replaced by individual endpoints
+### Deployment & Legal
+- Deployed to Vercel at `astrobiz-dashboard.vercel.app`
+- Privacy Policy, Terms of Service, Data Deletion pages for Facebook App compliance
+- Supabase auth proxy (Next.js 16 `proxy.ts` convention)
+- Pre-deployment cleanup: removed debug logging, unused files
 
-7. **Hide Unbuilt Sidebar Links**
-   - Problem: Sidebar shows links to Orders & Parcels, VA Dashboard — features not yet built
-   - Fix: Hide or grey out with "Coming Soon" badge
-
-8. **Ad Creation Wizard (~80% done)**
-   - Partial endpoints: `/api/facebook/create/pages`, `/pixels`, `/targeting`
-   - Step mode select component incomplete
-   - Needs full integration test before enabling for team
-
-### Low — Nice to Have
-
-9. **Add `app_settings` RLS documentation** — document what keys exist and who can access
-10. **Rate limiting** on Facebook API calls — prevent hitting API limits with many accounts
-11. **Error boundaries** — better error handling in ad creation flow
-
----
-
-## 2026-04-08: Date Filter Fix + Ad Account Selection
-
-### Bug Fix: Date Filter (Today vs Yesterday showing same data)
-
-**Problem:**
-Pag nag-switch ka ng date filter from "Today" to "Yesterday" (or vice versa), pareho lang yung lumalabas na data. Hindi nag-uupdate.
-
-**Root Cause:**
-- Next.js route handlers nag-cache ng API responses by default
-- Browser din nag-cache ng GET requests na same URL
-
-**Fix:**
-- Added `export const dynamic = "force-dynamic"` sa dalawang FB API routes para hindi mag-cache si Next.js:
-  - `src/app/api/facebook/all-ads/route.ts`
-  - `src/app/api/facebook/accounts/route.ts`
-- Added timestamp cache-buster (`_t` param) sa client-side fetch para hindi mag-cache ang browser
-
-**Files Changed:**
-- `src/app/api/facebook/all-ads/route.ts` — added `force-dynamic`
-- `src/app/api/facebook/accounts/route.ts` — added `force-dynamic`
-- `src/app/(dashboard)/marketing/ads/page.tsx` — added `_t` cache-buster sa fetch URL
-
----
-
-### New Feature: Ad Account Selection in Settings
-
-**Problem:**
-13 ad accounts ang lumalabas sa Ads dashboard pero 2 lang naman ang ginagamit (MONEYCATCHER at CHINKEE). Ang daming clutter.
-
-**Solution:**
-Nag-add ng checkboxes sa Settings page para ma-select kung aling ad accounts lang ang gustong makita sa Ads dashboard.
-
-**How to Use:**
-1. Go to **Settings** (`/admin/settings`)
-2. Sa "Ad Accounts" section, may checkboxes na per account
-3. Check yung mga accounts na gusto mo (e.g. MONEYCATCHER, CHINKEE)
-4. Click **"Save Selection"**
-5. Go back to **Ad Performance** — yung selected accounts lang ang lalabas
-6. Kung walang ni-select, lahat ng accounts lalabas (default behavior)
-
-**How It Works (Technical):**
-- Selected account IDs saved sa `app_settings` table with key `fb_selected_accounts` (JSON array)
-- `all-ads` API route reads this setting and filters accounts before fetching insights
-- Two levels of filtering:
-  - **Settings-level** — admin picks which accounts to include globally
-  - **Dashboard-level** — user can still filter by individual account via dropdown
-
-**Files Changed:**
-- `src/lib/facebook/actions.ts` — new `saveSelectedAccounts()` server action
-- `src/app/(dashboard)/admin/settings/page.tsx` — fetches saved selection, passes to TokenManager
-- `src/components/marketing/token-manager.tsx` — checkbox UI per account + Save Selection button
-- `src/app/api/facebook/all-ads/route.ts` — reads `fb_selected_accounts` and filters before querying FB API
+### Facebook Ads Module (Shareable)
+- Self-contained module at `src/lib/fb-ads-module/`
+- Zero dependencies — just needs FB token + account ID
+- `createAd()` — single ad creation
+- `bulkCreateAds()` — N ads with progress callback
+- Upload helpers for image/video
+- Copy entire folder to any Next.js project
 
 ---
 
-## Project Overview
+## Database Tables
 
-### Tech Stack
-- **Frontend:** Next.js 16 + React + TypeScript
+| Table | Purpose |
+|-------|---------|
+| `employees` | User profiles with roles |
+| `time_entries` | Work session tracking |
+| `time_pauses` | Pause/resume within sessions |
+| `app_settings` | Key-value config (FB token, selected accounts) |
+| `ad_drafts` | Saved ad creation drafts |
+| `shopify_stores` | Store credentials (OAuth tokens) |
+| `cogs_items` | Cost of goods per SKU per store |
+| `jt_deliveries` | J&T Express delivery tracking |
+
+## Tech Stack
+- **Frontend:** Next.js 16 + React + TypeScript + Tailwind CSS v4
 - **Backend:** Supabase (PostgreSQL + Auth + RLS)
 - **Hosting:** Vercel
-- **APIs:** Facebook Marketing API v21.0, Google OAuth
-
-### Completed Phases
-| Phase | Feature | Status |
-|-------|---------|--------|
-| 1 | Time Tracker (running timer + manual entry, admin attendance view) | Done |
-| 4 | Facebook Marketing Dashboard (multi-account, flat table, filters, sorting) | Done |
-
-### Pending Phases
-| Phase | Feature | Status |
-|-------|---------|--------|
-| 2 | Shopify API + Fulfillment Dashboard | Not started |
-| 3 | VA Dashboard + J&T Express Tracking | Not started |
-
-### Key Files
-| File | Purpose |
-|------|---------|
-| `src/app/api/facebook/all-ads/route.ts` | Main API — fetches all ads data across accounts |
-| `src/app/(dashboard)/marketing/ads/page.tsx` | Ads dashboard UI — flat table with filters & sorting |
-| `src/app/(dashboard)/admin/settings/page.tsx` | Settings — token management + account selection |
-| `src/components/marketing/token-manager.tsx` | Token form + account checkboxes UI |
-| `src/lib/facebook/actions.ts` | Server actions — save token, save selected accounts |
-| `src/lib/facebook/api.ts` | FB Marketing API helper functions |
-| `src/app/api/facebook/accounts/route.ts` | API — test/fetch ad accounts for a token |
-
-### Database (Supabase)
-**`app_settings` table keys:**
-| Key | Value | Purpose |
-|-----|-------|---------|
-| `fb_access_token` | System User token | FB API authentication |
-| `fb_ad_account_id` | `"all"` | Legacy — kept for compat |
-| `fb_selected_accounts` | JSON array of account IDs | Which accounts show in dashboard |
+- **APIs:** Facebook Marketing API v21.0, Shopify REST API 2024-01
+- **Dependencies:** xlsx (SheetJS) for J&T/COGS file parsing
