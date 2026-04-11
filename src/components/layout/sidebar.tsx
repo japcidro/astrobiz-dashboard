@@ -34,6 +34,7 @@ interface NavItem {
   icon: React.ReactNode;
   roles: UserRole[];
   comingSoon?: boolean;
+  section?: string; // visual section header above this item
 }
 
 interface NavGroup {
@@ -129,6 +130,7 @@ const navEntries: NavEntry[] = [
         href: "/marketing/ads",
         icon: <TrendingUp size={18} />,
         roles: ["admin", "marketing"],
+        section: "Ad Management",
       },
       {
         label: "Create Ad",
@@ -153,6 +155,7 @@ const navEntries: NavEntry[] = [
         href: "/marketing/ai-generator",
         icon: <Sparkles size={18} />,
         roles: ["admin", "marketing"],
+        section: "Creative Generator",
       },
       {
         label: "AI Knowledge",
@@ -243,8 +246,13 @@ export function Sidebar({ employeeName, employeeRole }: SidebarProps) {
                         const childActive =
                           pathname === child.href || pathname.startsWith(child.href + "/");
                         return (
+                          <div key={child.href}>
+                            {child.section && (
+                              <p className="text-[10px] uppercase tracking-wider text-gray-600 font-medium px-3 pt-3 pb-1">
+                                {child.section}
+                              </p>
+                            )}
                           <Link
-                            key={child.href}
                             href={child.href}
                             onClick={() => setMobileOpen(false)}
                             className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
@@ -256,6 +264,7 @@ export function Sidebar({ employeeName, employeeRole }: SidebarProps) {
                             {child.icon}
                             {child.label}
                           </Link>
+                          </div>
                         );
                       })}
                   </div>
