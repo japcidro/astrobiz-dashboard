@@ -107,7 +107,7 @@ const navEntries: NavEntry[] = [
         label: "Orders & Parcels",
         href: "/va/orders",
         icon: <Truck size={18} />,
-        roles: ["admin", "va"],
+        roles: ["admin", "va", "fulfillment"],
       },
       {
         label: "Inventory",

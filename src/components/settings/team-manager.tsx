@@ -30,7 +30,7 @@ interface Props {
 const ROLES = [
   { value: "admin", label: "Admin", color: "bg-purple-600", desc: "Full access to everything" },
   { value: "va", label: "VA", color: "bg-blue-600", desc: "Orders & Parcels + Time Tracker" },
-  { value: "fulfillment", label: "Fulfillment", color: "bg-green-600", desc: "Inventory + Time Tracker" },
+  { value: "fulfillment", label: "Fulfillment", color: "bg-green-600", desc: "Orders, Inventory + Time Tracker" },
   { value: "marketing", label: "Marketing", color: "bg-orange-600", desc: "Ads + Time Tracker" },
 ];
 

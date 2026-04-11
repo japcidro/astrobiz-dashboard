@@ -214,7 +214,7 @@ export async function GET(request: Request) {
   if (!employee) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!["admin", "va"].includes(employee.role)) {
+  if (!["admin", "va", "fulfillment"].includes(employee.role)) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
