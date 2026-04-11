@@ -398,7 +398,7 @@ export function KnowledgeManager() {
                       {existing ? (
                         <>
                           <button onClick={() => startEdit(dt.key)} className="text-xs text-gray-400 hover:text-white flex items-center gap-1 cursor-pointer"><Pencil size={12} /> Edit</button>
-                          <button onClick={() => handleDelete(existing.id)} className="text-xs text-gray-400 hover:text-red-400 flex items-center gap-1 cursor-pointer"><Trash2 size={12} /> Delete</button>
+                          <button onClick={() => handleDelete(existing)} className="text-xs text-gray-400 hover:text-red-400 flex items-center gap-1 cursor-pointer"><Trash2 size={12} /> Delete</button>
                         </>
                       ) : (
                         <button onClick={() => startEdit(dt.key)} className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-1 rounded flex items-center gap-1 cursor-pointer"><Plus size={12} /> Add</button>
