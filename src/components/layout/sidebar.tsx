@@ -55,16 +55,23 @@ const navEntries: NavEntry[] = [
     roles: ["admin", "va", "fulfillment", "marketing"],
   },
   {
-    label: "Time Tracker",
-    href: "/time-tracker",
+    label: "Time & Attendance",
     icon: <Clock size={20} />,
     roles: ["admin", "va", "fulfillment", "marketing"],
-  },
-  {
-    label: "Attendance",
-    href: "/admin/attendance",
-    icon: <Users size={20} />,
-    roles: ["admin"],
+    children: [
+      {
+        label: "Time Tracker",
+        href: "/time-tracker",
+        icon: <Clock size={18} />,
+        roles: ["admin", "va", "fulfillment", "marketing"],
+      },
+      {
+        label: "Attendance",
+        href: "/admin/attendance",
+        icon: <Users size={18} />,
+        roles: ["admin"],
+      },
+    ],
   },
   {
     label: "P&L",
@@ -92,40 +99,54 @@ const navEntries: NavEntry[] = [
     ],
   },
   {
-    label: "Orders & Parcels",
-    href: "/va/orders",
-    icon: <Truck size={20} />,
-    roles: ["admin", "va"],
-  },
-  {
-    label: "Inventory",
-    href: "/fulfillment/inventory",
+    label: "Orders & Inventory",
     icon: <Package size={20} />,
-    roles: ["admin", "fulfillment"],
+    roles: ["admin", "va", "fulfillment"],
+    children: [
+      {
+        label: "Orders & Parcels",
+        href: "/va/orders",
+        icon: <Truck size={18} />,
+        roles: ["admin", "va"],
+      },
+      {
+        label: "Inventory",
+        href: "/fulfillment/inventory",
+        icon: <Package size={18} />,
+        roles: ["admin", "fulfillment"],
+      },
+    ],
   },
   {
-    label: "Ad Performance",
-    href: "/marketing/ads",
+    label: "Marketing",
     icon: <TrendingUp size={20} />,
     roles: ["admin", "marketing"],
-  },
-  {
-    label: "Create Ad",
-    href: "/marketing/create",
-    icon: <PlusCircle size={20} />,
-    roles: ["admin", "marketing"],
-  },
-  {
-    label: "Bulk Create",
-    href: "/marketing/bulk-create",
-    icon: <Layers size={20} />,
-    roles: ["admin", "marketing"],
-  },
-  {
-    label: "Ad Drafts",
-    href: "/marketing/drafts",
-    icon: <FileText size={20} />,
-    roles: ["admin", "marketing"],
+    children: [
+      {
+        label: "Ad Performance",
+        href: "/marketing/ads",
+        icon: <TrendingUp size={18} />,
+        roles: ["admin", "marketing"],
+      },
+      {
+        label: "Create Ad",
+        href: "/marketing/create",
+        icon: <PlusCircle size={18} />,
+        roles: ["admin", "marketing"],
+      },
+      {
+        label: "Bulk Create",
+        href: "/marketing/bulk-create",
+        icon: <Layers size={18} />,
+        roles: ["admin", "marketing"],
+      },
+      {
+        label: "Ad Drafts",
+        href: "/marketing/drafts",
+        icon: <FileText size={18} />,
+        roles: ["admin", "marketing"],
+      },
+    ],
   },
   {
     label: "Settings",
