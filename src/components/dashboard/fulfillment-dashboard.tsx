@@ -37,11 +37,12 @@ export function FulfillmentDashboard({
   const [summary, setSummary] = useState<InventorySummary | null>(null);
 
   useEffect(() => {
-    fetch("/api/shopify/inventory?store=ALL")
-      .then((r) => r.json())
-      .then((data) => setSummary(data?.summary ?? null))
-      .catch(() => setSummary(null))
-      .finally(() => setLoading(false));
+    import("@/lib/client-cache").then(({ cachedFetch }) =>
+      cachedFetch("/api/shopify/inventory?store=ALL")
+        .then(({ data }) => setSummary((data as Record<string, unknown>)?.summary as typeof summary ?? null))
+        .catch(() => setSummary(null))
+        .finally(() => setLoading(false))
+    );
   }, []);
 
   return (

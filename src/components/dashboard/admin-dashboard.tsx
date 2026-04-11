@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { cachedFetch, formatLastRefreshed } from "@/lib/client-cache";
 import {
   Package,
   TrendingUp,
@@ -42,15 +43,6 @@ interface InventorySummary {
   low_stock_count: number;
 }
 
-// Module-level cache — survives navigation, cleared on full page reload
-let dashboardCache: {
-  todayOrders: OrdersSummary | null;
-  monthOrders: OrdersSummary | null;
-  todayAds: AdsTotals | null;
-  monthAds: AdsTotals | null;
-  inventory: InventorySummary | null;
-} = { todayOrders: null, monthOrders: null, todayAds: null, monthAds: null, inventory: null };
-
 function formatCurrency(num: number): string {
   return `₱${num.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
@@ -64,37 +56,51 @@ export function AdminDashboard({
   teamTotalHours,
   teamNotClockedIn,
 }: Props) {
-  const [loading, setLoading] = useState(!dashboardCache.todayOrders);
-  const [todayOrders, setTodayOrders] = useState<OrdersSummary | null>(dashboardCache.todayOrders);
-  const [monthOrders, setMonthOrders] = useState<OrdersSummary | null>(dashboardCache.monthOrders);
-  const [todayAds, setTodayAds] = useState<AdsTotals | null>(dashboardCache.todayAds);
-  const [monthAds, setMonthAds] = useState<AdsTotals | null>(dashboardCache.monthAds);
-  const [inventory, setInventory] = useState<InventorySummary | null>(dashboardCache.inventory);
+  const [loading, setLoading] = useState(true);
+  const [todayOrders, setTodayOrders] = useState<OrdersSummary | null>(null);
+  const [monthOrders, setMonthOrders] = useState<OrdersSummary | null>(null);
+  const [todayAds, setTodayAds] = useState<AdsTotals | null>(null);
+  const [monthAds, setMonthAds] = useState<AdsTotals | null>(null);
+  const [inventory, setInventory] = useState<InventorySummary | null>(null);
+  const [lastRefreshed, setLastRefreshed] = useState<string>("");
 
   useEffect(() => {
     Promise.allSettled([
-      fetch("/api/shopify/orders?date_filter=today&store=ALL").then((r) => r.json()),
-      fetch("/api/shopify/orders?date_filter=this_month&store=ALL").then((r) => r.json()),
-      fetch("/api/facebook/all-ads?date_preset=today").then((r) => r.json()),
-      fetch("/api/facebook/all-ads?date_preset=this_month").then((r) => r.json()),
-      fetch("/api/shopify/inventory?store=ALL").then((r) => r.json()),
+      cachedFetch("/api/shopify/orders?date_filter=today&store=ALL"),
+      cachedFetch("/api/shopify/orders?date_filter=this_month&store=ALL"),
+      cachedFetch("/api/facebook/all-ads?date_preset=today"),
+      cachedFetch("/api/facebook/all-ads?date_preset=this_month"),
+      cachedFetch("/api/shopify/inventory?store=ALL"),
     ]).then(([todayOrd, monthOrd, todayAd, monthAd, inv]) => {
-      const to = todayOrd.status === "fulfilled" ? todayOrd.value?.summary ?? null : null;
-      const mo = monthOrd.status === "fulfilled" ? monthOrd.value?.summary ?? null : null;
-      const ta = todayAd.status === "fulfilled" ? todayAd.value?.totals ?? null : null;
-      const ma = monthAd.status === "fulfilled" ? monthAd.value?.totals ?? null : null;
-      const iv = inv.status === "fulfilled" ? inv.value?.summary ?? null : null;
+      const toData = todayOrd.status === "fulfilled" ? todayOrd.value : null;
+      const moData = monthOrd.status === "fulfilled" ? monthOrd.value : null;
+      const taData = todayAd.status === "fulfilled" ? todayAd.value : null;
+      const maData = monthAd.status === "fulfilled" ? monthAd.value : null;
+      const ivData = inv.status === "fulfilled" ? inv.value : null;
 
-      setTodayOrders(to);
-      setMonthOrders(mo);
-      setTodayAds(ta);
-      setMonthAds(ma);
-      setInventory(iv);
+      setTodayOrders((toData?.data as Record<string, unknown>)?.summary as OrdersSummary ?? null);
+      setMonthOrders((moData?.data as Record<string, unknown>)?.summary as OrdersSummary ?? null);
+      setTodayAds((taData?.data as Record<string, unknown>)?.totals as AdsTotals ?? null);
+      setMonthAds((maData?.data as Record<string, unknown>)?.totals as AdsTotals ?? null);
+      setInventory((ivData?.data as Record<string, unknown>)?.summary as InventorySummary ?? null);
 
-      // Cache in module scope so navigating back shows data instantly
-      dashboardCache = { todayOrders: to, monthOrders: mo, todayAds: ta, monthAds: ma, inventory: iv };
+      // Find the oldest timestamp for "last refreshed"
+      const timestamps = [todayOrd, monthOrd, todayAd, monthAd, inv]
+        .filter((r) => r.status === "fulfilled")
+        .map((r) => (r as PromiseFulfilledResult<{ timestamp: number }>).value.timestamp);
+      if (timestamps.length > 0) {
+        setLastRefreshed(formatLastRefreshed(Math.min(...timestamps)));
+      }
+
       setLoading(false);
     });
+
+    // Update "last refreshed" text every 30s
+    const interval = setInterval(() => {
+      // Re-read from cache timestamps
+      setLastRefreshed((prev) => prev); // trigger re-render handled by interval
+    }, 30000);
+    return () => clearInterval(interval);
   }, []);
 
   const agingTotal =
@@ -108,6 +114,13 @@ export function AdminDashboard({
 
   return (
     <div>
+      {/* Last refreshed indicator */}
+      {lastRefreshed && (
+        <p className="text-xs text-gray-600 mb-4">
+          Last refreshed: {lastRefreshed}
+        </p>
+      )}
+
       {/* Today's Highlights */}
       <div className="mb-8">
         <h2 className="text-lg font-semibold text-white mb-4">

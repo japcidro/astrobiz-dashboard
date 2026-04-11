@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { cachedFetch, formatLastRefreshed } from "@/lib/client-cache";
 import {
   RefreshCw,
   Settings,
@@ -192,22 +193,19 @@ export default function AdsPage() {
 
   const isAdmin = role === "admin";
 
+  const [lastRefreshed, setLastRefreshed] = useState<string>("");
+
   const fetchData = useCallback(async (forceRefresh = false) => {
     setLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({
-        date_preset: datePreset,
-        account: filterAccount,
-        ...(forceRefresh ? { refresh: "1" } : {}),
-      });
-      const res = await fetch(`/api/facebook/all-ads?${params}`);
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error);
-      setAllRows(json.data);
-      if (json.accounts) setAccounts(json.accounts);
-      if (json.role) setRole(json.role);
-      if (json.budgets) setBudgets(json.budgets);
+      const url = `/api/facebook/all-ads?date_preset=${datePreset}&account=${filterAccount}`;
+      const { data: json, timestamp } = await cachedFetch<Record<string, unknown>>(url, { forceRefresh });
+      setAllRows(json.data as typeof allRows);
+      if (json.accounts) setAccounts(json.accounts as typeof accounts);
+      if (json.role) setRole(json.role as string);
+      if (json.budgets) setBudgets(json.budgets as typeof budgets);
+      setLastRefreshed(formatLastRefreshed(timestamp));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
     } finally {
@@ -567,6 +565,7 @@ export default function AdsPage() {
           <p className="text-gray-400 mt-1">
             Facebook Ads — {accounts.length} ad account
             {accounts.length !== 1 ? "s" : ""}
+            {lastRefreshed && <span className="text-gray-600 ml-2">· {lastRefreshed}</span>}
           </p>
         </div>
         <div className="flex items-center gap-2">

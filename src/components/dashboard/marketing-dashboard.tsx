@@ -42,17 +42,12 @@ export function MarketingDashboard({
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    fetch("/api/facebook/all-ads?date_preset=today")
-      .then((r) => {
-        if (!r.ok) throw new Error("Failed");
-        return r.json();
-      })
-      .then((data) => setTotals(data?.totals ?? null))
-      .catch(() => {
-        setTotals(null);
-        setError(true);
-      })
-      .finally(() => setLoading(false));
+    import("@/lib/client-cache").then(({ cachedFetch }) =>
+      cachedFetch("/api/facebook/all-ads?date_preset=today")
+        .then(({ data }) => setTotals((data as Record<string, unknown>)?.totals as typeof totals ?? null))
+        .catch(() => { setTotals(null); setError(true); })
+        .finally(() => setLoading(false))
+    );
   }, []);
 
   return (

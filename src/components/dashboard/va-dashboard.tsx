@@ -36,11 +36,12 @@ export function VADashboard({
   const [summary, setSummary] = useState<OrdersSummary | null>(null);
 
   useEffect(() => {
-    fetch("/api/shopify/orders?date_filter=today&store=ALL")
-      .then((r) => r.json())
-      .then((data) => setSummary(data?.summary ?? null))
-      .catch(() => setSummary(null))
-      .finally(() => setLoading(false));
+    import("@/lib/client-cache").then(({ cachedFetch }) =>
+      cachedFetch("/api/shopify/orders?date_filter=today&store=ALL")
+        .then(({ data }) => setSummary((data as Record<string, unknown>)?.summary as typeof summary ?? null))
+        .catch(() => setSummary(null))
+        .finally(() => setLoading(false))
+    );
   }, []);
 
   const agingTotal =
