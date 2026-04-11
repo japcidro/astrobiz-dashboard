@@ -101,34 +101,54 @@ export function JtUploader() {
     if (file) processFile(file);
   };
 
+  const [uploadProgress, setUploadProgress] = useState("");
+
   const handleUpload = async () => {
     if (!preview) return;
     setUploading(true);
     setError(null);
     try {
-      const res = await fetch("/api/profit/jt-upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rows: preview.rows }),
-      });
+      // Upload in batches of 100 from the client to avoid Vercel timeout
+      const BATCH_SIZE = 100;
+      const allRows = preview.rows;
+      let totalInserted = 0;
+      const allErrors: string[] = [];
 
-      // Handle non-JSON responses (Vercel timeout returns HTML)
-      const contentType = res.headers.get("content-type") || "";
-      if (!contentType.includes("application/json")) {
-        throw new Error(`Server error (${res.status}). The upload may have timed out — try uploading fewer rows.`);
+      for (let i = 0; i < allRows.length; i += BATCH_SIZE) {
+        const batch = allRows.slice(i, i + BATCH_SIZE);
+        const batchNum = Math.floor(i / BATCH_SIZE) + 1;
+        const totalBatches = Math.ceil(allRows.length / BATCH_SIZE);
+        setUploadProgress(`Uploading batch ${batchNum}/${totalBatches} (${Math.min(i + BATCH_SIZE, allRows.length)}/${allRows.length} rows)...`);
+
+        const res = await fetch("/api/profit/jt-upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rows: batch }),
+        });
+
+        const contentType = res.headers.get("content-type") || "";
+        if (!contentType.includes("application/json")) {
+          throw new Error(`Batch ${batchNum} failed (${res.status}). Try again.`);
+        }
+
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || `Batch ${batchNum} failed`);
+
+        totalInserted += json.inserted || 0;
+        if (json.errors?.length) allErrors.push(...json.errors);
       }
 
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed to upload");
       setResult({
-        inserted: json.inserted || 0,
-        updated: json.updated || 0,
-        total: json.total || 0,
-        errors: json.errors || [],
+        inserted: totalInserted,
+        updated: 0,
+        total: allRows.length,
+        errors: allErrors,
       });
       setPreview(null);
+      setUploadProgress("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to upload");
+      setUploadProgress("");
     } finally {
       setUploading(false);
     }
@@ -235,7 +255,7 @@ export function JtUploader() {
               ) : (
                 <Upload size={14} />
               )}
-              {uploading ? "Uploading..." : `Upload ${preview.rowCount} rows`}
+              {uploading ? (uploadProgress || "Uploading...") : `Upload ${preview.rowCount} rows`}
             </button>
             <button
               onClick={() => {
