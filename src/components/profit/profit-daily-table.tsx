@@ -43,9 +43,16 @@ function renderCell(key: string, row: DailyPnlRow) {
     case "revenue":
     case "cogs":
     case "ad_spend":
-    case "shipping":
     case "returns_value":
       return formatCurrency(row[key]);
+    case "shipping":
+      return row.shipping_projected ? (
+        <span className="text-yellow-400" title="Projected: 12% of revenue (no J&T data)">
+          {formatCurrency(row.shipping)}*
+        </span>
+      ) : (
+        formatCurrency(row.shipping)
+      );
     case "net_profit":
       return (
         <span className={profitColor(row.net_profit)}>

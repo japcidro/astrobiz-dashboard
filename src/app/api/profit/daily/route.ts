@@ -629,9 +629,26 @@ export async function GET(request: Request) {
     if (row) row.returns_value += value;
   }
 
+  // --- 6b. Shipping fallback: if no J&T data for a day, assume 12% of revenue ---
+  const SF_FALLBACK_RATE = 0.12;
+  let hasProjectedShipping = false;
+
+  for (const [date, row] of dailyMap) {
+    if (row.shipping === 0 && row.revenue > 0) {
+      row.shipping = row.revenue * SF_FALLBACK_RATE;
+      (row as Record<string, unknown>)._shipping_projected = true;
+      hasProjectedShipping = true;
+    }
+  }
+
+  if (hasProjectedShipping) {
+    warnings.push("Shipping: Using 12% of revenue estimate for days without J&T data");
+  }
+
   // Build final daily array
   const daily: DailyPnlRow[] = [];
   for (const [date, row] of dailyMap) {
+    const shippingProjected = !!(row as Record<string, unknown>)._shipping_projected;
     const netProfit =
       row.revenue - row.cogs - row.ad_spend - row.shipping - row.returns_value;
     const marginPct =
@@ -647,6 +664,7 @@ export async function GET(request: Request) {
       returns_value: Math.round(row.returns_value * 100) / 100,
       net_profit: Math.round(netProfit * 100) / 100,
       margin_pct: marginPct,
+      shipping_projected: shippingProjected,
     });
   }
 
