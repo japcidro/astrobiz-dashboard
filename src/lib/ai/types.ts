@@ -6,7 +6,6 @@ export const DOC_TYPES = [
   { key: "avatar_training", label: "Origins Edition / Evolved Avatar Training" },
   { key: "market_research", label: "Market Research Document" },
   { key: "winning_ad_template", label: "Winning Ad Template" },
-  { key: "product_overview", label: "Product Overview" },
 ] as const;
 
 export type DocType = (typeof DOC_TYPES)[number]["key"];
