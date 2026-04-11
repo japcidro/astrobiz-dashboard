@@ -13,8 +13,9 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { store_name, messages } = body as {
+  const { store_name, tool_type, messages } = body as {
     store_name: string;
+    tool_type?: string; // "angles" | "scripts" | "formats"
     messages: Array<{ role: "user" | "assistant"; content: string }>;
   };
 
@@ -24,6 +25,14 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+
+  // Determine which system instruction to use
+  const TOOL_TO_SYSTEM: Record<string, string> = {
+    angles: "system_angle_generator",
+    scripts: "system_script_creator",
+    formats: "system_format_expansion",
+  };
+  const systemDocType = tool_type ? TOOL_TO_SYSTEM[tool_type] || "system_angle_generator" : "system_angle_generator";
 
   const supabase = await createClient();
 
@@ -54,8 +63,8 @@ export async function POST(request: Request) {
   }
 
   // 3. Separate system instruction from knowledge docs
-  const systemDoc = docs?.find((d) => d.doc_type === "system_instruction");
-  const knowledgeDocs = (docs || []).filter((d) => d.doc_type !== "system_instruction");
+  const systemDoc = docs?.find((d) => d.doc_type === systemDocType);
+  const knowledgeDocs = (docs || []).filter((d) => !d.doc_type.startsWith("system_"));
 
   const systemPromptContent = systemDoc?.content || "You are a creative ad strategist and copywriter.";
 

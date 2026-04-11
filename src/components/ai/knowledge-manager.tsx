@@ -12,7 +12,7 @@ import {
   X,
   Upload,
 } from "lucide-react";
-import { DOC_TYPES, type AiStoreDoc, type DocType } from "@/lib/ai/types";
+import { DOC_TYPES, SYSTEM_PROMPT_TYPES, type AiStoreDoc, type DocType } from "@/lib/ai/types";
 
 interface StoreOption {
   name: string;
@@ -81,7 +81,9 @@ export function KnowledgeManager() {
   const getDocForType = (key: string): AiStoreDoc | undefined =>
     docs.find((d) => d.doc_type === key);
 
-  const filledCount = DOC_TYPES.filter((dt) => getDocForType(dt.key)).length;
+  const allTypes = [...DOC_TYPES, ...SYSTEM_PROMPT_TYPES];
+  const totalRequired = allTypes.length; // 6 docs + 3 system prompts = 9
+  const filledCount = allTypes.filter((dt) => getDocForType(dt.key)).length;
 
   const startEdit = (docType: DocType, existing?: AiStoreDoc) => {
     setEditingDocType(docType);
@@ -205,11 +207,11 @@ export function KnowledgeManager() {
           <div className="flex-1 bg-gray-700/50 rounded-full h-2 overflow-hidden">
             <div
               className="bg-emerald-500 h-full rounded-full transition-all"
-              style={{ width: `${(filledCount / 8) * 100}%` }}
+              style={{ width: `${(filledCount / totalRequired) * 100}%` }}
             />
           </div>
           <span className="text-sm text-gray-300 whitespace-nowrap">
-            {filledCount}/7 documents ready
+            {filledCount}/{totalRequired} documents ready
           </span>
         </div>
 
@@ -235,6 +237,7 @@ export function KnowledgeManager() {
           </div>
         ) : (
           <div className="space-y-2">
+            <p className="text-xs uppercase tracking-wider text-gray-500 font-medium pt-2 pb-1">Knowledge Documents</p>
             {DOC_TYPES.map((dt) => {
               const existing = getDocForType(dt.key);
               const isEditing = editingDocType === dt.key;
@@ -366,6 +369,62 @@ export function KnowledgeManager() {
                           "Save Document"
                         )}
                       </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            <p className="text-xs uppercase tracking-wider text-gray-500 font-medium pt-6 pb-1">System Instructions (per tool)</p>
+            {SYSTEM_PROMPT_TYPES.map((dt) => {
+              const existing = getDocForType(dt.key);
+              const isEditing = editingDocType === dt.key;
+
+              return (
+                <div
+                  key={dt.key}
+                  className="bg-gray-700/20 border border-gray-700/50 rounded-lg p-3"
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-white">{dt.label}</p>
+                      {existing ? (
+                        <p className="text-xs text-green-400">{existing.content.length.toLocaleString()} chars</p>
+                      ) : (
+                        <p className="text-xs text-red-400">Not set</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {existing ? (
+                        <>
+                          <button onClick={() => startEditing(dt.key)} className="text-xs text-gray-400 hover:text-white flex items-center gap-1 cursor-pointer"><Pencil size={12} /> Edit</button>
+                          <button onClick={() => handleDelete(existing.id)} className="text-xs text-gray-400 hover:text-red-400 flex items-center gap-1 cursor-pointer"><Trash2 size={12} /> Delete</button>
+                        </>
+                      ) : (
+                        <button onClick={() => startEditing(dt.key)} className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-2 py-1 rounded flex items-center gap-1 cursor-pointer"><Plus size={12} /> Add</button>
+                      )}
+                    </div>
+                  </div>
+
+                  {isEditing && (
+                    <div className="mt-3 space-y-3">
+                      <textarea
+                        value={editContent}
+                        onChange={(e) => setEditContent(e.target.value)}
+                        rows={12}
+                        className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-y font-mono"
+                        placeholder="Paste your system instruction here..."
+                      />
+                      <div className="flex gap-2">
+                        <button onClick={() => setEditingDocType(null)} className="px-3 py-1.5 text-gray-400 text-sm cursor-pointer">Cancel</button>
+                        <button
+                          onClick={handleSave}
+                          disabled={saving || !editContent}
+                          className="bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-4 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer"
+                        >
+                          {saving ? "Saving..." : "Save"}
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>

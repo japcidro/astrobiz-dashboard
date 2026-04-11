@@ -12,7 +12,7 @@ import {
   Save,
 } from "lucide-react";
 import type { AiStoreDoc } from "@/lib/ai/types";
-import { DOC_TYPES } from "@/lib/ai/types";
+import { DOC_TYPES, SYSTEM_PROMPT_TYPES } from "@/lib/ai/types";
 
 interface Message {
   role: "user" | "assistant";
@@ -27,6 +27,7 @@ export default function AiGeneratorPage() {
   const [loading, setLoading] = useState(true);
 
   // Chat
+  const [toolType, setToolType] = useState<"angles" | "scripts" | "formats">("angles");
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -61,7 +62,8 @@ export default function AiGeneratorPage() {
       .then((json) => {
         const storeDocs = json.docs || [];
         setDocs(storeDocs);
-        const filled = DOC_TYPES.filter((dt) =>
+        const allTypes = [...DOC_TYPES, ...SYSTEM_PROMPT_TYPES];
+        const filled = allTypes.filter((dt) =>
           storeDocs.some((d: AiStoreDoc) => d.doc_type === dt.key)
         ).length;
         setDocsReady(filled);
@@ -90,6 +92,7 @@ export default function AiGeneratorPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           store_name: storeName,
+          tool_type: toolType,
           messages: newMessages,
         }),
       });
@@ -161,7 +164,7 @@ export default function AiGeneratorPage() {
     setSaved(false);
   };
 
-  const notReady = docsReady < DOC_TYPES.length;
+  const notReady = docsReady < DOC_TYPES.length + SYSTEM_PROMPT_TYPES.length;
 
   if (loading) {
     return (
@@ -196,21 +199,42 @@ export default function AiGeneratorPage() {
       </div>
 
       {/* Readiness banner */}
-      {docsReady >= DOC_TYPES.length ? (
+      {docsReady >= DOC_TYPES.length + SYSTEM_PROMPT_TYPES.length ? (
         <div className="mb-3 p-2.5 bg-green-900/20 border border-green-700/50 rounded-lg text-green-300 text-sm flex items-center gap-2">
           <CheckCircle size={16} />
-          {DOC_TYPES.length}/{DOC_TYPES.length} docs ready — All knowledge documents are set
+          {DOC_TYPES.length + SYSTEM_PROMPT_TYPES.length}/{DOC_TYPES.length + SYSTEM_PROMPT_TYPES.length} docs ready — All knowledge documents are set
         </div>
       ) : (
         <div className="mb-3 p-2.5 bg-yellow-900/20 border border-yellow-700/50 rounded-lg text-yellow-300 text-sm flex items-center gap-2">
           <AlertTriangle size={16} />
-          {docsReady}/{DOC_TYPES.length} docs ready —{" "}
+          {docsReady}/{DOC_TYPES.length + SYSTEM_PROMPT_TYPES.length} docs ready —{" "}
           <a href="/marketing/ai-settings" className="underline hover:text-yellow-200">
             Go to AI Knowledge
           </a>{" "}
           to fill in the remaining documents
         </div>
       )}
+
+      {/* Tool selector */}
+      <div className="flex items-center gap-2 mb-3">
+        {([
+          { value: "angles", label: "Angle Generator" },
+          { value: "scripts", label: "Script Creator" },
+          { value: "formats", label: "Format Expansion" },
+        ] as const).map((t) => (
+          <button
+            key={t.value}
+            onClick={() => { setToolType(t.value); handleClear(); }}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+              toolType === t.value
+                ? "bg-emerald-600 text-white"
+                : "bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
 
       {/* Chat area */}
       <div className="flex-1 bg-gray-800/30 border border-gray-700/50 rounded-xl overflow-hidden flex flex-col">
