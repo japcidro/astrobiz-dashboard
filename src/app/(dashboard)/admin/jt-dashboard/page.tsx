@@ -159,11 +159,51 @@ export default function JtDashboardPage() {
   }, [deliveries]);
 
   // RTS deliveries
+  const rtsClassifications: JtClassification[] = ["Returned", "For Return", "Returned (Aged)"];
   const rtsDeliveries = useMemo(() => {
-    const rtsClassifications: JtClassification[] = ["Returned", "For Return", "Returned (Aged)"];
     return deliveries
       .filter((d) => rtsClassifications.includes(d.classification))
       .sort((a, b) => (b.days_since_submit ?? 0) - (a.days_since_submit ?? 0));
+  }, [deliveries]);
+
+  // RTS by Province analytics
+  const rtsByProvince = useMemo(() => {
+    const map = new Map<string, { province: string; total: number; rts: number; rts_rate: number; top_reason: string }>();
+
+    for (const d of deliveries) {
+      const province = d.province || "Unknown";
+      if (!map.has(province)) {
+        map.set(province, { province, total: 0, rts: 0, rts_rate: 0, top_reason: "" });
+      }
+      const entry = map.get(province)!;
+      entry.total++;
+      if (rtsClassifications.includes(d.classification)) {
+        entry.rts++;
+      }
+    }
+
+    // Compute rates and find top reason per province
+    for (const [province, entry] of map) {
+      entry.rts_rate = entry.total > 0 ? (entry.rts / entry.total) * 100 : 0;
+      // Find most common RTS reason for this province
+      const reasons = new Map<string, number>();
+      for (const d of deliveries) {
+        if ((d.province || "Unknown") === province && rtsClassifications.includes(d.classification) && d.rts_reason) {
+          const r = d.rts_reason.trim();
+          if (r && r !== "-") reasons.set(r, (reasons.get(r) || 0) + 1);
+        }
+      }
+      let topReason = "";
+      let topCount = 0;
+      for (const [reason, count] of reasons) {
+        if (count > topCount) { topReason = reason; topCount = count; }
+      }
+      entry.top_reason = topReason;
+    }
+
+    return Array.from(map.values())
+      .filter((e) => e.rts > 0) // only show provinces with RTS
+      .sort((a, b) => b.rts - a.rts); // sort by most RTS first
   }, [deliveries]);
 
   function rateColorClass(rate: number): string {
@@ -398,6 +438,59 @@ export default function JtDashboardPage() {
                       {row.delivery_rate.toFixed(1)}%
                     </td>
                     <td className="px-4 py-2.5 text-right text-green-400">{formatCurrency(row.cod_collected)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* RTS by Province Analytics */}
+      {!loading && rtsByProvince.length > 0 && (
+        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl overflow-hidden mb-6">
+          <div className="px-4 py-3 border-b border-gray-700/50">
+            <h2 className="text-sm font-semibold text-white">
+              RTS by Province{" "}
+              <span className="text-gray-400 font-normal">— {rtsByProvince.length} areas with returns</span>
+            </h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-900/50 text-gray-400 text-xs uppercase">
+                  <th className="text-left px-4 py-2.5 font-medium">Province</th>
+                  <th className="text-right px-4 py-2.5 font-medium">Total Parcels</th>
+                  <th className="text-right px-4 py-2.5 font-medium">RTS Count</th>
+                  <th className="text-right px-4 py-2.5 font-medium">RTS Rate</th>
+                  <th className="text-left px-4 py-2.5 font-medium">Top Reason</th>
+                  <th className="px-4 py-2.5 font-medium">RTS Bar</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rtsByProvince.map((row) => (
+                  <tr key={row.province} className="border-b border-gray-800 hover:bg-gray-800/30">
+                    <td className="px-4 py-2.5 text-white font-medium">{row.province}</td>
+                    <td className="px-4 py-2.5 text-right text-gray-300">{row.total}</td>
+                    <td className="px-4 py-2.5 text-right text-red-400 font-medium">{row.rts}</td>
+                    <td className={`px-4 py-2.5 text-right font-medium ${
+                      row.rts_rate > 30 ? "text-red-400" : row.rts_rate > 15 ? "text-yellow-400" : "text-green-400"
+                    }`}>
+                      {row.rts_rate.toFixed(1)}%
+                    </td>
+                    <td className="px-4 py-2.5 text-gray-400 text-xs truncate max-w-[200px]">
+                      {row.top_reason || "—"}
+                    </td>
+                    <td className="px-4 py-2.5 w-32">
+                      <div className="h-2 bg-gray-700 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${
+                            row.rts_rate > 30 ? "bg-red-500" : row.rts_rate > 15 ? "bg-yellow-500" : "bg-green-500"
+                          }`}
+                          style={{ width: `${Math.min(row.rts_rate, 100)}%` }}
+                        />
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
