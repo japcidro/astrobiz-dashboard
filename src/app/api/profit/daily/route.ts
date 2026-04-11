@@ -632,26 +632,19 @@ export async function GET(request: Request) {
     if (row) row.returns_value += value;
   }
 
-  // --- 6b. Shipping fallback: if no J&T data for a day, assume 12% of revenue ---
-  const SF_FALLBACK_RATE = 0.12;
-  let hasProjectedShipping = false;
+  // --- 6b. Shipping: always use 12% of revenue as projected estimate ---
+  const SF_RATE = 0.12;
 
-  for (const [date, row] of dailyMap) {
-    if (row.shipping === 0 && row.revenue > 0) {
-      row.shipping = row.revenue * SF_FALLBACK_RATE;
-      (row as Record<string, unknown>)._shipping_projected = true;
-      hasProjectedShipping = true;
+  for (const [, row] of dailyMap) {
+    if (row.revenue > 0) {
+      row.shipping = row.revenue * SF_RATE;
     }
-  }
-
-  if (hasProjectedShipping) {
-    warnings.push("Shipping: Using 12% of revenue estimate for days without J&T data");
   }
 
   // Build final daily array
   const daily: DailyPnlRow[] = [];
   for (const [date, row] of dailyMap) {
-    const shippingProjected = !!(row as Record<string, unknown>)._shipping_projected;
+    const shippingProjected = true; // always projected (12% of revenue)
     const returnsProjected = returnsProjectedDates.has(date);
     const netProfit =
       row.revenue - row.cogs - row.ad_spend - row.shipping - row.returns_value;

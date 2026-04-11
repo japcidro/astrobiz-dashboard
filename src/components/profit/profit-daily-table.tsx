@@ -15,7 +15,7 @@ const COLUMNS: { key: string; label: string }[] = [
   { key: "order_count", label: "Orders" },
   { key: "cogs", label: "COGS" },
   { key: "ad_spend", label: "Ad Spend" },
-  { key: "shipping", label: "Shipping" },
+  { key: "shipping", label: "Shipping (PROJECTED)" },
   { key: "returns_value", label: "Returns" },
   { key: "net_profit", label: "Net Profit" },
   { key: "margin_pct", label: "Margin %" },
@@ -53,12 +53,10 @@ function renderCell(key: string, row: DailyPnlRow) {
         formatCurrency(row.returns_value)
       );
     case "shipping":
-      return row.shipping_projected ? (
-        <span className="text-yellow-400" title="Projected: 12% of revenue (no J&T data)">
-          {formatCurrency(row.shipping)}*
+      return (
+        <span className="text-yellow-400">
+          {formatCurrency(row.shipping)}
         </span>
-      ) : (
-        formatCurrency(row.shipping)
       );
     case "net_profit":
       return (

@@ -35,11 +35,13 @@ export function ProfitSummaryCards({ summary, loading }: Props) {
       accent: "",
     },
     {
-      label: "Shipping",
+      label: "Shipping (PROJECTED)",
       value: formatCurrency(summary.shipping),
-      icon: <Truck size={20} className="text-purple-400" />,
-      bg: "bg-purple-600/20",
-      accent: "",
+      subtitle: "12% of revenue",
+      subtitleColor: "text-yellow-400",
+      icon: <Truck size={20} className="text-yellow-400" />,
+      bg: "bg-yellow-600/20",
+      accent: "border-yellow-700/50",
     },
     {
       label: "Returns",
