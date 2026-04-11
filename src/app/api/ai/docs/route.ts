@@ -46,6 +46,17 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
+
+  // Special case: save API key to app_settings
+  if (body._save_setting) {
+    const supabase = await createClient();
+    const { error } = await supabase
+      .from("app_settings")
+      .upsert({ key: body._save_setting, value: body.value }, { onConflict: "key" });
+    if (error) return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({ success: true });
+  }
+
   const { store_name, doc_type, title, content } = body as {
     store_name: string;
     doc_type: string;
