@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { TokenManager } from "@/components/marketing/token-manager";
 import { StoreManager } from "@/components/orders/store-manager";
+import { TeamManager } from "@/components/settings/team-manager";
 import type { ShopifyStore } from "@/lib/shopify/types";
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
@@ -34,7 +35,7 @@ export default async function SettingsPage() {
 
   const supabase = await createClient();
 
-  const [{ data: tokenSetting }, { data: selectedSetting }, { data: shopifyStores }] = await Promise.all([
+  const [{ data: tokenSetting }, { data: selectedSetting }, { data: shopifyStores }, { data: employees }] = await Promise.all([
     supabase
       .from("app_settings")
       .select("value, updated_at")
@@ -49,6 +50,10 @@ export default async function SettingsPage() {
       .from("shopify_stores")
       .select("*")
       .order("name"),
+    supabase
+      .from("employees")
+      .select("id, email, full_name, role, is_active, created_at")
+      .order("created_at"),
   ]);
 
   const token = tokenSetting?.value || "";
@@ -94,6 +99,15 @@ export default async function SettingsPage() {
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-white">Settings</h1>
         <p className="text-gray-400 mt-1">Manage integrations and tokens</p>
+      </div>
+
+      <TeamManager employees={employees || []} />
+
+      <div className="mt-10">
+        <h2 className="text-lg font-semibold text-white mb-1">Facebook Ads</h2>
+        <p className="text-gray-400 text-sm mb-4">
+          Manage your Facebook Marketing API token and ad accounts.
+        </p>
       </div>
 
       <TokenManager
