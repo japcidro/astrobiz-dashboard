@@ -3,54 +3,41 @@ import { getEmployee } from "@/lib/supabase/get-employee";
 
 export const dynamic = "force-dynamic";
 
-// POST — generate AI content via Claude API
 export async function POST(request: Request) {
   const employee = await getEmployee();
   if (!employee) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (employee.role !== "admin" && employee.role !== "marketing") {
+  if (!["admin", "marketing"].includes(employee.role)) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const body = await request.json();
-  const { store_name, tool_type, user_input, count } = body as {
+  const { store_name, messages } = body as {
     store_name: string;
-    tool_type: "angles" | "scripts" | "formats";
-    user_input: string;
-    count: number;
+    messages: Array<{ role: "user" | "assistant"; content: string }>;
   };
 
-  if (!store_name || !tool_type) {
+  if (!store_name || !messages || messages.length === 0) {
     return Response.json(
-      { error: "store_name and tool_type are required" },
+      { error: "store_name and messages are required" },
       { status: 400 }
     );
   }
-
-  const validToolTypes = ["angles", "scripts", "formats"];
-  if (!validToolTypes.includes(tool_type)) {
-    return Response.json(
-      { error: "tool_type must be one of: angles, scripts, formats" },
-      { status: 400 }
-    );
-  }
-
-  const effectiveCount = Math.min(Math.max(count || 5, 5), 10);
 
   const supabase = await createClient();
 
-  // 1. Fetch API key from app_settings
-  const { data: settingRow, error: settingError } = await supabase
+  // 1. Fetch API key
+  const { data: settingRow } = await supabase
     .from("app_settings")
     .select("value")
     .eq("key", "anthropic_api_key")
     .single();
 
-  if (settingError || !settingRow?.value) {
+  if (!settingRow?.value) {
     return Response.json(
-      { error: "Anthropic API key not configured" },
-      { status: 500 }
+      { error: "Anthropic API key not configured. Go to Settings." },
+      { status: 400 }
     );
   }
 
@@ -66,38 +53,30 @@ export async function POST(request: Request) {
     return Response.json({ error: docsError.message }, { status: 500 });
   }
 
-  if (!docs || docs.length === 0) {
-    return Response.json(
-      { error: "No documents found for this store. Upload store docs first." },
-      { status: 400 }
-    );
-  }
-
   // 3. Separate system instruction from knowledge docs
-  const systemDoc = docs.find((d) => d.doc_type === "system_instruction");
-  const knowledgeDocs = docs.filter((d) => d.doc_type !== "system_instruction");
+  const systemDoc = docs?.find((d) => d.doc_type === "system_instruction");
+  const knowledgeDocs = (docs || []).filter((d) => d.doc_type !== "system_instruction");
 
-  const systemPromptContent = systemDoc?.content || "You are a creative ad strategist.";
+  const systemPromptContent = systemDoc?.content || "You are a creative ad strategist and copywriter.";
 
   // 4. Build knowledge context
   const knowledgeContext = knowledgeDocs
     .map((doc) => `=== ${doc.title} ===\n${doc.content}`)
     .join("\n\n");
 
-  // 5. Build user message based on tool_type
-  let userMessage = "";
-
-  switch (tool_type) {
-    case "angles":
-      userMessage = `Based on the knowledge above, generate ${effectiveCount} unique ad angles for this product. Each angle should be a different approach/hook to sell the product. Number them 1-${effectiveCount}. Be specific and creative.`;
-      break;
-    case "scripts":
-      userMessage = `Based on the knowledge above, create detailed ad scripts for each of these selected angles:\n\n${user_input}\n\nFor each angle, provide:\n- Hook (first 3 seconds)\n- B-roll scenes description\n- Voiceover script\n- CTA\n\nMake each script ready for video production.`;
-      break;
-    case "formats":
-      userMessage = `Take this winning ad script/angle and expand it into ${effectiveCount} different creative formats. Each format should be adapted for a different style:\n\nWinning script:\n${user_input}\n\nCreate variations for: Short Hook (15s), Long Form (60s), UGC Testimonial, Problem-Solution, Before/After, Listicle, Story-based, etc.`;
-      break;
-  }
+  // 5. Build messages for Claude
+  // First user message gets the knowledge context prepended
+  const claudeMessages = messages.map((msg, i) => {
+    if (i === 0 && msg.role === "user") {
+      return {
+        role: msg.role,
+        content: knowledgeContext
+          ? `Here is all the knowledge about this product/brand:\n\n${knowledgeContext}\n\n---\n\n${msg.content}`
+          : msg.content,
+      };
+    }
+    return msg;
+  });
 
   // 6. Call Claude API
   try {
@@ -114,12 +93,7 @@ export async function POST(request: Request) {
           model: "claude-sonnet-4-20250514",
           max_tokens: 8192,
           system: systemPromptContent,
-          messages: [
-            {
-              role: "user",
-              content: knowledgeContext + "\n\n---\n\n" + userMessage,
-            },
-          ],
+          messages: claudeMessages,
         }),
       }
     );
@@ -149,11 +123,8 @@ export async function POST(request: Request) {
       model: "claude-sonnet-4-20250514",
       tokens_used: result.usage,
     });
-  } catch (err: unknown) {
+  } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json(
-      { error: `Failed to call Claude API: ${message}` },
-      { status: 502 }
-    );
+    return Response.json({ error: `Claude API call failed: ${message}` }, { status: 500 });
   }
 }

@@ -1,178 +1,357 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { Sparkles, ChevronDown, AlertTriangle, CheckCircle } from "lucide-react";
-import { AngleScriptGenerator } from "@/components/ai/angle-script-generator";
-import { FormatExpansion } from "@/components/ai/format-expansion";
+import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  Sparkles,
+  Send,
+  RefreshCw,
+  Copy,
+  CheckCircle,
+  AlertTriangle,
+  Trash2,
+  Save,
+} from "lucide-react";
 import type { AiStoreDoc } from "@/lib/ai/types";
 import { DOC_TYPES } from "@/lib/ai/types";
 
-type Tab = "angle-script" | "format-expansion";
-
-interface StoreOption {
-  name: string;
+interface Message {
+  role: "user" | "assistant";
+  content: string;
 }
 
 export default function AiGeneratorPage() {
+  const [stores, setStores] = useState<{ name: string }[]>([]);
   const [storeName, setStoreName] = useState("");
-  const [stores, setStores] = useState<StoreOption[]>([]);
   const [docs, setDocs] = useState<AiStoreDoc[]>([]);
-  const [activeTab, setActiveTab] = useState<Tab>("angle-script");
+  const [docsReady, setDocsReady] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  // Fetch stores on mount
+  // Chat
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input, setInput] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Fetch stores
   useEffect(() => {
-    (async () => {
-      try {
-        const res = await fetch("/api/shopify/stores");
-        const data = await res.json();
-        const storeList: StoreOption[] = (data.stores || data || []).map(
-          (s: { name: string }) => ({ name: s.name })
-        );
+    fetch("/api/shopify/stores")
+      .then((r) => r.json())
+      .then((json) => {
+        const storeList = (json.stores || json || []).map((s: { name: string }) => ({ name: s.name }));
         setStores(storeList);
-        if (storeList.length > 0) {
+        if (storeList.length > 0 && !storeName) {
           setStoreName(storeList[0].name);
         }
-      } catch {
-        // handled by empty stores
-      } finally {
-        setLoading(false);
-      }
-    })();
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
 
   // Fetch docs when store changes
-  const fetchDocs = useCallback(async (store: string) => {
-    if (!store) return;
-    try {
-      const res = await fetch(
-        `/api/ai/docs?store=${encodeURIComponent(store)}`
-      );
-      const data = await res.json();
-      setDocs(data.docs || data || []);
-    } catch {
-      setDocs([]);
-    }
-  }, []);
-
   useEffect(() => {
-    if (storeName) {
-      fetchDocs(storeName);
-    }
-  }, [storeName, fetchDocs]);
+    if (!storeName) return;
+    fetch(`/api/ai/docs?store=${encodeURIComponent(storeName)}`)
+      .then((r) => r.json())
+      .then((json) => {
+        const storeDocs = json.docs || [];
+        setDocs(storeDocs);
+        const filled = DOC_TYPES.filter((dt) =>
+          storeDocs.some((d: AiStoreDoc) => d.doc_type === dt.key)
+        ).length;
+        setDocsReady(filled);
+      })
+      .catch(() => setDocsReady(0));
+  }, [storeName]);
 
-  const docsReady = DOC_TYPES.filter((dt) =>
-    docs.some((d) => d.doc_type === dt.key)
-  ).length;
+  // Auto-scroll to bottom
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, generating]);
+
+  const handleSend = useCallback(async () => {
+    const text = input.trim();
+    if (!text || generating) return;
+
+    setError(null);
+    const newMessages: Message[] = [...messages, { role: "user", content: text }];
+    setMessages(newMessages);
+    setInput("");
+    setGenerating(true);
+
+    try {
+      const res = await fetch("/api/ai/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          store_name: storeName,
+          messages: newMessages,
+        }),
+      });
+
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        throw new Error(`Server error (${res.status})`);
+      }
+
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Generation failed");
+
+      setMessages([...newMessages, { role: "assistant", content: json.text }]);
+      setSaved(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Generation failed");
+    } finally {
+      setGenerating(false);
+      setTimeout(() => inputRef.current?.focus(), 100);
+    }
+  }, [input, messages, generating, storeName]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const handleCopyAll = () => {
+    const text = messages
+      .filter((m) => m.role === "assistant")
+      .map((m) => m.content)
+      .join("\n\n---\n\n");
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleCopyMessage = (content: string) => {
+    navigator.clipboard.writeText(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleSave = async () => {
+    if (messages.length === 0) return;
+    setSaving(true);
+    try {
+      await fetch("/api/ai/history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          store_name: storeName,
+          tool_type: "chat",
+          input_data: { messages },
+          output_data: { messages },
+        }),
+      });
+      setSaved(true);
+    } catch {} finally {
+      setSaving(false);
+    }
+  };
+
+  const handleClear = () => {
+    setMessages([]);
+    setError(null);
+    setSaved(false);
+  };
+
+  const notReady = docsReady < DOC_TYPES.length;
 
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="text-gray-500 text-sm">Loading...</div>
+        <RefreshCw size={24} className="animate-spin text-gray-400" />
       </div>
     );
   }
 
   return (
-    <div>
+    <div className="flex flex-col h-[calc(100vh-6rem)]">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+      <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <div className="p-2 bg-emerald-600/20 rounded-lg">
             <Sparkles size={20} className="text-emerald-400" />
           </div>
           <div>
             <h1 className="text-2xl font-bold text-white">AI Generator</h1>
-            <p className="text-gray-400 text-sm mt-0.5">
-              Generate angles, scripts, and format expansions
-            </p>
+            <p className="text-gray-400 text-sm">Chat with AI using your store&apos;s knowledge</p>
           </div>
         </div>
-
-        {/* Store Selector */}
-        <div className="relative">
-          <select
-            value={storeName}
-            onChange={(e) => setStoreName(e.target.value)}
-            className="appearance-none bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 pr-8 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer min-w-[180px]"
-          >
-            {stores.length === 0 && (
-              <option value="">No stores available</option>
-            )}
-            {stores.map((s) => (
-              <option key={s.name} value={s.name}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-          <ChevronDown
-            size={14}
-            className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
-          />
-        </div>
+        <select
+          value={storeName}
+          onChange={(e) => { setStoreName(e.target.value); handleClear(); }}
+          className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
+        >
+          {stores.map((s) => (
+            <option key={s.name} value={s.name}>{s.name}</option>
+          ))}
+        </select>
       </div>
 
-      {/* Readiness Banner */}
-      {storeName && (
-        <div
-          className={`mb-6 p-3 rounded-lg flex items-center gap-2 text-sm ${
-            docsReady === 8
-              ? "bg-green-900/30 border border-green-700/50 text-green-300"
-              : "bg-yellow-900/30 border border-yellow-700/50 text-yellow-300"
-          }`}
-        >
-          {docsReady >= 7 ? (
-            <>
-              <CheckCircle size={16} />
-              7/7 docs ready — All knowledge documents are set
-            </>
-          ) : (
-            <>
-              <AlertTriangle size={16} />
-              {docsReady}/7 docs ready —{" "}
-              <a
-                href="/marketing/ai-settings"
-                className="underline hover:text-yellow-200"
-              >
-                Go to AI Knowledge
-              </a>{" "}
-              to fill in the remaining documents
-            </>
+      {/* Readiness banner */}
+      {docsReady >= DOC_TYPES.length ? (
+        <div className="mb-3 p-2.5 bg-green-900/20 border border-green-700/50 rounded-lg text-green-300 text-sm flex items-center gap-2">
+          <CheckCircle size={16} />
+          {DOC_TYPES.length}/{DOC_TYPES.length} docs ready — All knowledge documents are set
+        </div>
+      ) : (
+        <div className="mb-3 p-2.5 bg-yellow-900/20 border border-yellow-700/50 rounded-lg text-yellow-300 text-sm flex items-center gap-2">
+          <AlertTriangle size={16} />
+          {docsReady}/{DOC_TYPES.length} docs ready —{" "}
+          <a href="/marketing/ai-settings" className="underline hover:text-yellow-200">
+            Go to AI Knowledge
+          </a>{" "}
+          to fill in the remaining documents
+        </div>
+      )}
+
+      {/* Chat area */}
+      <div className="flex-1 bg-gray-800/30 border border-gray-700/50 rounded-xl overflow-hidden flex flex-col">
+        {/* Messages */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {messages.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-full text-center py-12">
+              <Sparkles size={40} className="text-gray-600 mb-4" />
+              <p className="text-gray-400 text-lg font-medium mb-2">
+                Start a conversation
+              </p>
+              <p className="text-gray-500 text-sm max-w-md">
+                Ask the AI to generate ad angles, write scripts, expand formats, or anything creative for <strong className="text-gray-300">{storeName}</strong>.
+                The AI has access to all your knowledge documents.
+              </p>
+              <div className="mt-6 flex flex-wrap gap-2 justify-center max-w-lg">
+                {[
+                  "Generate 7 unique ad angles",
+                  "Write a 60-second video script",
+                  "Create 5 hook variations",
+                  "Expand this winning angle into 3 formats",
+                ].map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    onClick={() => { setInput(suggestion); setTimeout(() => inputRef.current?.focus(), 50); }}
+                    disabled={notReady}
+                    className="text-xs bg-gray-700/50 text-gray-400 hover:text-white hover:bg-gray-700 px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
+
+          {messages.map((msg, i) => (
+            <div
+              key={i}
+              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+            >
+              <div
+                className={`max-w-[85%] rounded-xl px-4 py-3 ${
+                  msg.role === "user"
+                    ? "bg-emerald-600/20 border border-emerald-700/50 text-white"
+                    : "bg-gray-700/30 border border-gray-600/50 text-gray-200"
+                }`}
+              >
+                <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                  {msg.content}
+                </div>
+                {msg.role === "assistant" && (
+                  <button
+                    onClick={() => handleCopyMessage(msg.content)}
+                    className="mt-2 text-xs text-gray-500 hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <Copy size={12} />
+                    Copy
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {generating && (
+            <div className="flex justify-start">
+              <div className="bg-gray-700/30 border border-gray-600/50 rounded-xl px-4 py-3">
+                <div className="flex items-center gap-2 text-gray-400 text-sm">
+                  <RefreshCw size={14} className="animate-spin" />
+                  Generating...
+                </div>
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div className="p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-sm">
+              {error}
+            </div>
+          )}
+
+          <div ref={chatEndRef} />
         </div>
-      )}
 
-      {/* Tabs */}
-      <div className="flex gap-1 mb-6 bg-gray-800/50 border border-gray-700/50 rounded-lg p-1 w-fit">
-        <button
-          onClick={() => setActiveTab("angle-script")}
-          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors cursor-pointer ${
-            activeTab === "angle-script"
-              ? "bg-emerald-600 text-white"
-              : "text-gray-400 hover:text-white hover:bg-gray-700/50"
-          }`}
-        >
-          Angle &rarr; Script
-        </button>
-        <button
-          onClick={() => setActiveTab("format-expansion")}
-          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors cursor-pointer ${
-            activeTab === "format-expansion"
-              ? "bg-emerald-600 text-white"
-              : "text-gray-400 hover:text-white hover:bg-gray-700/50"
-          }`}
-        >
-          Format Expansion
-        </button>
+        {/* Actions bar */}
+        {messages.length > 0 && (
+          <div className="px-4 py-2 border-t border-gray-700/50 flex items-center gap-2">
+            <button
+              onClick={handleCopyAll}
+              className="text-xs text-gray-500 hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
+            >
+              {copied ? <CheckCircle size={12} className="text-green-400" /> : <Copy size={12} />}
+              {copied ? "Copied!" : "Copy All"}
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving || saved}
+              className="text-xs text-gray-500 hover:text-white flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              {saved ? <CheckCircle size={12} className="text-green-400" /> : <Save size={12} />}
+              {saved ? "Saved" : saving ? "Saving..." : "Save to History"}
+            </button>
+            <button
+              onClick={handleClear}
+              className="text-xs text-gray-500 hover:text-red-400 flex items-center gap-1 transition-colors cursor-pointer ml-auto"
+            >
+              <Trash2 size={12} />
+              Clear Chat
+            </button>
+          </div>
+        )}
+
+        {/* Input */}
+        <div className="p-4 border-t border-gray-700/50">
+          <div className="flex gap-2">
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={notReady ? "Fill all knowledge docs first..." : `Message AI about ${storeName}...`}
+              disabled={notReady || generating}
+              rows={2}
+              className="flex-1 bg-gray-900 border border-gray-600 rounded-lg px-4 py-3 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none disabled:opacity-50"
+            />
+            <button
+              onClick={handleSend}
+              disabled={!input.trim() || generating || notReady}
+              className="bg-emerald-600 hover:bg-emerald-500 text-white px-4 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center"
+            >
+              {generating ? (
+                <RefreshCw size={18} className="animate-spin" />
+              ) : (
+                <Send size={18} />
+              )}
+            </button>
+          </div>
+          <p className="text-xs text-gray-600 mt-1.5">
+            Enter to send, Shift+Enter for new line. AI has access to all {storeName} knowledge docs.
+          </p>
+        </div>
       </div>
-
-      {/* Tab Content */}
-      {activeTab === "angle-script" && (
-        <AngleScriptGenerator storeName={storeName} docsReady={docsReady} />
-      )}
-      {activeTab === "format-expansion" && (
-        <FormatExpansion storeName={storeName} docsReady={docsReady} />
-      )}
     </div>
   );
 }
