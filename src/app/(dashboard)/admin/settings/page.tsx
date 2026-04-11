@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { TokenManager } from "@/components/marketing/token-manager";
 import { StoreManager } from "@/components/orders/store-manager";
 import { TeamManager } from "@/components/settings/team-manager";
+import { AiKeyManager } from "@/components/settings/ai-key-manager";
 import type { ShopifyStore } from "@/lib/shopify/types";
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
@@ -35,7 +36,7 @@ export default async function SettingsPage() {
 
   const supabase = await createClient();
 
-  const [{ data: tokenSetting }, { data: selectedSetting }, { data: shopifyStores }, { data: employees }] = await Promise.all([
+  const [{ data: tokenSetting }, { data: selectedSetting }, { data: shopifyStores }, { data: employees }, { data: aiKeySetting }] = await Promise.all([
     supabase
       .from("app_settings")
       .select("value, updated_at")
@@ -54,6 +55,11 @@ export default async function SettingsPage() {
       .from("employees")
       .select("id, email, full_name, role, is_active, created_at")
       .order("created_at"),
+    supabase
+      .from("app_settings")
+      .select("value")
+      .eq("key", "anthropic_api_key")
+      .single(),
   ]);
 
   const token = tokenSetting?.value || "";
@@ -124,6 +130,10 @@ export default async function SettingsPage() {
           Add your Shopify stores to view orders in the dashboard.
         </p>
         <StoreManager stores={(shopifyStores as ShopifyStore[]) || []} />
+      </div>
+
+      <div className="mt-10">
+        <AiKeyManager currentKey={aiKeySetting?.value || ""} />
       </div>
     </div>
   );
