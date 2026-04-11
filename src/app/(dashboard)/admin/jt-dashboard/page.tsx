@@ -78,11 +78,50 @@ export default function JtDashboardPage() {
   // Filters
   const [storeFilter, setStoreFilter] = useState("ALL");
   const [classificationFilter, setClassificationFilter] = useState("all");
+  const [datePreset, setDatePreset] = useState("all_time");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
   // Upload section
   const [showUploader, setShowUploader] = useState(false);
+
+  const applyDatePreset = useCallback((preset: string) => {
+    setDatePreset(preset);
+    const now = new Date();
+    const fmt = (d: Date) => d.toISOString().split("T")[0];
+
+    switch (preset) {
+      case "this_week": {
+        const day = now.getDay();
+        const monday = new Date(now);
+        monday.setDate(now.getDate() - (day === 0 ? 6 : day - 1));
+        setDateFrom(fmt(monday));
+        setDateTo(fmt(now));
+        break;
+      }
+      case "last_7d": {
+        const d = new Date(now.getTime() - 7 * 86400000);
+        setDateFrom(fmt(d));
+        setDateTo(fmt(now));
+        break;
+      }
+      case "this_month": {
+        setDateFrom(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`);
+        setDateTo(fmt(now));
+        break;
+      }
+      case "last_30d": {
+        const d = new Date(now.getTime() - 30 * 86400000);
+        setDateFrom(fmt(d));
+        setDateTo(fmt(now));
+        break;
+      }
+      case "all_time":
+        setDateFrom("");
+        setDateTo("");
+        break;
+    }
+  }, []);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -263,6 +302,29 @@ export default function JtDashboardPage() {
         {showUploader && <JtUploader />}
       </div>
 
+      {/* Quick Date Filters */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        {[
+          { label: "This Week", value: "this_week" },
+          { label: "Last 7 Days", value: "last_7d" },
+          { label: "This Month", value: "this_month" },
+          { label: "Last 30 Days", value: "last_30d" },
+          { label: "All Time", value: "all_time" },
+        ].map((p) => (
+          <button
+            key={p.value}
+            onClick={() => applyDatePreset(p.value)}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+              datePreset === p.value
+                ? "bg-white text-gray-900"
+                : "bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700"
+            }`}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
       {/* Filters */}
       <div className="flex items-center gap-4 mb-6 flex-wrap">
         <div className="flex items-center gap-2">
@@ -301,7 +363,7 @@ export default function JtDashboardPage() {
           <input
             type="date"
             value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
+            onChange={(e) => { setDateFrom(e.target.value); setDatePreset("custom"); }}
             className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
@@ -311,7 +373,7 @@ export default function JtDashboardPage() {
           <input
             type="date"
             value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
+            onChange={(e) => { setDateTo(e.target.value); setDatePreset("custom"); }}
             className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
