@@ -485,6 +485,7 @@ export async function GET(request: Request) {
   // Fetch total delivered count per store (ALL TIME, not just date range)
   const rtsMinRate = 0.25; // 25% worst case
   const rtsMinDelivered = 200; // threshold to use actual rate
+  const returnsProjectedDates = new Set<string>();
 
   try {
     // Lightweight query: just count delivered per store (not all rows)
@@ -543,6 +544,8 @@ export async function GET(request: Request) {
                   key,
                   (returnsByDateStore.get(key) || 0) + addedReturns
                 );
+                const dateStr = key.split("::")[0];
+                returnsProjectedDates.add(dateStr);
               }
             }
             warnings.push(`${store}: Using 25% worst-case RTS (${delivered}/${rtsMinDelivered} delivered)`);
@@ -649,6 +652,7 @@ export async function GET(request: Request) {
   const daily: DailyPnlRow[] = [];
   for (const [date, row] of dailyMap) {
     const shippingProjected = !!(row as Record<string, unknown>)._shipping_projected;
+    const returnsProjected = returnsProjectedDates.has(date);
     const netProfit =
       row.revenue - row.cogs - row.ad_spend - row.shipping - row.returns_value;
     const marginPct =
@@ -665,6 +669,7 @@ export async function GET(request: Request) {
       net_profit: Math.round(netProfit * 100) / 100,
       margin_pct: marginPct,
       shipping_projected: shippingProjected,
+      returns_projected: returnsProjected,
     });
   }
 

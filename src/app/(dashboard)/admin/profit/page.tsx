@@ -123,6 +123,7 @@ export default function ProfitPage() {
       net_profit: 0,
       margin_pct: 0,
       shipping_projected: false,
+      returns_projected: false,
     };
     for (const row of daily) {
       totals.revenue += row.revenue;

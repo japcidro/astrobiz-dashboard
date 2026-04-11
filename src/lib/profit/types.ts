@@ -52,6 +52,7 @@ export interface DailyPnlRow {
   net_profit: number;
   margin_pct: number;
   shipping_projected: boolean;
+  returns_projected: boolean;
 }
 
 export interface ProfitSummary {

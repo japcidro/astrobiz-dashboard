@@ -43,8 +43,15 @@ function renderCell(key: string, row: DailyPnlRow) {
     case "revenue":
     case "cogs":
     case "ad_spend":
-    case "returns_value":
       return formatCurrency(row[key]);
+    case "returns_value":
+      return row.returns_projected ? (
+        <span className="text-yellow-400" title="Worst-case: 25% RTS rate (under 200 delivered)">
+          {formatCurrency(row.returns_value)}*
+        </span>
+      ) : (
+        formatCurrency(row.returns_value)
+      );
     case "shipping":
       return row.shipping_projected ? (
         <span className="text-yellow-400" title="Projected: 12% of revenue (no J&T data)">
