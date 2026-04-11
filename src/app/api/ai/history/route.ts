@@ -22,8 +22,9 @@ export async function GET(request: Request) {
     .order("created_at", { ascending: false })
     .limit(50);
 
-  // Non-admin users only see their own generations
-  if (employee.role !== "admin") {
+  // Admin and marketing can see all threads (shared)
+  // Other roles see only their own
+  if (!["admin", "marketing"].includes(employee.role)) {
     query = query.eq("employee_id", employee.id);
   }
 
