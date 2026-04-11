@@ -210,6 +210,19 @@ export default function JtDashboardPage() {
         </div>
       )}
 
+      {/* Upload Section */}
+      <div className="mb-6">
+        <button
+          onClick={() => setShowUploader((v) => !v)}
+          className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-3 py-2 rounded-lg transition-colors cursor-pointer mb-3"
+        >
+          <Upload size={14} />
+          {showUploader ? "Hide J&T Upload" : "Upload J&T Data"}
+          {showUploader ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </button>
+        {showUploader && <JtUploader />}
+      </div>
+
       {/* Filters */}
       <div className="flex items-center gap-4 mb-6 flex-wrap">
         <div className="flex items-center gap-2">
@@ -457,18 +470,6 @@ export default function JtDashboardPage() {
         </div>
       )}
 
-      {/* Upload Section */}
-      <div className="mt-6">
-        <button
-          onClick={() => setShowUploader((v) => !v)}
-          className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm px-3 py-2 rounded-lg transition-colors cursor-pointer mb-4"
-        >
-          <Upload size={14} />
-          {showUploader ? "Hide J&T Upload" : "Upload J&T Data"}
-          {showUploader ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-        </button>
-        {showUploader && <JtUploader />}
-      </div>
     </div>
   );
 }
