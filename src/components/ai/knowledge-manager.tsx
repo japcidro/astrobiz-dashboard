@@ -209,7 +209,7 @@ export function KnowledgeManager() {
             />
           </div>
           <span className="text-sm text-gray-300 whitespace-nowrap">
-            {filledCount}/8 documents ready
+            {filledCount}/7 documents ready
           </span>
         </div>
 

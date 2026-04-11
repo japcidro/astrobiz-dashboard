@@ -121,15 +121,15 @@ export default function AiGeneratorPage() {
               : "bg-yellow-900/30 border border-yellow-700/50 text-yellow-300"
           }`}
         >
-          {docsReady === 8 ? (
+          {docsReady >= 7 ? (
             <>
               <CheckCircle size={16} />
-              8/8 docs ready — All knowledge documents are set
+              7/7 docs ready — All knowledge documents are set
             </>
           ) : (
             <>
               <AlertTriangle size={16} />
-              {docsReady}/8 docs ready —{" "}
+              {docsReady}/7 docs ready —{" "}
               <a
                 href="/marketing/ai-settings"
                 className="underline hover:text-yellow-200"

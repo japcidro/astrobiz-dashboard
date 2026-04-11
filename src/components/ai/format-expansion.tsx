@@ -123,7 +123,7 @@ export function FormatExpansion({ storeName, docsReady }: Props) {
     }
   };
 
-  const notReady = docsReady < 8;
+  const notReady = docsReady < 7;
 
   return (
     <div className="space-y-6">
@@ -232,8 +232,8 @@ export function FormatExpansion({ storeName, docsReady }: Props) {
 
         {notReady && (
           <p className="text-xs text-yellow-400 mt-2">
-            All 8 knowledge documents must be filled before generating. Currently{" "}
-            {docsReady}/8 ready.
+            All 7 knowledge documents must be filled before generating. Currently{" "}
+            {docsReady}/7 ready.
           </p>
         )}
       </div>
