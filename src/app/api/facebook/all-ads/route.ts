@@ -8,7 +8,7 @@ const FB_API_BASE = "https://graph.facebook.com/v21.0";
 
 // In-memory cache — survives across requests while server is running
 const cache = new Map<string, { data: unknown; timestamp: number }>();
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
 const INSIGHTS_FIELDS = [
   "account_name",

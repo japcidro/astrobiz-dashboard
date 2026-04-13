@@ -206,7 +206,7 @@ export default function AdsPage() {
     setError(null);
     try {
       const url = `/api/facebook/all-ads?date_preset=${datePreset}&account=${filterAccount}`;
-      const { data: json, timestamp } = await cachedFetch<Record<string, unknown>>(url, { forceRefresh });
+      const { data: json, timestamp } = await cachedFetch<Record<string, unknown>>(url, { forceRefresh, ttl: 10 * 60 * 1000 });
       setAllRows(json.data as typeof allRows);
       if (json.accounts) setAccounts(json.accounts as typeof accounts);
       if (json.role) setRole(json.role as string);
@@ -224,18 +224,6 @@ export default function AdsPage() {
     fetchData();
   }, [fetchData]);
 
-  // Pre-fetch other common date presets in background after initial load
-  useEffect(() => {
-    if (loading || allRows.length === 0) return;
-    const presets = ["today", "yesterday", "last_7d", "this_month", "last_30d"];
-    const otherPresets = presets.filter((p) => p !== datePreset);
-    // Stagger pre-fetches to avoid hammering
-    otherPresets.forEach((preset, i) => {
-      setTimeout(() => {
-        cachedFetch(`/api/facebook/all-ads?date_preset=${preset}&account=${filterAccount}`).catch(() => {});
-      }, (i + 1) * 2000); // 2s, 4s, 6s, 8s
-    });
-  }, [loading, allRows.length, filterAccount]); // only after first successful load
 
   // Reset drill-down when date/account changes
   useEffect(() => {
