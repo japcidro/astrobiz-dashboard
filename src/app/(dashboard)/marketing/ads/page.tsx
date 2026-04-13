@@ -638,13 +638,19 @@ export default function AdsPage() {
           <button
             key={preset.value}
             onClick={() => setDatePreset(preset.value)}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${
+            disabled={loading || updating}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
+              loading || updating ? "cursor-wait" : "cursor-pointer"
+            } ${
               datePreset === preset.value
                 ? "bg-white text-gray-900"
-                : "bg-gray-800 text-gray-400 hover:text-white"
+                : "bg-gray-800 text-gray-400 hover:text-white disabled:opacity-50 disabled:hover:text-gray-400"
             }`}
           >
             {preset.label}
+            {datePreset === preset.value && updating && (
+              <RefreshCw size={10} className="inline ml-1 animate-spin" />
+            )}
           </button>
         ))}
       </div>

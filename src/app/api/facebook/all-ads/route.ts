@@ -8,7 +8,11 @@ const FB_API_BASE = "https://graph.facebook.com/v21.0";
 
 // In-memory cache — survives across requests while server is running
 const cache = new Map<string, { data: unknown; timestamp: number }>();
-const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes for full response
+
+// Separate cache for structure data (campaigns/adsets/ads statuses) — rarely changes
+const structureCache = new Map<string, { data: unknown; timestamp: number }>();
+const STRUCTURE_CACHE_TTL = 30 * 60 * 1000; // 30 minutes for structure
 
 const INSIGHTS_FIELDS = [
   "account_name",
@@ -206,9 +210,25 @@ export async function GET(request: Request) {
       targetAccounts.map(async (account) => {
         accountStatusMap[account.account_id] = account;
 
-        // Fetch statuses and insights in parallel for this account
-        const [campaignsRaw, adsetsRaw, adsRaw, insightsData] =
-          await Promise.all([
+        // Check structure cache for this account (campaigns/adsets/ads don't change per date)
+        const structKey = `structure:${account.id}`;
+        const cachedStruct = structureCache.get(structKey);
+        const hasStructCache = !forceRefresh && cachedStruct && Date.now() - cachedStruct.timestamp < STRUCTURE_CACHE_TTL;
+
+        // Only fetch insights fresh — structure from cache if available
+        type CampaignRaw = { id: string; effective_status: string; daily_budget?: string; lifetime_budget?: string; updated_time?: string };
+        type AdsetRaw = { id: string; effective_status: string; campaign_id: string; daily_budget?: string; lifetime_budget?: string; updated_time?: string; start_time?: string };
+        type AdRaw = { id: string; effective_status: string; adset_id: string; updated_time?: string; creative?: { id: string; effective_object_story_id?: string; thumbnail_url?: string } };
+
+        const [campaignsRaw, adsetsRaw, adsRaw, insightsData] = hasStructCache
+          ? [
+              ...(cachedStruct.data as [CampaignRaw[], AdsetRaw[], AdRaw[]]),
+              await fbFetchAll<Record<string, unknown>>(
+                `/${account.id}/insights`, token,
+                { fields: INSIGHTS_FIELDS, date_preset: datePreset, level: "ad", limit: "500" }
+              ).catch(() => [] as Array<Record<string, unknown>>),
+            ]
+          : await Promise.all([
             fbFetchAll<{
               id: string;
               effective_status: string;
@@ -289,6 +309,14 @@ export async function GET(request: Request) {
               }
             ).catch(() => [] as Array<Record<string, unknown>>),
           ]);
+
+        // Save structure to cache (campaigns/adsets/ads — not insights)
+        if (!hasStructCache) {
+          structureCache.set(structKey, {
+            data: [campaignsRaw, adsetsRaw, adsRaw],
+            timestamp: Date.now(),
+          });
+        }
 
         // Build status maps + budget maps + time maps
         const campaignStatus: Record<string, string> = {};
