@@ -107,19 +107,14 @@ let backgroundTimer: ReturnType<typeof setInterval> | null = null;
 let isRefreshing = false;
 
 // All endpoints to keep warm — staggered to avoid rate limits
+// Only warm Shopify endpoints in background (no rate limit issues)
+// Facebook data is cached on first visit via cachedFetch (10min TTL)
+// and server-side cache (10min) — no need to pre-warm
 const WARM_ENDPOINTS = [
-  // Facebook (heaviest — stagger these)
-  { url: "/api/facebook/all-ads?date_preset=today", delay: 0 },
-  { url: "/api/facebook/all-ads?date_preset=yesterday", delay: 3000 },
-  { url: "/api/facebook/all-ads?date_preset=last_7d", delay: 6000 },
-  { url: "/api/facebook/all-ads?date_preset=this_month", delay: 9000 },
-  { url: "/api/facebook/accounts", delay: 12000 },
-  { url: "/api/facebook/create/pages", delay: 15000 },
-  // Shopify
-  { url: "/api/shopify/orders?date_filter=today&store=ALL", delay: 18000 },
-  { url: "/api/shopify/orders?date_filter=this_month&store=ALL", delay: 21000 },
-  { url: "/api/shopify/inventory?store=ALL", delay: 24000 },
-  { url: "/api/shopify/stores", delay: 27000 },
+  { url: "/api/shopify/orders?date_filter=today&store=ALL", delay: 0 },
+  { url: "/api/shopify/orders?date_filter=this_month&store=ALL", delay: 3000 },
+  { url: "/api/shopify/inventory?store=ALL", delay: 6000 },
+  { url: "/api/shopify/stores", delay: 9000 },
 ];
 
 async function refreshInBackground() {
