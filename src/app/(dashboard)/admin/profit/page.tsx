@@ -34,7 +34,7 @@ const defaultSummary: ProfitSummary = {
 export default function ProfitPage() {
   const [summary, setSummary] = useState<ProfitSummary>(defaultSummary);
   const [daily, setDaily] = useState<DailyPnlRow[]>([]);
-  const [stores, setStores] = useState<{ id: string; name: string }[]>([]);
+  const [stores, setStores] = useState<string[]>([]);
   const [missingCogsSkus, setMissingCogsSkus] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -213,8 +213,8 @@ export default function ProfitPage() {
           >
             <option value="ALL">All Stores</option>
             {stores.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
+              <option key={s} value={s}>
+                {s}
               </option>
             ))}
           </select>
@@ -234,7 +234,7 @@ export default function ProfitPage() {
               {missingCogsSkus.length > 5 ? ` and ${missingCogsSkus.length - 5} more` : ""}
               {" — "}
               <a
-                href="/admin/cogs"
+                href={`/admin/cogs?add_skus=${encodeURIComponent(missingCogsSkus.join(","))}`}
                 className="underline hover:text-yellow-200 transition-colors"
               >
                 Manage COGS
