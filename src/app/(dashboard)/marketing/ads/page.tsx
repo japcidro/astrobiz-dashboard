@@ -194,9 +194,15 @@ export default function AdsPage() {
   const isAdmin = role === "admin";
 
   const [lastRefreshed, setLastRefreshed] = useState<string>("");
+  const [updating, setUpdating] = useState(false); // soft loading (has stale data)
 
   const fetchData = useCallback(async (forceRefresh = false) => {
-    setLoading(true);
+    // If we already have data, show "updating" instead of full loading
+    if (allRows.length > 0) {
+      setUpdating(true);
+    } else {
+      setLoading(true);
+    }
     setError(null);
     try {
       const url = `/api/facebook/all-ads?date_preset=${datePreset}&account=${filterAccount}`;
@@ -210,12 +216,26 @@ export default function AdsPage() {
       setError(e instanceof Error ? e.message : "Failed to load");
     } finally {
       setLoading(false);
+      setUpdating(false);
     }
   }, [datePreset, filterAccount]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Pre-fetch other common date presets in background after initial load
+  useEffect(() => {
+    if (loading || allRows.length === 0) return;
+    const presets = ["today", "yesterday", "last_7d", "this_month", "last_30d"];
+    const otherPresets = presets.filter((p) => p !== datePreset);
+    // Stagger pre-fetches to avoid hammering
+    otherPresets.forEach((preset, i) => {
+      setTimeout(() => {
+        cachedFetch(`/api/facebook/all-ads?date_preset=${preset}&account=${filterAccount}`).catch(() => {});
+      }, (i + 1) * 2000); // 2s, 4s, 6s, 8s
+    });
+  }, [loading, allRows.length, filterAccount]); // only after first successful load
 
   // Reset drill-down when date/account changes
   useEffect(() => {
@@ -566,6 +586,7 @@ export default function AdsPage() {
             Facebook Ads — {accounts.length} ad account
             {accounts.length !== 1 ? "s" : ""}
             {lastRefreshed && <span className="text-gray-600 ml-2">· {lastRefreshed}</span>}
+            {updating && <span className="text-blue-400 ml-2">· Updating...</span>}
           </p>
         </div>
         <div className="flex items-center gap-2">
