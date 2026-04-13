@@ -17,6 +17,37 @@ interface CacheEntry {
 const cache = new Map<string, CacheEntry>();
 
 const DEFAULT_TTL = 5 * 60 * 1000; // 5 minutes
+const STORAGE_KEY = "astrobiz_cache";
+
+// Restore cache from sessionStorage on load
+function restoreCache() {
+  if (typeof window === "undefined") return;
+  try {
+    const stored = sessionStorage.getItem(STORAGE_KEY);
+    if (stored) {
+      const entries: [string, CacheEntry][] = JSON.parse(stored);
+      const now = Date.now();
+      for (const [key, entry] of entries) {
+        // Only restore entries that haven't expired (10 min max)
+        if (now - entry.timestamp < 10 * 60 * 1000) {
+          cache.set(key, entry);
+        }
+      }
+    }
+  } catch {}
+}
+
+// Persist cache to sessionStorage
+function persistCache() {
+  if (typeof window === "undefined") return;
+  try {
+    const entries = Array.from(cache.entries());
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+  } catch {}
+}
+
+// Restore on module load
+restoreCache();
 
 /**
  * Fetch with client-side caching.
@@ -62,6 +93,7 @@ export async function cachedFetch<T = unknown>(
 
   const now = Date.now();
   cache.set(cacheKey, { data: json, timestamp: now, url: cacheKey });
+  persistCache();
 
   return { data: json as T, cached: false, timestamp: now };
 }
@@ -94,6 +126,9 @@ export function formatLastRefreshed(timestamp: number | null): string {
  */
 export function clearCache(): void {
   cache.clear();
+  if (typeof window !== "undefined") {
+    try { sessionStorage.removeItem(STORAGE_KEY); } catch {}
+  }
 }
 
 // ============================================
@@ -143,6 +178,7 @@ async function refreshInBackground() {
     }
   }
 
+  persistCache();
   isRefreshing = false;
 }
 
