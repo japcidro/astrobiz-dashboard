@@ -246,7 +246,7 @@ export default function ProfitPage() {
 
       {/* Summary Cards */}
       <div className="mb-4">
-        <ProfitSummaryCards summary={summary} loading={loading} />
+        <ProfitSummaryCards summary={summary} loading={loading} returnsProjected={daily.some((d) => d.returns_projected)} />
       </div>
 
       {/* Loading */}

@@ -4,9 +4,10 @@ import type { ProfitSummary } from "@/lib/profit/types";
 interface Props {
   summary: ProfitSummary;
   loading: boolean;
+  returnsProjected?: boolean;
 }
 
-export function ProfitSummaryCards({ summary, loading }: Props) {
+export function ProfitSummaryCards({ summary, loading, returnsProjected }: Props) {
   const formatCurrency = (val: number) =>
     `₱${val.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -44,11 +45,13 @@ export function ProfitSummaryCards({ summary, loading }: Props) {
       accent: "border-yellow-700/50",
     },
     {
-      label: "Returns",
+      label: returnsProjected ? "Returns (PROJECTED)" : "Returns (ACTUAL)",
       value: formatCurrency(summary.returns_value),
-      icon: <RotateCcw size={20} className="text-red-400" />,
-      bg: "bg-red-600/20",
-      accent: "",
+      subtitle: returnsProjected ? "25% worst-case" : "From J&T data",
+      subtitleColor: returnsProjected ? "text-yellow-400" : "text-green-400",
+      icon: <RotateCcw size={20} className={returnsProjected ? "text-yellow-400" : "text-red-400"} />,
+      bg: returnsProjected ? "bg-yellow-600/20" : "bg-red-600/20",
+      accent: returnsProjected ? "border-yellow-700/50" : "",
     },
     {
       label: "Net Profit",

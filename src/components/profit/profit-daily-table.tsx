@@ -46,11 +46,13 @@ function renderCell(key: string, row: DailyPnlRow) {
       return formatCurrency(row[key]);
     case "returns_value":
       return row.returns_projected ? (
-        <span className="text-yellow-400" title="Worst-case: 25% RTS rate (under 200 delivered)">
+        <span className="text-yellow-400" title="Projected: 25% worst-case RTS (under 200 delivered)">
           {formatCurrency(row.returns_value)}*
         </span>
       ) : (
-        formatCurrency(row.returns_value)
+        <span title="Actual J&T returns data">
+          {formatCurrency(row.returns_value)}
+        </span>
       );
     case "shipping":
       return (
