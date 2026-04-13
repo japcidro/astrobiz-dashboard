@@ -91,9 +91,14 @@ export async function cachedFetch<T = unknown>(
   const json = await res.json();
   if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`);
 
+  // Don't cache error responses or empty FB data (likely rate limited)
+  const hasError = json.error || (json.data && Array.isArray(json.data) && json.data.length === 0 && json.totals?.count === 0);
+
   const now = Date.now();
-  cache.set(cacheKey, { data: json, timestamp: now, url: cacheKey });
-  persistCache();
+  if (!hasError) {
+    cache.set(cacheKey, { data: json, timestamp: now, url: cacheKey });
+    persistCache();
+  }
 
   return { data: json as T, cached: false, timestamp: now };
 }

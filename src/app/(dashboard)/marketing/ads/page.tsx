@@ -206,12 +206,21 @@ export default function AdsPage() {
     setError(null);
     try {
       const url = `/api/facebook/all-ads?date_preset=${datePreset}&account=${filterAccount}`;
-      const { data: json, timestamp } = await cachedFetch<Record<string, unknown>>(url, { forceRefresh, ttl: 10 * 60 * 1000 });
-      setAllRows(json.data as typeof allRows);
-      if (json.accounts) setAccounts(json.accounts as typeof accounts);
-      if (json.role) setRole(json.role as string);
-      if (json.budgets) setBudgets(json.budgets as typeof budgets);
-      setLastRefreshed(formatLastRefreshed(timestamp));
+      const result = await cachedFetch<Record<string, unknown>>(url, { forceRefresh, ttl: 10 * 60 * 1000 });
+      const json = result.data;
+      const rows = json.data as typeof allRows;
+
+      // If we got 0 ads but already had data, keep the old data (likely a rate limit error)
+      if (rows && rows.length === 0 && allRows.length > 0) {
+        // Don't overwrite good data with empty response — likely rate limited
+        setLastRefreshed(formatLastRefreshed(result.timestamp));
+      } else {
+        setAllRows(rows || []);
+        if (json.accounts) setAccounts(json.accounts as typeof accounts);
+        if (json.role) setRole(json.role as string);
+        if (json.budgets) setBudgets(json.budgets as typeof budgets);
+        setLastRefreshed(formatLastRefreshed(result.timestamp));
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
     } finally {
