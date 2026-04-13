@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getEmployee } from "@/lib/supabase/get-employee";
 import { createClient } from "@/lib/supabase/server";
 import { Sidebar } from "@/components/layout/sidebar";
+import { BackgroundRefresh } from "@/components/layout/background-refresh";
 
 export default async function DashboardLayout({
   children,
@@ -63,6 +64,7 @@ export default async function DashboardLayout({
       <main className="flex-1 overflow-auto">
         <div className="p-6 lg:p-8">{children}</div>
       </main>
+      <BackgroundRefresh />
     </div>
   );
 }
