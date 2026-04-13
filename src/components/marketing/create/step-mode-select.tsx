@@ -63,15 +63,13 @@ export function StepModeSelect({
   useEffect(() => {
     if (!adAccountId || mode === "new") return;
     setLoadingCampaigns(true);
-    fetch(
-      `/api/facebook/all-ads?date_preset=last_30d&account=${adAccountId}`
-    )
-      .then((r) => r.json())
-      .then((json) => {
+    import("@/lib/client-cache").then(({ cachedFetch }) =>
+    cachedFetch<Record<string, unknown>>(`/api/facebook/all-ads?date_preset=last_30d&account=${adAccountId}`, { ttl: 10 * 60 * 1000 })
+      .then(({ data: json }) => {
         if (json.data) {
           // Extract unique campaigns from ad data
           const campaignMap = new Map<string, CampaignInfo>();
-          for (const row of json.data) {
+          for (const row of json.data as Array<Record<string, string>>) {
             if (!campaignMap.has(row.campaign_id)) {
               campaignMap.set(row.campaign_id, {
                 id: row.campaign_id,
@@ -83,21 +81,20 @@ export function StepModeSelect({
           setCampaigns(Array.from(campaignMap.values()));
         }
       })
-      .finally(() => setLoadingCampaigns(false));
+      .finally(() => setLoadingCampaigns(false))
+    );
   }, [adAccountId, mode]);
 
   // Fetch adsets when campaign is selected
   useEffect(() => {
     if (!existingCampaignId || mode !== "existing_adset") return;
     setLoadingAdsets(true);
-    fetch(
-      `/api/facebook/all-ads?date_preset=last_30d&account=${adAccountId}`
-    )
-      .then((r) => r.json())
-      .then((json) => {
+    import("@/lib/client-cache").then(({ cachedFetch }) =>
+    cachedFetch<Record<string, unknown>>(`/api/facebook/all-ads?date_preset=last_30d&account=${adAccountId}`, { ttl: 10 * 60 * 1000 })
+      .then(({ data: json }) => {
         if (json.data) {
           const adsetMap = new Map<string, AdsetInfo>();
-          for (const row of json.data) {
+          for (const row of json.data as Array<Record<string, string>>) {
             if (
               row.campaign_id === existingCampaignId &&
               !adsetMap.has(row.adset_id)
@@ -112,7 +109,8 @@ export function StepModeSelect({
           setAdsets(Array.from(adsetMap.values()));
         }
       })
-      .finally(() => setLoadingAdsets(false));
+      .finally(() => setLoadingAdsets(false))
+    );
   }, [existingCampaignId, adAccountId, mode]);
 
   return (

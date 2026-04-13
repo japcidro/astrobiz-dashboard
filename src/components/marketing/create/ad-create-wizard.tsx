@@ -136,14 +136,14 @@ export function AdCreateWizard() {
   useEffect(() => {
     const init = async () => {
       try {
-        // Fetch accounts (lightweight — no insights/ads data)
-        const accRes = await fetch(`/api/facebook/accounts`);
-        const accJson = await accRes.json();
+        // Fetch accounts (cached 10 min)
+        const { cachedFetch } = await import("@/lib/client-cache");
+        const { data: accJson } = await cachedFetch<Record<string, unknown>>("/api/facebook/accounts", { ttl: 10 * 60 * 1000 });
         if (accJson.error) {
-          setFetchError(accJson.error);
+          setFetchError(accJson.error as string);
           return;
         }
-        if (accJson.accounts) setAccounts(accJson.accounts);
+        if (accJson.accounts) setAccounts(accJson.accounts as typeof accounts);
 
         // Load draft if param exists
         if (draftParam) {

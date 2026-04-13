@@ -186,15 +186,15 @@ export function BulkCreateWizard() {
   useEffect(() => {
     const init = async () => {
       try {
-        const res = await fetch("/api/facebook/accounts");
-        const json = await res.json();
+        const { cachedFetch } = await import("@/lib/client-cache");
+        const { data: json } = await cachedFetch<Record<string, unknown>>("/api/facebook/accounts", { ttl: 10 * 60 * 1000 });
         if (json.error) {
-          setFetchError(json.error);
+          setFetchError(json.error as string);
           return;
         }
         if (json.accounts) {
-          setAccounts(json.accounts);
-          const firstActive = json.accounts.find(
+          setAccounts(json.accounts as AccountInfo[]);
+          const firstActive = (json.accounts as AccountInfo[]).find(
             (a: AccountInfo) => a.is_active
           );
           if (firstActive) setAdAccountId(firstActive.id);
@@ -215,14 +215,12 @@ export function BulkCreateWizard() {
     setCampaigns([]);
     setExistingCampaignId(null);
 
-    fetch(
-      `/api/facebook/all-ads?date_preset=last_30d&account=${adAccountId}`
-    )
-      .then((r) => r.json())
-      .then((json) => {
+    import("@/lib/client-cache").then(({ cachedFetch }) =>
+    cachedFetch<Record<string, unknown>>(`/api/facebook/all-ads?date_preset=last_30d&account=${adAccountId}`, { ttl: 10 * 60 * 1000 })
+      .then(({ data: json }) => {
         if (json.data) {
           const campaignMap = new Map<string, CampaignInfo>();
-          for (const row of json.data) {
+          for (const row of json.data as Array<Record<string, string>>) {
             if (!campaignMap.has(row.campaign_id)) {
               campaignMap.set(row.campaign_id, {
                 id: row.campaign_id,
@@ -234,7 +232,8 @@ export function BulkCreateWizard() {
           setCampaigns(Array.from(campaignMap.values()));
         }
       })
-      .finally(() => setLoadingCampaigns(false));
+      .finally(() => setLoadingCampaigns(false))
+    );
   }, [adAccountId, mode]);
 
   // ─── Row handlers ───

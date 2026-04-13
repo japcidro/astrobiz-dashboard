@@ -20,21 +20,23 @@ export function PageSelector({ selectedPageId, onChange }: PageSelectorProps) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/facebook/create/pages")
-      .then((r) => r.json())
-      .then((json) => {
+    import("@/lib/client-cache").then(({ cachedFetch }) =>
+    cachedFetch<Record<string, unknown>>("/api/facebook/create/pages", { ttl: 10 * 60 * 1000 })
+      .then(({ data: json }) => {
         if (json.error) {
-          setError(json.error);
+          setError(json.error as string);
         } else if (json.data) {
-          setPages(json.data);
+          setPages(json.data as PageInfo[]);
           // Auto-select first page if none selected
-          if (!selectedPageId && json.data.length > 0) {
-            onChange(json.data[0].id, json.data[0].name);
+          const pages = json.data as PageInfo[];
+          if (!selectedPageId && pages.length > 0) {
+            onChange(pages[0].id, pages[0].name);
           }
         }
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false))
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

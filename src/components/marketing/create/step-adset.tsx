@@ -73,17 +73,18 @@ export function StepAdset({ data, adAccountId, pageName, onUpdate }: StepAdsetPr
   useEffect(() => {
     if (!adAccountId) return;
     setLoadingPixels(true);
-    fetch(`/api/facebook/create/pixels?account_id=${adAccountId}`)
-      .then((r) => r.json())
-      .then((json) => {
+    import("@/lib/client-cache").then(({ cachedFetch }) =>
+    cachedFetch<Record<string, unknown>>(`/api/facebook/create/pixels?account_id=${adAccountId}`, { ttl: 10 * 60 * 1000 })
+      .then(({ data: json }) => {
         if (json.data) {
-          setPixels(json.data);
+          const pixelList = json.data as PixelInfo[];
+          setPixels(pixelList);
           // Auto-select pixel: match by page name, fallback to first
-          if (!data.promoted_object.pixel_id && json.data.length > 0) {
-            let bestPixel = json.data[0];
+          if (!data.promoted_object.pixel_id && pixelList.length > 0) {
+            let bestPixel = pixelList[0];
             if (pageName) {
               const pageWords = pageName.toLowerCase().split(/\s+/);
-              const match = json.data.find((p: PixelInfo) => {
+              const match = pixelList.find((p: PixelInfo) => {
                 const pixelName = p.name.toLowerCase();
                 return pageWords.some((word: string) => word.length > 2 && pixelName.includes(word));
               });
@@ -98,7 +99,8 @@ export function StepAdset({ data, adAccountId, pageName, onUpdate }: StepAdsetPr
           }
         }
       })
-      .finally(() => setLoadingPixels(false));
+      .finally(() => setLoadingPixels(false))
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adAccountId]);
 
