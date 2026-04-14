@@ -1,6 +1,14 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
 import { matchAdToStore } from "@/lib/profit/store-matching";
+import {
+  calculateNetProfit,
+  calculateMarginPct,
+  roundCurrency,
+  SHIPPING_RATE,
+  RTS_WORST_CASE_RATE,
+  RTS_MIN_DELIVERED,
+} from "@/lib/profit/formulas";
 import type { DailyPnlRow, ProfitSummary, ProfitDateFilter } from "@/lib/profit/types";
 
 export const dynamic = "force-dynamic";
@@ -469,9 +477,10 @@ export async function GET(request: Request) {
           );
         }
         if (row.is_returned) {
+          // Returns cost = wasted shipping only (product comes back, can resell)
           returnsByDateStore.set(
             key,
-            (returnsByDateStore.get(key) || 0) + (parseFloat(row.item_value) || 0)
+            (returnsByDateStore.get(key) || 0) + (parseFloat(row.shipping_cost) || 0)
           );
         }
       }
@@ -483,8 +492,6 @@ export async function GET(request: Request) {
 
   // --- 5b. RTS worst-case rule: assume 25% RTS until 200+ delivered parcels per store ---
   // Fetch total delivered count per store (ALL TIME, not just date range)
-  const rtsMinRate = 0.25; // 25% worst case
-  const rtsMinDelivered = 200; // threshold to use actual rate
   const returnsProjectedDates = new Set<string>();
 
   try {
@@ -510,7 +517,7 @@ export async function GET(request: Request) {
 
       for (const store of allStoresInData) {
         const delivered = storeDelivered.get(store) || 0;
-        if (delivered < rtsMinDelivered) {
+        if (delivered < RTS_MIN_DELIVERED) {
           // Calculate what 25% RTS would look like for this store in the date range
           // Sum revenue for this store in the date range
           let storeRevenue = 0;
@@ -518,7 +525,7 @@ export async function GET(request: Request) {
             if (key.endsWith(`::${store}`)) storeRevenue += value;
           }
 
-          const worstCaseReturns = storeRevenue * rtsMinRate;
+          const worstCaseReturns = storeRevenue * RTS_WORST_CASE_RATE;
 
           // Sum actual returns for this store in date range
           let actualReturns = 0;
@@ -548,7 +555,7 @@ export async function GET(request: Request) {
                 returnsProjectedDates.add(dateStr);
               }
             }
-            warnings.push(`${store}: Using 25% worst-case RTS (${delivered}/${rtsMinDelivered} delivered)`);
+            warnings.push(`${store}: Using 25% worst-case RTS (${delivered}/${RTS_MIN_DELIVERED} delivered)`);
           }
         }
       }
@@ -633,11 +640,9 @@ export async function GET(request: Request) {
   }
 
   // --- 6b. Shipping: always use 12% of revenue as projected estimate ---
-  const SF_RATE = 0.12;
-
   for (const [, row] of dailyMap) {
     if (row.revenue > 0) {
-      row.shipping = row.revenue * SF_RATE;
+      row.shipping = row.revenue * SHIPPING_RATE;
     }
   }
 
@@ -646,20 +651,20 @@ export async function GET(request: Request) {
   for (const [date, row] of dailyMap) {
     const shippingProjected = true; // always projected (12% of revenue)
     const returnsProjected = returnsProjectedDates.has(date);
-    const netProfit =
-      row.revenue - row.cogs - row.ad_spend - row.shipping - row.returns_value;
-    const marginPct =
-      row.revenue > 0 ? Math.round((netProfit / row.revenue) * 10000) / 100 : 0;
+    const netProfit = calculateNetProfit(
+      row.revenue, row.cogs, row.ad_spend, row.shipping, row.returns_value
+    );
+    const marginPct = calculateMarginPct(netProfit, row.revenue);
 
     daily.push({
       date,
-      revenue: Math.round(row.revenue * 100) / 100,
+      revenue: roundCurrency(row.revenue),
       order_count: row.order_count,
-      cogs: Math.round(row.cogs * 100) / 100,
-      ad_spend: Math.round(row.ad_spend * 100) / 100,
-      shipping: Math.round(row.shipping * 100) / 100,
-      returns_value: Math.round(row.returns_value * 100) / 100,
-      net_profit: Math.round(netProfit * 100) / 100,
+      cogs: roundCurrency(row.cogs),
+      ad_spend: roundCurrency(row.ad_spend),
+      shipping: roundCurrency(row.shipping),
+      returns_value: roundCurrency(row.returns_value),
+      net_profit: roundCurrency(netProfit),
       margin_pct: marginPct,
       shipping_projected: shippingProjected,
       returns_projected: returnsProjected,
@@ -690,24 +695,18 @@ export async function GET(request: Request) {
     summary.returns_value += row.returns_value;
   }
 
-  summary.net_profit =
-    summary.revenue -
-    summary.cogs -
-    summary.ad_spend -
-    summary.shipping -
-    summary.returns_value;
-  summary.margin_pct =
-    summary.revenue > 0
-      ? Math.round((summary.net_profit / summary.revenue) * 10000) / 100
-      : 0;
+  summary.net_profit = calculateNetProfit(
+    summary.revenue, summary.cogs, summary.ad_spend, summary.shipping, summary.returns_value
+  );
+  summary.margin_pct = calculateMarginPct(summary.net_profit, summary.revenue);
 
   // Round summary values
-  summary.revenue = Math.round(summary.revenue * 100) / 100;
-  summary.cogs = Math.round(summary.cogs * 100) / 100;
-  summary.ad_spend = Math.round(summary.ad_spend * 100) / 100;
-  summary.shipping = Math.round(summary.shipping * 100) / 100;
-  summary.returns_value = Math.round(summary.returns_value * 100) / 100;
-  summary.net_profit = Math.round(summary.net_profit * 100) / 100;
+  summary.revenue = roundCurrency(summary.revenue);
+  summary.cogs = roundCurrency(summary.cogs);
+  summary.ad_spend = roundCurrency(summary.ad_spend);
+  summary.shipping = roundCurrency(summary.shipping);
+  summary.returns_value = roundCurrency(summary.returns_value);
+  summary.net_profit = roundCurrency(summary.net_profit);
 
   const responseData = {
     summary,
