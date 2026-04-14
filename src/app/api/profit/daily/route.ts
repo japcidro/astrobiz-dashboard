@@ -295,14 +295,14 @@ export async function GET(request: Request) {
   const targetStores =
     storeFilter === "ALL"
       ? storesData
-      : storesData.filter((s) => s.name === storeFilter);
+      : storesData.filter((s) => s.name.toUpperCase() === storeFilter.toUpperCase());
 
   // --- 2. Fetch COGS lookup ---
   const { data: cogsData } = await supabase.from("cogs_items").select("store_name, sku, cogs_per_unit");
 
   const cogsMap = new Map<string, number>();
   for (const item of cogsData || []) {
-    const key = `${item.store_name}::${(item.sku || "").toLowerCase()}`;
+    const key = `${(item.store_name || "").toUpperCase()}::${(item.sku || "").toLowerCase()}`;
     cogsMap.set(key, item.cogs_per_unit);
   }
 
@@ -333,7 +333,8 @@ export async function GET(request: Request) {
             continue;
 
           const dateStr = toPhtDateStr(order.created_at);
-          const key = `${dateStr}::${store.name}`;
+          const normalizedStore = store.name.toUpperCase();
+          const key = `${dateStr}::${normalizedStore}`;
 
           // Revenue
           const price = parseFloat(order.total_price) || 0;
@@ -344,7 +345,7 @@ export async function GET(request: Request) {
           for (const li of order.line_items || []) {
             const sku = (li.sku || "").toLowerCase();
             if (!sku) continue;
-            const cogsKey = `${store.name}::${sku}`;
+            const cogsKey = `${normalizedStore}::${sku}`;
             const cogsPerUnit = cogsMap.get(cogsKey);
             if (cogsPerUnit != null) {
               cogsByDateStore.set(
@@ -352,7 +353,7 @@ export async function GET(request: Request) {
                 (cogsByDateStore.get(key) || 0) + cogsPerUnit * li.quantity
               );
             } else {
-              missingCogsSkus.add(`${store.name}::${li.sku}`);
+              missingCogsSkus.add(`${normalizedStore}::${li.sku}`);
             }
           }
         }
@@ -416,8 +417,8 @@ export async function GET(request: Request) {
                 row.adset_name || ""
               );
 
-              // If store filter is active and this ad doesn't match, skip
-              if (storeFilter !== "ALL" && storeName !== storeFilter) continue;
+              // If store filter is active and this ad doesn't match, skip (case-insensitive)
+              if (storeFilter !== "ALL" && storeName.toUpperCase() !== storeFilter.toUpperCase()) continue;
 
               const key = storeName
                 ? `${dateStr}::${storeName}`
@@ -455,7 +456,7 @@ export async function GET(request: Request) {
       .lte("submission_date", endDate);
 
     if (storeFilter !== "ALL") {
-      jtQuery = jtQuery.eq("store_name", storeFilter);
+      jtQuery = jtQuery.ilike("store_name", storeFilter);
     }
 
     const { data: jtData, error: jtError } = await jtQuery;
@@ -468,7 +469,7 @@ export async function GET(request: Request) {
         const d = new Date(row.submission_date);
         if (isNaN(d.getTime())) continue;
         const dateStr = d.toISOString().split("T")[0];
-        const key = `${dateStr}::${row.store_name || "UNKNOWN"}`;
+        const key = `${dateStr}::${(row.store_name || "UNKNOWN").toUpperCase()}`;
 
         if (row.is_delivered) {
           shippingByDateStore.set(
@@ -507,7 +508,7 @@ export async function GET(request: Request) {
       // Count delivered per store
       const storeDelivered = new Map<string, number>();
       for (const row of deliveredCounts) {
-        const store = row.store_name || "UNKNOWN";
+        const store = (row.store_name || "UNKNOWN").toUpperCase();
         storeDelivered.set(store, (storeDelivered.get(store) || 0) + 1);
       }
 
