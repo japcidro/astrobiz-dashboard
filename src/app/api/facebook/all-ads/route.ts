@@ -192,6 +192,8 @@ export async function GET(request: Request) {
       roas: number;
       add_to_cart: number;
       purchases: number;
+      landing_page_views: number;
+      cost_per_lpv: number;
       reach: number;
       impressions: number;
       ctr: number;
