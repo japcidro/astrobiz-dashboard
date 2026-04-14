@@ -595,8 +595,8 @@ export function BulkCreateWizard() {
           />
         </Section>
 
-        {/* ─── Submit (sticky at bottom) ─── */}
-        <div className="sticky bottom-0 z-10 bg-gray-900 border-t border-gray-700 -mx-6 px-6 py-4 mt-6">
+        {/* ─── Section D: Submit ─── */}
+        <div className="bg-gray-800/30 border border-gray-700/50 rounded-xl p-6 mt-6">
           <div className="flex items-center gap-4">
             <button
               disabled={!canSubmit}
