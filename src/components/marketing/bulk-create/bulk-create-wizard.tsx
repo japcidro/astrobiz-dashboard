@@ -288,6 +288,7 @@ export function BulkCreateWizard() {
   if (!allRowsHaveAdName) missingItems.push("Enter ad name for every row");
   if (!allRowsHaveCreatives) missingItems.push("Upload creative for every row");
   if (!allRowsHaveCopy) missingItems.push("Enter primary text, headline, and description for every row");
+  if (!adset.name?.trim()) missingItems.push("Enter adset name prefix in Section B");
 
   const canSubmit =
     !!adAccountId &&
@@ -298,7 +299,7 @@ export function BulkCreateWizard() {
     allRowsHaveAdName &&
     allRowsHaveCopy &&
     (mode === "new" ? !!campaign.name : !!existingCampaignId) &&
-    !!adset.name;
+    !!adset.name?.trim();
 
   // ─── Loading / Error ───
   if (loading) {
@@ -594,8 +595,8 @@ export function BulkCreateWizard() {
           />
         </Section>
 
-        {/* ─── Section D: Submit ─── */}
-        <Section title="D. Submit">
+        {/* ─── Submit (sticky at bottom) ─── */}
+        <div className="sticky bottom-0 z-10 bg-gray-900 border-t border-gray-700 -mx-6 px-6 py-4 mt-6">
           <div className="flex items-center gap-4">
             <button
               disabled={!canSubmit}
@@ -606,21 +607,27 @@ export function BulkCreateWizard() {
                   : "bg-gray-700 text-gray-500 cursor-not-allowed"
               }`}
             >
-              Submit All to Facebook
+              Submit All to Facebook ({rows.length} ads)
             </button>
-            {!canSubmit && missingItems.length > 0 && (
-              <div className="text-xs space-y-1">
-                <p className="text-gray-500 font-medium">Missing:</p>
-                {missingItems.map((item) => (
-                  <p key={item} className="text-red-400 flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
-                    {item}
-                  </p>
-                ))}
+            {!canSubmit && (
+              <div className="text-xs space-y-0.5">
+                {missingItems.length > 0 ? (
+                  missingItems.map((item) => (
+                    <p key={item} className="text-red-400 flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
+                      {item}
+                    </p>
+                  ))
+                ) : (
+                  <p className="text-yellow-400">Checking requirements...</p>
+                )}
               </div>
             )}
+            {canSubmit && (
+              <p className="text-green-400 text-xs">Ready to submit {rows.length} ads</p>
+            )}
           </div>
-        </Section>
+        </div>
       </div>
 
       {/* Submission overlay */}
