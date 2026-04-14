@@ -477,10 +477,12 @@ export async function GET(request: Request) {
           );
         }
         if (row.is_returned) {
-          // Returns cost = wasted shipping only (product comes back, can resell)
+          // Returns cost = lost SRP (customer didn't pay) + wasted shipping
+          const itemValue = parseFloat(row.item_value) || 0;
+          const shipCost = parseFloat(row.shipping_cost) || 0;
           returnsByDateStore.set(
             key,
-            (returnsByDateStore.get(key) || 0) + (parseFloat(row.shipping_cost) || 0)
+            (returnsByDateStore.get(key) || 0) + itemValue + shipCost
           );
         }
       }
