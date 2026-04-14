@@ -157,6 +157,7 @@ const METRIC_COLS: { key: string; label: string }[] = [
   { key: "roas", label: "ROAS" },
   { key: "add_to_cart", label: "ATC" },
   { key: "link_clicks", label: "Clicks" },
+  { key: "cost_per_lpv", label: "Cost/LPV" },
   { key: "reach", label: "Reach" },
   { key: "impressions", label: "Impressions" },
   { key: "ctr", label: "CTR" },
@@ -420,6 +421,7 @@ export default function AdsPage() {
     switch (key) {
       case "spend":
       case "cpa":
+      case "cost_per_lpv":
         return fmt(v);
       case "roas":
         return `${v.toFixed(2)}x`;

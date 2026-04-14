@@ -406,9 +406,11 @@ export async function GET(request: Request) {
             getAction(actions, "add_to_cart") ||
             getAction(actions, "offsite_conversion.fb_pixel_add_to_cart");
           const linkClicks = getAction(actions, "link_click");
+          const landingPageViews = getAction(actions, "landing_page_view");
           const cpa =
             getAction(costPerAction, "purchase") ||
             getAction(costPerAction, "offsite_conversion.fb_pixel_purchase");
+          const costPerLpv = landingPageViews > 0 ? spend / landingPageViews : 0;
           const roas = spend > 0 ? purchaseValue / spend : 0;
 
           const adId = row.ad_id as string;
@@ -429,6 +431,8 @@ export async function GET(request: Request) {
             roas,
             add_to_cart: addToCart,
             purchases,
+            landing_page_views: landingPageViews,
+            cost_per_lpv: Math.round(costPerLpv * 100) / 100,
             reach: parseInt((row.reach as string) || "0"),
             impressions: parseInt((row.impressions as string) || "0"),
             ctr: parseFloat((row.ctr as string) || "0"),
