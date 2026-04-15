@@ -137,6 +137,18 @@ const navEntries: NavEntry[] = [
         icon: <FileText size={18} />,
         roles: ["admin", "fulfillment"],
       },
+      {
+        label: "Bin Locations",
+        href: "/fulfillment/pick-pack/bins",
+        icon: <Package size={18} />,
+        roles: ["admin", "fulfillment"],
+      },
+      {
+        label: "Audit Trail",
+        href: "/fulfillment/pick-pack/audit",
+        icon: <FileText size={18} />,
+        roles: ["admin"],
+      },
     ],
   },
   {

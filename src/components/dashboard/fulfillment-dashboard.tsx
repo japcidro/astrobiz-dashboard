@@ -11,6 +11,7 @@ import {
   CheckCircle,
   Timer,
   Boxes,
+  ClipboardList,
 } from "lucide-react";
 import { StatCard } from "./stat-card";
 import { ActionItem } from "./action-item";
@@ -28,6 +29,11 @@ interface InventorySummary {
   total_products: number;
 }
 
+interface UnfulfilledOrder {
+  order_number: string;
+  age_days: number;
+}
+
 export function FulfillmentDashboard({
   employeeName,
   hoursToday,
@@ -35,14 +41,24 @@ export function FulfillmentDashboard({
 }: Props) {
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<InventorySummary | null>(null);
+  const [fulfillmentLoading, setFulfillmentLoading] = useState(true);
+  const [unfulfilledOrders, setUnfulfilledOrders] = useState<UnfulfilledOrder[]>([]);
 
   useEffect(() => {
-    import("@/lib/client-cache").then(({ cachedFetch }) =>
+    import("@/lib/client-cache").then(({ cachedFetch }) => {
       cachedFetch("/api/shopify/inventory?store=ALL")
         .then(({ data }) => setSummary((data as Record<string, unknown>)?.summary as typeof summary ?? null))
         .catch(() => setSummary(null))
-        .finally(() => setLoading(false))
-    );
+        .finally(() => setLoading(false));
+
+      cachedFetch("/api/shopify/fulfillment")
+        .then(({ data }) => {
+          const orders = (data as Record<string, unknown>)?.orders as UnfulfilledOrder[] ?? [];
+          setUnfulfilledOrders(orders);
+        })
+        .catch(() => setUnfulfilledOrders([]))
+        .finally(() => setFulfillmentLoading(false));
+    });
   }, []);
 
   return (
@@ -110,6 +126,39 @@ export function FulfillmentDashboard({
         </div>
       </div>
 
+      {/* Fulfillment Queue */}
+      <div className="mb-8">
+        <h2 className="text-lg font-semibold text-white mb-4">
+          Fulfillment Queue
+        </h2>
+        <div className="grid grid-cols-2 gap-4">
+          <StatCard
+            label="Unfulfilled Orders"
+            value={String(unfulfilledOrders.length)}
+            icon={<Package size={16} />}
+            iconBg="bg-orange-500/20 text-orange-400"
+            accentBorder="border-orange-500/30"
+            loading={fulfillmentLoading}
+          />
+          <StatCard
+            label="Aging (3+ days)"
+            value={String(unfulfilledOrders.filter((o) => o.age_days >= 3).length)}
+            icon={<AlertTriangle size={16} />}
+            iconBg={
+              unfulfilledOrders.filter((o) => o.age_days >= 3).length > 0
+                ? "bg-red-500/20 text-red-400"
+                : "bg-gray-500/20 text-gray-400"
+            }
+            accentBorder={
+              unfulfilledOrders.filter((o) => o.age_days >= 3).length > 0
+                ? "border-red-500/30"
+                : "border-gray-700/50"
+            }
+            loading={fulfillmentLoading}
+          />
+        </div>
+      </div>
+
       {/* Needs Attention */}
       <div className="mb-8">
         <h2 className="text-lg font-semibold text-white mb-4">
@@ -129,6 +178,20 @@ export function FulfillmentDashboard({
             href="/fulfillment/inventory"
             severity="warning"
             icon={<AlertTriangle size={16} />}
+          />
+          <ActionItem
+            label="Unfulfilled orders waiting"
+            count={unfulfilledOrders.length}
+            href="/fulfillment/pick-pack"
+            severity="warning"
+            icon={<Package size={16} />}
+          />
+          <ActionItem
+            label="Orders aging 3+ days"
+            count={unfulfilledOrders.filter((o) => o.age_days >= 3).length}
+            href="/fulfillment/pick-pack"
+            severity="danger"
+            icon={<Clock size={16} />}
           />
         </div>
       </div>
@@ -150,6 +213,13 @@ export function FulfillmentDashboard({
           >
             <Boxes size={20} className="text-green-400" />
             <span className="text-sm text-gray-300">Inventory</span>
+          </Link>
+          <Link
+            href="/fulfillment/pick-pack"
+            className="flex items-center gap-3 p-4 bg-gray-700/30 rounded-lg hover:bg-gray-700/50 transition-colors"
+          >
+            <ClipboardList size={20} className="text-orange-400" />
+            <span className="text-sm text-gray-300">Pick &amp; Pack</span>
           </Link>
         </div>
       </div>

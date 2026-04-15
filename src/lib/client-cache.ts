@@ -155,6 +155,7 @@ const WARM_ENDPOINTS = [
   { url: "/api/shopify/orders?date_filter=this_month&store=ALL", delay: 3000 },
   { url: "/api/shopify/inventory?store=ALL", delay: 6000 },
   { url: "/api/shopify/stores", delay: 9000 },
+  { url: "/api/shopify/fulfillment", delay: 12000 },
 ];
 
 async function refreshInBackground() {
