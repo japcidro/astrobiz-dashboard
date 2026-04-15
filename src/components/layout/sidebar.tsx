@@ -23,6 +23,7 @@ import {
   ChevronDown,
   ChevronRight,
   BarChart3,
+  CheckCircle,
 } from "lucide-react";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -129,6 +130,12 @@ const navEntries: NavEntry[] = [
         label: "Pick & Pack",
         href: "/fulfillment/pick-pack",
         icon: <Layers size={18} />,
+        roles: ["admin", "fulfillment"],
+      },
+      {
+        label: "Verify & Fulfill",
+        href: "/fulfillment/pick-pack/verify",
+        icon: <CheckCircle size={18} />,
         roles: ["admin", "fulfillment"],
       },
       {
