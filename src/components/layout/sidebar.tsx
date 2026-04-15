@@ -102,8 +102,8 @@ const navEntries: NavEntry[] = [
     ],
   },
   {
-    label: "Orders & Inventory",
-    icon: <Package size={20} />,
+    label: "Orders",
+    icon: <Truck size={20} />,
     roles: ["admin", "va", "fulfillment"],
     children: [
       {
@@ -112,23 +112,29 @@ const navEntries: NavEntry[] = [
         icon: <Truck size={18} />,
         roles: ["admin", "va", "fulfillment"],
       },
+    ],
+  },
+  {
+    label: "Fulfillment",
+    icon: <Package size={20} />,
+    roles: ["admin", "fulfillment"],
+    children: [
       {
         label: "Inventory",
         href: "/fulfillment/inventory",
         icon: <Package size={18} />,
         roles: ["admin", "fulfillment"],
-        section: "Fulfillment",
       },
       {
         label: "Pick & Pack",
         href: "/fulfillment/pick-pack",
-        icon: <Package size={18} />,
+        icon: <Layers size={18} />,
         roles: ["admin", "fulfillment"],
       },
       {
         label: "Stock Management",
         href: "/fulfillment/pick-pack/stock",
-        icon: <Layers size={18} />,
+        icon: <Package size={18} />,
         roles: ["admin", "fulfillment"],
       },
       {
