@@ -320,6 +320,7 @@ export default function BarcodesPage() {
           </div>
 
           <div
+            id="label-print-area"
             className="grid gap-2 print:gap-0"
             style={{
               gridTemplateColumns: `repeat(auto-fill, minmax(${SIZE_STYLES[labelSize].width}, 1fr))`,
@@ -328,7 +329,7 @@ export default function BarcodesPage() {
             {labels.map((label) => (
               <div
                 key={label.sku}
-                className="bg-white rounded-lg p-2 flex flex-col items-center justify-center print:rounded-none print:border print:border-gray-300"
+                className="barcode-label bg-white rounded-lg p-2 flex flex-col items-center justify-center"
                 style={{
                   width: SIZE_STYLES[labelSize].width,
                   height: SIZE_STYLES[labelSize].height,
@@ -353,29 +354,56 @@ export default function BarcodesPage() {
         </div>
       )}
 
-      {/* Print styles */}
+      {/* Print styles — exact 30x20mm labels */}
       <style jsx global>{`
         @media print {
-          body {
-            background: white !important;
-            color: black !important;
+          @page {
+            size: 30mm 20mm;
+            margin: 0;
+          }
+          html, body {
             margin: 0 !important;
             padding: 0 !important;
+            background: white !important;
+            color: black !important;
+            width: 30mm;
+            height: 20mm;
           }
-          .print\\:hidden {
+          /* Hide everything except labels */
+          body > * {
             display: none !important;
           }
-          .print\\:gap-0 {
-            gap: 0 !important;
+          #label-print-area {
+            display: block !important;
           }
-          .print\\:rounded-none {
-            border-radius: 0 !important;
+          .print\\:hidden, nav, aside, header, footer, h1, h2, p {
+            display: none !important;
           }
-          .print\\:border {
-            border-width: 1px !important;
+          /* Each label is one page */
+          .barcode-label {
+            display: block !important;
+            width: 30mm !important;
+            height: 20mm !important;
+            page-break-after: always;
+            padding: 1mm !important;
+            margin: 0 !important;
+            border: none !important;
+            box-sizing: border-box;
+            overflow: hidden;
           }
-          .print\\:border-gray-300 {
-            border-color: #d1d5db !important;
+          .barcode-label:last-child {
+            page-break-after: auto;
+          }
+          .barcode-label img {
+            max-width: 28mm !important;
+            height: auto !important;
+            max-height: 12mm !important;
+          }
+          .barcode-label p {
+            display: block !important;
+            font-size: 6pt !important;
+            margin: 0 !important;
+            line-height: 1.1 !important;
           }
         }
       `}</style>
