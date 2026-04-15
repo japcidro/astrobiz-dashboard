@@ -9,7 +9,7 @@ import { OrdersQueue } from "@/components/fulfillment/orders-queue";
 export default function PickPackPage() {
   const router = useRouter();
   const [orders, setOrders] = useState<UnfulfilledOrder[]>([]);
-  const [stores, setStores] = useState<{ id: string; name: string }[]>([]);
+  const [stores, setStores] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [storeFilter, setStoreFilter] = useState("ALL");
@@ -43,7 +43,7 @@ export default function PickPackPage() {
 
   const filtered = useMemo(() => {
     if (storeFilter === "ALL") return orders;
-    return orders.filter((o) => o.store_id === storeFilter);
+    return orders.filter((o) => o.store_name === storeFilter);
   }, [orders, storeFilter]);
 
   function handleGeneratePickList(orderIds: number[]) {
@@ -87,8 +87,8 @@ export default function PickPackPage() {
         >
           <option value="ALL">All Stores</option>
           {stores.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
+            <option key={s} value={s}>
+              {s}
             </option>
           ))}
         </select>
