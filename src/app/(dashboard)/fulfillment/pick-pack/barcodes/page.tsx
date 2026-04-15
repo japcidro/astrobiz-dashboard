@@ -267,7 +267,7 @@ export default function BarcodesPage() {
                       {product.product_title}
                     </td>
                     <td className="px-4 py-3 text-gray-400 whitespace-nowrap">
-                      {product.variant_title || "---"}
+                      {product.variant_title && product.variant_title !== "Default" && product.variant_title !== "Default Title" ? product.variant_title : "---"}
                     </td>
                     <td className="px-4 py-3 text-white font-mono whitespace-nowrap">
                       {product.sku}
@@ -342,7 +342,7 @@ export default function BarcodesPage() {
                 <p className="text-[8px] text-gray-700 text-center leading-tight mt-1 truncate w-full">
                   {label.product_title}
                 </p>
-                {label.variant_title && (
+                {label.variant_title && label.variant_title !== "Default" && label.variant_title !== "Default Title" && (
                   <p className="text-[7px] text-gray-500 text-center leading-tight truncate w-full">
                     {label.variant_title}
                   </p>
