@@ -1,115 +1,188 @@
 # Astrobiz Dashboard — Changelog
 
-## 2026-04-10: Major Feature Release
+## 2026-04-15: Pick-Pack-Verify Fulfillment Module
 
-### Net Profit / Daily P&L (CEO Only)
-- **Net Profit page** (`/admin/profit`) — full P&L dashboard
-  - Formula: `Net Profit = Revenue - COGS - Ad Spend - Shipping - Returns`
-  - 6 summary cards: Revenue, COGS, Ad Spend, Shipping, Returns, Net Profit
-  - Daily P&L table with totals row, margin %, green/red profit coloring
-  - Date filters: Today, Yesterday, Last 7/30/90 Days, This Month, Custom
-  - Store filter: ALL or per-store
-  - 25% worst-case RTS rule until store reaches 200+ delivered parcels
-  - Missing COGS warning with link to COGS page
-- **COGS Management** (`/admin/cogs`) — cost of goods per SKU
-  - CSV/XLSX file upload for bulk import
-  - "Scan from Shopify" to auto-populate SKUs
-  - Inline editing per row
-- **J&T Dashboard** (`/admin/jt-dashboard`) — delivery tracking
-  - Upload J&T Express .xlsx reports
-  - 7 summary cards: Total, Delivered, In Transit, For Return, Returned, Aged, COD
-  - Store breakdown table with delivery rate %
-  - RTS table: all returned/aging parcels sorted by urgency
-  - Province tier cutoffs: Luzon 5d, VisMin 8d
-  - Sender name normalization (ILOVEPATCHES → I LOVE PATCHES)
-- **Database**: `cogs_items` + `jt_deliveries` tables with RLS
-- **Sidebar**: Collapsible P&L group (Net Profit, COGS, J&T Dashboard)
+### Pick & Pack System
+- **Pick & Pack** (`/fulfillment/pick-pack`) — orders queue showing fulfilled orders with waybills that haven't been packed yet
+  - Stock availability check per order: ✅ In Stock, ❌ OOS, ⚠ Low
+  - Store filter dropdown
+  - Bulk select → Generate Pick List
+  - Orders disappear from queue after pack verification
+- **Pick List** (`/fulfillment/pick-pack/pick-list`) — consolidated pick list
+  - Groups items by SKU across multiple orders
+  - Scan-to-pick with progress tracking
+  - Bin location display (from bin_locations table)
+  - Print-friendly layout
+- **Verify & Fulfill** (`/fulfillment/pick-pack/verify`) — pack verification
+  - Scan waybill → shows order items
+  - Scan each item → green/red full-screen feedback with audio
+  - Wrong item = BIG RED screen + error buzz
+  - Cannot confirm until 100% items matched
+  - Logs to pack_verifications table (no double-fulfill — BigSeller handles Shopify fulfillment)
+- **Barcodes** (`/fulfillment/pick-pack/barcodes`) — Code 128 barcode label generator
+  - Select products → generate labels → print
+  - Label sizes: 40x30mm, 50x25mm, 50x30mm
+- **Stock Management** (`/fulfillment/pick-pack/stock`) — 4 tabs
+  - Stock Overview: product table with stock badges, search, store filter
+  - Stock In: scanner-based rapid entry (scan → qty → Enter → next)
+  - Adjust: set or adjust stock with required reason
+  - Cycle Count: zone-based counting with expected vs actual
+- **Bin Locations** (`/fulfillment/pick-pack/bins`) — shelf location CRUD
+- **Audit Trail** (`/fulfillment/pick-pack/audit`) — adjustment + verification history
 
-### Inventory Dashboard
-- **Inventory page** (`/fulfillment/inventory`) — stock levels across all Shopify stores
-  - 5 summary cards: Total Products, Variants, Out of Stock, Low Stock, Total Units
-  - Sortable table by stock level (lowest first)
-  - Color-coded: green (10+), yellow (1-9), red (0)
-  - Click product → slide-out detail panel with all variants, SKU, barcode
-  - Filters: store, stock status, product type, search
-  - Price column admin-only
-  - Uses existing `read_products` Shopify scope (no reconnection needed)
+### Fulfillment Workflow
+```
+VA confirms in BigSeller → waybill printed → auto-fulfills in Shopify
+→ appears in Pick & Pack → Generate Pick List → pick items
+→ Verify & Pack → scan waybill → scan items → Confirm Packed
+→ disappears from queue → ship
+```
 
-### Role-Based Dashboard
-- **Admin/CEO**: Today's revenue/orders/ad spend/unfulfilled/team hours + This Month totals + Action items
-- **VA**: Hours + today's order stats + unfulfilled/aging alerts
-- **Marketing**: Hours + ad spend/ROAS/CPA/purchases
-- **Fulfillment**: Hours + out-of-stock/low stock/total units
-- Each role fetches only the APIs it needs
-- Dashboard client cache for instant back-navigation
+### Database Tables
+- `bin_locations` — product shelf locations
+- `inventory_adjustments` — stock change audit log
+- `cycle_counts` — cycle count session history
+- `stock_alert_thresholds` — low stock alert thresholds
+- `pack_verifications` — pack verification log
 
-### Shopify OAuth Integration
-- Replaced manual token input with OAuth flow (Client ID + Secret → Connect → approve)
-- Multi-store support via OAuth per store
-- Store management in Settings (add/edit/remove/toggle active)
-
-### Orders & Parcels
-- **Orders page** (`/va/orders`) — all orders across 4+ Shopify stores
-  - Date filters, store filter, status filter, search
-  - 6 summary cards with aging warnings
-  - Age tracking: 3+ days yellow, 5+ days red
-  - COD detection, payment/fulfillment badges
-  - Click order → slide-out detail panel with customer info, line items, tracking, totals
-  - Revenue/price hidden from non-admin users
-
-### Bulk Ad Creation
-- **Bulk Create** (`/marketing/bulk-create`) — create N ads at once
-  - Per-row adset name (1 adset = 1 ad for split testing)
-  - Bulk file upload (auto-detects image/video from MIME type)
-  - Default copy fill for all rows + per-row override
-  - Sequential submission with progress overlay + retry failed
-  - Visual indicators for missing required fields (red borders, checklist)
-  - Ads created as ACTIVE (not PAUSED) — auto-starts on scheduled date
-
-### Ad Creation Improvements
-- Adset start date defaults to tomorrow
-- Pixel auto-matches page name (fuzzy word match)
-- Upload directly to Facebook from browser (bypasses Vercel 4.5MB limit)
-- Detailed Facebook API error messages with endpoint/code/subcode
-
-### Performance Optimization
-- Server cache TTL increased to 5 minutes (was 3)
-- Removed `_t` cache-buster from all auto-fetches (was defeating cache)
-- Manual Refresh button sends `refresh=1` to bypass cache
-- Dashboard module-level client cache for instant back-navigation
-
-### Deployment & Legal
-- Deployed to Vercel at `astrobiz-dashboard.vercel.app`
-- Privacy Policy, Terms of Service, Data Deletion pages for Facebook App compliance
-- Supabase auth proxy (Next.js 16 `proxy.ts` convention)
-- Pre-deployment cleanup: removed debug logging, unused files
-
-### Facebook Ads Module (Shareable)
-- Self-contained module at `src/lib/fb-ads-module/`
-- Zero dependencies — just needs FB token + account ID
-- `createAd()` — single ad creation
-- `bulkCreateAds()` — N ads with progress callback
-- Upload helpers for image/video
-- Copy entire folder to any Next.js project
+### New Dependencies
+- `jsbarcode` — Code 128 barcode generation
 
 ---
 
-## Database Tables
+## 2026-04-14: Performance + P&L Improvements
 
-| Table | Purpose |
-|-------|---------|
-| `employees` | User profiles with roles |
-| `time_entries` | Work session tracking |
-| `time_pauses` | Pause/resume within sessions |
-| `app_settings` | Key-value config (FB token, selected accounts) |
-| `ad_drafts` | Saved ad creation drafts |
-| `shopify_stores` | Store credentials (OAuth tokens) |
-| `cogs_items` | Cost of goods per SKU per store |
-| `jt_deliveries` | J&T Express delivery tracking |
+### Performance Optimization
+- Global client-side cache with sessionStorage persistence (survives page refresh)
+- Background refresh every 10 min for Shopify endpoints
+- Facebook structure cache (30 min) — campaigns/adsets/ads cached separately from insights
+- Pre-fetch prevention: empty/rate-limited responses not cached
+- Date preset buttons disabled while loading (prevents rapid API calls)
+- "Last refreshed: Xm ago" indicators on Dashboard + Ad Performance
+- All Facebook-related fetches across the app use cachedFetch
+
+### P&L Fixes
+- Store filter fixed (was sending ID instead of name)
+- All store names normalized to uppercase (prevents case mismatch)
+- Returns = SRP + shipping cost per returned parcel (not just SRP or just shipping)
+- Shipping always projected at 12% of revenue with yellow indicator
+- Missing COGS auto-added when clicking "Manage COGS" link
+- Removed PROJECTED/ACTUAL labels from Returns (all actual data now)
+
+### Ad Performance
+- Added Cost per Landing Page View (Cost/LPV) column
+
+---
+
+## 2026-04-13: AI Generator + Team Management
+
+### AI Ad Generator
+- **AI Generator** (`/marketing/ai-generator`) — full chat interface with Claude API
+  - Per-store knowledge (6 docs + 3 system instructions per store)
+  - Tool selector: Angle Generator | Script Creator | Format Expansion
+  - Each tool uses its own system instruction
+  - Auto-save threads after each AI response
+  - Shared history across team (admin + marketing)
+  - Navigation-safe (module-level cache)
+- **AI Knowledge** (`/marketing/ai-settings`) — per-store document management
+  - 6 knowledge docs: Market Sophistication, New Information, New Mechanism, Avatar Training, Market Research, Winning Ad Template
+  - 3 system instructions: one per tool
+  - Paste text or upload .txt files
+
+### Team Management (Settings)
+- Add/edit/remove employees with role assignment
+- Pre-register by email — auto-links on first Google sign-in
+- Role legend: Admin (full access), VA (orders), Fulfillment (inventory + orders), Marketing (ads)
+- Toggle active/inactive, delete employees
+
+### Sidebar Reorganization
+- Collapsible groups: Time & Attendance, P&L, Orders, Fulfillment, Marketing
+- Section headers within Marketing: Ad Management, Creative Generator
+- Fixed overlapping active states in sidebar
+
+---
+
+## 2026-04-11: Shopify OAuth + Orders & Parcels
+
+### Shopify OAuth Integration
+- Replaced manual token input with OAuth flow (Client ID + Secret → Connect → approve)
+- Multi-store support (4+ stores) via OAuth per store
+- Store management in Settings (add/edit/remove/toggle active)
+
+### Orders & Parcels
+- Orders page across all Shopify stores with date/store/status filters
+- Order detail slide-out panel (customer, items, tracking, totals)
+- Age tracking: 3+ days yellow, 5+ days red
+- COD detection, revenue hidden from non-admin
+
+### Inventory Dashboard
+- Stock levels across all stores, color-coded badges
+- Product detail panel with variants, SKU, barcode
+- Price column admin-only
+
+---
+
+## 2026-04-10: Net Profit + J&T Dashboard
+
+### Net Profit / Daily P&L (CEO Only)
+- Net Profit = Revenue - COGS - Ad Spend - Shipping - Returns
+- Daily P&L table with totals row
+- 25% worst-case RTS rule until 200+ delivered
+- COGS management (CSV/XLSX import, inline edit, scan from Shopify)
+- J&T Dashboard with delivery tracking, RTS by province analytics
+
+### Role-Based Dashboard
+- Admin/CEO: full business overview
+- VA: orders focus
+- Marketing: ads focus
+- Fulfillment: inventory + fulfillment queue
+
+---
+
+## 2026-04-09: Initial Deployment
+
+### Facebook Marketing
+- Ad Performance with drill-down (campaigns → adsets → ads)
+- Create Ad wizard (campaign → adset → creative → ad)
+- Bulk Create (per-row adset, spreadsheet table, bulk file upload)
+- Direct browser-to-Facebook uploads (bypasses Vercel limit)
+- Ad drafts
+
+### Core Features
+- Time Tracker with running timer + manual entry
+- Admin attendance view
+- Google OAuth login via Supabase
+- Dark theme Tailwind CSS v4
+- Deployed to Vercel
+
+### Legal Pages
+- Privacy Policy, Terms of Service, Data Deletion for Facebook App compliance
+
+---
 
 ## Tech Stack
 - **Frontend:** Next.js 16 + React + TypeScript + Tailwind CSS v4
 - **Backend:** Supabase (PostgreSQL + Auth + RLS)
 - **Hosting:** Vercel
 - **APIs:** Facebook Marketing API v21.0, Shopify REST API 2024-01
-- **Dependencies:** xlsx (SheetJS) for J&T/COGS file parsing
+- **AI:** Claude API (Anthropic) — Sonnet 4
+- **Dependencies:** xlsx (SheetJS), jsbarcode
+
+## Database Tables
+| Table | Purpose |
+|-------|---------|
+| `employees` | User profiles with roles |
+| `time_entries` | Work session tracking |
+| `time_pauses` | Pause/resume within sessions |
+| `app_settings` | Key-value config (FB token, Anthropic key) |
+| `ad_drafts` | Saved ad creation drafts |
+| `shopify_stores` | Store credentials (OAuth) |
+| `cogs_items` | Cost of goods per SKU |
+| `jt_deliveries` | J&T Express delivery tracking |
+| `ai_store_docs` | Per-store AI knowledge documents |
+| `ai_generations` | AI generation history |
+| `bin_locations` | Product shelf locations |
+| `inventory_adjustments` | Stock change audit log |
+| `cycle_counts` | Cycle count sessions |
+| `stock_alert_thresholds` | Low stock alerts |
+| `pack_verifications` | Pack verification log |
