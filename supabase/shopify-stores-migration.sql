@@ -28,6 +28,12 @@ create policy "shopify_stores_va_select" on shopify_stores
     exists (select 1 from employees e where e.auth_id = auth.uid() and e.role = 'va')
   );
 
+-- Fulfillment can read stores (needs store info to view orders)
+create policy "shopify_stores_fulfillment_select" on shopify_stores
+  for select using (
+    exists (select 1 from employees e where e.auth_id = auth.uid() and e.role = 'fulfillment')
+  );
+
 -- Updated_at trigger
 create trigger shopify_stores_updated_at
   before update on shopify_stores
