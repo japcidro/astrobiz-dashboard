@@ -35,16 +35,19 @@ interface RawUnfulfilledOrder {
   fulfillment_status: string | null;
 }
 
-async function fetchUnfulfilledOrders(
+async function fetchFulfilledOrders(
   storeUrl: string,
   apiToken: string
 ): Promise<RawUnfulfilledOrder[]> {
   const allOrders: RawUnfulfilledOrder[] = [];
+  // Fetch fulfilled orders from last 7 days (recently printed waybills)
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   let url: string =
     `https://${storeUrl}/admin/api/${SHOPIFY_API_VERSION}/orders.json?` +
     new URLSearchParams({
-      fulfillment_status: "unfulfilled",
-      status: "open",
+      fulfillment_status: "shipped",
+      status: "any",
+      created_at_min: sevenDaysAgo,
       limit: "250",
       fields:
         "id,name,created_at,customer,line_items,fulfillment_status",
@@ -82,7 +85,7 @@ export async function GET() {
   }
 
   // Check cache
-  const cacheKey = "fulfillment-unfulfilled";
+  const cacheKey = "fulfillment-needs-packing";
   const cached = cache.get(cacheKey);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
     return Response.json(cached.data);
@@ -115,7 +118,7 @@ export async function GET() {
     storesData.map(async (store) => {
       try {
         storeNames.push(store.name);
-        const rawOrders = await fetchUnfulfilledOrders(
+        const rawOrders = await fetchFulfilledOrders(
           store.store_url,
           store.api_token
         );
@@ -170,13 +173,21 @@ export async function GET() {
     })
   );
 
-  // Sort by created_at ascending (oldest first)
-  allOrders.sort(
+  // Exclude orders already verified (in pack_verifications table)
+  const { data: verifiedOrders } = await supabase
+    .from("pack_verifications")
+    .select("order_id");
+
+  const verifiedIds = new Set((verifiedOrders || []).map((v) => v.order_id));
+  const needsPacking = allOrders.filter((o) => !verifiedIds.has(String(o.id)));
+
+  // Sort by created_at descending (newest first — most recent waybills on top)
+  needsPacking.sort(
     (a, b) =>
-      new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
 
-  const responseData = { orders: allOrders, stores: storeNames };
+  const responseData = { orders: needsPacking, stores: storeNames };
   cache.set(cacheKey, { data: responseData, timestamp: Date.now() });
 
   return Response.json(responseData);

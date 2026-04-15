@@ -104,8 +104,8 @@ export function OrdersQueue({ orders, stockMap, onGeneratePickList, loading }: P
     return (
       <div className="text-center py-16 text-gray-500">
         <Package size={40} className="mx-auto mb-3 opacity-50" />
-        <p className="text-lg">No unfulfilled orders</p>
-        <p className="text-sm mt-1">All caught up!</p>
+        <p className="text-lg">No orders to pack</p>
+        <p className="text-sm mt-1">All orders verified and packed!</p>
       </div>
     );
   }
@@ -117,7 +117,7 @@ export function OrdersQueue({ orders, stockMap, onGeneratePickList, loading }: P
           <p className="text-sm text-gray-400">
             {selected.size > 0
               ? `${selected.size} order${selected.size !== 1 ? "s" : ""} selected`
-              : `${orders.length} unfulfilled order${orders.length !== 1 ? "s" : ""}`}
+              : `${orders.length} order${orders.length !== 1 ? "s" : ""}`}
           </p>
           {selectedStockIssues > 0 && selected.size > 0 && (
             <p className="text-xs text-yellow-400 mt-0.5">

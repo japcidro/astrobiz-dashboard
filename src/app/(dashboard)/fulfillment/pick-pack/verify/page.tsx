@@ -164,34 +164,35 @@ export default function VerifyPage() {
       ? Math.round((totalScanned / totalExpected) * 100)
       : 0;
 
-  async function handleFulfill() {
+  async function handleVerifyComplete() {
     if (!orderDetails || fulfilling) return;
     setFulfilling(true);
     try {
-      const res = await fetch("/api/shopify/fulfillment", {
+      // Log verification to pack_verifications table (don't call Shopify — BigSeller already fulfilled)
+      const res = await fetch("/api/shopify/fulfillment/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          order_id: orderDetails.id,
           store_id: orderDetails.store_id,
+          store_name: orderDetails.store_name,
+          order_id: String(orderDetails.id),
+          order_number: orderDetails.name,
           items_expected: totalExpected,
           items_scanned: totalScanned,
-          verification: verifyItems.map((i) => ({
-            sku: i.sku,
-            expected_qty: i.expected_qty,
-            scanned_qty: i.scanned_qty,
-            status: i.status,
-          })),
+          mismatches: verifyItems
+            .filter((i) => i.scanned_qty !== i.expected_qty)
+            .map((i) => ({ sku: i.sku, expected: i.expected_qty, scanned: i.scanned_qty })),
         }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
 
       setPhase("verified");
+      playSuccess();
     } catch (e) {
       setFeedback({
         type: "error",
-        message: "FULFILL FAILED",
+        message: "SAVE FAILED",
         subMessage: e instanceof Error ? e.message : "Unknown error",
       });
     } finally {
@@ -364,11 +365,11 @@ export default function VerifyPage() {
           {/* Fulfill button */}
           {allVerified && (
             <button
-              onClick={handleFulfill}
+              onClick={handleVerifyComplete}
               disabled={fulfilling}
               className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
             >
-              {fulfilling ? "Fulfilling..." : "Mark as Fulfilled"}
+              {fulfilling ? "Saving..." : "Confirm Packed ✓"}
             </button>
           )}
         </div>
@@ -379,7 +380,7 @@ export default function VerifyPage() {
         <div className="flex flex-col items-center justify-center py-20">
           <CheckCircle size={80} className="text-emerald-400 mb-6" />
           <h2 className="text-3xl md:text-4xl font-bold text-emerald-400 mb-2 text-center">
-            Order {orderNumber} Verified &amp; Fulfilled
+            Order {orderNumber} Verified &amp; Packed
           </h2>
           <p className="text-gray-400 mb-8">
             {totalScanned}/{totalExpected} items confirmed
