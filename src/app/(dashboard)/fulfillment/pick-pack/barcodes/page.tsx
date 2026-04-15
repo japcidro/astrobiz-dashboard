@@ -19,17 +19,13 @@ interface BarcodeLabel {
 }
 
 const LABEL_SIZES = [
-  { label: "40x30mm", value: "40x30" },
-  { label: "50x25mm", value: "50x25" },
-  { label: "50x30mm", value: "50x30" },
+  { label: "30x20mm", value: "30x20" },
 ] as const;
 
 type LabelSize = (typeof LABEL_SIZES)[number]["value"];
 
 const SIZE_STYLES: Record<LabelSize, { width: string; height: string }> = {
-  "40x30": { width: "151px", height: "113px" },
-  "50x25": { width: "189px", height: "94px" },
-  "50x30": { width: "189px", height: "113px" },
+  "30x20": { width: "113px", height: "76px" },
 };
 
 export default function BarcodesPage() {
@@ -39,7 +35,7 @@ export default function BarcodesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [labelSize, setLabelSize] = useState<LabelSize>("50x30");
+  const [labelSize, setLabelSize] = useState<LabelSize>("30x20");
   const [generating, setGenerating] = useState(false);
   const [labels, setLabels] = useState<BarcodeLabel[]>([]);
 
@@ -115,7 +111,7 @@ export default function BarcodesPage() {
       try {
         const dataUrl = await generateBarcodeDataUrl(barcodeValue, {
           width: 2,
-          height: labelSize === "50x25" ? 30 : 40,
+          height: 25,
           fontSize: 10,
         });
         generated.push({
