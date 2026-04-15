@@ -287,8 +287,13 @@ export function Sidebar({ employeeName, employeeRole }: SidebarProps) {
                     {entry.children
                       .filter((child) => child.roles.includes(employeeRole))
                       .map((child) => {
-                        const childActive =
-                          pathname === child.href || pathname.startsWith(child.href + "/");
+                        // Check if another sibling has a longer matching href (prevents parent matching child)
+                        const hasMoreSpecificSibling = entry.children.some(
+                          (other) => other.href !== child.href && other.href.startsWith(child.href + "/") && pathname.startsWith(other.href)
+                        );
+                        const childActive = hasMoreSpecificSibling
+                          ? pathname === child.href
+                          : pathname === child.href || pathname.startsWith(child.href + "/");
                         return (
                           <div key={child.href}>
                             {child.section && (
