@@ -43,9 +43,9 @@ export default function PickPackPage() {
           const rows: InventoryRow[] = invJson.rows || [];
           const map = new Map<string, number>();
           for (const row of rows) {
+            if (!row.sku) continue;
             const key = `${row.store_name}::${row.sku}`.toLowerCase();
             map.set(key, (map.get(key) || 0) + row.stock);
-            // Also store by SKU only (for cross-store lookup)
             const skuKey = row.sku.toLowerCase();
             map.set(skuKey, (map.get(skuKey) || 0) + row.stock);
           }
