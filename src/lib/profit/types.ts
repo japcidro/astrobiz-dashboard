@@ -53,6 +53,7 @@ export interface DailyPnlRow {
   margin_pct: number;
   shipping_projected: boolean;
   returns_projected: boolean;
+  in_transit_count: number;
 }
 
 export interface ProfitSummary {

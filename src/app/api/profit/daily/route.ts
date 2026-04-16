@@ -448,6 +448,7 @@ export async function GET(request: Request) {
   // --- 5. Fetch J&T delivery data ---
   const shippingByDateStore = new Map<string, number>();
   const returnsByDateStore = new Map<string, number>();
+  const inTransitByDate = new Map<string, number>();
 
   try {
     // submission_date is stored as ISO UTC (e.g. "2026-04-11T16:00:00.000Z")
@@ -458,7 +459,7 @@ export async function GET(request: Request) {
 
     let jtQuery = supabase
       .from("jt_deliveries")
-      .select("submission_date, store_name, shipping_cost, item_value, cod_amount, is_delivered, is_returned")
+      .select("submission_date, store_name, shipping_cost, item_value, cod_amount, is_delivered, is_returned, classification")
       .gte("submission_date", jtStartUtc)
       .lte("submission_date", jtEndUtc);
 
@@ -496,6 +497,10 @@ export async function GET(request: Request) {
             key,
             (returnsByDateStore.get(key) || 0) + lostRevenue + shipCost
           );
+        }
+        // Count in-transit parcels per submission date
+        if (row.classification === "In Transit" || row.classification === "Pending") {
+          inTransitByDate.set(dateStr, (inTransitByDate.get(dateStr) || 0) + 1);
         }
       }
     }
@@ -717,6 +722,7 @@ export async function GET(request: Request) {
       margin_pct: marginPct,
       shipping_projected: shippingProjected,
       returns_projected: returnsProjected,
+      in_transit_count: inTransitByDate.get(date) || 0,
     });
   }
 

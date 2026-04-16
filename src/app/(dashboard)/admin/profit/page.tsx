@@ -124,6 +124,7 @@ export default function ProfitPage() {
       margin_pct: 0,
       shipping_projected: false,
       returns_projected: false,
+      in_transit_count: 0,
     };
     for (const row of daily) {
       totals.revenue += row.revenue;
@@ -133,6 +134,7 @@ export default function ProfitPage() {
       totals.shipping += row.shipping;
       totals.returns_value += row.returns_value;
       totals.net_profit += row.net_profit;
+      totals.in_transit_count += row.in_transit_count;
     }
     totals.margin_pct =
       totals.revenue > 0

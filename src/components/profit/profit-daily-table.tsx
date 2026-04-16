@@ -45,7 +45,16 @@ function renderCell(key: string, row: DailyPnlRow) {
     case "ad_spend":
       return formatCurrency(row[key]);
     case "returns_value":
-      return formatCurrency(row.returns_value);
+      return (
+        <span>
+          {formatCurrency(row.returns_value)}
+          {row.in_transit_count > 0 && (
+            <span className="text-yellow-400 text-xs ml-1.5" title={`${row.in_transit_count} parcels still in transit — returns not yet final`}>
+              ({row.in_transit_count} in transit)
+            </span>
+          )}
+        </span>
+      );
     case "shipping":
       return (
         <span className="text-yellow-400">
