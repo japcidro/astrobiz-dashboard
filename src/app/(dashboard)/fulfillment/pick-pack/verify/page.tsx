@@ -29,51 +29,93 @@ export default function VerifyPage() {
 
   // ── Phase 1: Scan or type order number ──
 
+  // Helper to set up order for verification
+  const setupOrder = useCallback((match: UnfulfilledOrder) => {
+    playSuccess();
+    setOrderNumber(match.name);
+    setOrderDetails(match);
+
+    const items: VerifyItem[] = match.line_items.map((li) => ({
+      sku: li.sku || `NOSKU-${li.id}`,
+      barcode: li.barcode,
+      title: li.title,
+      variant_title: li.variant_title,
+      expected_qty: li.quantity,
+      scanned_qty: 0,
+      status: "pending" as const,
+    }));
+    setVerifyItems(items);
+    setPhase("scan_items");
+  }, []);
+
   const handleOrderScan = useCallback(
     async (value: string) => {
       const trimmed = value.trim().replace(/^#/, "");
       setFetchError(null);
 
       try {
+        // Fetch all orders that need packing
         const res = await fetch(
-          `/api/shopify/fulfillment?order=${encodeURIComponent(trimmed)}&store=ALL`
+          `/api/shopify/fulfillment?store=ALL`
         );
         const json = await res.json();
         if (!res.ok) throw new Error(json.error);
 
         const orders: UnfulfilledOrder[] = json.orders || [];
-        const match = orders.find(
+
+        // Try 1: Match by Shopify order name/number
+        const nameMatch = orders.find(
           (o) =>
             o.name.replace("#", "") === trimmed ||
             o.name === `#${trimmed}` ||
             o.name === trimmed
         );
 
-        if (!match) {
+        if (nameMatch) {
+          setupOrder(nameMatch);
+          return;
+        }
+
+        // Try 2: Looks like a waybill (starts with JT or is long numeric)
+        const isWaybill = /^JT/i.test(trimmed) || /^\d{10,}$/.test(trimmed);
+        if (isWaybill) {
+          // Look up waybill in jt_deliveries to get receiver name
+          const wbRes = await fetch(
+            `/api/shopify/fulfillment/waybill-lookup?waybill=${encodeURIComponent(trimmed)}`
+          );
+          const wbJson = await wbRes.json();
+
+          if (wbRes.ok && wbJson.receiver) {
+            // Match by customer name (normalize both sides)
+            const receiverNorm = wbJson.receiver.toUpperCase().trim();
+            const match = orders.find((o) => {
+              const custNorm = (o.customer_name || "").toUpperCase().trim();
+              return custNorm === receiverNorm ||
+                custNorm.includes(receiverNorm) ||
+                receiverNorm.includes(custNorm);
+            });
+
+            if (match) {
+              setupOrder(match);
+              return;
+            }
+          }
+
           playError();
           setFeedback({
             type: "error",
-            message: "ORDER NOT FOUND",
-            subMessage: `#${trimmed}`,
+            message: "WAYBILL NOT MATCHED",
+            subMessage: `${trimmed}${wbJson.receiver ? ` (${wbJson.receiver})` : ""} — no matching order found`,
           });
           return;
         }
 
-        playSuccess();
-        setOrderNumber(match.name);
-        setOrderDetails(match);
-
-        const items: VerifyItem[] = match.line_items.map((li) => ({
-          sku: li.sku || `NOSKU-${li.id}`,
-          barcode: li.barcode,
-          title: li.title,
-          variant_title: li.variant_title,
-          expected_qty: li.quantity,
-          scanned_qty: 0,
-          status: "pending" as const,
-        }));
-        setVerifyItems(items);
-        setPhase("scan_items");
+        playError();
+        setFeedback({
+          type: "error",
+          message: "ORDER NOT FOUND",
+          subMessage: `#${trimmed}`,
+        });
       } catch (e) {
         playError();
         setFetchError(
@@ -81,7 +123,7 @@ export default function VerifyPage() {
         );
       }
     },
-    []
+    [setupOrder]
   );
 
   // ── Phase 2: Scan items to verify ──
@@ -229,15 +271,15 @@ export default function VerifyPage() {
         <div className="flex flex-col items-center justify-center py-20">
           <Package size={64} className="text-gray-500 mb-6" />
           <h2 className="text-3xl md:text-4xl font-bold text-white mb-2 text-center">
-            Scan Order Barcode
+            Scan Waybill or Order #
           </h2>
           <p className="text-gray-400 mb-8 text-center">
-            Or type order number manually (e.g. 1234)
+            Scan J&T waybill barcode or type order number
           </p>
           <div className="w-full max-w-md">
             <BarcodeScannerInput
               onScan={handleOrderScan}
-              placeholder="Scan or type order #..."
+              placeholder="Scan waybill or order #..."
             />
           </div>
           {fetchError && (

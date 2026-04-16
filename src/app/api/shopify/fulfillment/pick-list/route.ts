@@ -97,6 +97,36 @@ export async function GET(request: Request) {
     return Response.json({ items: [], order_count: 0, total_items: 0 });
   }
 
+  // Fetch barcodes from Shopify variants (line_items don't include barcode)
+  const variantIds = new Set<number>();
+  for (const order of allOrders) {
+    for (const li of order.line_items) {
+      if (li.variant_id) variantIds.add(li.variant_id);
+    }
+  }
+
+  const barcodeMap = new Map<number, string>();
+  // Fetch variants in parallel per store (Shopify has variant endpoint)
+  await Promise.all(
+    stores.map(async (store) => {
+      for (const vid of variantIds) {
+        if (barcodeMap.has(vid)) continue;
+        try {
+          const res = await fetch(
+            `https://${store.store_url}/admin/api/${SHOPIFY_API_VERSION}/variants/${vid}.json?fields=id,barcode`,
+            { headers: { "X-Shopify-Access-Token": store.api_token }, cache: "no-store" }
+          );
+          if (res.ok) {
+            const json = await res.json();
+            if (json.variant?.barcode) {
+              barcodeMap.set(vid, json.variant.barcode);
+            }
+          }
+        } catch {}
+      }
+    })
+  );
+
   // Fetch bin locations
   const { data: binData } = await supabase.from("bin_locations").select("sku, bin_code, zone");
   const binMap = new Map<string, { bin_code: string; zone: string | null }>();
@@ -116,7 +146,7 @@ export async function GET(request: Request) {
         const bin = binMap.get(key);
         skuMap.set(key, {
           sku,
-          barcode: li.barcode || null,
+          barcode: barcodeMap.get(li.variant_id) || li.barcode || null,
           product_title: li.title,
           variant_title: li.variant_title,
           total_qty: 0,
