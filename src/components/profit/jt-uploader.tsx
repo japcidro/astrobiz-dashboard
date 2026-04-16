@@ -112,6 +112,7 @@ export function JtUploader() {
       const BATCH_SIZE = 100;
       const allRows = preview.rows;
       let totalInserted = 0;
+      let totalProtected = 0;
       const allErrors: string[] = [];
 
       for (let i = 0; i < allRows.length; i += BATCH_SIZE) {
@@ -135,6 +136,7 @@ export function JtUploader() {
         if (!res.ok) throw new Error(json.error || `Batch ${batchNum} failed`);
 
         totalInserted += json.inserted || 0;
+        totalProtected += json.protected_returns || 0;
         if (json.errors?.length) allErrors.push(...json.errors);
       }
 
@@ -142,6 +144,7 @@ export function JtUploader() {
         inserted: totalInserted,
         updated: 0,
         total: allRows.length,
+        protected_returns: totalProtected,
         errors: allErrors,
       });
       setPreview(null);
@@ -178,7 +181,12 @@ export function JtUploader() {
       {result && (
         <div className="p-3 bg-green-900/30 border border-green-700/50 rounded-lg text-green-300 text-sm flex items-center gap-2">
           <CheckCircle size={16} />
-          Upload complete: {result.inserted} inserted, {result.updated} updated ({result.total} total)
+          Upload complete: {result.inserted} inserted ({result.total} total)
+          {result.protected_returns > 0 && (
+            <span className="text-amber-300 ml-1">
+              &middot; {result.protected_returns} confirmed returns preserved
+            </span>
+          )}
           {result.errors && result.errors.length > 0 && (
             <span className="text-yellow-300 ml-2">
               ({result.errors.length} errors)

@@ -4,6 +4,7 @@ import { matchAdToStore } from "@/lib/profit/store-matching";
 import {
   calculateNetProfit,
   calculateMarginPct,
+  calculateInTransitProjectedReturns,
   roundCurrency,
   SHIPPING_RATE,
   RTS_WORST_CASE_RATE,
@@ -449,11 +450,17 @@ export async function GET(request: Request) {
   const returnsByDateStore = new Map<string, number>();
 
   try {
+    // submission_date is stored as ISO UTC (e.g. "2026-04-11T16:00:00.000Z")
+    // but startDate/endDate are PHT date strings (e.g. "2026-04-12").
+    // Convert to UTC boundaries so parcels near midnight aren't excluded.
+    const jtStartUtc = `${startDate}T00:00:00+08:00`;
+    const jtEndUtc = `${endDate}T23:59:59+08:00`;
+
     let jtQuery = supabase
       .from("jt_deliveries")
-      .select("submission_date, store_name, shipping_cost, item_value, is_delivered, is_returned")
-      .gte("submission_date", startDate)
-      .lte("submission_date", endDate);
+      .select("submission_date, store_name, shipping_cost, item_value, cod_amount, is_delivered, is_returned")
+      .gte("submission_date", jtStartUtc)
+      .lte("submission_date", jtEndUtc);
 
     if (storeFilter !== "ALL") {
       jtQuery = jtQuery.ilike("store_name", storeFilter);
@@ -468,7 +475,8 @@ export async function GET(request: Request) {
         if (!row.submission_date) continue;
         const d = new Date(row.submission_date);
         if (isNaN(d.getTime())) continue;
-        const dateStr = d.toISOString().split("T")[0];
+        // Convert to PHT date to match Shopify/FB date grouping
+        const dateStr = toPhtDateStr(row.submission_date);
         const key = `${dateStr}::${(row.store_name || "UNKNOWN").toUpperCase()}`;
 
         if (row.is_delivered) {
@@ -478,12 +486,15 @@ export async function GET(request: Request) {
           );
         }
         if (row.is_returned) {
-          // Returns cost = lost SRP (customer didn't pay) + wasted shipping
+          // Returns cost = lost revenue (COD amount customer didn't pay) + wasted shipping
+          // Use cod_amount (actual selling price) over item_value (declared/insured value)
+          const codAmount = parseFloat(row.cod_amount) || 0;
           const itemValue = parseFloat(row.item_value) || 0;
+          const lostRevenue = codAmount > 0 ? codAmount : itemValue;
           const shipCost = parseFloat(row.shipping_cost) || 0;
           returnsByDateStore.set(
             key,
-            (returnsByDateStore.get(key) || 0) + itemValue + shipCost
+            (returnsByDateStore.get(key) || 0) + lostRevenue + shipCost
           );
         }
       }
@@ -493,72 +504,107 @@ export async function GET(request: Request) {
     warnings.push(`J&T: ${message}`);
   }
 
-  // --- 5b. RTS worst-case rule: assume 25% RTS until 200+ delivered parcels per store ---
-  // Fetch total delivered count per store (ALL TIME, not just date range)
+  // --- 5b. RTS projection: two strategies depending on data maturity ---
+  //   < 200 delivered: 25% worst-case of revenue (conservative)
+  //   >= 200 delivered: project returns from in-transit parcels using actual RTS rate
   const returnsProjectedDates = new Set<string>();
 
   try {
-    // Lightweight query: just count delivered per store (not all rows)
-    const { data: deliveredCounts } = await supabase
+    // Fetch ALL-TIME delivery stats per store (delivered, returned, in-transit)
+    const { data: allJtRows } = await supabase
       .from("jt_deliveries")
-      .select("store_name")
-      .eq("is_delivered", true);
+      .select("store_name, is_delivered, is_returned, classification, cod_amount, shipping_cost");
 
-    if (deliveredCounts && deliveredCounts.length > 0) {
-      // Count delivered per store
-      const storeDelivered = new Map<string, number>();
-      for (const row of deliveredCounts) {
+    if (allJtRows && allJtRows.length > 0) {
+      // Aggregate per store
+      const storeStats = new Map<string, {
+        delivered: number;
+        returned: number;
+        inTransit: number;
+        totalReturnCod: number;
+        totalReturnShip: number;
+      }>();
+
+      for (const row of allJtRows) {
         const store = (row.store_name || "UNKNOWN").toUpperCase();
-        storeDelivered.set(store, (storeDelivered.get(store) || 0) + 1);
+        if (!storeStats.has(store)) {
+          storeStats.set(store, { delivered: 0, returned: 0, inTransit: 0, totalReturnCod: 0, totalReturnShip: 0 });
+        }
+        const stats = storeStats.get(store)!;
+
+        if (row.is_delivered) stats.delivered++;
+        if (row.is_returned) {
+          stats.returned++;
+          stats.totalReturnCod += parseFloat(row.cod_amount) || 0;
+          stats.totalReturnShip += parseFloat(row.shipping_cost) || 0;
+        }
+        if (row.classification === "In Transit" || row.classification === "Pending") {
+          stats.inTransit++;
+        }
       }
 
-      // For each store, if delivered < 200, override returns to be at least 25% of revenue
+      // Get all stores present in revenue data
       const allStoresInData = new Set<string>();
       for (const key of revenueByDateStore.keys()) {
         allStoresInData.add(key.split("::")[1]);
       }
 
       for (const store of allStoresInData) {
-        const delivered = storeDelivered.get(store) || 0;
-        if (delivered < RTS_MIN_DELIVERED) {
-          // Calculate what 25% RTS would look like for this store in the date range
-          // Sum revenue for this store in the date range
-          let storeRevenue = 0;
-          for (const [key, value] of revenueByDateStore) {
-            if (key.endsWith(`::${store}`)) storeRevenue += value;
+        const stats = storeStats.get(store);
+        const delivered = stats?.delivered || 0;
+        const returned = stats?.returned || 0;
+        const settled = delivered + returned;
+
+        // Sum actual returns already counted for this store in date range
+        let actualReturns = 0;
+        for (const [key, value] of returnsByDateStore) {
+          if (key.endsWith(`::${store}`)) actualReturns += value;
+        }
+
+        // Sum revenue for this store in date range
+        let storeRevenue = 0;
+        for (const [key, value] of revenueByDateStore) {
+          if (key.endsWith(`::${store}`)) storeRevenue += value;
+        }
+
+        let additionalReturns = 0;
+
+        if (settled < RTS_MIN_DELIVERED) {
+          // Strategy A: not enough data — use 25% worst-case of revenue
+          const worstCase = storeRevenue * RTS_WORST_CASE_RATE;
+          if (worstCase > actualReturns) {
+            additionalReturns = worstCase - actualReturns;
+            warnings.push(`${store}: Using 25% worst-case RTS (${settled}/${RTS_MIN_DELIVERED} settled)`);
           }
-
-          const worstCaseReturns = storeRevenue * RTS_WORST_CASE_RATE;
-
-          // Sum actual returns for this store in date range
-          let actualReturns = 0;
-          for (const [key, value] of returnsByDateStore) {
-            if (key.endsWith(`::${store}`)) actualReturns += value;
+        } else {
+          // Strategy B: enough data — project returns from in-transit using actual RTS rate
+          const inTransit = stats?.inTransit || 0;
+          if (inTransit > 0) {
+            const avgCod = returned > 0 ? (stats!.totalReturnCod / returned) : 0;
+            const avgShip = returned > 0 ? (stats!.totalReturnShip / returned) : 0;
+            const { projectedReturns, projectedRtsRate } = calculateInTransitProjectedReturns(
+              delivered, returned, inTransit, avgCod, avgShip
+            );
+            if (projectedReturns > 0) {
+              additionalReturns = projectedReturns;
+              const rtsPct = Math.round(projectedRtsRate * 1000) / 10;
+              warnings.push(`${store}: +₱${Math.round(projectedReturns).toLocaleString()} projected returns from ${inTransit} in-transit parcels (${rtsPct}% RTS rate)`);
+            }
           }
+        }
 
-          // If worst case is higher, distribute the difference across the store's dates
-          if (worstCaseReturns > actualReturns && storeRevenue > 0) {
-            const diff = worstCaseReturns - actualReturns;
-            // Find all dates this store has revenue
-            const storeDates: string[] = [];
-            for (const key of revenueByDateStore.keys()) {
-              if (key.endsWith(`::${store}`)) storeDates.push(key);
-            }
-            if (storeDates.length > 0) {
-              // Distribute proportionally by revenue
-              for (const key of storeDates) {
-                const dateRevenue = revenueByDateStore.get(key) || 0;
-                const proportion = dateRevenue / storeRevenue;
-                const addedReturns = diff * proportion;
-                returnsByDateStore.set(
-                  key,
-                  (returnsByDateStore.get(key) || 0) + addedReturns
-                );
-                const dateStr = key.split("::")[0];
-                returnsProjectedDates.add(dateStr);
-              }
-            }
-            warnings.push(`${store}: Using 25% worst-case RTS (${delivered}/${RTS_MIN_DELIVERED} delivered)`);
+        // Distribute additional returns proportionally by revenue across dates
+        if (additionalReturns > 0 && storeRevenue > 0) {
+          const storeDates: string[] = [];
+          for (const key of revenueByDateStore.keys()) {
+            if (key.endsWith(`::${store}`)) storeDates.push(key);
+          }
+          for (const key of storeDates) {
+            const dateRevenue = revenueByDateStore.get(key) || 0;
+            const proportion = dateRevenue / storeRevenue;
+            const added = additionalReturns * proportion;
+            returnsByDateStore.set(key, (returnsByDateStore.get(key) || 0) + added);
+            returnsProjectedDates.add(key.split("::")[0]);
           }
         }
       }

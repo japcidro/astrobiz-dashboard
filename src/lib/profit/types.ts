@@ -80,5 +80,6 @@ export interface JtUploadResult {
   inserted: number;
   updated: number;
   total: number;
+  protected_returns: number;
   errors: string[];
 }

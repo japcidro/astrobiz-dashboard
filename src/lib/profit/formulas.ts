@@ -126,6 +126,33 @@ export function distributeReturnsByRevenue(
 }
 
 /**
+ * Project returns from in-transit parcels using the store's actual RTS rate.
+ * Only applies when the store has enough settled data (200+ delivered).
+ *
+ * For stores below the threshold, the 25% worst-case rule already covers this.
+ * For stores above it, in-transit parcels are unaccounted — this fills the gap.
+ */
+export function calculateInTransitProjectedReturns(
+  deliveredCount: number,
+  returnedCount: number,
+  inTransitCount: number,
+  avgCodPerReturn: number,
+  avgShipCostPerReturn: number
+): { projectedReturns: number; projectedRtsRate: number } {
+  const settled = deliveredCount + returnedCount;
+
+  if (settled < RTS_MIN_DELIVERED || inTransitCount <= 0) {
+    return { projectedReturns: 0, projectedRtsRate: 0 };
+  }
+
+  const rtsRate = returnedCount / settled;
+  const estimatedReturns = Math.round(inTransitCount * rtsRate);
+  const projectedReturns = estimatedReturns * (avgCodPerReturn + avgShipCostPerReturn);
+
+  return { projectedReturns, projectedRtsRate: rtsRate };
+}
+
+/**
  * Round to 2 decimal places (same as the API does).
  */
 export function roundCurrency(value: number): number {

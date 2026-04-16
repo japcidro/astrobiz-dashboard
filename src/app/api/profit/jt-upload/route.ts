@@ -158,6 +158,39 @@ export async function POST(request: Request) {
     );
   }
 
+  // --- Protect confirmed returns from being overwritten ---
+  // Fetch waybills that already have a confirmed J&T return status.
+  // "Returned" and "For Return" come directly from J&T, so we must
+  // never downgrade them. "Returned (Aged)" is our own inference and
+  // CAN be overridden when J&T confirms delivery.
+  const uploadWaybills = dbRows.map((r) => r.waybill);
+  const confirmedReturnWaybills = new Set<string>();
+
+  // Query in chunks of 200 (Supabase .in() limit)
+  const WB_CHUNK = 200;
+  for (let i = 0; i < uploadWaybills.length; i += WB_CHUNK) {
+    const wbChunk = uploadWaybills.slice(i, i + WB_CHUNK);
+    const { data: existing } = await supabase
+      .from("jt_deliveries")
+      .select("waybill, classification")
+      .in("waybill", wbChunk)
+      .in("classification", ["Returned", "For Return"]);
+
+    for (const row of existing || []) {
+      confirmedReturnWaybills.add(row.waybill);
+    }
+  }
+
+  // For confirmed returns, preserve their returned status
+  let protectedCount = 0;
+  for (const row of dbRows) {
+    if (confirmedReturnWaybills.has(row.waybill) && !row.is_returned) {
+      row.is_returned = true;
+      row.classification = row.order_status === "For Return" ? "For Return" : "Returned";
+      protectedCount++;
+    }
+  }
+
   // Upsert in chunks of 50 to avoid timeout
   const CHUNK_SIZE = 50;
   let totalUpserted = 0;
@@ -181,6 +214,7 @@ export async function POST(request: Request) {
     inserted: totalUpserted,
     updated: 0,
     total: dbRows.length,
+    protected_returns: protectedCount,
     summary,
     errors,
   });
