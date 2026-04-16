@@ -9,6 +9,7 @@ export interface UnfulfilledOrder {
   line_items: OrderLineItem[];
   item_count: number;
   age_days: number;
+  tracking_numbers: string[];
 }
 
 export interface OrderLineItem {

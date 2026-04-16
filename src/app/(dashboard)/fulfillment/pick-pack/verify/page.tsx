@@ -76,37 +76,15 @@ export default function VerifyPage() {
           return;
         }
 
-        // Try 2: Looks like a waybill (starts with JT or is long numeric)
-        const isWaybill = /^JT/i.test(trimmed) || /^\d{10,}$/.test(trimmed);
-        if (isWaybill) {
-          // Look up waybill in jt_deliveries to get receiver name
-          const wbRes = await fetch(
-            `/api/shopify/fulfillment/waybill-lookup?waybill=${encodeURIComponent(trimmed)}`
-          );
-          const wbJson = await wbRes.json();
+        // Try 2: Match by tracking number (waybill) from Shopify fulfillments
+        const waybillMatch = orders.find((o) =>
+          o.tracking_numbers?.some(
+            (tn) => tn.toUpperCase() === trimmed.toUpperCase()
+          )
+        );
 
-          if (wbRes.ok && wbJson.receiver) {
-            // Match by customer name (normalize both sides)
-            const receiverNorm = wbJson.receiver.toUpperCase().trim();
-            const match = orders.find((o) => {
-              const custNorm = (o.customer_name || "").toUpperCase().trim();
-              return custNorm === receiverNorm ||
-                custNorm.includes(receiverNorm) ||
-                receiverNorm.includes(custNorm);
-            });
-
-            if (match) {
-              setupOrder(match);
-              return;
-            }
-          }
-
-          playError();
-          setFeedback({
-            type: "error",
-            message: "WAYBILL NOT MATCHED",
-            subMessage: `${trimmed}${wbJson.receiver ? ` (${wbJson.receiver})` : ""} — no matching order found`,
-          });
+        if (waybillMatch) {
+          setupOrder(waybillMatch);
           return;
         }
 

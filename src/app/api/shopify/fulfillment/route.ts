@@ -33,6 +33,10 @@ interface RawUnfulfilledOrder {
   } | null;
   line_items: RawShopifyLineItem[];
   fulfillment_status: string | null;
+  fulfillments?: Array<{
+    tracking_number: string | null;
+    tracking_numbers: string[];
+  }>;
 }
 
 async function fetchFulfilledOrders(
@@ -50,7 +54,7 @@ async function fetchFulfilledOrders(
       created_at_min: sevenDaysAgo,
       limit: "250",
       fields:
-        "id,name,created_at,customer,line_items,fulfillment_status",
+        "id,name,created_at,customer,line_items,fulfillment_status,fulfillments",
     });
 
   while (url) {
@@ -152,6 +156,15 @@ export async function GET() {
             ? `${raw.customer.first_name || ""} ${raw.customer.last_name || ""}`.trim()
             : "Unknown";
 
+          // Collect tracking numbers from fulfillments (waybill numbers)
+          const trackingNumbers: string[] = [];
+          for (const f of raw.fulfillments || []) {
+            if (f.tracking_number) trackingNumbers.push(f.tracking_number);
+            for (const tn of f.tracking_numbers || []) {
+              if (tn && !trackingNumbers.includes(tn)) trackingNumbers.push(tn);
+            }
+          }
+
           allOrders.push({
             id: raw.id,
             name: raw.name,
@@ -162,6 +175,7 @@ export async function GET() {
             line_items: lineItems,
             item_count: itemCount,
             age_days: ageDays,
+            tracking_numbers: trackingNumbers,
           });
         }
       } catch (err) {
