@@ -340,11 +340,11 @@ export default function BarcodesPage() {
                   alt={label.sku}
                   className="max-w-full max-h-[60%] object-contain"
                 />
-                <p className="text-[8px] text-gray-700 text-center leading-tight mt-1 truncate w-full">
+                <p className="barcode-label-text text-[8px] text-gray-700 text-center leading-tight mt-1 truncate w-full">
                   {label.product_title}
                 </p>
                 {label.variant_title && label.variant_title !== "Default" && label.variant_title !== "Default Title" && (
-                  <p className="text-[7px] text-gray-500 text-center leading-tight truncate w-full">
+                  <p className="barcode-label-text text-[7px] text-gray-500 text-center leading-tight truncate w-full">
                     {label.variant_title}
                   </p>
                 )}
@@ -361,35 +361,46 @@ export default function BarcodesPage() {
             size: 30mm 20mm;
             margin: 0;
           }
-          html, body {
+          /* Hide sidebar, header, nav, and all non-label content */
+          aside, nav, header, footer,
+          .print-hide,
+          [class*="sidebar"],
+          button, select, input, table, thead, tbody {
+            display: none !important;
+          }
+          /* Reset page */
+          html, body, main, #__next {
             margin: 0 !important;
             padding: 0 !important;
             background: white !important;
             color: black !important;
-            width: 30mm;
-            height: 20mm;
           }
-          /* Hide everything except labels */
-          body > * {
+          /* Hide everything in the page except the label area */
+          h1, h2, p:not(.barcode-label-text) {
             display: none !important;
           }
+          /* Show label grid */
           #label-print-area {
             display: block !important;
+            margin: 0 !important;
+            padding: 0 !important;
           }
-          .print\\:hidden, nav, aside, header, footer, h1, h2, p {
-            display: none !important;
-          }
-          /* Each label is one page */
+          /* Each label = one page, exact size */
           .barcode-label {
-            display: block !important;
+            display: flex !important;
+            flex-direction: column !important;
+            align-items: center !important;
+            justify-content: center !important;
             width: 30mm !important;
             height: 20mm !important;
             page-break-after: always;
             padding: 1mm !important;
             margin: 0 !important;
             border: none !important;
+            border-radius: 0 !important;
             box-sizing: border-box;
             overflow: hidden;
+            background: white !important;
           }
           .barcode-label:last-child {
             page-break-after: auto;
@@ -399,11 +410,12 @@ export default function BarcodesPage() {
             height: auto !important;
             max-height: 12mm !important;
           }
-          .barcode-label p {
+          .barcode-label .barcode-label-text {
             display: block !important;
-            font-size: 6pt !important;
+            font-size: 5pt !important;
             margin: 0 !important;
             line-height: 1.1 !important;
+            color: black !important;
           }
         }
       `}</style>
