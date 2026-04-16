@@ -310,7 +310,24 @@ export default function BarcodesPage() {
                 Back
               </button>
               <button
-                onClick={() => window.print()}
+                onClick={() => {
+                  // Open a clean print window with only the barcode labels
+                  const printWindow = window.open("", "_blank", "width=400,height=600");
+                  if (!printWindow) return;
+                  const labelsHtml = labels.map((label) => {
+                    const variantText = label.variant_title && label.variant_title !== "Default" && label.variant_title !== "Default Title"
+                      ? `<p style="font-size:5pt;margin:0;text-align:center;color:#333">${label.variant_title}</p>` : "";
+                    return `<div style="width:30mm;height:20mm;padding:1mm;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;page-break-after:always;overflow:hidden">
+                      <img src="${label.dataUrl}" style="max-width:28mm;max-height:12mm;height:auto" />
+                      <p style="font-size:5pt;margin:1px 0 0;text-align:center;color:#333;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:28mm">${label.product_title}</p>
+                      ${variantText}
+                    </div>`;
+                  }).join("");
+                  printWindow.document.write(`<!DOCTYPE html><html><head><title>Barcode Labels</title><style>@page{size:30mm 20mm;margin:0}body{margin:0;padding:0;font-family:Arial,sans-serif}</style></head><body>${labelsHtml}</body></html>`);
+                  printWindow.document.close();
+                  printWindow.focus();
+                  setTimeout(() => { printWindow.print(); }, 500);
+                }}
                 className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-3 py-2 rounded-lg transition-colors cursor-pointer"
               >
                 <Printer size={14} />
@@ -354,71 +371,6 @@ export default function BarcodesPage() {
         </div>
       )}
 
-      {/* Print styles — exact 30x20mm labels */}
-      <style jsx global>{`
-        @media print {
-          @page {
-            size: 30mm 20mm;
-            margin: 0;
-          }
-          /* Hide sidebar, header, nav, and all non-label content */
-          aside, nav, header, footer,
-          .print-hide,
-          [class*="sidebar"],
-          button, select, input, table, thead, tbody {
-            display: none !important;
-          }
-          /* Reset page */
-          html, body, main, #__next {
-            margin: 0 !important;
-            padding: 0 !important;
-            background: white !important;
-            color: black !important;
-          }
-          /* Hide everything in the page except the label area */
-          h1, h2, p:not(.barcode-label-text) {
-            display: none !important;
-          }
-          /* Show label grid */
-          #label-print-area {
-            display: block !important;
-            margin: 0 !important;
-            padding: 0 !important;
-          }
-          /* Each label = one page, exact size */
-          .barcode-label {
-            display: flex !important;
-            flex-direction: column !important;
-            align-items: center !important;
-            justify-content: center !important;
-            width: 30mm !important;
-            height: 20mm !important;
-            page-break-after: always;
-            padding: 1mm !important;
-            margin: 0 !important;
-            border: none !important;
-            border-radius: 0 !important;
-            box-sizing: border-box;
-            overflow: hidden;
-            background: white !important;
-          }
-          .barcode-label:last-child {
-            page-break-after: auto;
-          }
-          .barcode-label img {
-            max-width: 28mm !important;
-            height: auto !important;
-            max-height: 12mm !important;
-          }
-          .barcode-label .barcode-label-text {
-            display: block !important;
-            font-size: 5pt !important;
-            margin: 0 !important;
-            line-height: 1.1 !important;
-            color: black !important;
-          }
-        }
-      `}</style>
     </div>
   );
 }
