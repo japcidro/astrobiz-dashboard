@@ -20,6 +20,15 @@ const DATE_PRESETS: { label: string; value: ProfitDateFilter }[] = [
   { label: "Custom", value: "custom" },
 ];
 
+function formatTimeAgo(iso: string): string {
+  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (seconds < 10) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.floor(minutes / 60)}h ago`;
+}
+
 const defaultSummary: ProfitSummary = {
   revenue: 0,
   order_count: 0,
@@ -44,6 +53,8 @@ export default function ProfitPage() {
   const [storeFilter, setStoreFilter] = useState("ALL");
   const [sortKey, setSortKey] = useState("date");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
+  const [fromCache, setFromCache] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -60,7 +71,7 @@ export default function ProfitPage() {
         params.set("date_to", customTo);
       }
 
-      const res = await fetch(`/api/profit/daily?${params}`);
+      const res = await fetch(`/api/profit/daily?${params}`, { cache: "no-store" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to load profit data");
 
@@ -68,6 +79,8 @@ export default function ProfitPage() {
       setDaily(json.daily || []);
       if (json.stores) setStores(json.stores);
       if (json.missing_cogs_skus) setMissingCogsSkus(json.missing_cogs_skus);
+      if (json.refreshed_at) setRefreshedAt(json.refreshed_at);
+      setFromCache(!!json.from_cache);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load profit data");
     } finally {
@@ -149,10 +162,41 @@ export default function ProfitPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-white">Net Profit</h1>
-          <p className="text-gray-400 mt-1">Daily P&L</p>
+          <p className="text-gray-400 mt-1">
+            Daily P&L
+            {refreshedAt && !loading && (
+              <span className="text-gray-500 ml-2 text-xs">
+                {fromCache ? "Cached" : "Live"} &middot; Last updated: {formatTimeAgo(refreshedAt)}
+              </span>
+            )}
+          </p>
         </div>
         <button
-          onClick={() => fetchData()}
+          onClick={() => {
+            // Force refresh: add refresh=1 to bypass cache
+            setLoading(true);
+            setError(null);
+            const params = new URLSearchParams({
+              store: storeFilter,
+              date_filter: dateFilter,
+              refresh: "1",
+            });
+            if (dateFilter === "custom" && customFrom) params.set("date_from", customFrom);
+            if (dateFilter === "custom" && customTo) params.set("date_to", customTo);
+            fetch(`/api/profit/daily?${params}`, { cache: "no-store" })
+              .then((r) => r.json())
+              .then((json) => {
+                if (json.error) throw new Error(json.error);
+                setSummary(json.summary || defaultSummary);
+                setDaily(json.daily || []);
+                if (json.stores) setStores(json.stores);
+                if (json.missing_cogs_skus) setMissingCogsSkus(json.missing_cogs_skus);
+                if (json.refreshed_at) setRefreshedAt(json.refreshed_at);
+                setFromCache(false);
+              })
+              .catch((e) => setError(e instanceof Error ? e.message : "Failed"))
+              .finally(() => setLoading(false));
+          }}
           disabled={loading}
           className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm px-3 py-2 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
         >

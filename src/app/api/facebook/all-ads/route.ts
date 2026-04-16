@@ -1,16 +1,13 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
+import { buildCacheKey, getCachedResponse, setCachedResponse } from "@/lib/data-cache";
 import type { DatePreset } from "@/lib/facebook/types";
 
 export const dynamic = "force-dynamic";
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
 
-// In-memory cache — survives across requests while server is running
-const cache = new Map<string, { data: unknown; timestamp: number }>();
-const CACHE_TTL = 10 * 60 * 1000; // 10 minutes for full response
-
-// Separate cache for structure data (campaigns/adsets/ads statuses) — rarely changes
+// Structure cache for campaigns/adsets/ads statuses — rarely changes
 const structureCache = new Map<string, { data: unknown; timestamp: number }>();
 const STRUCTURE_CACHE_TTL = 30 * 60 * 1000; // 30 minutes for structure
 
@@ -82,12 +79,19 @@ interface AccountInfo {
 }
 
 export async function GET(request: Request) {
-  const employee = await getEmployee();
-  if (!employee) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  if (!["admin", "marketing"].includes(employee.role)) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
+  // Allow cron jobs to bypass auth using CRON_SECRET
+  const isCron = request.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`;
+
+  let employeeRole = "admin";
+  if (!isCron) {
+    const employee = await getEmployee();
+    if (!employee) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (!["admin", "marketing"].includes(employee.role)) {
+      return Response.json({ error: "Forbidden" }, { status: 403 });
+    }
+    employeeRole = employee.role;
   }
 
   const { searchParams } = new URL(request.url);
@@ -95,16 +99,25 @@ export async function GET(request: Request) {
   const accountFilter = searchParams.get("account") || "ALL";
   const forceRefresh = searchParams.get("refresh") === "1";
 
-  // Check cache first (ignore _t timestamp param for cache key)
-  const cacheKey = `${datePreset}:${accountFilter}`;
+  const supabase = await createClient();
+
+  // Check Supabase cache first
+  const cacheKey = buildCacheKey("ads", {
+    date_preset: datePreset,
+    account: accountFilter,
+  });
+
   if (!forceRefresh) {
-    const cached = cache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      return Response.json({ ...(cached.data as Record<string, unknown>), role: employee.role, cached: true });
+    const cached = await getCachedResponse(supabase, cacheKey);
+    if (cached) {
+      return Response.json({
+        ...(cached.data as Record<string, unknown>),
+        role: employeeRole,
+        refreshed_at: cached.refreshed_at,
+        from_cache: true,
+      });
     }
   }
-
-  const supabase = await createClient();
 
   const { data: tokenSetting } = await supabase
     .from("app_settings")
@@ -171,7 +184,7 @@ export async function GET(request: Request) {
         totals: { count: 0, spend: 0, link_clicks: 0, purchases: 0, add_to_cart: 0, reach: 0, impressions: 0, cpa: 0, roas: 0, ctr: 0 },
         accounts,
         budgets: {},
-        role: employee.role,
+        role: employeeRole,
       });
     }
 
@@ -488,10 +501,11 @@ export async function GET(request: Request) {
       budgets,
     };
 
-    // Cache the response (without role — role is added per-request)
-    cache.set(cacheKey, { data: responseData, timestamp: Date.now() });
+    // Write to Supabase cache (non-blocking)
+    const refreshedAt = new Date().toISOString();
+    setCachedResponse(supabase, "ads", cacheKey, responseData).catch(() => {});
 
-    return Response.json({ ...responseData, role: employee.role });
+    return Response.json({ ...responseData, role: employeeRole, refreshed_at: refreshedAt });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Facebook API error";
     return Response.json({ error: message }, { status: 500 });

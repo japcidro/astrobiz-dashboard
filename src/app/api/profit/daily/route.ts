@@ -10,16 +10,13 @@ import {
   RTS_WORST_CASE_RATE,
   RTS_MIN_DELIVERED,
 } from "@/lib/profit/formulas";
+import { buildCacheKey, getCachedResponse, setCachedResponse } from "@/lib/data-cache";
 import type { DailyPnlRow, ProfitSummary, ProfitDateFilter } from "@/lib/profit/types";
 
 export const dynamic = "force-dynamic";
 
 const SHOPIFY_API_VERSION = "2024-01";
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
-
-// In-memory cache — survives across requests while server is running
-const cache = new Map<string, { data: unknown; timestamp: number }>();
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 // ---------- Date helpers (PHT +08:00) ----------
 
@@ -249,12 +246,17 @@ function toPhtDateStr(isoString: string): string {
 // ---------- Main handler ----------
 
 export async function GET(request: Request) {
-  const employee = await getEmployee();
-  if (!employee) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  if (employee.role !== "admin") {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
+  // Allow cron jobs to bypass auth using CRON_SECRET
+  const isCron = request.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`;
+
+  if (!isCron) {
+    const employee = await getEmployee();
+    if (!employee) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (employee.role !== "admin") {
+      return Response.json({ error: "Forbidden" }, { status: 403 });
+    }
   }
 
   const { searchParams } = new URL(request.url);
@@ -264,14 +266,26 @@ export async function GET(request: Request) {
   const dateTo = searchParams.get("date_to");
   const forceRefresh = searchParams.get("refresh") === "1";
 
-  // Cache check
-  const cacheKey = `pnl-${dateFilter}-${storeFilter}-${dateFrom}-${dateTo}`;
-  const cached = cache.get(cacheKey);
-  if (!forceRefresh && cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return Response.json(cached.data);
-  }
-
   const supabase = await createClient();
+
+  // Check Supabase cache first (skip on force refresh)
+  const cacheKey = buildCacheKey("pnl", {
+    store: storeFilter,
+    date_filter: dateFilter,
+    date_from: dateFrom || "",
+    date_to: dateTo || "",
+  });
+
+  if (!forceRefresh) {
+    const cached = await getCachedResponse(supabase, cacheKey);
+    if (cached) {
+      return Response.json({
+        ...(cached.data as Record<string, unknown>),
+        refreshed_at: cached.refreshed_at,
+        from_cache: true,
+      });
+    }
+  }
   const warnings: string[] = [];
 
   const { startDate, endDate, createdAtMin, createdAtMax } = computeDateRange(
@@ -771,8 +785,9 @@ export async function GET(request: Request) {
     warnings,
   };
 
-  // Cache the response
-  cache.set(cacheKey, { data: responseData, timestamp: Date.now() });
+  // Write to Supabase cache (non-blocking)
+  const refreshedAt = new Date().toISOString();
+  setCachedResponse(supabase, "pnl", cacheKey, responseData).catch(() => {});
 
-  return Response.json(responseData);
+  return Response.json({ ...responseData, refreshed_at: refreshedAt });
 }

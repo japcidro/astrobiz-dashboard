@@ -214,13 +214,15 @@ export default function AdsPage() {
       // If we got 0 ads but already had data, keep the old data (likely a rate limit error)
       if (rows && rows.length === 0 && allRows.length > 0) {
         // Don't overwrite good data with empty response — likely rate limited
-        setLastRefreshed(formatLastRefreshed(result.timestamp));
+        const serverTime = json.refreshed_at ? new Date(json.refreshed_at as string).getTime() : result.timestamp;
+        setLastRefreshed(formatLastRefreshed(serverTime) + (json.from_cache ? " (cached)" : ""));
       } else {
         setAllRows(rows || []);
         if (json.accounts) setAccounts(json.accounts as typeof accounts);
         if (json.role) setRole(json.role as string);
         if (json.budgets) setBudgets(json.budgets as typeof budgets);
-        setLastRefreshed(formatLastRefreshed(result.timestamp));
+        const serverTime = json.refreshed_at ? new Date(json.refreshed_at as string).getTime() : result.timestamp;
+        setLastRefreshed(formatLastRefreshed(serverTime) + (json.from_cache ? " (cached)" : ""));
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
