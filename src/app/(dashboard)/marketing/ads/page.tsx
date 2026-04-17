@@ -118,13 +118,23 @@ function aggregate(
     const active_count = group.filter((r) => r.status === "ACTIVE").length;
     const unknown_count = group.filter((r) => r.status === "UNKNOWN").length;
 
-    // For adset/campaign-level rows, use the entity's OWN updated_time
-    // (not the child ad's) so dates reflect actual edits at that level.
-    // All rows in the group share the same adset/campaign updated_time.
-    const entityUpdated =
+    // Prefer entity's OWN updated_time, but fall back to the most recent
+    // child ad updated_time, then to campaign — so the column is never empty
+    // when FB returned ANY date for this hierarchy.
+    const ownUpdated =
       groupBy === "adset"
-        ? group[0]?.adset_updated_time ?? null
-        : group[0]?.campaign_updated_time ?? null;
+        ? group[0]?.adset_updated_time
+        : group[0]?.campaign_updated_time;
+    const adUpdatedTimes = group
+      .map((r) => r.updated_time)
+      .filter(Boolean) as string[];
+    const latestAdUpdated =
+      adUpdatedTimes.length > 0 ? adUpdatedTimes.sort().reverse()[0] : null;
+    const entityUpdated =
+      ownUpdated ||
+      latestAdUpdated ||
+      group[0]?.campaign_updated_time ||
+      null;
 
     // Earliest start_time
     const startTimes = group

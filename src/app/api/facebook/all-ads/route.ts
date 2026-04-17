@@ -234,7 +234,7 @@ export async function GET(request: Request) {
 
         // Only fetch insights fresh — structure from cache if available
         type CampaignRaw = { id: string; effective_status: string; daily_budget?: string; lifetime_budget?: string; updated_time?: string };
-        type AdsetRaw = { id: string; effective_status: string; campaign_id: string; daily_budget?: string; lifetime_budget?: string; updated_time?: string; start_time?: string };
+        type AdsetRaw = { id: string; effective_status: string; campaign_id: string; daily_budget?: string; lifetime_budget?: string; updated_time?: string; start_time?: string; created_time?: string };
         type AdRaw = { id: string; effective_status: string; adset_id: string; updated_time?: string; creative?: { id: string; effective_object_story_id?: string; thumbnail_url?: string } };
 
         const [campaignsRaw, adsetsRaw, adsRaw, insightsData] = hasStructCache
@@ -258,7 +258,7 @@ export async function GET(request: Request) {
             fbFetchAll<AdsetRaw>(
               `/${account.id}/adsets`,
               token,
-              { fields: "id,effective_status,campaign_id,daily_budget,lifetime_budget,updated_time,start_time", limit: "500" }
+              { fields: "id,effective_status,campaign_id,daily_budget,lifetime_budget,updated_time,start_time,created_time", limit: "500" }
             ).catch((e) => {
               console.error(`[FB all-ads] adsets fetch failed for ${account.name}:`, e instanceof Error ? e.message : e);
               return [] as AdsetRaw[];
@@ -320,7 +320,10 @@ export async function GET(request: Request) {
           adsetStatus[a.id] = a.effective_status;
           adsetToCampaign[a.id] = a.campaign_id;
           if (a.updated_time) adsetUpdated[a.id] = a.updated_time;
+          // Fall back to created_time when start_time is missing — older
+          // adsets without an explicit schedule still have created_time
           if (a.start_time) adsetStartTime[a.id] = a.start_time;
+          else if (a.created_time) adsetStartTime[a.id] = a.created_time;
           budgets[a.id] = {
             daily_budget: a.daily_budget ? parseInt(a.daily_budget) / 100 : null,
             lifetime_budget: a.lifetime_budget ? parseInt(a.lifetime_budget) / 100 : null,
