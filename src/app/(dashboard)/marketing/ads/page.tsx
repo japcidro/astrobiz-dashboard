@@ -13,8 +13,10 @@ import {
   Pencil,
   X,
   Loader2,
+  Zap,
 } from "lucide-react";
 import type { DatePreset } from "@/lib/facebook/types";
+import { QuickActionsModal } from "@/components/marketing/quick-actions-modal";
 
 const DATE_PRESETS: { label: string; value: DatePreset }[] = [
   { label: "Today", value: "today" },
@@ -199,6 +201,9 @@ export default function AdsPage() {
   const [selectedCampaign, setSelectedCampaign] = useState<string | null>(null);
   const [selectedAdset, setSelectedAdset] = useState<string | null>(null);
 
+  // Quick Actions modal
+  const [quickActionsOpen, setQuickActionsOpen] = useState(false);
+
   // Admin action states
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [editingBudget, setEditingBudget] = useState<{
@@ -373,6 +378,21 @@ export default function AdsPage() {
     () => ["ALL", ...Array.from(new Set(allRows.map((r) => r.status)))],
     [allRows]
   );
+
+  // Raw ad rows in current scope (respects account/status filter + drill)
+  // Used by Quick Actions so bulk pause/boost only affects what user sees.
+  const scopedRawRows = useMemo(() => {
+    if (drillLevel === "campaign") return filteredRows;
+    if (drillLevel === "adset" && selectedCampaign) {
+      return filteredRows.filter((r) => r.campaign === selectedCampaign);
+    }
+    if (drillLevel === "ad" && selectedCampaign && selectedAdset) {
+      return filteredRows.filter(
+        (r) => r.campaign === selectedCampaign && r.adset === selectedAdset
+      );
+    }
+    return filteredRows;
+  }, [filteredRows, drillLevel, selectedCampaign, selectedAdset]);
 
   // Build display data based on drill level
   const displayData = useMemo(() => {
@@ -627,6 +647,17 @@ export default function AdsPage() {
           >
             <Settings size={20} />
           </a>
+          {isAdmin && (
+            <button
+              onClick={() => setQuickActionsOpen(true)}
+              disabled={loading || allRows.length === 0}
+              className="flex items-center gap-1.5 bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 text-sm px-3 py-2 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+              title="Bulk pause bleeders or boost winners"
+            >
+              <Zap size={14} />
+              Quick Actions
+            </button>
+          )}
           <button
             onClick={() => fetchData(true)}
             disabled={loading}
@@ -1211,6 +1242,15 @@ export default function AdsPage() {
           </table>
         </div>
       </div>
+
+      {/* Quick Actions Modal */}
+      <QuickActionsModal
+        open={quickActionsOpen}
+        onClose={() => setQuickActionsOpen(false)}
+        rows={scopedRawRows}
+        budgets={budgets}
+        onComplete={() => fetchData(true)}
+      />
     </div>
   );
 }
