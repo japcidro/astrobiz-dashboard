@@ -421,8 +421,8 @@ export async function GET(request: Request) {
             ctr: parseFloat((row.ctr as string) || "0"),
             preview_url: adPreview[adId]?.url || null,
             thumbnail_url: adPreview[adId]?.thumbnail || null,
-            updated_time: adUpdated[adId] || adsetUpdated[adToAdset[adId]] || campaignUpdated[row.campaign_id as string] || null,
-            start_time: adsetStartTime[adToAdset[adId]] || null,
+            updated_time: adUpdated[adId] || adsetUpdated[adToAdset[adId] || (row.adset_id as string)] || campaignUpdated[row.campaign_id as string] || null,
+            start_time: adsetStartTime[adToAdset[adId] || (row.adset_id as string)] || null,
           });
         }
       })
