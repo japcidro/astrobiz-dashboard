@@ -48,6 +48,8 @@ interface AdRow {
   preview_url: string | null;
   thumbnail_url: string | null;
   updated_time: string | null;
+  adset_updated_time: string | null;
+  campaign_updated_time: string | null;
   start_time: string | null;
 }
 
@@ -115,14 +117,13 @@ function aggregate(
     const active_count = group.filter((r) => r.status === "ACTIVE").length;
     const unknown_count = group.filter((r) => r.status === "UNKNOWN").length;
 
-    // Most recent updated_time across all child ads
-    const updatedTimes = group
-      .map((r) => r.updated_time)
-      .filter(Boolean) as string[];
-    const latestUpdated =
-      updatedTimes.length > 0
-        ? updatedTimes.sort().reverse()[0]
-        : null;
+    // For adset/campaign-level rows, use the entity's OWN updated_time
+    // (not the child ad's) so dates reflect actual edits at that level.
+    // All rows in the group share the same adset/campaign updated_time.
+    const entityUpdated =
+      groupBy === "adset"
+        ? group[0]?.adset_updated_time ?? null
+        : group[0]?.campaign_updated_time ?? null;
 
     // Earliest start_time
     const startTimes = group
@@ -137,7 +138,7 @@ function aggregate(
       count: group.length,
       active_count,
       unknown_count,
-      updated_time: latestUpdated,
+      updated_time: entityUpdated,
       start_time: earliestStart,
       spend,
       link_clicks,

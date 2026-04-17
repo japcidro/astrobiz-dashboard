@@ -212,7 +212,9 @@ export async function GET(request: Request) {
       ctr: number;
       preview_url: string | null;
       thumbnail_url: string | null;
-      updated_time: string | null;
+      updated_time: string | null;        // ad's own updated_time
+      adset_updated_time: string | null;  // parent adset's updated_time
+      campaign_updated_time: string | null; // parent campaign's updated_time
       start_time: string | null;
     }
 
@@ -421,7 +423,9 @@ export async function GET(request: Request) {
             ctr: parseFloat((row.ctr as string) || "0"),
             preview_url: adPreview[adId]?.url || null,
             thumbnail_url: adPreview[adId]?.thumbnail || null,
-            updated_time: adUpdated[adId] || adsetUpdated[adToAdset[adId] || (row.adset_id as string)] || campaignUpdated[row.campaign_id as string] || null,
+            updated_time: adUpdated[adId] || null,
+            adset_updated_time: adsetUpdated[adToAdset[adId] || (row.adset_id as string)] || null,
+            campaign_updated_time: campaignUpdated[row.campaign_id as string] || null,
             start_time: adsetStartTime[adToAdset[adId] || (row.adset_id as string)] || null,
           });
         }
