@@ -73,6 +73,7 @@ interface AggRow {
   count: number;
   active_count: number; // how many child ads are ACTIVE
   unknown_count: number; // how many child ads have UNKNOWN status (FB structure fetch issue)
+  scheduled: boolean; // start_time is in the future
   updated_time: string | null;
   start_time: string | null;
   spend: number;
@@ -131,6 +132,8 @@ function aggregate(
       .filter(Boolean) as string[];
     const earliestStart =
       startTimes.length > 0 ? startTimes.sort()[0] : null;
+    const scheduled =
+      !!earliestStart && new Date(earliestStart).getTime() > Date.now();
 
     result.push({
       name,
@@ -138,6 +141,7 @@ function aggregate(
       count: group.length,
       active_count,
       unknown_count,
+      scheduled,
       updated_time: entityUpdated,
       start_time: earliestStart,
       spend,
@@ -1055,6 +1059,14 @@ export default function AdsPage() {
                             const active = agg.active_count;
                             const unknown = agg.unknown_count;
                             const total = agg.count;
+                            const scheduled = agg.scheduled;
+                            if (scheduled) {
+                              return (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/30 text-blue-400 flex-shrink-0" title="Start date is in the future">
+                                  SCHEDULED
+                                </span>
+                              );
+                            }
                             if (unknown === total) {
                               return (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700/50 text-gray-400 flex-shrink-0" title="FB structure fetch incomplete — refresh to retry">
@@ -1129,22 +1141,37 @@ export default function AdsPage() {
                             })
                           : "—"}
                       </td>
-                      {/* Days Running */}
-                      <td className="px-3 py-2.5 text-right whitespace-nowrap text-gray-400 text-xs">
+                      {/* Days Running / Scheduled */}
+                      <td className="px-3 py-2.5 text-right whitespace-nowrap text-xs">
                         {rowData.start_time
                           ? (() => {
-                              const days = Math.floor(
-                                (Date.now() -
-                                  new Date(
-                                    rowData.start_time as string
-                                  ).getTime()) /
-                                  86400000
+                              const startMs = new Date(
+                                rowData.start_time as string
+                              ).getTime();
+                              const diffMs = Date.now() - startMs;
+                              const days = Math.floor(diffMs / 86400000);
+                              if (days < 0) {
+                                const startsIn = Math.ceil(-diffMs / 86400000);
+                                const dateLabel = new Date(startMs).toLocaleDateString(
+                                  "en-PH",
+                                  { month: "short", day: "numeric" }
+                                );
+                                return (
+                                  <span
+                                    className="text-blue-400"
+                                    title={`Scheduled to start ${dateLabel} (in ${startsIn}d)`}
+                                  >
+                                    📅 {dateLabel}
+                                  </span>
+                                );
+                              }
+                              return (
+                                <span className="text-gray-400">
+                                  {days === 0 ? "Today" : `${days}d`}
+                                </span>
                               );
-                              return days <= 0
-                                ? "Today"
-                                : `${days}d`;
                             })()
-                          : "—"}
+                          : <span className="text-gray-400">—</span>}
                       </td>
                       {/* Metrics */}
                       {METRIC_COLS.map((col) => (
