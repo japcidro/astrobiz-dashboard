@@ -15,6 +15,7 @@ interface AdRow {
   spend: number;
   cpa: number;
   purchases: number;
+  start_time: string | null;
 }
 
 interface BudgetInfo {
@@ -31,6 +32,7 @@ interface AdsetTarget {
   current_budget: number;
   new_budget: number;
   is_daily: boolean;
+  days_running: number | null;
 }
 
 interface AdTarget {
@@ -40,6 +42,7 @@ interface AdTarget {
   spend: number;
   purchases: number;
   cpa: number;
+  days_running: number | null;
 }
 
 interface ExecResult {
@@ -97,6 +100,14 @@ export function QuickActionsModal({
         spend: r.spend,
         purchases: r.purchases,
         cpa: r.cpa,
+        days_running: r.start_time
+          ? Math.max(
+              0,
+              Math.floor(
+                (Date.now() - new Date(r.start_time).getTime()) / 86400000
+              )
+            )
+          : null,
       }));
   }, [rows, killSpendMin, killCpaMax]);
 
@@ -105,12 +116,19 @@ export function QuickActionsModal({
   const winners = useMemo<AdsetTarget[]>(() => {
     const byAdset = new Map<
       string,
-      { name: string; spend: number; purchases: number }
+      { name: string; spend: number; purchases: number; start_time: string | null }
     >();
     for (const r of rows) {
       if (r.status !== "ACTIVE") continue;
       const k = r.adset_id;
-      if (!byAdset.has(k)) byAdset.set(k, { name: r.adset, spend: 0, purchases: 0 });
+      if (!byAdset.has(k)) {
+        byAdset.set(k, {
+          name: r.adset,
+          spend: 0,
+          purchases: 0,
+          start_time: r.start_time,
+        });
+      }
       const entry = byAdset.get(k)!;
       entry.spend += r.spend;
       entry.purchases += r.purchases;
@@ -126,6 +144,14 @@ export function QuickActionsModal({
       const current = b.daily_budget ?? b.lifetime_budget ?? 0;
       if (current <= 0) continue;
       const newBudget = Math.round(current * (1 + boostPercent / 100));
+      const days = agg.start_time
+        ? Math.max(
+            0,
+            Math.floor(
+              (Date.now() - new Date(agg.start_time).getTime()) / 86400000
+            )
+          )
+        : null;
       result.push({
         id,
         name: agg.name,
@@ -135,6 +161,7 @@ export function QuickActionsModal({
         current_budget: current,
         new_budget: newBudget,
         is_daily: b.daily_budget != null,
+        days_running: days,
       });
     }
     return result.sort((a, b) => a.cpa - b.cpa);
@@ -327,6 +354,7 @@ export function QuickActionsModal({
                     <thead className="bg-gray-800/50 sticky top-0">
                       <tr className="text-gray-400">
                         <th className="text-left px-3 py-2">Ad</th>
+                        <th className="text-right px-3 py-2">Days</th>
                         <th className="text-right px-3 py-2">Spent</th>
                         <th className="text-right px-3 py-2">Pur</th>
                         <th className="text-right px-3 py-2">CPA</th>
@@ -335,7 +363,7 @@ export function QuickActionsModal({
                     <tbody>
                       {bleeders.length === 0 ? (
                         <tr>
-                          <td colSpan={4} className="text-center text-gray-500 py-6">
+                          <td colSpan={5} className="text-center text-gray-500 py-6">
                             Nothing to kill — no ads match the criteria
                           </td>
                         </tr>
@@ -365,6 +393,13 @@ export function QuickActionsModal({
                                     {result.error}
                                   </div>
                                 )}
+                              </td>
+                              <td className="px-3 py-2 text-right text-gray-300">
+                                {b.days_running == null
+                                  ? "—"
+                                  : b.days_running === 0
+                                    ? "Today"
+                                    : `${b.days_running}d`}
                               </td>
                               <td className="px-3 py-2 text-right text-gray-300">
                                 {fmt(b.spend)}
@@ -440,6 +475,7 @@ export function QuickActionsModal({
                     <thead className="bg-gray-800/50 sticky top-0">
                       <tr className="text-gray-400">
                         <th className="text-left px-3 py-2">Ad Set</th>
+                        <th className="text-right px-3 py-2">Days</th>
                         <th className="text-right px-3 py-2">CPA</th>
                         <th className="text-right px-3 py-2">Pur</th>
                         <th className="text-right px-3 py-2">Budget</th>
@@ -449,7 +485,7 @@ export function QuickActionsModal({
                     <tbody>
                       {winners.length === 0 ? (
                         <tr>
-                          <td colSpan={5} className="text-center text-gray-500 py-6">
+                          <td colSpan={6} className="text-center text-gray-500 py-6">
                             No adsets match the criteria
                           </td>
                         </tr>
@@ -476,6 +512,13 @@ export function QuickActionsModal({
                                     {result.error}
                                   </div>
                                 )}
+                              </td>
+                              <td className="px-3 py-2 text-right text-gray-300">
+                                {w.days_running == null
+                                  ? "—"
+                                  : w.days_running === 0
+                                    ? "Today"
+                                    : `${w.days_running}d`}
                               </td>
                               <td className="px-3 py-2 text-right text-gray-300">
                                 {fmt(w.cpa)}
