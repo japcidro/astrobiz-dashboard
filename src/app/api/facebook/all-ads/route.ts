@@ -343,29 +343,24 @@ export async function GET(request: Request) {
           };
         }
 
-        function getDeliveryStatus(
-          adId: string,
-          insightsAdsetId?: string,
-          insightsCampaignId?: string
-        ): string {
+        function getDeliveryStatus(adId: string): string {
           if (!account.is_active) return `ACCOUNT ${account.status_label}`;
 
           const adSt = adEffStatus[adId];
-          const adsetId = adToAdset[adId] || insightsAdsetId;
+          // Ad missing from structure fetch — DON'T infer ACTIVE from parents
+          // since campaign/adset can be ACTIVE while individual ads are PAUSED.
+          // Show UNKNOWN so user knows status couldn't be verified.
+          if (!adSt) return "UNKNOWN";
+
+          const adsetId = adToAdset[adId];
           const adsetSt = adsetId ? adsetStatus[adsetId] : undefined;
-          const campaignId = (adsetId ? adsetToCampaign[adsetId] : undefined) || insightsCampaignId;
+          const campaignId = adsetId ? adsetToCampaign[adsetId] : undefined;
           const campaignSt = campaignId ? campaignStatus[campaignId] : undefined;
 
           if (campaignSt && campaignSt !== "ACTIVE") return `CAMPAIGN ${campaignSt}`;
           if (adsetSt && adsetSt !== "ACTIVE") return `ADSET ${adsetSt}`;
-
-          // Ad missing from structure fetch — insights returned it, so infer from parents
-          if (!adSt) {
-            if (campaignSt === "ACTIVE" && adsetSt === "ACTIVE") return "ACTIVE";
-            return "UNKNOWN";
-          }
-
           if (adSt !== "ACTIVE") return adSt;
+
           return "ACTIVE";
         }
 
@@ -412,7 +407,7 @@ export async function GET(request: Request) {
             adset_id: row.adset_id as string,
             ad: row.ad_name,
             ad_id: adId,
-            status: getDeliveryStatus(adId, row.adset_id as string, row.campaign_id as string),
+            status: getDeliveryStatus(adId),
             spend,
             link_clicks: linkClicks,
             cpa,

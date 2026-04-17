@@ -70,6 +70,7 @@ interface AggRow {
   entity_id: string; // campaign or adset ID for API calls
   count: number;
   active_count: number; // how many child ads are ACTIVE
+  unknown_count: number; // how many child ads have UNKNOWN status (FB structure fetch issue)
   updated_time: string | null;
   start_time: string | null;
   spend: number;
@@ -112,6 +113,7 @@ function aggregate(
         : 0;
 
     const active_count = group.filter((r) => r.status === "ACTIVE").length;
+    const unknown_count = group.filter((r) => r.status === "UNKNOWN").length;
 
     // Most recent updated_time across all child ads
     const updatedTimes = group
@@ -134,6 +136,7 @@ function aggregate(
       entity_id: id,
       count: group.length,
       active_count,
+      unknown_count,
       updated_time: latestUpdated,
       start_time: earliestStart,
       spend,
@@ -1049,7 +1052,15 @@ export default function AdsPage() {
                           {drillLevel !== "ad" && (() => {
                             const agg = rowData as unknown as AggRow;
                             const active = agg.active_count;
+                            const unknown = agg.unknown_count;
                             const total = agg.count;
+                            if (unknown === total) {
+                              return (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700/50 text-gray-400 flex-shrink-0" title="FB structure fetch incomplete — refresh to retry">
+                                  {total} ?
+                                </span>
+                              );
+                            }
                             if (active === 0) {
                               return (
                                 <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700/50 text-gray-500 flex-shrink-0">
