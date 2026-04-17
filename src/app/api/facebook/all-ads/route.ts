@@ -244,74 +244,35 @@ export async function GET(request: Request) {
               ).catch(() => [] as Array<Record<string, unknown>>),
             ]
           : await Promise.all([
-            fbFetchAll<{
-              id: string;
-              effective_status: string;
-              daily_budget?: string;
-              lifetime_budget?: string;
-              updated_time?: string;
-            }>(
+            fbFetchAll<CampaignRaw>(
               `/${account.id}/campaigns`,
               token,
               { fields: "id,effective_status,daily_budget,lifetime_budget,updated_time", limit: "500" }
-            ).catch(() => [] as Array<{
-              id: string;
-              effective_status: string;
-              daily_budget?: string;
-              lifetime_budget?: string;
-              updated_time?: string;
-            }>),
+            ).catch((e) => {
+              console.error(`[FB all-ads] campaigns fetch failed for ${account.name}:`, e instanceof Error ? e.message : e);
+              return [] as CampaignRaw[];
+            }),
 
-            fbFetchAll<{
-              id: string;
-              effective_status: string;
-              campaign_id: string;
-              daily_budget?: string;
-              lifetime_budget?: string;
-              updated_time?: string;
-              start_time?: string;
-            }>(
+            fbFetchAll<AdsetRaw>(
               `/${account.id}/adsets`,
               token,
               { fields: "id,effective_status,campaign_id,daily_budget,lifetime_budget,updated_time,start_time", limit: "500" }
-            ).catch(() => [] as Array<{
-              id: string;
-              effective_status: string;
-              campaign_id: string;
-              daily_budget?: string;
-              lifetime_budget?: string;
-              updated_time?: string;
-              start_time?: string;
-            }>),
+            ).catch((e) => {
+              console.error(`[FB all-ads] adsets fetch failed for ${account.name}:`, e instanceof Error ? e.message : e);
+              return [] as AdsetRaw[];
+            }),
 
-            fbFetchAll<{
-              id: string;
-              effective_status: string;
-              adset_id: string;
-              updated_time?: string;
-              creative?: {
-                id: string;
-                effective_object_story_id?: string;
-                thumbnail_url?: string;
-              };
-            }>(
+            fbFetchAll<AdRaw>(
               `/${account.id}/ads`,
               token,
               {
                 fields: "id,effective_status,adset_id,updated_time,creative{effective_object_story_id,thumbnail_url}",
                 limit: "500",
               }
-            ).catch(() => [] as Array<{
-              id: string;
-              effective_status: string;
-              adset_id: string;
-              updated_time?: string;
-              creative?: {
-                id: string;
-                effective_object_story_id?: string;
-                thumbnail_url?: string;
-              };
-            }>),
+            ).catch((e) => {
+              console.error(`[FB all-ads] ads fetch failed for ${account.name}:`, e instanceof Error ? e.message : e);
+              return [] as AdRaw[];
+            }),
 
             fbFetchAll<Record<string, unknown>>(
               `/${account.id}/insights`,
@@ -322,11 +283,15 @@ export async function GET(request: Request) {
                 level: "ad",
                 limit: "500",
               }
-            ).catch(() => [] as Array<Record<string, unknown>>),
+            ).catch((e) => {
+              console.error(`[FB all-ads] insights fetch failed for ${account.name}:`, e instanceof Error ? e.message : e);
+              return [] as Array<Record<string, unknown>>;
+            }),
           ]);
 
         // Save structure to cache (campaigns/adsets/ads — not insights)
-        if (!hasStructCache) {
+        // Only cache if we actually got ad data — otherwise all statuses would show "OFF"
+        if (!hasStructCache && adsRaw.length > 0) {
           structureCache.set(structKey, {
             data: [campaignsRaw, adsetsRaw, adsRaw],
             timestamp: Date.now(),
@@ -378,21 +343,29 @@ export async function GET(request: Request) {
           };
         }
 
-        function getDeliveryStatus(adId: string): string {
+        function getDeliveryStatus(
+          adId: string,
+          insightsAdsetId?: string,
+          insightsCampaignId?: string
+        ): string {
           if (!account.is_active) return `ACCOUNT ${account.status_label}`;
 
           const adSt = adEffStatus[adId];
-          if (!adSt) return "OFF";
-
-          const adsetId = adToAdset[adId];
+          const adsetId = adToAdset[adId] || insightsAdsetId;
           const adsetSt = adsetId ? adsetStatus[adsetId] : undefined;
-          const campaignId = adsetId ? adsetToCampaign[adsetId] : undefined;
+          const campaignId = (adsetId ? adsetToCampaign[adsetId] : undefined) || insightsCampaignId;
           const campaignSt = campaignId ? campaignStatus[campaignId] : undefined;
 
           if (campaignSt && campaignSt !== "ACTIVE") return `CAMPAIGN ${campaignSt}`;
           if (adsetSt && adsetSt !== "ACTIVE") return `ADSET ${adsetSt}`;
-          if (adSt !== "ACTIVE") return adSt;
 
+          // Ad missing from structure fetch — insights returned it, so infer from parents
+          if (!adSt) {
+            if (campaignSt === "ACTIVE" && adsetSt === "ACTIVE") return "ACTIVE";
+            return "UNKNOWN";
+          }
+
+          if (adSt !== "ACTIVE") return adSt;
           return "ACTIVE";
         }
 
@@ -439,7 +412,7 @@ export async function GET(request: Request) {
             adset_id: row.adset_id as string,
             ad: row.ad_name,
             ad_id: adId,
-            status: getDeliveryStatus(adId),
+            status: getDeliveryStatus(adId, row.adset_id as string, row.campaign_id as string),
             spend,
             link_clicks: linkClicks,
             cpa,
@@ -502,8 +475,13 @@ export async function GET(request: Request) {
     };
 
     // Write to Supabase cache (non-blocking)
+    // Skip caching if all rows are UNKNOWN — indicates structure fetch failed
+    // and caching would propagate bad "OFF"-like data for 30 minutes
+    const allUnknown = allRows.length > 0 && allRows.every((r) => r.status === "UNKNOWN");
     const refreshedAt = new Date().toISOString();
-    setCachedResponse(supabase, "ads", cacheKey, responseData).catch(() => {});
+    if (!allUnknown) {
+      setCachedResponse(supabase, "ads", cacheKey, responseData).catch(() => {});
+    }
 
     return Response.json({ ...responseData, role: employeeRole, refreshed_at: refreshedAt });
   } catch (e) {
