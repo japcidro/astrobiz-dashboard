@@ -459,8 +459,19 @@ export default function AdsPage() {
   const renderMetric = (row: Record<string, unknown>, key: string) => {
     const v = (row[key] as number) ?? 0;
     switch (key) {
+      case "cpa": {
+        // Color-code CPA: green <200, yellow 200-350, red >350
+        // Skip color when 0 (no purchases) since CPA is meaningless
+        if (v <= 0) return <span className="text-gray-500">{fmt(v)}</span>;
+        const color =
+          v < 200
+            ? "text-green-400"
+            : v <= 350
+              ? "text-yellow-400"
+              : "text-red-400";
+        return <span className={color}>{fmt(v)}</span>;
+      }
       case "spend":
-      case "cpa":
       case "cost_per_lpv":
         return fmt(v);
       case "roas":
