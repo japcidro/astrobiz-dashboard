@@ -442,17 +442,28 @@ export default function AdsPage() {
     }
   };
 
+  // Remap sort key when moving between drill levels — most numeric metrics
+  // work at every level, but "name"/"ad"/"status"/"count" are level-specific
+  const remapSortKey = (key: SortKey, toLevel: DrillLevel): SortKey => {
+    if (toLevel === "ad") {
+      if (key === "name") return "ad";
+      if (key === "count") return "spend";
+      return key;
+    }
+    if (key === "ad") return "name";
+    if (key === "status") return "spend";
+    return key;
+  };
+
   const handleRowClick = (row: AggRow | AdRow) => {
     if (drillLevel === "campaign") {
       setSelectedCampaign((row as AggRow).name);
       setDrillLevel("adset");
-      setSortKey("spend");
-      setSortDir("desc");
+      setSortKey(remapSortKey(sortKey, "adset"));
     } else if (drillLevel === "adset") {
       setSelectedAdset((row as AggRow).name);
       setDrillLevel("ad");
-      setSortKey("spend");
-      setSortDir("desc");
+      setSortKey(remapSortKey(sortKey, "ad"));
     }
   };
 
@@ -461,12 +472,12 @@ export default function AdsPage() {
       setDrillLevel("campaign");
       setSelectedCampaign(null);
       setSelectedAdset(null);
+      setSortKey(remapSortKey(sortKey, "campaign"));
     } else if (level === "adset") {
       setDrillLevel("adset");
       setSelectedAdset(null);
+      setSortKey(remapSortKey(sortKey, "adset"));
     }
-    setSortKey("spend");
-    setSortDir("desc");
   };
 
   const nameLabel =
