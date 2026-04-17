@@ -43,7 +43,8 @@ const ACCOUNT_STATUS_MAP: Record<number, string> = {
 async function fbFetchAll<T>(
   url: string,
   token?: string,
-  params?: Record<string, string>
+  params?: Record<string, string>,
+  timeoutMs = 7000
 ): Promise<T[]> {
   const allData: T[] = [];
   let fetchUrl: string;
@@ -56,9 +57,16 @@ async function fbFetchAll<T>(
   }
 
   while (fetchUrl) {
-    const res = await fetch(fetchUrl, { cache: "no-store" });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let res: Response;
+    try {
+      res = await fetch(fetchUrl, { cache: "no-store", signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
     if (!res.ok) {
-      const err = await res.json();
+      const err = await res.json().catch(() => ({}));
       throw new Error(err.error?.message || `FB API error: ${res.status}`);
     }
     const json = await res.json();
@@ -235,7 +243,7 @@ export async function GET(request: Request) {
         // Only fetch insights fresh — structure from cache if available
         type CampaignRaw = { id: string; effective_status: string; daily_budget?: string; lifetime_budget?: string; updated_time?: string };
         type AdsetRaw = { id: string; effective_status: string; campaign_id: string; daily_budget?: string; lifetime_budget?: string; updated_time?: string; start_time?: string; created_time?: string };
-        type AdRaw = { id: string; effective_status: string; adset_id: string; updated_time?: string; creative?: { id: string; effective_object_story_id?: string; thumbnail_url?: string } };
+        type AdRaw = { id: string; effective_status: string; adset_id: string; updated_time?: string };
 
         const [campaignsRaw, adsetsRaw, adsRaw, insightsData] = hasStructCache
           ? [
@@ -268,7 +276,10 @@ export async function GET(request: Request) {
               `/${account.id}/ads`,
               token,
               {
-                fields: "id,effective_status,adset_id,updated_time,creative{effective_object_story_id,thumbnail_url}",
+                // Stripped creative{} expansion — too slow, was causing
+                // /ads to time out and leave all statuses as UNKNOWN.
+                // Creatives can be fetched lazily at ad-drill level.
+                fields: "id,effective_status,adset_id,updated_time",
                 limit: "500",
               }
             ).catch((e) => {
@@ -333,19 +344,14 @@ export async function GET(request: Request) {
         const adEffStatus: Record<string, string> = {};
         const adToAdset: Record<string, string> = {};
         const adUpdated: Record<string, string> = {};
+        // Creative preview/thumbnail no longer fetched in main payload
+        // (was causing /ads to time out). Lazy-load in ad-drill view if needed.
         const adPreview: Record<string, { url: string | null; thumbnail: string | null }> = {};
         for (const a of adsRaw) {
           adEffStatus[a.id] = a.effective_status;
           adToAdset[a.id] = a.adset_id;
           if (a.updated_time) adUpdated[a.id] = a.updated_time;
-          const storyId = a.creative?.effective_object_story_id;
-          const postUrl = storyId
-            ? `https://www.facebook.com/${storyId.replace("_", "/posts/")}`
-            : null;
-          adPreview[a.id] = {
-            url: postUrl,
-            thumbnail: a.creative?.thumbnail_url || null,
-          };
+          adPreview[a.id] = { url: null, thumbnail: null };
         }
 
         function getDeliveryStatus(adId: string): string {
