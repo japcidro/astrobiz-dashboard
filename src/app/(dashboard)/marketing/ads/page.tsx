@@ -14,9 +14,11 @@ import {
   X,
   Loader2,
   Zap,
+  Bot,
 } from "lucide-react";
 import type { DatePreset } from "@/lib/facebook/types";
 import { QuickActionsModal } from "@/components/marketing/quick-actions-modal";
+import { AutopilotModal } from "@/components/marketing/autopilot-modal";
 
 const DATE_PRESETS: { label: string; value: DatePreset }[] = [
   { label: "Today", value: "today" },
@@ -204,6 +206,12 @@ export default function AdsPage() {
   // Quick Actions modal
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
 
+  // Autopilot modal + status
+  const [autopilotOpen, setAutopilotOpen] = useState(false);
+  const [autopilotEnabled, setAutopilotEnabled] = useState<boolean | null>(
+    null
+  );
+
   // Admin action states
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [editingBudget, setEditingBudget] = useState<{
@@ -258,6 +266,22 @@ export default function AdsPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Poll Autopilot status (header badge)
+  const loadAutopilotStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/facebook/autopilot/config");
+      if (!res.ok) return;
+      const json = await res.json();
+      setAutopilotEnabled(!!json.config?.enabled);
+    } catch {
+      // silent — header badge is non-critical
+    }
+  }, []);
+
+  useEffect(() => {
+    if (role === "admin") loadAutopilotStatus();
+  }, [role, loadAutopilotStatus]);
 
 
   // Reset drill-down when date/account changes
@@ -378,6 +402,37 @@ export default function AdsPage() {
     () => ["ALL", ...Array.from(new Set(allRows.map((r) => r.status)))],
     [allRows]
   );
+
+  // Unique campaigns (for Autopilot watchlist tab)
+  const campaignOptions = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        account_id: string;
+        campaign_id: string;
+        campaign_name: string;
+        status: string;
+        ad_count: number;
+      }
+    >();
+    for (const r of allRows) {
+      const existing = map.get(r.campaign_id);
+      if (existing) {
+        existing.ad_count += 1;
+      } else {
+        map.set(r.campaign_id, {
+          account_id: r.account_id,
+          campaign_id: r.campaign_id,
+          campaign_name: r.campaign,
+          status: r.status,
+          ad_count: 1,
+        });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) =>
+      a.campaign_name.localeCompare(b.campaign_name)
+    );
+  }, [allRows]);
 
   // Raw ad rows in current scope (respects account/status filter + drill)
   // Used by Quick Actions so bulk pause/boost only affects what user sees.
@@ -658,6 +713,31 @@ export default function AdsPage() {
           >
             <Settings size={20} />
           </a>
+          {isAdmin && (
+            <button
+              onClick={() => setAutopilotOpen(true)}
+              className={`flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg transition-colors cursor-pointer border ${
+                autopilotEnabled
+                  ? "bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border-blue-500/30"
+                  : "bg-gray-700/40 hover:bg-gray-700/60 text-gray-300 border-gray-600/40"
+              }`}
+              title={
+                autopilotEnabled
+                  ? "Autopilot is ON — auto-pausing losers hourly"
+                  : "Autopilot is OFF — click to configure"
+              }
+            >
+              <Bot size={14} />
+              Autopilot
+              <span
+                className={`inline-block w-1.5 h-1.5 rounded-full ${
+                  autopilotEnabled
+                    ? "bg-green-400 animate-pulse"
+                    : "bg-gray-500"
+                }`}
+              />
+            </button>
+          )}
           {isAdmin && (
             <button
               onClick={() => setQuickActionsOpen(true)}
@@ -1262,6 +1342,19 @@ export default function AdsPage() {
         budgets={budgets}
         onComplete={() => fetchData(true)}
       />
+
+      {/* Autopilot Modal */}
+      {isAdmin && (
+        <AutopilotModal
+          open={autopilotOpen}
+          onClose={() => {
+            setAutopilotOpen(false);
+            loadAutopilotStatus();
+          }}
+          campaignOptions={campaignOptions}
+          onRefreshData={() => fetchData(true)}
+        />
+      )}
     </div>
   );
 }

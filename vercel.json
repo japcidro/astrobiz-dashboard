@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/refresh-data",
       "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/facebook/autopilot/run",
+      "schedule": "0 * * * *"
     }
   ]
 }
