@@ -19,6 +19,7 @@ export default function VerifyPage() {
     null
   );
   const [verifyItems, setVerifyItems] = useState<VerifyItem[]>([]);
+  const [startedAt, setStartedAt] = useState<string | null>(null);
   const [fulfilling, setFulfilling] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{
@@ -45,6 +46,7 @@ export default function VerifyPage() {
       status: "pending" as const,
     }));
     setVerifyItems(items);
+    setStartedAt(new Date().toISOString());
     setPhase("scan_items");
   }, []);
 
@@ -199,17 +201,23 @@ export default function VerifyPage() {
           order_number: orderDetails.name,
           items_expected: totalExpected,
           items_scanned: totalScanned,
+          started_at: startedAt,
           mismatches: verifyItems
             .filter((i) => i.scanned_qty !== i.expected_qty)
             .map((i) => ({ sku: i.sku, expected: i.expected_qty, scanned: i.scanned_qty })),
         }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(
+          json?.error || `Save failed (HTTP ${res.status})`
+        );
+      }
 
       setPhase("verified");
       playSuccess();
     } catch (e) {
+      playError();
       setFeedback({
         type: "error",
         message: "SAVE FAILED",
@@ -225,6 +233,7 @@ export default function VerifyPage() {
     setOrderNumber("");
     setOrderDetails(null);
     setVerifyItems([]);
+    setStartedAt(null);
     setFeedback({ type: null, message: "" });
     setFetchError(null);
   }
