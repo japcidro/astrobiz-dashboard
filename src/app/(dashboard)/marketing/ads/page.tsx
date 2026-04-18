@@ -291,6 +291,70 @@ export default function AdsPage() {
     setSelectedAdset(null);
   }, [datePreset, filterAccount]);
 
+  // Lazy-load FB creative preview links when drilled to ad level.
+  // /all-ads no longer returns creative{} (too slow, was causing
+  // timeouts). We fetch preview/thumbnail only for the ads currently
+  // being viewed.
+  const [loadedCreatives, setLoadedCreatives] = useState<Set<string>>(
+    new Set()
+  );
+
+  useEffect(() => {
+    if (drillLevel !== "ad" || !selectedCampaign || !selectedAdset) return;
+
+    const targetIds = allRows
+      .filter(
+        (r) =>
+          r.campaign === selectedCampaign &&
+          r.adset === selectedAdset &&
+          !loadedCreatives.has(r.ad_id) &&
+          r.preview_url === null
+      )
+      .map((r) => r.ad_id);
+
+    if (targetIds.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/facebook/ad-creatives?ids=${targetIds.join(",")}`
+        );
+        if (!res.ok) return;
+        const json = (await res.json()) as {
+          creatives: Record<
+            string,
+            { preview_url: string | null; thumbnail_url: string | null }
+          >;
+        };
+        if (cancelled) return;
+        const creatives = json.creatives ?? {};
+        setAllRows((prev) =>
+          prev.map((row) => {
+            const c = creatives[row.ad_id];
+            if (!c) return row;
+            return {
+              ...row,
+              preview_url: c.preview_url,
+              thumbnail_url: c.thumbnail_url,
+            };
+          })
+        );
+        setLoadedCreatives((prev) => {
+          const next = new Set(prev);
+          for (const id of targetIds) next.add(id);
+          return next;
+        });
+      } catch {
+        // Preview links are non-critical — fail silently
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [drillLevel, selectedCampaign, selectedAdset, allRows, loadedCreatives]);
+
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
