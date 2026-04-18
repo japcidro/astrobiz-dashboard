@@ -25,7 +25,7 @@ import {
   BarChart3,
   CheckCircle,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { UserRole } from "@/lib/types";
 
@@ -232,19 +232,34 @@ interface SidebarProps {
 export function Sidebar({ employeeName, employeeRole }: SidebarProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
 
   const filteredEntries = navEntries.filter((entry) =>
     entry.roles.includes(employeeRole)
   );
 
-  const toggleGroup = (label: string) => {
-    setOpenGroups((prev) => ({ ...prev, [label]: !prev[label] }));
-  };
-
   // Auto-open group if current path matches a child
   const isGroupActive = (group: NavGroup) =>
     group.children.some((c) => pathname === c.href || pathname.startsWith(c.href + "/"));
+
+  const findActiveGroupLabel = () =>
+    navEntries.find((e): e is NavGroup => isGroup(e) && isGroupActive(e))?.label ?? null;
+
+  // Accordion: only one group expanded at a time.
+  const [openGroup, setOpenGroup] = useState<string | null>(() => findActiveGroupLabel());
+
+  // When navigating to a route inside a group, make sure that group opens
+  // (and any other open group collapses).
+  useEffect(() => {
+    const activeLabel = findActiveGroupLabel();
+    if (activeLabel) {
+      setOpenGroup(activeLabel);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
+
+  const toggleGroup = (label: string) => {
+    setOpenGroup((prev) => (prev === label ? null : label));
+  };
 
   const handleLogout = async () => {
     const supabase = createClient();
@@ -265,7 +280,7 @@ export function Sidebar({ employeeName, employeeRole }: SidebarProps) {
         {filteredEntries.map((entry) => {
           if (isGroup(entry)) {
             const active = isGroupActive(entry);
-            const expanded = openGroups[entry.label] ?? active;
+            const expanded = openGroup === entry.label;
             return (
               <div key={entry.label}>
                 <button

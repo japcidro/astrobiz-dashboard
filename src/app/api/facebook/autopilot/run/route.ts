@@ -214,21 +214,35 @@ async function handleRun(request: Request) {
 
   // 4. Fetch current ad data via our own /all-ads endpoint.
   //    This reuses the same FB fetching + status/insights pipeline.
+  //    Cron triggers pass CRON_SECRET bearer; manual UI triggers need
+  //    the user's session cookie forwarded, otherwise /all-ads 401s.
   const url = new URL(request.url);
   const baseUrl = `${url.protocol}//${url.host}`;
-  const cronAuth = process.env.CRON_SECRET
-    ? { Authorization: `Bearer ${process.env.CRON_SECRET}` }
-    : undefined;
+  const forwardHeaders: Record<string, string> = {};
+  if (isCron && process.env.CRON_SECRET) {
+    forwardHeaders.Authorization = `Bearer ${process.env.CRON_SECRET}`;
+  } else {
+    const cookieHeader = request.headers.get("cookie");
+    if (cookieHeader) forwardHeaders.Cookie = cookieHeader;
+  }
 
   let rows: AdRow[] = [];
   try {
     const adsRes = await fetch(
       `${baseUrl}/api/facebook/all-ads?date_preset=today&account=ALL&refresh=1`,
       {
-        headers: cronAuth,
+        headers: forwardHeaders,
         cache: "no-store",
       }
     );
+    // Content-type check — if we got HTML (Vercel error page, redirect),
+    // surface that explicitly instead of letting res.json() blow up.
+    const ct = adsRes.headers.get("content-type") || "";
+    if (!ct.includes("application/json")) {
+      throw new Error(
+        `all-ads returned non-JSON (${adsRes.status}) — likely auth redirect. Set CRON_SECRET env var.`
+      );
+    }
     if (!adsRes.ok) {
       const err = await adsRes.json().catch(() => ({}));
       throw new Error(err.error || `all-ads failed: ${adsRes.status}`);

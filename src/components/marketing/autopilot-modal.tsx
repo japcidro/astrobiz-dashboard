@@ -114,14 +114,35 @@ export function AutopilotModal({
   // Form state mirrors config
   const [form, setForm] = useState<Partial<AutopilotConfig>>({});
 
+  // Parse response safely — if server returned HTML (auth redirect, 404
+  // page, Vercel error), don't crash with 'Unexpected token <'.
+  const parseResponse = async (
+    res: Response
+  ): Promise<Record<string, unknown>> => {
+    const ct = res.headers.get("content-type") || "";
+    if (!ct.includes("application/json")) {
+      const text = await res.text().catch(() => "");
+      const hint = text.includes("<!DOCTYPE")
+        ? "server returned an HTML page — likely a 404 or auth redirect. Try refreshing or check that the autopilot migration was run"
+        : `non-JSON response (HTTP ${res.status})`;
+      throw new Error(hint);
+    }
+    const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    if (!res.ok) {
+      throw new Error(
+        (json.error as string) || `Request failed (HTTP ${res.status})`
+      );
+    }
+    return json;
+  };
+
   const loadConfig = useCallback(async () => {
     setLoadingConfig(true);
     try {
       const res = await fetch("/api/facebook/autopilot/config");
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error);
-      setConfig(json.config);
-      setForm(json.config ?? {});
+      const json = await parseResponse(res);
+      setConfig(json.config as AutopilotConfig | null);
+      setForm((json.config as Partial<AutopilotConfig>) ?? {});
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load config");
     } finally {
@@ -133,9 +154,8 @@ export function AutopilotModal({
     setLoadingWatched(true);
     try {
       const res = await fetch("/api/facebook/autopilot/watchlist");
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error);
-      setWatched(json.campaigns ?? []);
+      const json = await parseResponse(res);
+      setWatched((json.campaigns as WatchedCampaign[]) ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load watchlist");
     } finally {
@@ -147,9 +167,8 @@ export function AutopilotModal({
     setLoadingActions(true);
     try {
       const res = await fetch("/api/facebook/autopilot/actions?limit=100");
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error);
-      setActions(json.actions ?? []);
+      const json = await parseResponse(res);
+      setActions((json.actions as ActionRow[]) ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load activity");
     } finally {
@@ -180,10 +199,9 @@ export function AutopilotModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error);
-      setConfig(json.config);
-      setForm(json.config);
+      const json = await parseResponse(res);
+      setConfig(json.config as AutopilotConfig);
+      setForm(json.config as AutopilotConfig);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to save");
     } finally {
@@ -203,8 +221,7 @@ export function AutopilotModal({
           )}`,
           { method: "DELETE" }
         );
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(json.error);
+        await parseResponse(res);
         setWatched((prev) =>
           prev.filter((w) => w.campaign_id !== opt.campaign_id)
         );
@@ -218,9 +235,8 @@ export function AutopilotModal({
             campaign_name: opt.campaign_name,
           }),
         });
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error);
-        setWatched((prev) => [json.campaign, ...prev]);
+        const json = await parseResponse(res);
+        setWatched((prev) => [json.campaign as WatchedCampaign, ...prev]);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to toggle");
@@ -237,10 +253,9 @@ export function AutopilotModal({
       const res = await fetch("/api/facebook/autopilot/run", {
         method: "POST",
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error);
+      const json = await parseResponse(res);
       if (json.skipped) {
-        setRunResult(json.reason ?? "Skipped");
+        setRunResult((json.reason as string) ?? "Skipped");
       } else {
         setRunResult(
           `Scanned ${json.scanned_ads} ads · paused ${json.paused} · resumed ${json.resumed} · skipped young ${json.skipped_young} · errors ${json.errors}`
