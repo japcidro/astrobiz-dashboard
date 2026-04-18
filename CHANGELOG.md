@@ -1,5 +1,27 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-04-19: Manual Clear for Pick & Pack Queue
+
+- **Mark as Already Packed** button on `/fulfillment/pick-pack` — lets admin &
+  fulfillment roles remove selected orders from the queue without running a
+  scan. Intended for catching up on backlogs where packing happened offline
+  or before the system existed.
+- Confirmation modal requires a **reason code** (`catching_up_backlog`,
+  `already_packed_offline`, `system_error_manual_fulfill`, or `other` with
+  a note) and shows the operator's name as attribution.
+- Writes `pack_verifications` rows with `source = 'manual_clear'` so they
+  are clearly distinguishable from real scan verifications. Preserves
+  `verified_by`, `notes`, and timestamps for full audit.
+- **Audit page** (`/fulfillment/pick-pack/audit`) Verifications tab rebuilt:
+  source filter, store/employee name enrichment, notes column, and a
+  per-row **Undo** action that only works on `manual_clear` rows
+  (scan rows are immutable from the UI).
+- New routes: `POST /api/shopify/fulfillment/manual-clear`,
+  `POST /api/shopify/fulfillment/manual-clear/undo`,
+  `GET /api/shopify/fulfillment/verifications`, `GET /api/me`.
+- Migration: `supabase/pack-verifications-manual-clear-migration.sql`
+  (idempotent; adds `notes`, `source`, unique constraint, and source index).
+
 ## 2026-04-15: Pick-Pack-Verify Fulfillment Module
 
 ### Pick & Pack System

@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Search } from "lucide-react";
+import { Search, Undo2, Loader2 } from "lucide-react";
 
 type Tab = "adjustments" | "verifications";
 
@@ -23,12 +23,14 @@ interface Verification {
   id: string;
   completed_at: string;
   order_number: string;
-  store: string;
+  store_name: string;
   status: string;
-  expected_items: number;
-  scanned_items: number;
-  mismatches: number;
-  verified_by: string | null;
+  source: "scan" | "manual_clear" | "backfill";
+  items_expected: number;
+  items_scanned: number;
+  mismatch_count: number;
+  notes: string | null;
+  verified_by_name: string | null;
 }
 
 const TYPE_BADGES: Record<string, { bg: string; text: string; label: string }> =
@@ -66,6 +68,28 @@ const STATUS_BADGES: Record<
     label: "Corrected",
   },
   failed: { bg: "bg-red-500/10", text: "text-red-400", label: "Failed" },
+  manual_cleared: {
+    bg: "bg-gray-500/10",
+    text: "text-gray-400",
+    label: "Manual Clear",
+  },
+};
+
+const SOURCE_BADGES: Record<
+  string,
+  { bg: string; text: string; label: string }
+> = {
+  scan: { bg: "bg-blue-500/10", text: "text-blue-300", label: "Scan" },
+  manual_clear: {
+    bg: "bg-orange-500/10",
+    text: "text-orange-300",
+    label: "Manual Clear",
+  },
+  backfill: {
+    bg: "bg-purple-500/10",
+    text: "text-purple-300",
+    label: "Backfill",
+  },
 };
 
 function formatDate(iso: string) {
@@ -88,6 +112,11 @@ export default function AuditPage() {
   const [typeFilter, setTypeFilter] = useState("ALL");
   const [searchAdj, setSearchAdj] = useState("");
   const [searchVer, setSearchVer] = useState("");
+  const [sourceFilter, setSourceFilter] = useState<
+    "ALL" | "scan" | "manual_clear" | "backfill"
+  >("ALL");
+  const [undoingId, setUndoingId] = useState<string | null>(null);
+  const [verError, setVerError] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchAdjustments() {
@@ -103,19 +132,52 @@ export default function AuditPage() {
     fetchAdjustments();
   }, [supabase]);
 
-  useEffect(() => {
-    async function fetchVerifications() {
-      setLoadingVer(true);
-      const { data } = await supabase
-        .from("pack_verifications")
-        .select("*")
-        .order("completed_at", { ascending: false })
-        .limit(100);
-      setVerifications((data as Verification[]) ?? []);
+  const fetchVerifications = useCallback(async () => {
+    setLoadingVer(true);
+    setVerError(null);
+    try {
+      const params = new URLSearchParams();
+      if (sourceFilter !== "ALL") params.set("source", sourceFilter);
+      if (searchVer) params.set("q", searchVer);
+      const res = await fetch(
+        `/api/shopify/fulfillment/verifications?${params.toString()}`
+      );
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to load");
+      setVerifications((json.rows as Verification[]) ?? []);
+    } catch (e) {
+      setVerError(e instanceof Error ? e.message : "Unknown error");
+    } finally {
       setLoadingVer(false);
     }
+  }, [sourceFilter, searchVer]);
+
+  useEffect(() => {
     fetchVerifications();
-  }, [supabase]);
+  }, [fetchVerifications]);
+
+  async function handleUndo(v: Verification) {
+    if (v.source !== "manual_clear") return;
+    const confirmed = window.confirm(
+      `Undo manual clear for order ${v.order_number}?\n\nThis order will return to the Pick & Pack list.`
+    );
+    if (!confirmed) return;
+    setUndoingId(v.id);
+    try {
+      const res = await fetch("/api/shopify/fulfillment/manual-clear/undo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [v.id] }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Undo failed");
+      await fetchVerifications();
+    } catch (e) {
+      setVerError(e instanceof Error ? e.message : "Undo failed");
+    } finally {
+      setUndoingId(null);
+    }
+  }
 
   const filteredAdj = adjustments.filter((a) => {
     if (typeFilter !== "ALL" && a.type !== typeFilter) return false;
@@ -127,11 +189,7 @@ export default function AuditPage() {
     );
   });
 
-  const filteredVer = verifications.filter((v) => {
-    if (!searchVer) return true;
-    const q = searchVer.toLowerCase();
-    return v.order_number.toLowerCase().includes(q);
-  });
+  const filteredVer = verifications;
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-8">
@@ -322,6 +380,20 @@ export default function AuditPage() {
       {tab === "verifications" && (
         <>
           <div className="flex flex-wrap items-center gap-3 mb-4">
+            <select
+              value={sourceFilter}
+              onChange={(e) =>
+                setSourceFilter(
+                  e.target.value as "ALL" | "scan" | "manual_clear" | "backfill"
+                )
+              }
+              className="bg-gray-800 border border-gray-700 text-gray-300 text-sm rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
+            >
+              <option value="ALL">All sources</option>
+              <option value="scan">Scan</option>
+              <option value="manual_clear">Manual Clear</option>
+              <option value="backfill">Backfill</option>
+            </select>
             <div className="relative flex-1 min-w-[200px] max-w-xs">
               <Search
                 size={16}
@@ -336,6 +408,12 @@ export default function AuditPage() {
               />
             </div>
           </div>
+
+          {verError && (
+            <div className="mb-3 p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-sm">
+              {verError}
+            </div>
+          )}
 
           <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl overflow-hidden">
             <div className="overflow-x-auto">
@@ -352,33 +430,42 @@ export default function AuditPage() {
                       Store
                     </th>
                     <th className="px-4 py-3 text-xs font-medium text-gray-400 uppercase">
+                      Source
+                    </th>
+                    <th className="px-4 py-3 text-xs font-medium text-gray-400 uppercase">
                       Status
                     </th>
                     <th className="px-4 py-3 text-xs font-medium text-gray-400 uppercase text-right">
-                      Expected
+                      Exp
                     </th>
                     <th className="px-4 py-3 text-xs font-medium text-gray-400 uppercase text-right">
-                      Scanned
+                      Scan
                     </th>
                     <th className="px-4 py-3 text-xs font-medium text-gray-400 uppercase text-right">
-                      Mismatches
+                      Mis
                     </th>
                     <th className="px-4 py-3 text-xs font-medium text-gray-400 uppercase">
                       By
+                    </th>
+                    <th className="px-4 py-3 text-xs font-medium text-gray-400 uppercase">
+                      Notes
+                    </th>
+                    <th className="px-4 py-3 text-xs font-medium text-gray-400 uppercase text-right">
+                      Action
                     </th>
                   </tr>
                 </thead>
                 <tbody>
                   {loadingVer ? (
                     <tr>
-                      <td colSpan={8} className="px-4 py-8 text-center">
+                      <td colSpan={11} className="px-4 py-8 text-center">
                         <div className="h-4 w-32 mx-auto bg-gray-700/50 rounded animate-pulse" />
                       </td>
                     </tr>
                   ) : filteredVer.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={8}
+                        colSpan={11}
                         className="px-4 py-8 text-center text-gray-500"
                       >
                         No verifications found
@@ -386,10 +473,15 @@ export default function AuditPage() {
                     </tr>
                   ) : (
                     filteredVer.map((v) => {
-                      const badge = STATUS_BADGES[v.status] ?? {
+                      const statusBadge = STATUS_BADGES[v.status] ?? {
                         bg: "bg-gray-500/10",
                         text: "text-gray-400",
                         label: v.status,
+                      };
+                      const sourceBadge = SOURCE_BADGES[v.source] ?? {
+                        bg: "bg-gray-500/10",
+                        text: "text-gray-400",
+                        label: v.source,
                       };
                       return (
                         <tr
@@ -403,34 +495,69 @@ export default function AuditPage() {
                             {v.order_number}
                           </td>
                           <td className="px-4 py-3 text-gray-400 text-xs">
-                            {v.store}
+                            {v.store_name}
                           </td>
                           <td className="px-4 py-3">
                             <span
-                              className={`${badge.bg} ${badge.text} text-xs px-2 py-0.5 rounded`}
+                              className={`${sourceBadge.bg} ${sourceBadge.text} text-xs px-2 py-0.5 rounded`}
                             >
-                              {badge.label}
+                              {sourceBadge.label}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`${statusBadge.bg} ${statusBadge.text} text-xs px-2 py-0.5 rounded`}
+                            >
+                              {statusBadge.label}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-gray-400 text-right font-mono text-xs">
-                            {v.expected_items}
+                            {v.items_expected}
                           </td>
                           <td className="px-4 py-3 text-gray-300 text-right font-mono text-xs">
-                            {v.scanned_items}
+                            {v.items_scanned}
                           </td>
                           <td className="px-4 py-3 text-right font-mono text-xs">
                             <span
                               className={
-                                v.mismatches > 0
+                                v.mismatch_count > 0
                                   ? "text-red-400"
                                   : "text-green-400"
                               }
                             >
-                              {v.mismatches}
+                              {v.mismatch_count}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-gray-500 text-xs">
-                            {v.verified_by ?? "-"}
+                          <td className="px-4 py-3 text-gray-300 text-xs max-w-[120px] truncate">
+                            {v.verified_by_name ?? "-"}
+                          </td>
+                          <td
+                            className="px-4 py-3 text-gray-500 text-xs max-w-[180px] truncate"
+                            title={v.notes ?? undefined}
+                          >
+                            {v.notes ?? "-"}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            {v.source === "manual_clear" ? (
+                              <button
+                                onClick={() => handleUndo(v)}
+                                disabled={undoingId === v.id}
+                                title="Return this order to the Pick & Pack list"
+                                className="inline-flex items-center gap-1 text-xs text-orange-300 hover:text-orange-200 disabled:opacity-40 cursor-pointer"
+                              >
+                                {undoingId === v.id ? (
+                                  <Loader2
+                                    size={12}
+                                    className="animate-spin"
+                                  />
+                                ) : (
+                                  <Undo2 size={12} />
+                                )}
+                                Undo
+                              </button>
+                            ) : (
+                              <span className="text-gray-600 text-xs">—</span>
+                            )}
                           </td>
                         </tr>
                       );

@@ -8,7 +8,9 @@ interface Props {
   orders: UnfulfilledOrder[];
   stockMap: Map<string, number>;
   onGeneratePickList: (orderIds: number[]) => void;
+  onMarkPacked: (orderIds: number[]) => void;
   loading: boolean;
+  resetSignal?: number;
 }
 
 function formatDate(iso: string) {
@@ -67,8 +69,20 @@ function StockBadge({ order, stockMap }: { order: UnfulfilledOrder; stockMap: Ma
   );
 }
 
-export function OrdersQueue({ orders, stockMap, onGeneratePickList, loading }: Props) {
+export function OrdersQueue({
+  orders,
+  stockMap,
+  onGeneratePickList,
+  onMarkPacked,
+  loading,
+  resetSignal = 0,
+}: Props) {
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [lastReset, setLastReset] = useState(resetSignal);
+  if (lastReset !== resetSignal) {
+    setLastReset(resetSignal);
+    setSelected(new Set());
+  }
   const allIds = useMemo(() => orders.map((o) => o.id), [orders]);
   const allSelected = orders.length > 0 && selected.size === orders.length;
 
@@ -125,13 +139,23 @@ export function OrdersQueue({ orders, stockMap, onGeneratePickList, loading }: P
             </p>
           )}
         </div>
-        <button
-          onClick={() => onGeneratePickList(Array.from(selected))}
-          disabled={selected.size === 0}
-          className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-        >
-          Generate Pick List
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => onMarkPacked(Array.from(selected))}
+            disabled={selected.size === 0}
+            title="Remove selected orders from this list (logged in audit trail)"
+            className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          >
+            Mark as Already Packed
+          </button>
+          <button
+            onClick={() => onGeneratePickList(Array.from(selected))}
+            disabled={selected.size === 0}
+            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          >
+            Generate Pick List
+          </button>
+        </div>
       </div>
 
       <div className="overflow-x-auto rounded-xl border border-gray-700/50">

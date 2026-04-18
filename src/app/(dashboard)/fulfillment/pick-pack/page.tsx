@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { RefreshCw } from "lucide-react";
 import type { UnfulfilledOrder } from "@/lib/fulfillment/types";
 import { OrdersQueue } from "@/components/fulfillment/orders-queue";
+import { MarkPackedModal } from "@/components/fulfillment/mark-packed-modal";
 
 interface InventoryRow {
   sku: string;
@@ -20,6 +21,21 @@ export default function PickPackPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [storeFilter, setStoreFilter] = useState("ALL");
+  const [employeeName, setEmployeeName] = useState("");
+  const [markPackedOrders, setMarkPackedOrders] = useState<
+    UnfulfilledOrder[] | null
+  >(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [resetSignal, setResetSignal] = useState(0);
+
+  useEffect(() => {
+    fetch("/api/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.full_name) setEmployeeName(d.full_name);
+      })
+      .catch(() => {});
+  }, []);
 
   const fetchData = useCallback(
     async (forceRefresh = false) => {
@@ -73,6 +89,23 @@ export default function PickPackPage() {
     router.push(
       `/fulfillment/pick-pack/pick-list?orders=${orderIds.join(",")}&store=${storeFilter}`
     );
+  }
+
+  function handleMarkPacked(orderIds: number[]) {
+    const picked = orders.filter((o) => orderIds.includes(o.id));
+    if (picked.length === 0) return;
+    setMarkPackedOrders(picked);
+  }
+
+  function handleClearSuccess(cleared: number, skipped: number) {
+    setMarkPackedOrders(null);
+    setResetSignal((n) => n + 1);
+    const parts: string[] = [];
+    if (cleared > 0) parts.push(`${cleared} cleared`);
+    if (skipped > 0) parts.push(`${skipped} skipped (already recorded)`);
+    setToast(parts.join(" · "));
+    fetchData(true);
+    setTimeout(() => setToast(null), 4000);
   }
 
   return (
@@ -130,8 +163,25 @@ export default function PickPackPage() {
           orders={filtered}
           stockMap={stockMap}
           onGeneratePickList={handleGeneratePickList}
+          onMarkPacked={handleMarkPacked}
           loading={loading}
+          resetSignal={resetSignal}
         />
+      )}
+
+      {markPackedOrders && (
+        <MarkPackedModal
+          orders={markPackedOrders}
+          employeeName={employeeName || "you"}
+          onClose={() => setMarkPackedOrders(null)}
+          onSuccess={handleClearSuccess}
+        />
+      )}
+
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-emerald-700/90 border border-emerald-500 text-white text-sm px-4 py-2.5 rounded-lg shadow-lg">
+          {toast}
+        </div>
       )}
     </div>
   );

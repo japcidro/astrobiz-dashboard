@@ -56,14 +56,35 @@ export interface PackVerification {
   store_id: string;
   order_id: string;
   order_number: string;
-  status: "verified" | "mismatch_corrected" | "failed";
+  status: "verified" | "mismatch_corrected" | "failed" | "manual_cleared";
+  source: "scan" | "manual_clear" | "backfill";
   items_expected: number;
   items_scanned: number;
   mismatches: unknown;
+  notes: string | null;
   verified_by: string;
   started_at: string;
   completed_at: string;
 }
+
+export type ManualClearReasonCode =
+  | "catching_up_backlog"
+  | "already_packed_offline"
+  | "system_error_manual_fulfill"
+  | "other";
+
+export const MANUAL_CLEAR_REASONS: {
+  code: ManualClearReasonCode;
+  label: string;
+}[] = [
+  { code: "catching_up_backlog", label: "Catching up backlog" },
+  { code: "already_packed_offline", label: "Already packed offline" },
+  {
+    code: "system_error_manual_fulfill",
+    label: "System error — manually fulfilled",
+  },
+  { code: "other", label: "Other (enter note)" },
+];
 
 // ── Inventory / Stock ──
 export interface BinLocation {
