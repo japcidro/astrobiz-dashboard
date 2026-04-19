@@ -1,17 +1,16 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   BarChart3,
-  Send,
   RefreshCw,
   Sparkles,
   Video,
-  Loader2,
   AlertCircle,
 } from "lucide-react";
 import type { DatePreset } from "@/lib/facebook/types";
+import { ChatPanel, type ChatAd, type ChatTotals } from "@/components/marketing/chat-panel";
 import { DeconstructionPanel } from "@/components/marketing/deconstruction-panel";
 
 const DATE_PRESETS: { label: string; value: DatePreset }[] = [
@@ -24,25 +23,7 @@ const DATE_PRESETS: { label: string; value: DatePreset }[] = [
   { label: "Last Month", value: "last_month" },
 ];
 
-interface AdRow {
-  account: string;
-  account_id: string;
-  campaign: string;
-  adset: string;
-  ad: string;
-  ad_id: string;
-  status: string;
-  spend: number;
-  link_clicks: number;
-  cpa: number;
-  roas: number;
-  add_to_cart: number;
-  purchases: number;
-  landing_page_views: number;
-  cost_per_lpv: number;
-  reach: number;
-  impressions: number;
-  ctr: number;
+interface AdRow extends ChatAd {
   thumbnail_url?: string | null;
 }
 
@@ -50,25 +31,6 @@ interface AccountInfo {
   id: string;
   name: string;
 }
-
-interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-}
-
-interface Totals {
-  spend: number;
-  purchases: number;
-  link_clicks: number;
-  impressions: number;
-}
-
-const SAMPLE_PROMPTS = [
-  "Ano yung top 3 ads based on ROAS?",
-  "Anong ads ang bleeding ng pera? Ano dapat i-kill?",
-  "Compare performance ng top ad vs bottom ad — ano difference?",
-  "Mag-summarize ka ng overall account health ngayon.",
-];
 
 type Tab = "chat" | "deconstruct";
 
@@ -79,12 +41,11 @@ export default function AiAnalyticsPage() {
 
   const [tab, setTab] = useState<Tab>(deconstructAdParam ? "deconstruct" : "chat");
 
-  // Data loading
   const [datePreset, setDatePreset] = useState<DatePreset>("last_7d");
   const [accountFilter, setAccountFilter] = useState("ALL");
   const [accounts, setAccounts] = useState<AccountInfo[]>([]);
   const [ads, setAds] = useState<AdRow[]>([]);
-  const [totals, setTotals] = useState<Totals>({
+  const [totals, setTotals] = useState<ChatTotals>({
     spend: 0,
     purchases: 0,
     link_clicks: 0,
@@ -92,13 +53,6 @@ export default function AiAnalyticsPage() {
   });
   const [loadingAds, setLoadingAds] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-
-  // Chat
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [streaming, setStreaming] = useState(false);
-  const [chatError, setChatError] = useState<string | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     async function loadAds() {
@@ -112,7 +66,7 @@ export default function AiAnalyticsPage() {
         if (!res.ok) throw new Error(json.error || "Failed to load ads");
         setAds((json.data as AdRow[]) ?? []);
         setAccounts((json.accounts as AccountInfo[]) ?? []);
-        if (json.totals) setTotals(json.totals as Totals);
+        if (json.totals) setTotals(json.totals as ChatTotals);
       } catch (e) {
         setLoadError(e instanceof Error ? e.message : "Failed to load ads");
       } finally {
@@ -121,10 +75,6 @@ export default function AiAnalyticsPage() {
     }
     loadAds();
   }, [datePreset, accountFilter]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streaming]);
 
   const deconstructAds = useMemo(
     () =>
@@ -145,102 +95,6 @@ export default function AiAnalyticsPage() {
     [ads]
   );
 
-  // When filters change, clear the chat — otherwise the AI is answering against stale context
-  useEffect(() => {
-    setMessages([]);
-    setChatError(null);
-  }, [datePreset, accountFilter]);
-
-  async function handleSend(textOverride?: string) {
-    const text = (textOverride ?? input).trim();
-    if (!text || streaming) return;
-    if (ads.length === 0) {
-      setChatError("No ads data loaded yet. Try refreshing.");
-      return;
-    }
-
-    const userMsg: ChatMessage = { role: "user", content: text };
-    const nextMessages = [...messages, userMsg];
-    setMessages(nextMessages);
-    setInput("");
-    setStreaming(true);
-    setChatError(null);
-
-    // Start with an empty assistant message that we'll fill as we stream
-    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
-
-    try {
-      const res = await fetch("/api/marketing/ai-analytics/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: nextMessages,
-          ads_snapshot: ads,
-          date_preset: datePreset,
-          totals,
-        }),
-      });
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || `Chat error (${res.status})`);
-      }
-
-      if (!res.body) throw new Error("No response body");
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let acc = "";
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        // Split on double newlines (SSE event boundary)
-        const events = buffer.split("\n\n");
-        buffer = events.pop() ?? "";
-        for (const event of events) {
-          for (const line of event.split("\n")) {
-            if (!line.startsWith("data: ")) continue;
-            const payload = line.slice(6);
-            if (!payload || payload === "[DONE]") continue;
-            try {
-              const obj = JSON.parse(payload);
-              if (
-                obj.type === "content_block_delta" &&
-                obj.delta?.type === "text_delta"
-              ) {
-                acc += obj.delta.text;
-                setMessages((prev) => {
-                  const copy = [...prev];
-                  const last = copy[copy.length - 1];
-                  if (last?.role === "assistant") {
-                    copy[copy.length - 1] = { ...last, content: acc };
-                  }
-                  return copy;
-                });
-              }
-            } catch {
-              // ignore malformed event frames
-            }
-          }
-        }
-      }
-    } catch (e) {
-      setChatError(e instanceof Error ? e.message : "Chat failed");
-      // Drop the empty assistant placeholder
-      setMessages((prev) =>
-        prev[prev.length - 1]?.role === "assistant" &&
-        prev[prev.length - 1].content === ""
-          ? prev.slice(0, -1)
-          : prev
-      );
-    } finally {
-      setStreaming(false);
-    }
-  }
-
   return (
     <div className="max-w-6xl">
       {/* Header */}
@@ -251,7 +105,7 @@ export default function AiAnalyticsPage() {
         <div>
           <h1 className="text-2xl font-bold text-white">AI Analytics</h1>
           <p className="text-gray-400 text-sm mt-0.5">
-            Chat with your ads data. Powered by Claude Sonnet.
+            Chat with your ads data. Deconstruct winning creatives.
           </p>
         </div>
       </div>
@@ -330,124 +184,22 @@ export default function AiAnalyticsPage() {
         </button>
       </div>
 
-      {/* Chat Tab */}
       {tab === "chat" && (
-        <div className="bg-gray-900/50 border border-gray-700/50 rounded-xl overflow-hidden flex flex-col h-[65vh] min-h-[500px]">
-          {/* Messages area */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {messages.length === 0 && !streaming && (
-              <div className="flex flex-col items-center justify-center h-full text-center">
-                <Sparkles size={28} className="text-emerald-400/60 mb-3" />
-                <p className="text-gray-400 text-sm mb-1">
-                  Ask me anything about your ads.
-                </p>
-                <p className="text-gray-500 text-xs mb-6">
-                  I see {ads.length} ads from {accounts.length || "your"}{" "}
-                  account(s) for the selected date range.
-                </p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 w-full max-w-xl">
-                  {SAMPLE_PROMPTS.map((p) => (
-                    <button
-                      key={p}
-                      onClick={() => handleSend(p)}
-                      disabled={loadingAds || ads.length === 0}
-                      className="text-left text-xs text-gray-300 bg-gray-800/70 hover:bg-gray-700/70 border border-gray-700 rounded-lg px-3 py-2.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-                    >
-                      {p}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {messages.map((m, i) => (
-              <div
-                key={i}
-                className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                <div
-                  className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap ${
-                    m.role === "user"
-                      ? "bg-emerald-600 text-white"
-                      : "bg-gray-800 text-gray-200 border border-gray-700"
-                  }`}
-                >
-                  {m.content ||
-                    (streaming && i === messages.length - 1 ? (
-                      <Loader2 size={14} className="animate-spin text-gray-400" />
-                    ) : (
-                      ""
-                    ))}
-                </div>
-              </div>
-            ))}
-
-            {chatError && (
-              <div className="flex justify-start">
-                <div className="bg-red-900/30 border border-red-700/50 text-red-300 text-sm rounded-2xl px-4 py-2.5 flex items-center gap-2">
-                  <AlertCircle size={14} />
-                  {chatError}
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input area */}
-          <div className="border-t border-gray-700/50 p-3">
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleSend();
-              }}
-              className="flex items-end gap-2"
-            >
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    handleSend();
-                  }
-                }}
-                placeholder={
-                  loadingAds
-                    ? "Loading ads…"
-                    : ads.length === 0
-                      ? "No ads data yet"
-                      : "Ask about your ads… (Enter to send, Shift+Enter for newline)"
-                }
-                disabled={loadingAds || streaming || ads.length === 0}
-                rows={2}
-                className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:ring-emerald-500 focus:border-emerald-500 resize-none disabled:opacity-50"
-              />
-              <button
-                type="submit"
-                disabled={
-                  loadingAds || streaming || !input.trim() || ads.length === 0
-                }
-                className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-              >
-                {streaming ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <Send size={14} />
-                )}
-                Send
-              </button>
-            </form>
-          </div>
-        </div>
+        <ChatPanel
+          ads={ads}
+          totals={totals}
+          datePreset={datePreset}
+          accountFilter={accountFilter}
+          accountCount={accounts.length}
+          loadingAds={loadingAds}
+        />
       )}
 
-      {/* Deconstruction tab */}
       {tab === "deconstruct" && (
         <DeconstructionPanel
           ads={deconstructAds}
           initialAdId={deconstructAdParam}
           onAutoAnalyzeHandled={() => {
-            // Clear the deep-link query param so a refresh doesn't re-trigger
             router.replace("/marketing/ai-analytics");
           }}
         />

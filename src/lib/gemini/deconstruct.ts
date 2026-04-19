@@ -1,10 +1,19 @@
 const GEMINI_MODEL = "gemini-2.5-pro";
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com";
 
-// Inline video limit is ~20MB for most Gemini models. Keep a buffer.
-const MAX_INLINE_VIDEO_BYTES = 18 * 1024 * 1024;
-// Abort video download after this many seconds (Vercel max duration is 60s).
-const DOWNLOAD_TIMEOUT_MS = 30_000;
+// Inline vs File API threshold. Gemini's documented inline cap is 20MB;
+// we keep a buffer. Anything above this goes through the File API,
+// which supports up to 2GB per file.
+const INLINE_THRESHOLD_BYTES = 18 * 1024 * 1024;
+// Hard cap on any video (File API also has per-file limits and very large
+// videos hit Gemini's token budget). 400MB is well past typical ads and
+// leaves room under Vercel function memory on Fluid Compute.
+const MAX_VIDEO_BYTES = 400 * 1024 * 1024;
+// Abort video download if Facebook is slow.
+const DOWNLOAD_TIMEOUT_MS = 90_000;
+// Poll the File API this long waiting for the upload to become ACTIVE.
+const FILE_ACTIVATION_TIMEOUT_MS = 90_000;
+const FILE_POLL_INTERVAL_MS = 2_000;
 
 export interface AdDeconstruction {
   transcript: string;
@@ -128,9 +137,9 @@ async function downloadVideo(
     }
     const mimeType = res.headers.get("content-type") ?? "video/mp4";
     const buffer = await res.arrayBuffer();
-    if (buffer.byteLength > MAX_INLINE_VIDEO_BYTES) {
+    if (buffer.byteLength > MAX_VIDEO_BYTES) {
       throw new Error(
-        `Video too large for inline analysis (${(buffer.byteLength / 1024 / 1024).toFixed(1)}MB, max 18MB). Skipping.`
+        `Video too large (${(buffer.byteLength / 1024 / 1024).toFixed(1)}MB, max ${MAX_VIDEO_BYTES / 1024 / 1024}MB).`
       );
     }
     return { buffer, mimeType };
@@ -146,31 +155,164 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return Buffer.from(bytes).toString("base64");
 }
 
+interface UploadedFile {
+  uri: string;
+  mimeType: string;
+  name: string;
+}
+
+// Uploads a video to Gemini's File API using the resumable upload protocol.
+// Returns the fileUri that can be referenced in generateContent and polls
+// until the file reaches ACTIVE state (Gemini pre-processes video before
+// it can be used in a prompt).
+async function uploadToFileApi(
+  buffer: ArrayBuffer,
+  mimeType: string,
+  apiKey: string
+): Promise<UploadedFile> {
+  const effectiveMime = mimeType.startsWith("video/") ? mimeType : "video/mp4";
+  const size = buffer.byteLength;
+
+  // 1. Start the resumable upload session.
+  const startRes = await fetch(
+    `${GEMINI_API_BASE}/upload/v1beta/files?key=${encodeURIComponent(apiKey)}`,
+    {
+      method: "POST",
+      headers: {
+        "X-Goog-Upload-Protocol": "resumable",
+        "X-Goog-Upload-Command": "start",
+        "X-Goog-Upload-Header-Content-Length": String(size),
+        "X-Goog-Upload-Header-Content-Type": effectiveMime,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        file: { display_name: `ad-${Date.now()}` },
+      }),
+    }
+  );
+  if (!startRes.ok) {
+    const text = await startRes.text();
+    throw new Error(
+      `File API start failed (${startRes.status}): ${text.slice(0, 200)}`
+    );
+  }
+  const uploadUrl = startRes.headers.get("X-Goog-Upload-URL");
+  if (!uploadUrl) {
+    throw new Error("File API did not return an upload URL");
+  }
+
+  // 2. Upload the bytes and finalize in one request.
+  const uploadRes = await fetch(uploadUrl, {
+    method: "POST",
+    headers: {
+      "Content-Length": String(size),
+      "X-Goog-Upload-Offset": "0",
+      "X-Goog-Upload-Command": "upload, finalize",
+    },
+    body: buffer,
+  });
+  if (!uploadRes.ok) {
+    const text = await uploadRes.text();
+    throw new Error(
+      `File API upload failed (${uploadRes.status}): ${text.slice(0, 200)}`
+    );
+  }
+  const uploadJson = (await uploadRes.json()) as {
+    file?: { uri?: string; name?: string; mimeType?: string; state?: string };
+  };
+  const initialFile = uploadJson.file ?? {};
+  if (!initialFile.uri || !initialFile.name) {
+    throw new Error("File API returned no uri");
+  }
+
+  // 3. Poll until ACTIVE. Gemini runs video pre-processing before allowing
+  //    the file in a prompt; for large videos this can take 10-60s.
+  const fileName = initialFile.name;
+  const deadline = Date.now() + FILE_ACTIVATION_TIMEOUT_MS;
+  let state = initialFile.state ?? "PROCESSING";
+  let mimeOut = initialFile.mimeType ?? effectiveMime;
+
+  while (state !== "ACTIVE") {
+    if (Date.now() > deadline) {
+      throw new Error(
+        `File API processing timed out after ${FILE_ACTIVATION_TIMEOUT_MS / 1000}s (still ${state})`
+      );
+    }
+    await new Promise((r) => setTimeout(r, FILE_POLL_INTERVAL_MS));
+    const pollRes = await fetch(
+      `${GEMINI_API_BASE}/v1beta/${fileName}?key=${encodeURIComponent(apiKey)}`,
+      { cache: "no-store" }
+    );
+    if (!pollRes.ok) {
+      const text = await pollRes.text();
+      throw new Error(
+        `File API poll failed (${pollRes.status}): ${text.slice(0, 200)}`
+      );
+    }
+    const pollJson = (await pollRes.json()) as {
+      state?: string;
+      mimeType?: string;
+    };
+    state = pollJson.state ?? state;
+    if (pollJson.mimeType) mimeOut = pollJson.mimeType;
+    if (state === "FAILED") {
+      throw new Error("File API reported FAILED state for uploaded video");
+    }
+  }
+
+  return {
+    uri: initialFile.uri,
+    mimeType: mimeOut,
+    name: fileName,
+  };
+}
+
+async function deleteFile(fileName: string, apiKey: string): Promise<void> {
+  try {
+    await fetch(
+      `${GEMINI_API_BASE}/v1beta/${fileName}?key=${encodeURIComponent(apiKey)}`,
+      { method: "DELETE" }
+    );
+  } catch {
+    // Non-fatal — files auto-delete after 48h anyway.
+  }
+}
+
+const USER_PROMPT =
+  "Analyze this ad video. Return the structured deconstruction as described in the schema. Be accurate — do not invent transcript content.";
+
 export async function deconstructAdVideo(
   videoUrl: string,
   apiKey: string
 ): Promise<DeconstructResult> {
   const { buffer, mimeType } = await downloadVideo(videoUrl);
-  const base64 = arrayBufferToBase64(buffer);
+  const sizeBytes = buffer.byteLength;
+  const useFileApi = sizeBytes > INLINE_THRESHOLD_BYTES;
+
+  let videoPart: Record<string, unknown>;
+  let uploadedFileName: string | null = null;
+
+  if (useFileApi) {
+    const uploaded = await uploadToFileApi(buffer, mimeType, apiKey);
+    uploadedFileName = uploaded.name;
+    videoPart = {
+      fileData: { mimeType: uploaded.mimeType, fileUri: uploaded.uri },
+    };
+  } else {
+    videoPart = {
+      inlineData: {
+        mimeType: mimeType.startsWith("video/") ? mimeType : "video/mp4",
+        data: arrayBufferToBase64(buffer),
+      },
+    };
+  }
 
   const body = {
-    systemInstruction: {
-      parts: [{ text: SYSTEM_INSTRUCTION }],
-    },
+    systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
     contents: [
       {
         role: "user",
-        parts: [
-          {
-            inlineData: {
-              mimeType: mimeType.startsWith("video/") ? mimeType : "video/mp4",
-              data: base64,
-            },
-          },
-          {
-            text: "Analyze this ad video. Return the structured deconstruction as described in the schema. Be accurate — do not invent transcript content.",
-          },
-        ],
+        parts: [videoPart, { text: USER_PROMPT }],
       },
     ],
     generationConfig: {
@@ -181,42 +323,48 @@ export async function deconstructAdVideo(
     },
   };
 
-  const res = await fetch(
-    `${GEMINI_API_BASE}/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }
-  );
-
-  const json = await res.json();
-  if (!res.ok) {
-    const msg =
-      json?.error?.message ?? `Gemini API error ${res.status}`;
-    throw new Error(msg);
-  }
-
-  const textPart = json?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (typeof textPart !== "string") {
-    throw new Error("Gemini returned no analysis text");
-  }
-
-  let parsed: AdDeconstruction;
   try {
-    parsed = JSON.parse(textPart) as AdDeconstruction;
-  } catch {
-    throw new Error("Gemini response was not valid JSON");
+    const res = await fetch(
+      `${GEMINI_API_BASE}/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }
+    );
+
+    const json = await res.json();
+    if (!res.ok) {
+      const msg = json?.error?.message ?? `Gemini API error ${res.status}`;
+      throw new Error(msg);
+    }
+
+    const textPart = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (typeof textPart !== "string") {
+      throw new Error("Gemini returned no analysis text");
+    }
+
+    let parsed: AdDeconstruction;
+    try {
+      parsed = JSON.parse(textPart) as AdDeconstruction;
+    } catch {
+      throw new Error("Gemini response was not valid JSON");
+    }
+
+    const tokensUsed =
+      (json?.usageMetadata?.totalTokenCount as number | undefined) ?? null;
+
+    return {
+      analysis: parsed,
+      model: GEMINI_MODEL,
+      tokens_used: tokensUsed,
+      size_bytes: sizeBytes,
+      mime_type: mimeType,
+    };
+  } finally {
+    // Best-effort cleanup. Files auto-delete after 48h regardless.
+    if (uploadedFileName) {
+      void deleteFile(uploadedFileName, apiKey);
+    }
   }
-
-  const tokensUsed =
-    (json?.usageMetadata?.totalTokenCount as number | undefined) ?? null;
-
-  return {
-    analysis: parsed,
-    model: GEMINI_MODEL,
-    tokens_used: tokensUsed,
-    size_bytes: buffer.byteLength,
-    mime_type: mimeType,
-  };
 }

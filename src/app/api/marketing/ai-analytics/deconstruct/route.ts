@@ -4,8 +4,10 @@ import { resolveAdVideo } from "@/lib/facebook/video";
 import { deconstructAdVideo } from "@/lib/gemini/deconstruct";
 
 export const dynamic = "force-dynamic";
-// Video download + Gemini analysis can take a while. Keep under 60s (Vercel default).
-export const maxDuration = 60;
+// Large videos take time: ~60s download + ~60s File API upload & processing
+// + ~60s Gemini analysis. Fluid Compute lets this run up to 800s on Pro,
+// 300s on Hobby — we cap at 300s to stay safe.
+export const maxDuration = 300;
 
 // Re-analyze only if the existing row is older than this.
 const STALE_AFTER_DAYS = 7;

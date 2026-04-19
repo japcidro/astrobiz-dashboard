@@ -1,5 +1,28 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-04-19: AI Analytics — large video support + chat history
+
+- **Gemini File API** for videos >18MB. Ads up to 400MB now work
+  (previously failed with "video too large"). Flow: download to server →
+  resumable upload to Gemini File API → poll until ACTIVE → reference
+  `fileUri` in generateContent. Best-effort delete after analysis;
+  Gemini auto-purges after 48h regardless.
+- **Per-ad `deconstruct` maxDuration** bumped from 60s to 300s — a 200MB
+  video can take ~2-3 minutes end-to-end (download + upload + processing
+  + analysis) and was timing out at 60s.
+- **Daily cron cap** lowered from 10 to 4 analyses per run so one slow
+  video can't push the 300s budget over.
+- **Chat history** — each AI Analytics chat now auto-saves per employee
+  after every assistant reply. Toolbar shows "History (N)" with a
+  dropdown of the 20 most recent chats (title derived from first user
+  message, with relative timestamps). Click to resume; trash icon to
+  delete. "New chat" button to start fresh.
+- Migration: `supabase/ai-chat-sessions-migration.sql` (idempotent).
+  Creates `ai_chat_sessions` table with per-employee RLS (each user
+  sees only their own chats; admin can see all).
+- Extracted chat UI into `components/marketing/chat-panel.tsx` — the
+  ai-analytics page is now a thin shell over Chat + Deconstruction panels.
+
 ## 2026-04-19: AI Analytics — Phase 2 (Creative Deconstruction)
 
 - **On-demand video deconstruction** — from the ads table, click ✨ Analyze

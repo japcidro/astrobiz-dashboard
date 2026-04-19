@@ -12,7 +12,10 @@ const FB_API_BASE = "https://graph.facebook.com/v21.0";
 // How many ads to deconstruct per account per day.
 const TOP_N_PER_ACCOUNT = 2;
 // Hard cap total analyses per run, across all accounts, to bound cost.
-const MAX_ANALYSES = 10;
+// Lowered from 10 to 4: a single 200MB video can eat ~3 minutes of
+// the 300s budget, so fewer but more reliable runs is better than
+// timing out mid-batch.
+const MAX_ANALYSES = 4;
 // Only analyze ads with at least these metrics (filters out noise).
 const MIN_SPEND = 500;
 const MIN_PURCHASES = 1;
