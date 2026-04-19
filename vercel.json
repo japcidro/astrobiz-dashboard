@@ -23,6 +23,22 @@
     {
       "path": "/api/cron/email-digest",
       "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/cron/briefing-morning",
+      "schedule": "0 22 * * *"
+    },
+    {
+      "path": "/api/cron/briefing-evening",
+      "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/cron/briefing-weekly",
+      "schedule": "0 1 * * 1"
+    },
+    {
+      "path": "/api/cron/briefing-monthly",
+      "schedule": "0 1 1 * *"
     }
   ]
 }

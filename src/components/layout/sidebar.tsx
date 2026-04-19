@@ -25,6 +25,7 @@ import {
   BarChart3,
   CheckCircle,
   Bell,
+  Newspaper,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -222,6 +223,12 @@ const navEntries: NavEntry[] = [
     label: "Notifications",
     href: "/admin/notifications",
     icon: <Bell size={20} />,
+    roles: ["admin"],
+  },
+  {
+    label: "Briefings",
+    href: "/admin/briefings",
+    icon: <Newspaper size={20} />,
     roles: ["admin"],
   },
   {
