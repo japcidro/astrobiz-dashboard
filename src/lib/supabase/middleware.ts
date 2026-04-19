@@ -2,6 +2,18 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function updateSession(request: NextRequest) {
+  // Cron / internal calls authenticate via Bearer CRON_SECRET.
+  // Skip the Supabase session check so these don't get redirected.
+  const authHeader = request.headers.get("authorization");
+  const cronSecret = process.env.CRON_SECRET;
+  if (
+    cronSecret &&
+    authHeader &&
+    authHeader === `Bearer ${cronSecret}`
+  ) {
+    return NextResponse.next({ request });
+  }
+
   let supabaseResponse = NextResponse.next({
     request,
   });
