@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   BarChart3,
   Send,
@@ -11,6 +12,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import type { DatePreset } from "@/lib/facebook/types";
+import { DeconstructionPanel } from "@/components/marketing/deconstruction-panel";
 
 const DATE_PRESETS: { label: string; value: DatePreset }[] = [
   { label: "Today", value: "today" },
@@ -41,6 +43,7 @@ interface AdRow {
   reach: number;
   impressions: number;
   ctr: number;
+  thumbnail_url?: string | null;
 }
 
 interface AccountInfo {
@@ -70,7 +73,11 @@ const SAMPLE_PROMPTS = [
 type Tab = "chat" | "deconstruct";
 
 export default function AiAnalyticsPage() {
-  const [tab, setTab] = useState<Tab>("chat");
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const deconstructAdParam = searchParams.get("deconstruct_ad");
+
+  const [tab, setTab] = useState<Tab>(deconstructAdParam ? "deconstruct" : "chat");
 
   // Data loading
   const [datePreset, setDatePreset] = useState<DatePreset>("last_7d");
@@ -118,6 +125,25 @@ export default function AiAnalyticsPage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streaming]);
+
+  const deconstructAds = useMemo(
+    () =>
+      ads
+        .map((a) => ({
+          ad_id: a.ad_id,
+          ad: a.ad,
+          account: a.account,
+          account_id: a.account_id,
+          campaign: a.campaign,
+          adset: a.adset,
+          spend: a.spend,
+          purchases: a.purchases,
+          roas: a.roas,
+          thumbnail_url: a.thumbnail_url ?? null,
+        }))
+        .sort((a, b) => b.spend - a.spend),
+    [ads]
+  );
 
   // When filters change, clear the chat — otherwise the AI is answering against stale context
   useEffect(() => {
@@ -415,21 +441,16 @@ export default function AiAnalyticsPage() {
         </div>
       )}
 
-      {/* Deconstruct Tab — Phase 2 placeholder */}
+      {/* Deconstruction tab */}
       {tab === "deconstruct" && (
-        <div className="bg-gray-900/50 border border-gray-700/50 rounded-xl p-12 text-center">
-          <Video size={40} className="text-gray-500 mx-auto mb-3" />
-          <h3 className="text-lg font-semibold text-white mb-1">
-            Creative Deconstruction
-          </h3>
-          <p className="text-gray-400 text-sm max-w-md mx-auto">
-            Coming in Phase 2 — AI watches your top ad videos, extracts scripts,
-            identifies hooks, maps scene changes, and describes visual style.
-          </p>
-          <p className="text-gray-500 text-xs mt-4">
-            Set your Gemini API key in Admin → Settings to prepare.
-          </p>
-        </div>
+        <DeconstructionPanel
+          ads={deconstructAds}
+          initialAdId={deconstructAdParam}
+          onAutoAnalyzeHandled={() => {
+            // Clear the deep-link query param so a refresh doesn't re-trigger
+            router.replace("/marketing/ai-analytics");
+          }}
+        />
       )}
     </div>
   );

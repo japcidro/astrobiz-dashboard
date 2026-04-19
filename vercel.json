@@ -7,6 +7,10 @@
     {
       "path": "/api/facebook/autopilot/run",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/deconstruct-top-ads",
+      "schedule": "30 1 * * *"
     }
   ]
 }

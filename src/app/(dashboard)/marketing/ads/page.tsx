@@ -15,7 +15,9 @@ import {
   Loader2,
   Zap,
   Bot,
+  Sparkles,
 } from "lucide-react";
+import Link from "next/link";
 import type { DatePreset } from "@/lib/facebook/types";
 import { QuickActionsModal } from "@/components/marketing/quick-actions-modal";
 import { AutopilotModal } from "@/components/marketing/autopilot-modal";
@@ -1320,21 +1322,32 @@ export default function AdsPage() {
                       {/* Preview link (ad level) */}
                       {drillLevel === "ad" && (
                         <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                          {rowData.preview_url ? (
-                            <a
-                              href={rowData.preview_url as string}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                          <div className="flex items-center justify-center gap-2">
+                            {rowData.preview_url ? (
+                              <a
+                                href={rowData.preview_url as string}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={(e) => e.stopPropagation()}
+                                className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors text-xs"
+                                title="View ad on Facebook"
+                              >
+                                <ExternalLink size={13} />
+                                View
+                              </a>
+                            ) : (
+                              <span className="text-gray-600 text-xs">—</span>
+                            )}
+                            <Link
+                              href={`/marketing/ai-analytics?deconstruct_ad=${encodeURIComponent(rowData.ad_id as string)}`}
                               onClick={(e) => e.stopPropagation()}
-                              className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors text-xs"
-                              title="View ad on Facebook"
+                              className="inline-flex items-center gap-1 text-purple-400 hover:text-purple-300 transition-colors text-xs"
+                              title="Analyze this ad's video with AI"
                             >
-                              <ExternalLink size={13} />
-                              View
-                            </a>
-                          ) : (
-                            <span className="text-gray-600 text-xs">—</span>
-                          )}
+                              <Sparkles size={13} />
+                              Analyze
+                            </Link>
+                          </div>
                         </td>
                       )}
                       {/* Last Edited */}

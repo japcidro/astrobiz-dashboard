@@ -1,5 +1,37 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-04-19: AI Analytics — Phase 2 (Creative Deconstruction)
+
+- **On-demand video deconstruction** — from the ads table, click ✨ Analyze
+  on any ad row to open AI Analytics → Deconstruction tab with that ad
+  pre-selected. Pulls the ad's video via Facebook Graph, sends it to
+  Gemini 2.5 Pro with a response schema, and renders a structured
+  breakdown: hook (0:00-0:03), scene/b-roll timeline, visual style,
+  tone, CTA, language, full transcript.
+- **Deconstruction panel** — new tab in `/marketing/ai-analytics`:
+  * Dropdown of currently-loaded ads with ✓ marker for already-analyzed ones
+  * Thumbnail grid of past analyses, searchable by ad/campaign/tone/style
+  * Click card → modal with the full structured breakdown
+  * Re-run button (force refresh) on any analysis
+- **Daily auto-run** — Vercel cron `/api/cron/deconstruct-top-ads` at
+  09:30 PHT picks the top 2 ads per ad account by purchases (last 7
+  days), filters out low-signal ads (min ₱500 spend, ≥1 purchase),
+  and caps total work at 10 analyses per run to bound cost. Skips ads
+  already analyzed in the last 7 days. Marked as `trigger_source =
+  'auto_daily'` in the UI.
+- **Cache strategy** — `ad_creative_analyses` keyed by `ad_id`. Fresh
+  analyses served from cache for 7 days; older than that auto-refreshes.
+  Video source URLs are not persisted (they expire) — only thumbnail URL.
+- **Size guardrails** — videos >18MB skip inline analysis with an
+  explicit error (Gemini's inline limit is 20MB). Dark posts that don't
+  expose a video source URL return a clear "no playable video" message.
+- New libs: `src/lib/facebook/video.ts` (walks creative →
+  asset_feed_spec → object story → /video source), `src/lib/gemini/deconstruct.ts`
+  (inline base64 + responseSchema JSON mode).
+- Routes: `POST /api/marketing/ai-analytics/deconstruct` (60s max),
+  `GET /api/marketing/ai-analytics/deconstructions`,
+  `GET /api/cron/deconstruct-top-ads` (300s max).
+
 ## 2026-04-19: AI Analytics — Phase 1 (Chat Insights)
 
 - **New page**: `/marketing/ai-analytics` — chat interface for querying ads
