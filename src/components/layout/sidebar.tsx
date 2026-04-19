@@ -195,6 +195,13 @@ const navEntries: NavEntry[] = [
         roles: ["admin", "marketing"],
       },
       {
+        label: "AI Analytics",
+        href: "/marketing/ai-analytics",
+        icon: <BarChart3 size={18} />,
+        roles: ["admin", "marketing"],
+        section: "Analytics",
+      },
+      {
         label: "AI Generator",
         href: "/marketing/ai-generator",
         icon: <Sparkles size={18} />,

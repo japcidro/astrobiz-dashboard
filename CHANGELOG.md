@@ -1,5 +1,28 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-04-19: AI Analytics — Phase 1 (Chat Insights)
+
+- **New page**: `/marketing/ai-analytics` — chat interface for querying ads
+  performance data in natural language (Taglish-friendly). Uses Claude Sonnet
+  4.6 with streaming SSE responses.
+- Pre-loads ads snapshot from the existing `/api/facebook/all-ads` endpoint
+  (respects date preset + account filter) and feeds a compact TSV of the
+  top 50 ads by spend into the system prompt along with account totals.
+- Sample prompts pinned: "Top 3 ads based on ROAS?", "Which ads are bleeding
+  money?", "Compare top vs bottom ad", "Account health summary".
+- Sidebar link added under Marketing → Analytics (admin + marketing roles).
+- **Gemini API key** management added to Admin → Settings (Phase 2 will use
+  it for video creative deconstruction; key field lives here now so it's
+  ready when that ships).
+- Generalised `AiKeyManager` component to support any `settingKey` with
+  title/label/placeholder/docs props + blue/purple/emerald accents.
+- Migration: `supabase/ai-analytics-migration.sql`
+  - `ad_creative_analyses` table scaffolded (Phase 2 storage for video deconstructions).
+  - `app_settings` RLS updated so marketing role can read
+    `anthropic_api_key` and `gemini_api_key` in addition to
+    `fb_access_token` / `fb_selected_accounts`.
+- Route: `POST /api/marketing/ai-analytics/chat` (SSE streaming, 60s max).
+
 ## 2026-04-19: Manual Clear for Pick & Pack Queue
 
 - **Mark as Already Packed** button on `/fulfillment/pick-pack` — lets admin &

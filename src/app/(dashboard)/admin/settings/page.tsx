@@ -36,7 +36,7 @@ export default async function SettingsPage() {
 
   const supabase = await createClient();
 
-  const [{ data: tokenSetting }, { data: selectedSetting }, { data: shopifyStores }, { data: employees }, { data: aiKeySetting }] = await Promise.all([
+  const [{ data: tokenSetting }, { data: selectedSetting }, { data: shopifyStores }, { data: employees }, { data: aiKeySetting }, { data: geminiKeySetting }] = await Promise.all([
     supabase
       .from("app_settings")
       .select("value, updated_at")
@@ -59,6 +59,11 @@ export default async function SettingsPage() {
       .from("app_settings")
       .select("value")
       .eq("key", "anthropic_api_key")
+      .single(),
+    supabase
+      .from("app_settings")
+      .select("value")
+      .eq("key", "gemini_api_key")
       .single(),
   ]);
 
@@ -132,8 +137,19 @@ export default async function SettingsPage() {
         <StoreManager stores={(shopifyStores as ShopifyStore[]) || []} />
       </div>
 
-      <div className="mt-10">
+      <div className="mt-10 space-y-6">
         <AiKeyManager currentKey={aiKeySetting?.value || ""} />
+        <AiKeyManager
+          currentKey={geminiKeySetting?.value || ""}
+          settingKey="gemini_api_key"
+          title="Gemini API Key"
+          description="Google Gemini key — used for video creative deconstruction"
+          label="Google Gemini API Key"
+          placeholder="AIza..."
+          docsUrl="https://aistudio.google.com/apikey"
+          docsLabel="aistudio.google.com"
+          accent="blue"
+        />
       </div>
     </div>
   );
