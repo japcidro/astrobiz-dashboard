@@ -24,10 +24,12 @@ import {
   ChevronRight,
   BarChart3,
   CheckCircle,
+  Bell,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { UserRole } from "@/lib/types";
+import { NotificationBell } from "@/components/alerts/notification-bell";
 
 interface NavItem {
   label: string;
@@ -217,6 +219,12 @@ const navEntries: NavEntry[] = [
     ],
   },
   {
+    label: "Notifications",
+    href: "/admin/notifications",
+    icon: <Bell size={20} />,
+    roles: ["admin"],
+  },
+  {
     label: "Settings",
     href: "/admin/settings",
     icon: <Settings size={20} />,
@@ -393,6 +401,7 @@ export function Sidebar({ employeeName, employeeRole }: SidebarProps) {
               {employeeRole}
             </span>
           </div>
+          <NotificationBell employeeRole={employeeRole} />
         </div>
         <button
           onClick={handleLogout}

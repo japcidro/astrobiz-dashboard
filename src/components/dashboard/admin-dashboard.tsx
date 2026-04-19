@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { StatCard } from "./stat-card";
 import { ActionItem } from "./action-item";
+import { AlertsFeed } from "@/components/alerts/alerts-feed";
 
 interface Props {
   employeeName: string;
@@ -120,6 +121,11 @@ export function AdminDashboard({
           Last refreshed: {lastRefreshed}
         </p>
       )}
+
+      {/* Decision Cockpit — action feed at the top */}
+      <div className="mb-8">
+        <AlertsFeed limit={5} />
+      </div>
 
       {/* Today's Highlights */}
       <div className="mb-8">

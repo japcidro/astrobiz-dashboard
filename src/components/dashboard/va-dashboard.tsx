@@ -9,6 +9,7 @@ import {
   CheckCircle,
   Timer,
   ClipboardList,
+  Store,
 } from "lucide-react";
 import { StatCard } from "./stat-card";
 import { ActionItem } from "./action-item";
@@ -27,21 +28,41 @@ interface OrdersSummary {
   aging_danger_count: number;
 }
 
+interface StoreBreakdown {
+  store_name: string;
+  total: number;
+  unfulfilled: number;
+  aging: number;
+  fulfilled: number;
+}
+
 export function VADashboard({
-  employeeName,
+  employeeName: _employeeName,
   hoursToday,
   hasActiveSession,
 }: Props) {
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<OrdersSummary | null>(null);
+  const [stores, setStores] = useState<StoreBreakdown[]>([]);
+  const [storesLoading, setStoresLoading] = useState(true);
 
   useEffect(() => {
     import("@/lib/client-cache").then(({ cachedFetch }) =>
       cachedFetch("/api/shopify/orders?date_filter=today&store=ALL")
-        .then(({ data }) => setSummary((data as Record<string, unknown>)?.summary as typeof summary ?? null))
+        .then(({ data }) =>
+          setSummary((data as Record<string, unknown>)?.summary as typeof summary ?? null)
+        )
         .catch(() => setSummary(null))
         .finally(() => setLoading(false))
     );
+
+    fetch("/api/va/today", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d) setStores(d.stores ?? []);
+      })
+      .catch(() => {})
+      .finally(() => setStoresLoading(false));
   }, []);
 
   const agingTotal =
@@ -118,6 +139,62 @@ export function VADashboard({
             loading={loading}
           />
         </div>
+      </div>
+
+      {/* Store Breakdown */}
+      <div className="mb-8">
+        <h2 className="text-lg font-semibold text-white mb-4">By Store</h2>
+        {storesLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="h-20 bg-gray-800/30 rounded-lg animate-pulse" />
+            <div className="h-20 bg-gray-800/30 rounded-lg animate-pulse" />
+          </div>
+        ) : stores.length === 0 ? (
+          <p className="text-sm text-gray-500">No orders today.</p>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {stores.map((store) => (
+              <Link
+                key={store.store_name}
+                href={`/va/orders?store=${encodeURIComponent(store.store_name)}`}
+                className="bg-gray-800/50 hover:bg-gray-800 border border-gray-700/50 rounded-lg p-4 transition-colors"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <Store size={14} className="text-gray-400" />
+                  <span className="text-sm font-medium text-white truncate">
+                    {store.store_name}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div>
+                    <p className="text-xs text-gray-500">Total</p>
+                    <p className="text-lg font-semibold text-white">{store.total}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500">Unfulfilled</p>
+                    <p
+                      className={`text-lg font-semibold ${
+                        store.unfulfilled > 0 ? "text-yellow-400" : "text-gray-600"
+                      }`}
+                    >
+                      {store.unfulfilled}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500">Aging</p>
+                    <p
+                      className={`text-lg font-semibold ${
+                        store.aging > 0 ? "text-red-400" : "text-gray-600"
+                      }`}
+                    >
+                      {store.aging}
+                    </p>
+                  </div>
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Needs Attention */}

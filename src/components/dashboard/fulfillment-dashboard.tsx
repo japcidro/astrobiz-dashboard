@@ -12,6 +12,9 @@ import {
   Timer,
   Boxes,
   ClipboardList,
+  TrendingDown,
+  ScanLine,
+  ArrowRight,
 } from "lucide-react";
 import { StatCard } from "./stat-card";
 import { ActionItem } from "./action-item";
@@ -34,8 +37,22 @@ interface UnfulfilledOrder {
   age_days: number;
 }
 
+interface TodayData {
+  pack_queue: number;
+  my_verified_today: number;
+  team_verified_today: number;
+  low_runway_skus: Array<{
+    product_title: string;
+    sku: string | null;
+    stock: number;
+    runway_days: number;
+    velocity_per_day: number;
+    store_name: string;
+  }>;
+}
+
 export function FulfillmentDashboard({
-  employeeName,
+  employeeName: _employeeName,
   hoursToday,
   hasActiveSession,
 }: Props) {
@@ -43,11 +60,14 @@ export function FulfillmentDashboard({
   const [summary, setSummary] = useState<InventorySummary | null>(null);
   const [fulfillmentLoading, setFulfillmentLoading] = useState(true);
   const [unfulfilledOrders, setUnfulfilledOrders] = useState<UnfulfilledOrder[]>([]);
+  const [today, setToday] = useState<TodayData | null>(null);
 
   useEffect(() => {
     import("@/lib/client-cache").then(({ cachedFetch }) => {
       cachedFetch("/api/shopify/inventory?store=ALL")
-        .then(({ data }) => setSummary((data as Record<string, unknown>)?.summary as typeof summary ?? null))
+        .then(({ data }) =>
+          setSummary((data as Record<string, unknown>)?.summary as typeof summary ?? null)
+        )
         .catch(() => setSummary(null))
         .finally(() => setLoading(false));
 
@@ -59,13 +79,20 @@ export function FulfillmentDashboard({
         .catch(() => setUnfulfilledOrders([]))
         .finally(() => setFulfillmentLoading(false));
     });
+
+    fetch("/api/fulfillment/today", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d) setToday(d);
+      })
+      .catch(() => {});
   }, []);
 
   return (
     <div>
       {/* Personal */}
       <div className="mb-8">
-        <div className="grid grid-cols-2 gap-4 max-w-md">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 max-w-2xl">
           <StatCard
             label="Hours Today"
             value={hoursToday}
@@ -82,14 +109,91 @@ export function FulfillmentDashboard({
             accentBorder="border-green-500/30"
             loading={false}
           />
+          <StatCard
+            label="My Verified Today"
+            value={String(today?.my_verified_today ?? 0)}
+            subtitle={
+              today?.team_verified_today
+                ? `Team: ${today.team_verified_today}`
+                : undefined
+            }
+            icon={<ScanLine size={16} />}
+            iconBg="bg-purple-500/20 text-purple-400"
+            accentBorder="border-purple-500/30"
+            loading={!today}
+          />
         </div>
       </div>
 
+      {/* Pack Queue CTA */}
+      <div className="mb-8">
+        <Link
+          href="/fulfillment/pick-pack/verify"
+          className="block bg-gradient-to-r from-orange-500/20 to-orange-600/10 border border-orange-500/30 rounded-xl p-5 hover:from-orange-500/30 hover:to-orange-600/20 transition-colors"
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 rounded-lg bg-orange-500/20 text-orange-400 flex items-center justify-center flex-shrink-0">
+              <Package size={24} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-orange-300 uppercase tracking-wider mb-1">
+                Pack Queue
+              </p>
+              <p className="text-2xl font-bold text-white">
+                {today?.pack_queue ?? 0}{" "}
+                <span className="text-sm font-normal text-gray-400">
+                  orders ready to verify
+                </span>
+              </p>
+            </div>
+            <div className="flex items-center gap-2 text-orange-300 font-medium text-sm">
+              Start verifying
+              <ArrowRight size={16} />
+            </div>
+          </div>
+        </Link>
+      </div>
+
+      {/* Low Runway SKUs */}
+      {today?.low_runway_skus && today.low_runway_skus.length > 0 && (
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+            <TrendingDown size={18} className="text-red-400" />
+            SKUs Running Out Soon
+          </h2>
+          <div className="bg-gray-900/40 border border-gray-800 rounded-xl divide-y divide-gray-800">
+            {today.low_runway_skus.map((sku) => (
+              <div
+                key={`${sku.store_name}-${sku.sku}`}
+                className="flex items-center gap-3 px-4 py-3"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-white truncate">
+                    {sku.product_title}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {sku.store_name} • {sku.velocity_per_day.toFixed(1)}/day velocity
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p
+                    className={`text-sm font-semibold ${
+                      sku.runway_days < 3 ? "text-red-400" : "text-yellow-400"
+                    }`}
+                  >
+                    {sku.runway_days}d left
+                  </p>
+                  <p className="text-xs text-gray-600">{sku.stock} in stock</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Inventory Health */}
       <div className="mb-8">
-        <h2 className="text-lg font-semibold text-white mb-4">
-          Inventory Health
-        </h2>
+        <h2 className="text-lg font-semibold text-white mb-4">Inventory Health</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <StatCard
             label="Out of Stock"
@@ -128,9 +232,7 @@ export function FulfillmentDashboard({
 
       {/* Fulfillment Queue */}
       <div className="mb-8">
-        <h2 className="text-lg font-semibold text-white mb-4">
-          Fulfillment Queue
-        </h2>
+        <h2 className="text-lg font-semibold text-white mb-4">Fulfillment Queue</h2>
         <div className="grid grid-cols-2 gap-4">
           <StatCard
             label="Unfulfilled Orders"
@@ -161,9 +263,7 @@ export function FulfillmentDashboard({
 
       {/* Needs Attention */}
       <div className="mb-8">
-        <h2 className="text-lg font-semibold text-white mb-4">
-          Needs Attention
-        </h2>
+        <h2 className="text-lg font-semibold text-white mb-4">Needs Attention</h2>
         <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-2">
           <ActionItem
             label="Out of stock products"
