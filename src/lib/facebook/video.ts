@@ -26,13 +26,80 @@ async function fbGet<T>(path: string, token: string): Promise<T> {
   return json as T;
 }
 
+// Try to fetch the playable MP4 URL for a video the ad carries.
+// For dark-post videos, the direct /{video_id}?fields=source endpoint
+// often returns null because the user token doesn't have page-level
+// access. Fall back to the ad account's advideos edge, which runs
+// under the ad-account permission model and works for ads the token
+// has ads_management on.
+async function resolveVideoSource(
+  videoId: string,
+  accountId: string,
+  token: string
+): Promise<{ source: string | null; note: string }> {
+  // Attempt 1: direct video lookup, richer field set.
+  try {
+    type VideoResp = {
+      source?: string | null;
+      permalink_url?: string | null;
+      muted_video_url?: string | null;
+    };
+    const v = await fbGet<VideoResp>(
+      `/${videoId}?fields=source,permalink_url,muted_video_url`,
+      token
+    );
+    if (v.source) return { source: v.source, note: "direct /{video_id}" };
+    if (v.muted_video_url) {
+      return { source: v.muted_video_url, note: "muted_video_url fallback" };
+    }
+  } catch (err) {
+    // Continue to next attempt.
+    const msg = err instanceof Error ? err.message : "unknown";
+    if (msg.includes("token")) {
+      // Token issue — no point trying more paths.
+      return { source: null, note: `direct video lookup failed: ${msg}` };
+    }
+  }
+
+  // Attempt 2: ad account's advideos edge with id filter.
+  if (accountId) {
+    try {
+      type ListResp = {
+        data?: Array<{ id?: string; source?: string | null }>;
+      };
+      const filtering = encodeURIComponent(
+        JSON.stringify([
+          { field: "id", operator: "IN", value: [videoId] },
+        ])
+      );
+      const res = await fbGet<ListResp>(
+        `/${accountId}/advideos?fields=source&filtering=${filtering}&limit=1`,
+        token
+      );
+      const match = (res.data ?? []).find((d) => d.id === videoId);
+      if (match?.source) {
+        return { source: match.source, note: "advideos edge" };
+      }
+    } catch {
+      // Fall through.
+    }
+  }
+
+  return {
+    source: null,
+    note:
+      "Facebook returned no playable MP4 for this video on any endpoint. This is usually a dark post accessed with a token that lacks pages_read_engagement or full ads_management on the running page. Try a published (non-dark) ad, or refresh the FB token with broader scopes.",
+  };
+}
+
 // Walks through every place Meta can put a video ID on an ad creative.
 // Ads built via different tools nest the video differently, so we check
 // them all in descending-likelihood order. Returns video_url=null only
 // if none of the paths yield a playable video.
 export async function resolveAdVideo(
   adId: string,
-  token: string
+  token: string,
+  accountId?: string
 ): Promise<AdVideoRef> {
   const attempts: string[] = [];
 
@@ -201,37 +268,22 @@ export async function resolveAdVideo(
     };
   }
 
-  // Resolve the actual playable source URL for the video.
-  try {
-    type VideoResp = {
-      source?: string | null;
-      permalink_url?: string | null;
-    };
-    const video = await fbGet<VideoResp>(
-      `/${video_id}?fields=source,permalink_url`,
-      token
-    );
-    attempts.push(`video lookup ${video_id}`);
-    return {
-      ad_id: adId,
-      creative_id,
-      video_id,
-      video_url: video.source ?? null,
-      thumbnail_url,
-      attempts,
-      source_note: video.source
-        ? "ok"
-        : `Video ${video_id} exists but Facebook returned no source URL (dark post or region-restricted).`,
-    };
-  } catch (err) {
-    return {
-      ad_id: adId,
-      creative_id,
-      video_id,
-      video_url: null,
-      thumbnail_url,
-      attempts,
-      source_note: `Video metadata fetch failed for video ${video_id}: ${err instanceof Error ? err.message : "unknown error"}`,
-    };
-  }
+  // Resolve the actual playable source URL for the video, with fallbacks.
+  const { source, note } = await resolveVideoSource(
+    video_id,
+    accountId ?? "",
+    token
+  );
+  attempts.push(`video source: ${note}`);
+  return {
+    ad_id: adId,
+    creative_id,
+    video_id,
+    video_url: source,
+    thumbnail_url,
+    attempts,
+    source_note: source
+      ? "ok"
+      : `Video ${video_id} exists but no playable MP4 URL could be retrieved. ${note}`,
+  };
 }

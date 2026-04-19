@@ -210,7 +210,7 @@ export async function GET(request: Request) {
       }
 
       try {
-        const video = await resolveAdVideo(ad.ad_id, fbToken);
+        const video = await resolveAdVideo(ad.ad_id, fbToken, acct.id);
         if (!video.video_url) {
           results.push({
             account: acct.name,

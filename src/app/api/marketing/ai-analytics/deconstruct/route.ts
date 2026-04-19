@@ -98,7 +98,7 @@ export async function POST(request: Request) {
   // 1. Resolve the video URL from the ad
   let videoRef;
   try {
-    videoRef = await resolveAdVideo(adId, fb);
+    videoRef = await resolveAdVideo(adId, fb, accountId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "unknown";
     console.error("[deconstruct] resolveAdVideo failed:", msg);
