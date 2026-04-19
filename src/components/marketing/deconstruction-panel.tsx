@@ -24,6 +24,7 @@ interface AdBrief {
   adset: string;
   spend: number;
   purchases: number;
+  cpa: number;
   roas: number;
   thumbnail_url: string | null;
   preview_url: string | null;
@@ -58,15 +59,21 @@ interface Props {
   onAutoAnalyzeHandled?: () => void;
 }
 
-type SortKey = "purchases" | "spend" | "roas";
+type SortKey = "purchases" | "spend" | "roas" | "cpa";
 
 const INITIAL_VISIBLE = 12;
 const LOAD_MORE_STEP = 12;
 
-const SORT_LABELS: Record<SortKey, string> = {
-  purchases: "Purchases",
-  spend: "Spend",
-  roas: "ROAS",
+// For most keys we sort descending (bigger = better). CPP is the exception —
+// lower cost per purchase is better, so it sorts ascending.
+const SORT_SPECS: Record<
+  SortKey,
+  { label: string; direction: "desc" | "asc" }
+> = {
+  purchases: { label: "Purchases (high → low)", direction: "desc" },
+  spend: { label: "Spend (high → low)", direction: "desc" },
+  roas: { label: "ROAS (high → low)", direction: "desc" },
+  cpa: { label: "CPP (low → high)", direction: "asc" },
 };
 
 function money(n: number): string {
@@ -275,9 +282,20 @@ export function DeconstructionPanel({
       list = list.filter((a) => !alreadyAnalyzedIds.has(a.ad_id));
     }
 
+    const direction = SORT_SPECS[sortKey].direction;
     return [...list].sort((a, b) => {
       const av = a[sortKey] ?? 0;
       const bv = b[sortKey] ?? 0;
+      // For "low → high" sorts, ads with 0 in the sort key are usually
+      // "no data" (e.g. 0 purchases → no real CPP). Push them to the end
+      // so "best CPP" results actually show ads that converted.
+      if (direction === "asc") {
+        const aEmpty = av <= 0;
+        const bEmpty = bv <= 0;
+        if (aEmpty && !bEmpty) return 1;
+        if (!aEmpty && bEmpty) return -1;
+        return av - bv;
+      }
       return bv - av;
     });
   }, [
@@ -339,7 +357,11 @@ export function DeconstructionPanel({
                 </p>
                 <p className="text-xs text-gray-500 truncate">
                   {selectedAd.account} · 🛒 {selectedAd.purchases} · ROAS{" "}
-                  {selectedAd.roas.toFixed(2)} · {money(selectedAd.spend)}
+                  {selectedAd.roas.toFixed(2)} · CPP{" "}
+                  {selectedAd.purchases > 0
+                    ? `₱${Math.round(selectedAd.cpa)}`
+                    : "—"}{" "}
+                  · {money(selectedAd.spend)}
                 </p>
               </div>
             </div>
@@ -424,9 +446,9 @@ export function DeconstructionPanel({
             onChange={(e) => setSortKey(e.target.value as SortKey)}
             className="bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:ring-blue-500 focus:border-blue-500"
           >
-            {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
+            {(Object.keys(SORT_SPECS) as SortKey[]).map((k) => (
               <option key={k} value={k}>
-                {SORT_LABELS[k]} (high → low)
+                {SORT_SPECS[k].label}
               </option>
             ))}
           </select>
@@ -543,7 +565,7 @@ export function DeconstructionPanel({
                       <p className="text-[11px] text-gray-500 truncate mt-0.5">
                         {a.campaign || "—"}
                       </p>
-                      <div className="flex items-center gap-1.5 mt-2.5">
+                      <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
                         <MetricBadge
                           label="🛒"
                           value={a.purchases.toString()}
@@ -559,6 +581,11 @@ export function DeconstructionPanel({
                                 ? "yellow"
                                 : "red"
                           }
+                        />
+                        <MetricBadge
+                          label="CPP"
+                          value={a.purchases > 0 ? `₱${Math.round(a.cpa)}` : "—"}
+                          color={a.purchases === 0 ? "gray" : "gray"}
                         />
                         <MetricBadge
                           label=""

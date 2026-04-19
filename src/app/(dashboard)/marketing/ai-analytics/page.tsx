@@ -135,6 +135,7 @@ export default function AiAnalyticsPage() {
           adset: a.adset,
           spend: a.spend,
           purchases: a.purchases,
+          cpa: a.cpa,
           roas: a.roas,
           thumbnail_url: a.thumbnail_url ?? null,
           preview_url: a.preview_url ?? null,
