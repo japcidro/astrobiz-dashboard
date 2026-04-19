@@ -1,5 +1,26 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-04-19: AI Analytics — visual ad picker
+
+Replaces the long single-line dropdown in the Deconstruction tab
+with a scannable card grid. The old UI buried ~100 ads in a
+crammed select; hard to read, hard to decide.
+
+- **Card grid** with thumbnail + ad name + three colour-coded
+  metric badges (purchases, ROAS, spend). ROAS colour: green ≥1.5,
+  yellow ≥0.8, red below. Analyzed ads get a green "✓ Analyzed"
+  badge so re-picks are obvious.
+- **Controls**: store filter, sort (default: purchases desc — matches
+  how the operator actually picks winners), "hide already analyzed"
+  toggle, search by ad/campaign/adset name.
+- **Selection + action bar**: clicking a card highlights it (blue
+  ring) and populates a persistent action bar at the top with
+  "Analyze" / "View analysis" (if cached) / "Re-run" buttons.
+- **Pagination**: 12 cards initially, "Show more" adds 12 per click.
+- **Historical strip**: smaller thumbnail row beneath for analyses
+  done on ads outside the current date range, so past winners stay
+  reachable without switching filters.
+
 ## 2026-04-19: AI Analytics — large video support + chat history
 
 - **Gemini File API** for videos >18MB. Ads up to 400MB now work

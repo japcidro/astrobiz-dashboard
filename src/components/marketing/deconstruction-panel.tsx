@@ -10,6 +10,8 @@ import {
   X,
   Search,
   Wand2,
+  CheckCircle2,
+  Eye,
 } from "lucide-react";
 
 interface AdBrief {
@@ -54,6 +56,22 @@ interface Props {
   onAutoAnalyzeHandled?: () => void;
 }
 
+type SortKey = "purchases" | "spend" | "roas";
+
+const INITIAL_VISIBLE = 12;
+const LOAD_MORE_STEP = 12;
+
+const SORT_LABELS: Record<SortKey, string> = {
+  purchases: "Purchases",
+  spend: "Spend",
+  roas: "ROAS",
+};
+
+function money(n: number): string {
+  if (n >= 1000) return `₱${(n / 1000).toFixed(1)}k`;
+  return `₱${Math.round(n)}`;
+}
+
 export function DeconstructionPanel({
   ads,
   initialAdId,
@@ -63,8 +81,14 @@ export function DeconstructionPanel({
   const [loadingList, setLoadingList] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
 
+  // Picker state
   const [selectedAdId, setSelectedAdId] = useState<string>("");
   const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("purchases");
+  const [storeFilter, setStoreFilter] = useState<string>("ALL");
+  const [hideAnalyzed, setHideAnalyzed] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
+
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
   const [activeRow, setActiveRow] = useState<DeconstructionRow | null>(null);
@@ -93,6 +117,17 @@ export function DeconstructionPanel({
   useEffect(() => {
     loadList();
   }, [loadList]);
+
+  const rowByAdId = useMemo(() => {
+    const m = new Map<string, DeconstructionRow>();
+    for (const r of rows) m.set(r.ad_id, r);
+    return m;
+  }, [rows]);
+
+  const alreadyAnalyzedIds = useMemo(
+    () => new Set(rows.map((r) => r.ad_id)),
+    [rows]
+  );
 
   const runAnalyze = useCallback(
     async (adId: string, forceRefresh = false) => {
@@ -123,7 +158,6 @@ export function DeconstructionPanel({
         if (!res.ok) {
           throw new Error(json.error || `Analyze failed (${res.status})`);
         }
-        // Refresh list + open the new row
         await loadList();
         if (json.row) setActiveRow(json.row as DeconstructionRow);
       } catch (e) {
@@ -135,7 +169,7 @@ export function DeconstructionPanel({
     [adMap, loadList]
   );
 
-  // Deep-link: if the page was loaded with ?deconstruct_ad=ID, trigger once.
+  // Deep-link: auto-trigger if ?deconstruct_ad=ID was passed.
   useEffect(() => {
     if (!initialAdId) return;
     if (ads.length === 0) return;
@@ -146,84 +180,145 @@ export function DeconstructionPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialAdId, ads.length]);
 
-  const filteredRows = useMemo(() => {
-    if (!search) return rows;
-    const q = search.toLowerCase();
-    return rows.filter((r) => {
-      const ad = adMap.get(r.ad_id);
-      return (
-        r.ad_id.toLowerCase().includes(q) ||
-        (ad?.ad ?? "").toLowerCase().includes(q) ||
-        (ad?.campaign ?? "").toLowerCase().includes(q) ||
-        r.analysis?.tone?.toLowerCase().includes(q) ||
-        r.analysis?.visual_style?.toLowerCase().includes(q)
-      );
-    });
-  }, [rows, search, adMap]);
+  const accountOptions = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of ads) {
+      if (a.account_id && a.account && !m.has(a.account_id)) {
+        m.set(a.account_id, a.account);
+      }
+    }
+    return [...m.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [ads]);
 
-  const alreadyAnalyzedIds = useMemo(
-    () => new Set(rows.map((r) => r.ad_id)),
-    [rows]
-  );
+  const visibleAds = useMemo(() => {
+    let list = ads;
+
+    if (storeFilter !== "ALL") {
+      list = list.filter((a) => a.account_id === storeFilter);
+    }
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter(
+        (a) =>
+          a.ad.toLowerCase().includes(q) ||
+          a.campaign.toLowerCase().includes(q) ||
+          a.adset.toLowerCase().includes(q)
+      );
+    }
+    if (hideAnalyzed) {
+      list = list.filter((a) => !alreadyAnalyzedIds.has(a.ad_id));
+    }
+
+    // Sort descending by chosen metric. Ads with zero in the sort key go last.
+    return [...list].sort((a, b) => {
+      const av = a[sortKey] ?? 0;
+      const bv = b[sortKey] ?? 0;
+      return bv - av;
+    });
+  }, [ads, storeFilter, search, hideAnalyzed, sortKey, alreadyAnalyzedIds]);
+
+  // Reset visible count when filters change so the user doesn't have to
+  // scroll back up to un-stick "Show more".
+  useEffect(() => {
+    setVisibleCount(INITIAL_VISIBLE);
+  }, [storeFilter, search, hideAnalyzed, sortKey]);
+
+  const selectedAd = selectedAdId ? adMap.get(selectedAdId) : null;
+  const selectedIsAnalyzed = selectedAdId
+    ? alreadyAnalyzedIds.has(selectedAdId)
+    : false;
+
+  // Ads from past analyses that are NOT in the current view — shown as a
+  // smaller historical section so older winners stay reachable.
+  const historicalRows = useMemo(() => {
+    const currentIds = new Set(ads.map((a) => a.ad_id));
+    return rows.filter((r) => !currentIds.has(r.ad_id));
+  }, [rows, ads]);
 
   return (
-    <div className="space-y-4">
-      {/* Analyze new ad */}
-      <div className="bg-gray-900/50 border border-gray-700/50 rounded-xl p-4">
+    <div className="space-y-5">
+      {/* Selection / action bar */}
+      <div className="bg-gray-900/60 border border-gray-700/50 rounded-xl p-4">
         <div className="flex items-center gap-2 mb-3">
           <Wand2 size={16} className="text-blue-400" />
           <h3 className="text-sm font-semibold text-white">
-            Analyze an ad video
+            Pick an ad to analyze
           </h3>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <select
-            value={selectedAdId}
-            onChange={(e) => setSelectedAdId(e.target.value)}
-            disabled={analyzing || ads.length === 0}
-            className="flex-1 min-w-[260px] bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50"
-          >
-            <option value="">
-              {ads.length === 0
-                ? "Loading ads…"
-                : "Pick an ad to analyze…"}
-            </option>
-            {ads.map((a) => (
-              <option key={a.ad_id} value={a.ad_id}>
-                {alreadyAnalyzedIds.has(a.ad_id) ? "✓ " : ""}
-                {a.ad} · ₱{a.spend.toFixed(0)} · ROAS{" "}
-                {a.roas.toFixed(2)}
-              </option>
-            ))}
-          </select>
-          <button
-            onClick={() => runAnalyze(selectedAdId)}
-            disabled={!selectedAdId || analyzing}
-            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-          >
-            {analyzing ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <Play size={14} />
-            )}
-            {analyzing ? "Analyzing…" : "Analyze"}
-          </button>
-          {selectedAdId && alreadyAnalyzedIds.has(selectedAdId) && (
-            <button
-              onClick={() => runAnalyze(selectedAdId, true)}
-              disabled={analyzing}
-              title="Force re-analyze (ignores 7-day cache)"
-              className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm px-3 py-2 rounded-lg transition-colors disabled:opacity-40 cursor-pointer"
-            >
-              <RefreshCw size={14} />
-              Re-run
-            </button>
-          )}
-        </div>
+
+        {selectedAd ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-3 flex-1 min-w-[240px]">
+              {selectedAd.thumbnail_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={selectedAd.thumbnail_url}
+                  alt=""
+                  className="w-12 h-12 rounded border border-gray-700 object-cover flex-shrink-0"
+                />
+              ) : (
+                <div className="w-12 h-12 rounded bg-gray-800 border border-gray-700 flex-shrink-0 flex items-center justify-center">
+                  <Video size={16} className="text-gray-600" />
+                </div>
+              )}
+              <div className="min-w-0">
+                <p className="text-sm text-white font-medium truncate">
+                  {selectedAd.ad}
+                </p>
+                <p className="text-xs text-gray-500 truncate">
+                  {selectedAd.account} · 🛒 {selectedAd.purchases} · ROAS{" "}
+                  {selectedAd.roas.toFixed(2)} · {money(selectedAd.spend)}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {selectedIsAnalyzed && (
+                <button
+                  onClick={() => {
+                    const row = rowByAdId.get(selectedAdId);
+                    if (row) setActiveRow(row);
+                  }}
+                  disabled={analyzing}
+                  className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm px-3 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-40"
+                >
+                  <Eye size={14} />
+                  View analysis
+                </button>
+              )}
+              <button
+                onClick={() => runAnalyze(selectedAdId, selectedIsAnalyzed)}
+                disabled={analyzing}
+                className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                {analyzing ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : selectedIsAnalyzed ? (
+                  <RefreshCw size={14} />
+                ) : (
+                  <Play size={14} />
+                )}
+                {analyzing
+                  ? "Analyzing…"
+                  : selectedIsAnalyzed
+                    ? "Re-run analysis"
+                    : "Analyze"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">
+            Click a card below to select an ad. Default sort: highest
+            purchases.
+          </p>
+        )}
+
         {analyzing && (
-          <p className="text-xs text-gray-500 mt-2">
-            Downloading video + running Gemini analysis. Takes ~20-40 seconds.
-            Do not close the tab.
+          <p className="text-xs text-gray-500 mt-3">
+            Downloading video + running Gemini analysis. Takes ~20-60 seconds
+            for small ads, up to ~3 minutes for large HD videos. Do not close
+            the tab.
           </p>
         )}
         {analyzeError && (
@@ -234,97 +329,230 @@ export function DeconstructionPanel({
         )}
       </div>
 
-      {/* Cached analyses */}
+      {/* Controls */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs text-gray-400">Store:</label>
+          <select
+            value={storeFilter}
+            onChange={(e) => setStoreFilter(e.target.value)}
+            className="bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:ring-blue-500 focus:border-blue-500 max-w-[200px]"
+          >
+            <option value="ALL">All stores</option>
+            {accountOptions.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <label className="text-xs text-gray-400">Sort:</label>
+          <select
+            value={sortKey}
+            onChange={(e) => setSortKey(e.target.value as SortKey)}
+            className="bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:ring-blue-500 focus:border-blue-500"
+          >
+            {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
+              <option key={k} value={k}>
+                {SORT_LABELS[k]} (high → low)
+              </option>
+            ))}
+          </select>
+        </div>
+        <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={hideAnalyzed}
+            onChange={(e) => setHideAnalyzed(e.target.checked)}
+            className="rounded border-gray-600 bg-gray-800 text-blue-500 focus:ring-blue-500"
+          />
+          Hide already analyzed
+        </label>
+        <div className="relative ml-auto">
+          <Search
+            size={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"
+          />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search ad / campaign / adset…"
+            className="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-lg pl-8 pr-3 py-1.5 focus:ring-blue-500 focus:border-blue-500 w-56"
+          />
+        </div>
+      </div>
+
+      {/* Ad cards grid */}
       <div>
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-          <h3 className="text-sm font-semibold text-gray-300">
-            Past analyses ({rows.length})
-          </h3>
-          <div className="relative">
-            <Search
-              size={14}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"
-            />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search…"
-              className="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-lg pl-8 pr-3 py-1.5 focus:ring-blue-500 focus:border-blue-500 w-48"
-            />
-          </div>
+        <div className="flex items-center justify-between mb-2 text-xs text-gray-500">
+          <span>
+            {visibleAds.length} ad
+            {visibleAds.length === 1 ? "" : "s"}
+            {storeFilter !== "ALL" || search || hideAnalyzed
+              ? " matching filters"
+              : ""}
+          </span>
+          {alreadyAnalyzedIds.size > 0 && (
+            <span>{alreadyAnalyzedIds.size} analyzed</span>
+          )}
         </div>
 
-        {listError && (
-          <div className="mb-3 p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-sm">
-            {listError}
-          </div>
-        )}
-
-        {loadingList ? (
-          <div className="flex items-center justify-center py-10">
-            <Loader2 className="animate-spin text-gray-500" size={20} />
-          </div>
-        ) : filteredRows.length === 0 ? (
+        {visibleAds.length === 0 ? (
           <div className="bg-gray-900/30 border border-gray-700/40 rounded-xl p-10 text-center">
             <Video size={32} className="text-gray-600 mx-auto mb-3" />
-            <p className="text-gray-400 text-sm">
-              {rows.length === 0
-                ? "No analyses yet. Pick an ad above to run your first deconstruction."
-                : "No analyses match your search."}
+            <p className="text-sm text-gray-400">
+              {ads.length === 0
+                ? "No ads loaded yet."
+                : "No ads match your filters."}
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {filteredRows.map((r) => {
-              const ad = adMap.get(r.ad_id);
-              return (
-                <button
-                  key={r.id}
-                  onClick={() => setActiveRow(r)}
-                  className="text-left bg-gray-900/50 border border-gray-700/50 hover:border-gray-500 rounded-xl overflow-hidden transition-colors cursor-pointer"
-                >
-                  <div className="aspect-video bg-gray-800 relative">
-                    {r.thumbnail_url ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={r.thumbnail_url}
-                        alt=""
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <Video size={28} className="text-gray-600" />
-                      </div>
-                    )}
-                    {r.trigger_source === "auto_daily" && (
-                      <span className="absolute top-2 right-2 bg-purple-600/80 text-white text-[10px] px-2 py-0.5 rounded">
-                        Auto
-                      </span>
-                    )}
-                  </div>
-                  <div className="p-3">
-                    <p className="text-sm text-white font-medium truncate">
-                      {ad?.ad ?? r.ad_id}
-                    </p>
-                    <p className="text-xs text-gray-500 truncate">
-                      {ad?.campaign ?? "—"}
-                    </p>
-                    <div className="flex items-center justify-between mt-2 text-[11px] text-gray-400">
-                      <span>{r.analysis.language || "—"}</span>
-                      <span>
-                        {new Date(r.created_at).toLocaleDateString("en-PH", {
-                          month: "short",
-                          day: "numeric",
-                        })}
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {visibleAds.slice(0, visibleCount).map((a) => {
+                const isAnalyzed = alreadyAnalyzedIds.has(a.ad_id);
+                const isSelected = selectedAdId === a.ad_id;
+                return (
+                  <button
+                    key={a.ad_id}
+                    onClick={() => setSelectedAdId(a.ad_id)}
+                    className={`text-left bg-gray-900/50 border rounded-xl overflow-hidden transition-all cursor-pointer ${
+                      isSelected
+                        ? "border-blue-500 ring-2 ring-blue-500/40"
+                        : "border-gray-700/50 hover:border-gray-500"
+                    }`}
+                  >
+                    <div className="aspect-video bg-gray-800 relative">
+                      {a.thumbnail_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={a.thumbnail_url}
+                          alt=""
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Video size={28} className="text-gray-600" />
+                        </div>
+                      )}
+                      {isAnalyzed && (
+                        <span className="absolute top-2 right-2 inline-flex items-center gap-1 bg-emerald-600/90 text-white text-[10px] font-medium px-2 py-0.5 rounded">
+                          <CheckCircle2 size={10} /> Analyzed
+                        </span>
+                      )}
+                      <span className="absolute top-2 left-2 bg-gray-900/80 text-gray-200 text-[10px] px-1.5 py-0.5 rounded">
+                        {a.account}
                       </span>
                     </div>
-                  </div>
+                    <div className="p-3">
+                      <p className="text-sm text-white font-medium truncate">
+                        {a.ad}
+                      </p>
+                      <p className="text-[11px] text-gray-500 truncate mt-0.5">
+                        {a.campaign || "—"}
+                      </p>
+                      <div className="flex items-center gap-1.5 mt-2.5">
+                        <MetricBadge
+                          label="🛒"
+                          value={a.purchases.toString()}
+                          color={a.purchases > 0 ? "emerald" : "gray"}
+                        />
+                        <MetricBadge
+                          label="ROAS"
+                          value={a.roas.toFixed(2)}
+                          color={
+                            a.roas >= 1.5
+                              ? "emerald"
+                              : a.roas >= 0.8
+                                ? "yellow"
+                                : "red"
+                          }
+                        />
+                        <MetricBadge
+                          label=""
+                          value={money(a.spend)}
+                          color="gray"
+                        />
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {visibleCount < visibleAds.length && (
+              <div className="mt-4 flex justify-center">
+                <button
+                  onClick={() =>
+                    setVisibleCount((n) => n + LOAD_MORE_STEP)
+                  }
+                  className="text-sm text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 border border-gray-700 px-4 py-2 rounded-lg cursor-pointer"
+                >
+                  Show {Math.min(LOAD_MORE_STEP, visibleAds.length - visibleCount)}{" "}
+                  more
                 </button>
-              );
-            })}
-          </div>
+              </div>
+            )}
+          </>
         )}
       </div>
+
+      {/* Historical analyses (from outside current view) */}
+      {historicalRows.length > 0 && (
+        <div className="pt-2 border-t border-gray-800">
+          <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mt-4 mb-3">
+            From other date ranges ({historicalRows.length})
+          </h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+            {historicalRows.slice(0, 12).map((r) => (
+              <button
+                key={r.id}
+                onClick={() => setActiveRow(r)}
+                className="text-left bg-gray-900/50 border border-gray-700/50 hover:border-gray-500 rounded-lg overflow-hidden transition-colors cursor-pointer"
+              >
+                <div className="aspect-video bg-gray-800">
+                  {r.thumbnail_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={r.thumbnail_url}
+                      alt=""
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <Video size={20} className="text-gray-600" />
+                    </div>
+                  )}
+                </div>
+                <div className="p-2">
+                  <p className="text-xs text-gray-200 truncate">
+                    {r.ad_id}
+                  </p>
+                  <p className="text-[10px] text-gray-500">
+                    {new Date(r.created_at).toLocaleDateString("en-PH", {
+                      month: "short",
+                      day: "numeric",
+                    })}
+                  </p>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {listError && (
+        <div className="p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-sm">
+          {listError}
+        </div>
+      )}
+
+      {loadingList && rows.length === 0 && (
+        <div className="flex items-center justify-center py-4">
+          <Loader2 className="animate-spin text-gray-500" size={16} />
+        </div>
+      )}
 
       {activeRow && (
         <DeconstructionDetailModal
@@ -336,6 +564,31 @@ export function DeconstructionPanel({
         />
       )}
     </div>
+  );
+}
+
+function MetricBadge({
+  label,
+  value,
+  color,
+}: {
+  label: string;
+  value: string;
+  color: "emerald" | "yellow" | "red" | "gray";
+}) {
+  const colors: Record<typeof color, string> = {
+    emerald: "bg-emerald-500/10 text-emerald-300 border-emerald-500/20",
+    yellow: "bg-yellow-500/10 text-yellow-300 border-yellow-500/20",
+    red: "bg-red-500/10 text-red-300 border-red-500/20",
+    gray: "bg-gray-700/40 text-gray-300 border-gray-600/40",
+  };
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-[11px] border rounded px-1.5 py-0.5 font-mono ${colors[color]}`}
+    >
+      {label && <span className="opacity-70">{label}</span>}
+      <span className="font-semibold">{value}</span>
+    </span>
   );
 }
 
