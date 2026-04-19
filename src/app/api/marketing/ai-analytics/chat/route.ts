@@ -37,6 +37,83 @@ function money(n: number) {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : n.toFixed(0);
 }
 
+interface Aggregate {
+  name: string;
+  ad_count: number;
+  spend: number;
+  purchases: number;
+  purchase_value: number;
+  link_clicks: number;
+  landing_page_views: number;
+  add_to_cart: number;
+  impressions: number;
+  reach: number;
+}
+
+function rollup(
+  ads: AdSnapshot[],
+  keyFn: (a: AdSnapshot) => string
+): Aggregate[] {
+  const map = new Map<string, Aggregate>();
+  for (const a of ads) {
+    const key = keyFn(a) || "(unknown)";
+    const existing = map.get(key);
+    // roas = value / spend, so value = roas * spend
+    const purchaseValue = (a.roas || 0) * (a.spend || 0);
+    if (existing) {
+      existing.ad_count += 1;
+      existing.spend += a.spend;
+      existing.purchases += a.purchases;
+      existing.purchase_value += purchaseValue;
+      existing.link_clicks += a.link_clicks;
+      existing.landing_page_views += a.landing_page_views;
+      existing.add_to_cart += a.add_to_cart;
+      existing.impressions += a.impressions;
+      existing.reach += a.reach;
+    } else {
+      map.set(key, {
+        name: key,
+        ad_count: 1,
+        spend: a.spend,
+        purchases: a.purchases,
+        purchase_value: purchaseValue,
+        link_clicks: a.link_clicks,
+        landing_page_views: a.landing_page_views,
+        add_to_cart: a.add_to_cart,
+        impressions: a.impressions,
+        reach: a.reach,
+      });
+    }
+  }
+  return [...map.values()].sort((a, b) => b.spend - a.spend);
+}
+
+function aggregateTsv(rows: Aggregate[], label: string): string {
+  const header = `${label}\tad_count\tspend\tpurchases\troas\tcpa\tctr%\tlpv\tclicks\tatc\timpr`;
+  const body = rows
+    .slice(0, 30)
+    .map((r) => {
+      const roas = r.spend > 0 ? r.purchase_value / r.spend : 0;
+      const cpa = r.purchases > 0 ? r.spend / r.purchases : 0;
+      const ctr = r.impressions > 0 ? (r.link_clicks / r.impressions) * 100 : 0;
+      return [
+        r.name.slice(0, 60),
+        r.ad_count,
+        r.spend.toFixed(0),
+        r.purchases.toFixed(0),
+        roas.toFixed(2),
+        cpa.toFixed(0),
+        ctr.toFixed(2),
+        r.landing_page_views.toFixed(0),
+        r.link_clicks.toFixed(0),
+        r.add_to_cart.toFixed(0),
+        r.impressions.toFixed(0),
+      ].join("\t");
+    })
+    .join("\n");
+  return `${header}\n${body}`;
+}
+
 function buildSystemPrompt(
   ads: AdSnapshot[],
   datePreset: string,
@@ -47,16 +124,16 @@ function buildSystemPrompt(
     impressions: number;
   }
 ): string {
-  // Compact the ad list. Keep top 50 by spend to cap tokens.
+  // Ad-level (top 50 by spend) — detailed, includes adset + campaign.
   const topAds = [...ads].sort((a, b) => b.spend - a.spend).slice(0, 50);
-
-  const tsvHeader =
-    "ad_id\tad\tcampaign\tstatus\tspend\tpurchases\troas\tcpa\tctr%\tlpv\tclicks\tatc\timpr\treach";
-  const tsvRows = topAds
+  const adTsvHeader =
+    "ad_id\tad\tadset\tcampaign\tstatus\tspend\tpurchases\troas\tcpa\tctr%\tlpv\tclicks\tatc\timpr\treach";
+  const adTsvRows = topAds
     .map((a) =>
       [
         a.ad_id,
         a.ad?.slice(0, 60) ?? "",
+        a.adset?.slice(0, 60) ?? "",
         a.campaign?.slice(0, 60) ?? "",
         a.status,
         a.spend.toFixed(0),
@@ -73,33 +150,45 @@ function buildSystemPrompt(
     )
     .join("\n");
 
+  // Pre-computed rollups so Claude doesn't have to do the math
+  // (and so questions about adsets/campaigns work even when their
+  //  ads are outside the top 50 shown above).
+  const adsetRollup = rollup(ads, (a) => a.adset);
+  const campaignRollup = rollup(ads, (a) => a.campaign);
+
   const totalsLine = `spend=₱${money(totals.spend)}  purchases=${totals.purchases}  clicks=${money(totals.link_clicks)}  impr=${money(totals.impressions)}`;
 
   return `You are a senior Facebook Ads performance analyst for Astrobiz, a Philippine e-commerce company running Shopify + Meta Ads. The operator is a marketing team lead looking for clear, decision-oriented insights — not textbook explanations.
 
 Current context:
 - Date range: ${datePreset}
-- Ad count in view: ${ads.length} (top 50 by spend shown below)
+- Total ads in view: ${ads.length}
 - Account-level totals: ${totalsLine}
 
-Ad-level data (top 50 by spend, TSV format):
-${tsvHeader}
-${tsvRows}
+### Ad-level data (top 50 by spend, TSV)
+${adTsvHeader}
+${adTsvRows}
 
-Glossary of the metrics:
+### Adset-level rollup (all adsets in view, aggregated from ads, TSV)
+${aggregateTsv(adsetRollup, "adset")}
+
+### Campaign-level rollup (all campaigns in view, aggregated from ads, TSV)
+${aggregateTsv(campaignRollup, "campaign")}
+
+Glossary:
 - roas = purchase value ÷ spend  (>1.5 healthy, >2.5 strong for cold PH traffic)
 - cpa = cost per purchase (peso)
-- ctr = click-through rate (outbound clicks ÷ impressions)
-- cost_per_lpv = spend ÷ landing page views
+- ctr = link click-through rate (link clicks ÷ impressions × 100)
+- lpv = landing page views
 - atc = add-to-cart count
-- status = FB delivery status (ACTIVE, PAUSED, etc.)
+- status = FB delivery status (ACTIVE, PAUSED, etc.) — only present on ad-level rows
 
 How to answer:
-1. Lead with the specific answer, not caveats. If the user asks "which ads are top", name them by ad name + ROAS/CPA.
-2. Reference ads by their "ad" column name when talking about specific ones, not ad_id.
-3. When patterns exist, call them out (e.g. "the top 3 ROAS ads all use UGC hooks").
-4. When data is insufficient, say so in one line and suggest what you'd need.
-5. Be decisive. If the user asks for a recommendation, give one with reasoning. If an ad is bleeding (ROAS < 0.8, spend > ₱3,000), say "kill it" or "pause" and explain.
+1. Lead with the specific answer, not caveats. If the user asks "top 3 adsets", read from the Adset-level rollup and name them.
+2. Use the right table for the question: ad questions → ad-level; adset questions → adset rollup; campaign questions → campaign rollup.
+3. When patterns exist, call them out (e.g. "the top 3 ROAS ads all share the same adset").
+4. When data is genuinely missing, say so in one line and suggest what you'd need — but always check the rollup tables first before claiming you don't have data.
+5. Be decisive. If the user asks for a recommendation, give one with reasoning. If an ad/adset is bleeding (ROAS < 0.8, spend > ₱3,000), say "kill it" or "pause" and explain.
 6. Use Taglish naturally — mix English analysis with Filipino phrases when it feels right, like talking to a colleague. Don't force it.
 7. Peso amounts: use ₱ symbol, round to whole pesos for spend/CPA, 2 decimals for ROAS/CTR.
 8. Never invent data. If you weren't given a metric, say so.`;
