@@ -178,32 +178,37 @@ export async function detectCashAtRisk(
 
 // ===================================================================
 // Rule: store_outage
-// Trigger: Any shopify_store marked is_active=true that returned
-// errors for 3+ consecutive polls in the last hour.
-// (Heuristic: check cached_api_data errors for the store.)
+// Trigger: Shopify shop endpoint returns 4xx/5xx or times out.
+// Probes the store directly using its stored token — no internal API.
 // ===================================================================
 export async function detectStoreOutage(
   supabase: SupabaseClient,
-  baseUrl: string,
-  cronSecret: string
+  _baseUrl: string,
+  _cronSecret: string
 ): Promise<number> {
   const { data: stores } = await supabase
     .from("shopify_stores")
-    .select("id, name, store_url")
+    .select("id, name, store_url, api_token")
     .eq("is_active", true);
 
   if (!stores || stores.length === 0) return 0;
 
   let alertCount = 0;
-  for (const store of stores) {
-    // Light check: try a minimal orders query
+  for (const store of stores as Array<{
+    id: string;
+    name: string;
+    store_url: string | null;
+    api_token: string | null;
+  }>) {
+    if (!store.store_url || !store.api_token) continue;
+
     try {
       const res = await fetch(
-        `${baseUrl}/api/shopify/orders?date_filter=today&store=${encodeURIComponent(store.name)}&refresh=1`,
+        `https://${store.store_url}/admin/api/2024-01/shop.json`,
         {
-          headers: { Authorization: `Bearer ${cronSecret}` },
+          headers: { "X-Shopify-Access-Token": store.api_token },
           cache: "no-store",
-          signal: AbortSignal.timeout(20_000),
+          signal: AbortSignal.timeout(15_000),
         }
       );
       if (res.ok) continue;
@@ -213,7 +218,7 @@ export async function detectStoreOutage(
         type: "store_outage",
         severity: "urgent",
         title: `${store.name} Shopify connection failing`,
-        body: `Store returned ${res.status}. First 200 chars: ${body.slice(0, 200)}`,
+        body: `Store returned ${res.status} from Shopify. First 200 chars: ${body.slice(0, 200)}`,
         resource_type: "store",
         resource_id: String(store.id),
         action_url: `/admin/settings`,
