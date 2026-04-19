@@ -12,6 +12,7 @@ import {
   Wand2,
   CheckCircle2,
   Eye,
+  ExternalLink,
 } from "lucide-react";
 
 interface AdBrief {
@@ -25,6 +26,7 @@ interface AdBrief {
   purchases: number;
   roas: number;
   thumbnail_url: string | null;
+  preview_url: string | null;
 }
 
 export interface DeconstructionRow {
@@ -72,6 +74,35 @@ function money(n: number): string {
   return `₱${Math.round(n)}`;
 }
 
+// Lowercases + strips non-alphanumerics so "I Love Patches" and
+// "ilovepatches" and "ILP" → "ilovepatches" / "ilp" respectively
+// and match regardless of spacing/casing.
+function normalize(s: string): string {
+  return (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+// Returns the store whose (normalized) name appears as a substring of
+// the (normalized) campaign. Longest match wins so "i love patches"
+// beats a sub-match like "patches". Returns null if none match.
+function deriveStore(
+  campaign: string,
+  storeNames: string[]
+): string | null {
+  const normCampaign = normalize(campaign);
+  if (!normCampaign) return null;
+  let best: { name: string; len: number } | null = null;
+  for (const name of storeNames) {
+    const key = normalize(name);
+    if (!key) continue;
+    if (normCampaign.includes(key)) {
+      if (!best || key.length > best.len) {
+        best = { name, len: key.length };
+      }
+    }
+  }
+  return best?.name ?? null;
+}
+
 export function DeconstructionPanel({
   ads,
   initialAdId,
@@ -80,6 +111,7 @@ export function DeconstructionPanel({
   const [rows, setRows] = useState<DeconstructionRow[]>([]);
   const [loadingList, setLoadingList] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
+  const [storeNames, setStoreNames] = useState<string[]>([]);
 
   // Picker state
   const [selectedAdId, setSelectedAdId] = useState<string>("");
@@ -117,6 +149,24 @@ export function DeconstructionPanel({
   useEffect(() => {
     loadList();
   }, [loadList]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/shopify/stores/names");
+        if (!res.ok) return;
+        const json = (await res.json()) as { names?: string[] };
+        if (cancelled) return;
+        setStoreNames(json.names ?? []);
+      } catch {
+        // non-fatal
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const rowByAdId = useMemo(() => {
     const m = new Map<string, DeconstructionRow>();
@@ -180,23 +230,37 @@ export function DeconstructionPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialAdId, ads.length]);
 
-  const accountOptions = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const a of ads) {
-      if (a.account_id && a.account && !m.has(a.account_id)) {
-        m.set(a.account_id, a.account);
-      }
+  // Attach a derived store to every ad based on campaign-name matching
+  // against the Shopify store list. Ad accounts can carry multiple
+  // stores so ad_account ≠ store.
+  const adsWithStore = useMemo(() => {
+    return ads.map((a) => ({
+      ...a,
+      store: deriveStore(a.campaign, storeNames) ?? "Unmatched",
+    }));
+  }, [ads, storeNames]);
+
+  const storeOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const a of adsWithStore) {
+      counts.set(a.store, (counts.get(a.store) ?? 0) + 1);
     }
-    return [...m.entries()]
-      .map(([id, name]) => ({ id, name }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [ads]);
+    // Stores that actually appear in current ads, sorted by count desc.
+    // "Unmatched" always sinks to the bottom.
+    return [...counts.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => {
+        if (a.name === "Unmatched") return 1;
+        if (b.name === "Unmatched") return -1;
+        return b.count - a.count;
+      });
+  }, [adsWithStore]);
 
   const visibleAds = useMemo(() => {
-    let list = ads;
+    let list = adsWithStore;
 
     if (storeFilter !== "ALL") {
-      list = list.filter((a) => a.account_id === storeFilter);
+      list = list.filter((a) => a.store === storeFilter);
     }
     if (search) {
       const q = search.toLowerCase();
@@ -211,13 +275,19 @@ export function DeconstructionPanel({
       list = list.filter((a) => !alreadyAnalyzedIds.has(a.ad_id));
     }
 
-    // Sort descending by chosen metric. Ads with zero in the sort key go last.
     return [...list].sort((a, b) => {
       const av = a[sortKey] ?? 0;
       const bv = b[sortKey] ?? 0;
       return bv - av;
     });
-  }, [ads, storeFilter, search, hideAnalyzed, sortKey, alreadyAnalyzedIds]);
+  }, [
+    adsWithStore,
+    storeFilter,
+    search,
+    hideAnalyzed,
+    sortKey,
+    alreadyAnalyzedIds,
+  ]);
 
   // Reset visible count when filters change so the user doesn't have to
   // scroll back up to un-stick "Show more".
@@ -337,11 +407,12 @@ export function DeconstructionPanel({
             value={storeFilter}
             onChange={(e) => setStoreFilter(e.target.value)}
             className="bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded-lg px-2 py-1.5 focus:ring-blue-500 focus:border-blue-500 max-w-[200px]"
+            title="Derived from the campaign name — matches your Shopify store list"
           >
             <option value="ALL">All stores</option>
-            {accountOptions.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.name}
+            {storeOptions.map((s) => (
+              <option key={s.name} value={s.name}>
+                {s.name} ({s.count})
               </option>
             ))}
           </select>
@@ -414,10 +485,10 @@ export function DeconstructionPanel({
                 const isAnalyzed = alreadyAnalyzedIds.has(a.ad_id);
                 const isSelected = selectedAdId === a.ad_id;
                 return (
-                  <button
+                  <div
                     key={a.ad_id}
                     onClick={() => setSelectedAdId(a.ad_id)}
-                    className={`text-left bg-gray-900/50 border rounded-xl overflow-hidden transition-all cursor-pointer ${
+                    className={`relative text-left bg-gray-900/50 border rounded-xl overflow-hidden transition-all cursor-pointer ${
                       isSelected
                         ? "border-blue-500 ring-2 ring-blue-500/40"
                         : "border-gray-700/50 hover:border-gray-500"
@@ -436,14 +507,34 @@ export function DeconstructionPanel({
                           <Video size={28} className="text-gray-600" />
                         </div>
                       )}
-                      {isAnalyzed && (
-                        <span className="absolute top-2 right-2 inline-flex items-center gap-1 bg-emerald-600/90 text-white text-[10px] font-medium px-2 py-0.5 rounded">
-                          <CheckCircle2 size={10} /> Analyzed
-                        </span>
-                      )}
-                      <span className="absolute top-2 left-2 bg-gray-900/80 text-gray-200 text-[10px] px-1.5 py-0.5 rounded">
-                        {a.account}
+                      <span
+                        className={`absolute top-2 left-2 text-[10px] px-1.5 py-0.5 rounded ${
+                          a.store === "Unmatched"
+                            ? "bg-gray-700/80 text-gray-400"
+                            : "bg-gray-900/80 text-gray-200"
+                        }`}
+                      >
+                        {a.store}
                       </span>
+                      <div className="absolute top-2 right-2 flex items-center gap-1">
+                        {isAnalyzed && (
+                          <span className="inline-flex items-center gap-1 bg-emerald-600/90 text-white text-[10px] font-medium px-2 py-0.5 rounded">
+                            <CheckCircle2 size={10} /> Analyzed
+                          </span>
+                        )}
+                        {a.preview_url && (
+                          <a
+                            href={a.preview_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                            title="Open this ad on Facebook"
+                            className="inline-flex items-center justify-center w-6 h-6 bg-gray-900/80 hover:bg-gray-800 text-gray-200 rounded"
+                          >
+                            <ExternalLink size={11} />
+                          </a>
+                        )}
+                      </div>
                     </div>
                     <div className="p-3">
                       <p className="text-sm text-white font-medium truncate">
@@ -476,7 +567,7 @@ export function DeconstructionPanel({
                         />
                       </div>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>

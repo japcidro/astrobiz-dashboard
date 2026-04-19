@@ -25,6 +25,7 @@ const DATE_PRESETS: { label: string; value: DatePreset }[] = [
 
 interface AdRow extends ChatAd {
   thumbnail_url?: string | null;
+  preview_url?: string | null;
 }
 
 interface AccountInfo {
@@ -55,6 +56,7 @@ export default function AiAnalyticsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     async function loadAds() {
       setLoadingAds(true);
       setLoadError(null);
@@ -64,16 +66,61 @@ export default function AiAnalyticsPage() {
         );
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "Failed to load ads");
-        setAds((json.data as AdRow[]) ?? []);
+        if (cancelled) return;
+        const initialAds = (json.data as AdRow[]) ?? [];
+        setAds(initialAds);
         setAccounts((json.accounts as AccountInfo[]) ?? []);
         if (json.totals) setTotals(json.totals as ChatTotals);
+
+        // Lazy-load creatives (thumbnails + FB preview URLs) for the top
+        // ads by spend — /all-ads strips creatives for performance.
+        const targetIds = [...initialAds]
+          .sort((a, b) => b.spend - a.spend)
+          .slice(0, 60)
+          .map((a) => a.ad_id)
+          .filter(Boolean);
+        if (targetIds.length > 0) {
+          try {
+            const crRes = await fetch(
+              `/api/facebook/ad-creatives?ids=${targetIds.join(",")}`
+            );
+            if (crRes.ok) {
+              const crJson = (await crRes.json()) as {
+                creatives: Record<
+                  string,
+                  { preview_url: string | null; thumbnail_url: string | null }
+                >;
+              };
+              if (cancelled) return;
+              const creatives = crJson.creatives ?? {};
+              setAds((prev) =>
+                prev.map((row) => {
+                  const c = creatives[row.ad_id];
+                  if (!c) return row;
+                  return {
+                    ...row,
+                    preview_url: c.preview_url,
+                    thumbnail_url: c.thumbnail_url,
+                  };
+                })
+              );
+            }
+          } catch {
+            // Creatives are non-critical; fail silently
+          }
+        }
       } catch (e) {
-        setLoadError(e instanceof Error ? e.message : "Failed to load ads");
+        if (!cancelled) {
+          setLoadError(e instanceof Error ? e.message : "Failed to load ads");
+        }
       } finally {
-        setLoadingAds(false);
+        if (!cancelled) setLoadingAds(false);
       }
     }
     loadAds();
+    return () => {
+      cancelled = true;
+    };
   }, [datePreset, accountFilter]);
 
   const deconstructAds = useMemo(
@@ -90,6 +137,7 @@ export default function AiAnalyticsPage() {
           purchases: a.purchases,
           roas: a.roas,
           thumbnail_url: a.thumbnail_url ?? null,
+          preview_url: a.preview_url ?? null,
         }))
         .sort((a, b) => b.spend - a.spend),
     [ads]

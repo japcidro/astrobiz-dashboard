@@ -1,5 +1,32 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-04-19: AI Analytics — real thumbnails, store from campaign, FB link
+
+Three UX fixes to the Deconstruction picker:
+
+- **Thumbnails** now actually render. The `/all-ads` endpoint strips
+  creatives for speed, so the picker was showing video-icon
+  placeholders for everything. The analytics page now lazy-loads
+  the top 60 ads' creatives after the initial fetch (same pattern as
+  the Ad Performance page at drill-level ad).
+- **Store filter** is now derived from the campaign name instead of
+  the ad account. A Meta ad account often runs multiple Shopify
+  stores, so "Account" was the wrong unit. The filter now matches
+  each campaign name against the Shopify store list (normalized —
+  strips spaces/punctuation, lowercases — so "I Love Patches",
+  "ilovepatches", and "I-Love-Patches" all map to the same store).
+  Longest match wins; unmatched campaigns group under "Unmatched".
+  Counts per store shown in the dropdown, "Unmatched" sinks to
+  bottom.
+- **FB preview link** on each card — small external-link icon top
+  right of the thumbnail. Opens the ad's FB post in a new tab so
+  you can watch the video before deciding to run Gemini on it.
+  stopPropagation keeps card-select behavior intact.
+- New endpoint `GET /api/shopify/stores/names` — marketing-safe,
+  returns only `{ names: [...] }` for active stores (no api_token
+  exposure), uses the service client to sidestep the strict RLS on
+  the stores table.
+
 ## 2026-04-19: AI Analytics — visual ad picker
 
 Replaces the long single-line dropdown in the Deconstruction tab
