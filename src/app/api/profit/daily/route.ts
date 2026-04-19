@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { getEmployee } from "@/lib/supabase/get-employee";
 import { matchAdToStore } from "@/lib/profit/store-matching";
 import {
@@ -266,7 +267,9 @@ export async function GET(request: Request) {
   const dateTo = searchParams.get("date_to");
   const forceRefresh = searchParams.get("refresh") === "1";
 
-  const supabase = await createClient();
+  // Cron invocations have no user session — use service client
+  // so RLS on shopify_stores / app_settings doesn't silently return empty.
+  const supabase = isCron ? createServiceClient() : await createClient();
 
   // Check Supabase cache first (skip on force refresh)
   const cacheKey = buildCacheKey("pnl", {

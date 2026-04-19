@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { getEmployee } from "@/lib/supabase/get-employee";
 import { buildCacheKey, getCachedResponse, setCachedResponse } from "@/lib/data-cache";
 import type { DatePreset } from "@/lib/facebook/types";
@@ -107,7 +108,9 @@ export async function GET(request: Request) {
   const accountFilter = searchParams.get("account") || "ALL";
   const forceRefresh = searchParams.get("refresh") === "1";
 
-  const supabase = await createClient();
+  // Cron invocations have no user session — use service client so
+  // RLS on app_settings doesn't silently return empty FB token.
+  const supabase = isCron ? createServiceClient() : await createClient();
 
   // Check Supabase cache first
   const cacheKey = buildCacheKey("ads", {

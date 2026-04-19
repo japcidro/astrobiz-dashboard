@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { getEmployee } from "@/lib/supabase/get-employee";
 import type {
   ShopifyOrder,
@@ -210,12 +211,22 @@ function computeAgeLevel(
 }
 
 export async function GET(request: Request) {
-  const employee = await getEmployee();
-  if (!employee) {
-    return Response.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  if (!["admin", "va", "fulfillment"].includes(employee.role)) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
+  // Allow cron jobs to bypass auth using CRON_SECRET.
+  // Cron invocations have no user session — service client bypasses RLS.
+  const isCron =
+    request.headers.get("authorization") === `Bearer ${process.env.CRON_SECRET}`;
+
+  let employee: { role: string } | null = null;
+  if (!isCron) {
+    employee = await getEmployee();
+    if (!employee) {
+      return Response.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (!["admin", "va", "fulfillment"].includes(employee.role)) {
+      return Response.json({ error: "Forbidden" }, { status: 403 });
+    }
+  } else {
+    employee = { role: "admin" };
   }
 
   const { searchParams } = new URL(request.url);
@@ -238,7 +249,7 @@ export async function GET(request: Request) {
     });
   }
 
-  const supabase = await createClient();
+  const supabase = isCron ? createServiceClient() : await createClient();
 
   // Fetch active stores from shopify_stores table
   const { data: storesData, error: storesError } = await supabase
