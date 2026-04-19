@@ -109,10 +109,14 @@ export async function POST(request: Request) {
   }
 
   if (!videoRef.video_url) {
+    console.warn(
+      `[deconstruct] no video for ad=${adId} attempts=${videoRef.attempts.join(" | ")}`
+    );
     return Response.json(
       {
-        error: "No playable video on this ad.",
+        error: videoRef.source_note || "No playable video on this ad.",
         detail: videoRef.source_note,
+        attempts: videoRef.attempts,
         ad_id: adId,
       },
       { status: 422 }
