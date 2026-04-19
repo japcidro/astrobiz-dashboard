@@ -1,5 +1,129 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-04-19: Attendance improvements — shifts + reminders + auto-close
+
+Added the supervisor-style attendance system to fix forgotten clock-ins,
+breaks, and clock-outs:
+
+- **Per-day shifts** — new `employee_shifts` table. Schedules vary
+  week-to-week, so the editor at `/admin/attendance/schedule` is a 7-day
+  grid (rows = employees, cols = Mon-Sun). Click a cell → set start/end
+  + break, or mark Day Off. "Copy last week" pulls a template forward.
+- **Attendance-check cron** every 15 min (`/api/cron/attendance-check`):
+  - Clock-in reminder if 15+ min past shift start with no entry
+  - Break reminder if running > 4h continuous (no pauses)
+  - Clock-out reminder if 15+ min past shift end and still running
+  - **Auto-close** any session running ≥ 10h (prevents inflated hours
+    when someone forgets to stop the timer overnight). Logs to
+    `attendance_events`, alerts admin, notifies the employee.
+- **Admin Attendance Issues panel** at `/admin/attendance` — live view
+  of: not clocked in, long-running sessions, missed clock-outs,
+  auto-closed yesterday. Refreshes every minute.
+- **Persistent clock-in status banner** on every page (all roles).
+  Green/yellow/red indicator with elapsed time and "Clock in now" CTA
+  when a shift is active.
+- **Employee notifications** — new `employee_notifications` table +
+  bell + inbox for non-admin users. Dedup window per type prevents
+  spam. RLS scoped so employees only see their own.
+
+Email templates render via Resend; in testing mode only the Resend
+signup email receives. Other employees still get in-app notifications.
+
+## 2026-04-19: Scheduled briefings — morning / evening / weekly / monthly
+
+Added a scheduled-digest layer on top of the alerts system:
+
+- **4 cron schedules** (PHT): morning 6 AM, evening 10 PM, weekly Mon
+  9 AM, monthly 1st 9 AM. Each generates a full briefing.
+- **Data collected per period**: P&L (with vs prior period delta),
+  orders/unfulfilled/aging, top 5 products by revenue, top 3 ads + 3
+  ads to review, store breakdown, autopilot activity, RTS, stock
+  movement, team hours.
+- **AI summary** — Claude Sonnet 4.6 writes a 2-5 paragraph narrative
+  per briefing using the `anthropic_api_key` from `app_settings`.
+  Briefing-specific prompts (morning = action-oriented, monthly =
+  strategic). Summary appears at the top of email + in-app detail view.
+- **Email template** — rich HTML with metric tables, top lists, and
+  CTA to view full report in-app.
+- **In-app browsing** — `/admin/briefings` list (filterable by type)
+  + `/admin/briefings/[id]` detail page with full data.
+- **Idempotent**: re-running a cron for the same (type, period) is a
+  no-op.
+
+## 2026-04-19: Cron RLS fix — internal API calls were silently empty
+
+Fixed a structural bug affecting all crons that fetched data through
+internal routes:
+
+- Cron Bearer auth bypass let requests reach the route handler, **but**
+  the routes used `createClient()` (user-session client) for the
+  Supabase queries. With no session, RLS on `shopify_stores` and
+  `app_settings` returned empty → revenue/orders/ads all came back as
+  zero. The morning briefing's "₱0 revenue" was caused by this.
+- Patched `/api/profit/daily`, `/api/facebook/all-ads`, `/api/shopify/
+  orders` to use `createServiceClient()` when `isCron === true`.
+  Added the cron bypass to `/api/shopify/orders` which was missing it.
+- Also fixes silently-broken `refresh-data` pre-warming of the cache.
+
+## 2026-04-19: store_outage rule — fix false positives
+
+The `store_outage` alert rule was probing each store via our own
+`/api/shopify/orders` endpoint. That route requires a user session,
+so cron invocations always got 401 → every store flagged "failing"
+on every run. Fix: probe Shopify directly via
+`/admin/api/2024-01/shop.json` with the stored access token, skipping
+our routing layer entirely.
+
+## 2026-04-19: Middleware — exempt cron + Bearer-secret bypass
+
+Two bugs surfaced when wiring the new alert/briefing crons:
+
+- Public-routes list didn't include `/api/cron/`, so middleware was
+  redirecting every cron invocation (including Vercel scheduler hits)
+  to `/login`. All existing crons were silently being intercepted.
+- Internal cron-to-cron fetches with `Authorization: Bearer
+  CRON_SECRET` also got redirected since middleware checked Supabase
+  session, not the Bearer. Added a top-of-middleware short-circuit:
+  any request whose Authorization header matches `Bearer
+  ${CRON_SECRET}` skips the session check entirely.
+
+## 2026-04-19: Admin notifications system
+
+Decision-support layer for the CEO. Detects events worth surfacing
+(stock restocks, depleting winners, new winners, autopilot actions,
+RTS spikes, cash at risk, store outages) and pushes them via:
+
+- In-app **bell icon** with unread badge (admin only)
+- **/admin/notifications** inbox with Unread/Acted/Dismissed/All tabs
+  + severity-grouped sections + Mark all read
+- **"Today's Decisions"** action feed at the top of `/dashboard`
+- **Email** to admins via Resend — urgent severity emails immediately
+  after detection, action/info severity rolled into a daily digest
+  cron at 9 AM PHT
+
+Schemas: `admin_alerts` table with severity / dedup / lifecycle
+(read/dismissed/acted) + `inventory_snapshots` table populated daily
+to power stock rules. Rule engine cron runs every 30 min and dedups
+per (type, resource_id) within a configurable window per rule.
+
+Recipients controlled by `ALERT_RECIPIENTS` env var (comma-separated)
+to keep emails inside Resend's testing-mode allowlist until a verified
+domain is added.
+
+## 2026-04-19: Team-specific dashboard layouts
+
+Replaced placeholder team dashboards with role-specific views:
+
+- **Admin** — adds `AlertsFeed` hero section, then existing P&L + ops
+  cards. Cockpit feel.
+- **Marketing** — Action Queue (scaling winners / fading / dead
+  weight from 7-day FB data) + Autopilot 24h activity log.
+- **VA** — By Store breakdown card with total / unfulfilled / aging
+  per store, click-through to filtered orders.
+- **Fulfillment** — Pack Queue CTA card (orders ready to verify),
+  My Verified Today counter, SKUs Running Out Soon list driven by
+  inventory_snapshots velocity.
+
 ## 2026-04-19: AI Analytics — video resolution fixes + CPP on cards
 
 Iterated on the Creative Deconstruction picker after the first pass

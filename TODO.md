@@ -5,6 +5,77 @@ of letting them drift in chat.
 
 ---
 
+## Manual setup pending (from recent commits)
+
+### 1. Run pending Supabase migrations
+Order matters — copy each file's full SQL into Supabase SQL Editor and Run.
+
+- [ ] `supabase/admin-alerts-migration.sql`
+      Tables: `admin_alerts`, `inventory_snapshots`. RPC: `insert_admin_alert`.
+      Powers the bell icon + `/admin/notifications` + decision feed.
+- [ ] `supabase/briefings-migration.sql`
+      Table: `briefings`. Powers `/admin/briefings` list + detail.
+- [ ] `supabase/attendance-improvements-migration.sql`
+      Tables: `employee_shifts`, `employee_notifications`, `attendance_events`.
+      RPC: `insert_employee_notification`. Powers schedule editor + reminders.
+
+### 2. Set Vercel env vars (Settings → Environment Variables)
+
+If not already set, add these — tick all 3 environments (Production / Preview / Development) → redeploy after.
+
+- [ ] `RESEND_API_KEY` = `re_...` (from resend.com)
+- [ ] `ALERTS_EMAIL_FROM` = `Astrobiz Alerts <onboarding@resend.dev>`
+      (until a verified domain is added)
+- [ ] `ALERT_RECIPIENTS` = `japcidro@gmail.com`
+      (Resend testing mode — only the signup email can receive)
+- [ ] `NEXT_PUBLIC_APP_URL` = `https://astrobiz-dashboard.vercel.app`
+
+### 3. Set this week's employee shifts
+
+- [ ] Open `/admin/attendance/schedule`
+- [ ] Set start/end + break for each of the 6 employees, per day
+- [ ] After this week, use "Copy last week" instead of re-entering
+
+### 4. Smoke-test attendance system
+
+- [ ] Set your own shift for today (start = 1h ago, end = 8h later)
+- [ ] Don't clock in
+- [ ] Trigger cron manually:
+      `curl -H "Authorization: Bearer $CRON_SECRET" https://astrobiz-dashboard.vercel.app/api/cron/attendance-check`
+- [ ] Verify: response shows `clockin_reminders: 1`, bell shows badge,
+      banner shows red "Not clocked in" with CTA, email arrives in Gmail
+
+### 5. Smoke-test briefings
+
+- [ ] Trigger morning briefing manually:
+      `curl -H "Authorization: Bearer $CRON_SECRET" https://astrobiz-dashboard.vercel.app/api/cron/briefing-morning`
+- [ ] Verify: numbers are non-zero (RLS fix should have resolved this),
+      AI summary reads sensibly, email arrives, briefing visible at
+      `/admin/briefings`
+
+### 6. Security follow-up — rotate CRON_SECRET
+
+The current secret was pasted in chat during debugging. Before going to
+production, rotate it:
+
+- [ ] Generate new value: `openssl rand -hex 32`
+- [ ] Vercel → Settings → Env Vars → edit `CRON_SECRET` → paste new
+- [ ] Redeploy
+- [ ] Re-test one cron with new secret
+
+### 7. Long-term: get a domain for Resend
+
+While on `onboarding@resend.dev`, only `japcidro@gmail.com` receives
+emails. Other admins + employee reminder emails silently fail.
+
+- [ ] Buy a cheap domain (porkbun.com, namecheap.com — ₱500-600/year)
+- [ ] Resend → Domains → Add → follow DNS verification
+- [ ] Once verified, change `ALERTS_EMAIL_FROM` to use the new domain
+      and remove `ALERT_RECIPIENTS` so all admins + employees get emails
+- [ ] Bonus: point the same domain at Vercel as a custom domain
+
+---
+
 ## AI Analytics — Creative Deconstruction
 
 ### FB token scope upgrade (blocks dark-post video analysis)
