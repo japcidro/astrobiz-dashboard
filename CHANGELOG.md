@@ -1,5 +1,36 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-04-19: AI Analytics — video resolution fixes + CPP on cards
+
+Iterated on the Creative Deconstruction picker after the first pass
+surfaced real-world failures:
+
+- **Cost Per Purchase (CPP) badge** on every card (fourth metric
+  after purchases / ROAS / spend). Shows "—" when an ad has 0
+  purchases so we don't display a fake CPP. New sort option
+  "CPP (low → high)" that puts zero-conversion ads at the bottom
+  so the top of the list is always ads that actually sold.
+- **Video resolver: expanded creative paths.** Most Ads-Manager
+  ads store their video under
+  `creative.object_story_spec.video_data.video_id` — that path
+  wasn't being checked, so almost every Capsuled ad failed with
+  "No playable video on this ad." The resolver now walks six
+  paths in likelihood order: direct `creative.video_id`,
+  `object_story_spec.video_data`, `object_story_spec.link_data`,
+  carousel `child_attachments`, DCO `asset_feed_spec.videos`, and
+  finally the object-story attachments walk. Error messages now
+  list every path that was attempted so the next failure is
+  diagnosable.
+- **Video source fallbacks for dark posts.** Even when the
+  `video_id` resolves, direct `/{video_id}?fields=source` returns
+  null on dark posts when the token lacks page-level access.
+  Added two fallbacks: (1) request `muted_video_url` on the same
+  call — fine for Gemini, it's the same visual content;
+  (2) query the ad account's `/advideos` edge with an id filter,
+  which runs under ad-account permissions and is usually broader.
+  Errors now explain the probable cause (token scope) when all
+  paths fail, instead of a generic "no video" message.
+
 ## 2026-04-19: AI Analytics — real thumbnails, store from campaign, FB link
 
 Three UX fixes to the Deconstruction picker:
