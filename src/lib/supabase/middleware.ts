@@ -33,8 +33,18 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Public routes that don't need auth
-  const publicRoutes = ["/login", "/api/auth/callback", "/api/shopify/auth/callback", "/privacy-policy", "/terms-of-service", "/data-deletion"];
+  // Public routes that don't need auth. Cron routes are included because
+  // they perform their own Bearer-token auth against CRON_SECRET — the
+  // middleware session check would block legitimate cron invocations.
+  const publicRoutes = [
+    "/login",
+    "/api/auth/callback",
+    "/api/shopify/auth/callback",
+    "/api/cron/",
+    "/privacy-policy",
+    "/terms-of-service",
+    "/data-deletion",
+  ];
   const isPublicRoute = publicRoutes.some((route) =>
     request.nextUrl.pathname.startsWith(route)
   );
