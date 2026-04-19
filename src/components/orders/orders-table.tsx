@@ -97,17 +97,29 @@ function FulfillmentBadge({ status }: { status: string | null }) {
   );
 }
 
+function formatAge(createdAt: string, days: number): string {
+  if (days >= 1) return `${days}d`;
+  const diffMs = Date.now() - new Date(createdAt).getTime();
+  const hours = Math.floor(diffMs / (1000 * 60 * 60));
+  if (hours >= 1) return `${hours}h`;
+  const minutes = Math.max(1, Math.floor(diffMs / (1000 * 60)));
+  return `${minutes}m`;
+}
+
 function AgeBadge({
+  createdAt,
   days,
   level,
   isUnfulfilled,
 }: {
+  createdAt: string;
   days: number;
   level: "normal" | "warning" | "danger";
   isUnfulfilled: boolean;
 }) {
+  const label = formatAge(createdAt, days);
   if (!isUnfulfilled) {
-    return <span className="text-gray-500">{days}d</span>;
+    return <span className="text-gray-500">{label}</span>;
   }
 
   const cls =
@@ -117,7 +129,7 @@ function AgeBadge({
         ? "text-yellow-400"
         : "text-white";
 
-  return <span className={cls}>{days}d</span>;
+  return <span className={cls}>{label}</span>;
 }
 
 export function OrdersTable({ orders, sortKey, sortDir, onSort, isAdmin, onSelectOrder }: Props) {
@@ -194,9 +206,10 @@ export function OrdersTable({ orders, sortKey, sortDir, onSort, isAdmin, onSelec
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap">
                   <AgeBadge
+                    createdAt={order.created_at}
                     days={order.age_days}
                     level={order.age_level}
-                    isUnfulfilled={isUnfulfilled}
+                    isUnfulfilled={isUnfulfilled && !order.is_dead}
                   />
                 </td>
                 <td className="px-4 py-3 text-gray-300 whitespace-nowrap">

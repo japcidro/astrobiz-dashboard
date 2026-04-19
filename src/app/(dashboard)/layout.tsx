@@ -3,6 +3,7 @@ import { getEmployee } from "@/lib/supabase/get-employee";
 import { createClient } from "@/lib/supabase/server";
 import { Sidebar } from "@/components/layout/sidebar";
 import { BackgroundRefresh } from "@/components/layout/background-refresh";
+import { ClockStatusBanner } from "@/components/attendance/clock-status-banner";
 
 export default async function DashboardLayout({
   children,
@@ -62,6 +63,7 @@ export default async function DashboardLayout({
         employeeRole={employee.role}
       />
       <main className="flex-1 overflow-auto">
+        <ClockStatusBanner />
         <div className="p-6 lg:p-8">{children}</div>
       </main>
       <BackgroundRefresh />

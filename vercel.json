@@ -39,6 +39,10 @@
     {
       "path": "/api/cron/briefing-monthly",
       "schedule": "0 1 1 * *"
+    },
+    {
+      "path": "/api/cron/attendance-check",
+      "schedule": "*/15 * * * *"
     }
   ]
 }

@@ -199,12 +199,28 @@ function computeDateRange(
   }
 }
 
+// An order is "dead" when no further fulfillment work is expected:
+// manually cancelled, voided (COD declined), or fully refunded.
+// Also treats explicit cancel tags as dead for stores that manage this via tags.
+function isDeadOrder(args: {
+  cancelledAt: string | null;
+  financialStatus: string;
+  tags: string;
+}): boolean {
+  if (args.cancelledAt) return true;
+  const fs = (args.financialStatus || "").toLowerCase();
+  if (fs === "voided" || fs === "refunded") return true;
+  const tags = (args.tags || "").toLowerCase();
+  if (/\b(cancelled|canceled|void|voided|refunded|deleted)\b/.test(tags)) return true;
+  return false;
+}
+
 function computeAgeLevel(
   fulfillmentStatus: string | null,
-  cancelledAt: string | null,
+  isDead: boolean,
   ageDays: number
 ): "normal" | "warning" | "danger" {
-  if (fulfillmentStatus === "fulfilled" || cancelledAt) return "normal";
+  if (fulfillmentStatus === "fulfilled" || isDead) return "normal";
   if (ageDays >= 5) return "danger";
   if (ageDays >= 3) return "warning";
   return "normal";
@@ -324,6 +340,12 @@ export async function GET(request: Request) {
               (1000 * 60 * 60 * 24)
           );
 
+          const dead = isDeadOrder({
+            cancelledAt: raw.cancelled_at,
+            financialStatus: raw.financial_status || "",
+            tags: raw.tags || "",
+          });
+
           const sa = raw.shipping_address;
           const fullAddress = sa
             ? [sa.address1, sa.address2, sa.city, sa.province, sa.zip, sa.country]
@@ -355,11 +377,8 @@ export async function GET(request: Request) {
             shipping_address: fullAddress,
             province: sa?.province || "—",
             age_days: ageDays,
-            age_level: computeAgeLevel(
-              raw.fulfillment_status,
-              raw.cancelled_at,
-              ageDays
-            ),
+            age_level: computeAgeLevel(raw.fulfillment_status, dead, ageDays),
+            is_dead: dead,
             line_items: (raw.line_items || []).map((li) => ({
               id: li.id,
               title: li.title,
@@ -384,8 +403,10 @@ export async function GET(request: Request) {
 
           allOrders.push(order);
 
-          // Track fulfillment hours for fulfilled orders
+          // Track fulfillment hours for fulfilled orders (skip dead so
+          // fulfilled-then-refunded orders don't skew the SLA metric).
           if (
+            !dead &&
             raw.fulfillment_status === "fulfilled" &&
             raw.fulfillments?.[0]?.created_at
           ) {
@@ -409,26 +430,35 @@ export async function GET(request: Request) {
     })
   );
 
-  // Apply status filter
+  // Apply status filter. Buckets are mutually exclusive: dead wins over
+  // everything else, then fulfilled, then partial, then unfulfilled.
   let orders = allOrders;
   switch (statusFilter) {
     case "unfulfilled":
       orders = allOrders.filter(
-        (o) => !o.fulfillment_status && !o.cancelled_at
+        (o) => !o.is_dead && o.fulfillment_status !== "fulfilled" && o.fulfillment_status !== "partial"
       );
       break;
     case "fulfilled":
       orders = allOrders.filter(
-        (o) => o.fulfillment_status === "fulfilled"
+        (o) => !o.is_dead && o.fulfillment_status === "fulfilled"
       );
       break;
     case "partial":
       orders = allOrders.filter(
-        (o) => o.fulfillment_status === "partial"
+        (o) => !o.is_dead && o.fulfillment_status === "partial"
       );
       break;
     case "cancelled":
-      orders = allOrders.filter((o) => o.cancelled_at !== null);
+      orders = allOrders.filter((o) => o.is_dead);
+      break;
+    case "aging":
+      orders = allOrders.filter(
+        (o) =>
+          !o.is_dead &&
+          o.fulfillment_status !== "fulfilled" &&
+          (o.age_level === "warning" || o.age_level === "danger")
+      );
       break;
     // "all" — no filter
   }
@@ -443,32 +473,35 @@ export async function GET(request: Request) {
         ) / 10
       : null;
 
-  // Compute summary
+  // Compute summary from the full date-range set (allOrders) so counts don't
+  // change when the user narrows by status. Buckets are mutually exclusive
+  // and match the status filter above.
+  const alive = allOrders.filter((o) => !o.is_dead);
   const summary: OrdersSummary = {
-    total_orders: orders.length,
-    total_revenue: orders.reduce(
+    total_orders: allOrders.length,
+    // Net revenue: exclude dead (cancelled/voided/refunded) orders.
+    total_revenue: alive.reduce(
       (sum, o) => sum + parseFloat(o.total_price),
       0
     ),
-    unfulfilled_count: orders.filter(
-      (o) => !o.fulfillment_status && !o.cancelled_at
+    unfulfilled_count: alive.filter(
+      (o) =>
+        o.fulfillment_status !== "fulfilled" &&
+        o.fulfillment_status !== "partial"
     ).length,
-    fulfilled_count: orders.filter(
-      (o) => o.fulfillment_status === "fulfilled"
-    ).length,
-    cancelled_count: orders.filter((o) => o.cancelled_at).length,
-    partially_fulfilled_count: orders.filter(
+    fulfilled_count: alive.filter((o) => o.fulfillment_status === "fulfilled")
+      .length,
+    cancelled_count: allOrders.filter((o) => o.is_dead).length,
+    partially_fulfilled_count: alive.filter(
       (o) => o.fulfillment_status === "partial"
     ).length,
     avg_fulfillment_hours: avgFulfillmentHours,
-    cod_count: orders.filter((o) => o.is_cod).length,
-    prepaid_count: orders.filter(
+    cod_count: alive.filter((o) => o.is_cod).length,
+    prepaid_count: alive.filter(
       (o) => !o.is_cod && o.financial_status === "paid"
     ).length,
-    aging_warning_count: orders.filter((o) => o.age_level === "warning")
-      .length,
-    aging_danger_count: orders.filter((o) => o.age_level === "danger")
-      .length,
+    aging_warning_count: alive.filter((o) => o.age_level === "warning").length,
+    aging_danger_count: alive.filter((o) => o.age_level === "danger").length,
   };
 
   // Sort by created_at descending (newest first)

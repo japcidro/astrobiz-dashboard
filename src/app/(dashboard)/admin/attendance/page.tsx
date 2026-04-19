@@ -2,7 +2,8 @@ import { getEmployee } from "@/lib/supabase/get-employee";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { format } from "date-fns";
-import { Clock, User, CheckCircle, XCircle } from "lucide-react";
+import { User, CheckCircle, XCircle } from "lucide-react";
+import { AttendanceIssues } from "@/components/attendance/attendance-issues";
 
 export default async function AttendancePage() {
   const employee = await getEmployee();
@@ -89,6 +90,8 @@ export default async function AttendancePage() {
           {format(new Date(), "EEEE, MMMM d, yyyy")}
         </p>
       </div>
+
+      <AttendanceIssues />
 
       {/* Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">

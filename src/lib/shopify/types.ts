@@ -48,6 +48,7 @@ export interface ShopifyOrder {
   tracking_company: string | null;
   fulfilled_at: string | null;
   is_cod: boolean;
+  is_dead: boolean; // cancelled, voided, or refunded — not counted as unfulfilled
   cancelled_at: string | null;
   gateway: string;
   note: string | null;
@@ -68,7 +69,10 @@ export type FulfillmentFilter =
   | "unfulfilled"
   | "fulfilled"
   | "partial"
-  | "cancelled";
+  | "cancelled"
+  | "aging";
+
+export type PaymentTypeFilter = "all" | "cod" | "prepaid";
 
 export interface OrdersSummary {
   total_orders: number;

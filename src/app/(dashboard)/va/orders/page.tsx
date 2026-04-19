@@ -6,6 +6,7 @@ import type {
   ShopifyOrder,
   OrderDateFilter,
   FulfillmentFilter,
+  PaymentTypeFilter,
   OrdersSummary,
 } from "@/lib/shopify/types";
 import { OrdersSummaryCards } from "@/components/orders/orders-summary-cards";
@@ -24,9 +25,16 @@ const DATE_PRESETS: { label: string; value: OrderDateFilter }[] = [
 const STATUS_OPTIONS: { label: string; value: FulfillmentFilter }[] = [
   { label: "All", value: "all" },
   { label: "Unfulfilled", value: "unfulfilled" },
+  { label: "Aging (3d+)", value: "aging" },
   { label: "Fulfilled", value: "fulfilled" },
   { label: "Partial", value: "partial" },
-  { label: "Cancelled", value: "cancelled" },
+  { label: "Cancelled / Voided", value: "cancelled" },
+];
+
+const PAYMENT_OPTIONS: { label: string; value: PaymentTypeFilter }[] = [
+  { label: "All", value: "all" },
+  { label: "COD", value: "cod" },
+  { label: "Prepaid", value: "prepaid" },
 ];
 
 const defaultSummary: OrdersSummary = {
@@ -54,6 +62,7 @@ export default function OrdersPage() {
   const [customTo, setCustomTo] = useState("");
   const [storeFilter, setStoreFilter] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState<FulfillmentFilter>("all");
+  const [paymentFilter, setPaymentFilter] = useState<PaymentTypeFilter>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [sortKey, setSortKey] = useState("created_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -112,6 +121,13 @@ export default function OrdersPage() {
   const filteredAndSorted = useMemo(() => {
     let result = [...orders];
 
+    // Client-side payment type filter (is_cod is computed from Shopify gateway)
+    if (paymentFilter === "cod") {
+      result = result.filter((o) => o.is_cod);
+    } else if (paymentFilter === "prepaid") {
+      result = result.filter((o) => !o.is_cod);
+    }
+
     // Client-side search filter
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -148,7 +164,16 @@ export default function OrdersPage() {
     });
 
     return result;
-  }, [orders, searchQuery, sortKey, sortDir]);
+  }, [orders, paymentFilter, searchQuery, sortKey, sortDir]);
+
+  // "Needs Attention" shortcut: broaden date window to last 30d and filter
+  // to aging unfulfilled orders. The VA can one-click triage old orders
+  // without having to re-pick date + status filters separately.
+  const showNeedsAttention = useCallback(() => {
+    setDateFilter("last_30d");
+    setStatusFilter("aging");
+    setPaymentFilter("all");
+  }, []);
 
   return (
     <div>
@@ -249,6 +274,23 @@ export default function OrdersPage() {
           </select>
         </div>
 
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-gray-400">Payment:</label>
+          <select
+            value={paymentFilter}
+            onChange={(e) =>
+              setPaymentFilter(e.target.value as PaymentTypeFilter)
+            }
+            className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            {PAYMENT_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div className="flex items-center gap-2 flex-1 min-w-[200px]">
           <Search size={16} className="text-gray-400 shrink-0" />
           <input
@@ -266,16 +308,25 @@ export default function OrdersPage() {
         <OrdersSummaryCards summary={summary} loading={loading} isAdmin={role === "admin"} />
       </div>
 
-      {/* Aging Danger Banner */}
+      {/* Aging Danger Banner — click to show all aging orders across last 30d */}
       {!loading && summary.aging_danger_count > 0 && (
-        <div className="mb-4 p-4 bg-red-900/20 border border-red-700/50 rounded-xl flex items-center gap-3">
-          <AlertTriangle size={20} className="text-red-400 shrink-0" />
-          <p className="text-red-300 text-sm font-medium">
-            {summary.aging_danger_count} order
-            {summary.aging_danger_count !== 1 ? "s" : ""} unfulfilled for 5+
-            days!
-          </p>
-        </div>
+        <button
+          type="button"
+          onClick={showNeedsAttention}
+          className="w-full mb-4 p-4 bg-red-900/20 border border-red-700/50 hover:bg-red-900/30 rounded-xl flex items-center justify-between gap-3 text-left transition-colors cursor-pointer"
+        >
+          <div className="flex items-center gap-3">
+            <AlertTriangle size={20} className="text-red-400 shrink-0" />
+            <p className="text-red-300 text-sm font-medium">
+              {summary.aging_danger_count} order
+              {summary.aging_danger_count !== 1 ? "s" : ""} unfulfilled for 5+
+              days!
+            </p>
+          </div>
+          <span className="text-xs text-red-300/80 underline underline-offset-2">
+            Review now →
+          </span>
+        </button>
       )}
 
       {/* Loading */}

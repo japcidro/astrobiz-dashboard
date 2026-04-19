@@ -31,6 +31,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { UserRole } from "@/lib/types";
 import { NotificationBell } from "@/components/alerts/notification-bell";
+import { EmployeeNotificationBell } from "@/components/attendance/employee-notification-bell";
 
 interface NavItem {
   label: string;
@@ -75,6 +76,12 @@ const navEntries: NavEntry[] = [
       {
         label: "Attendance",
         href: "/admin/attendance",
+        icon: <Users size={18} />,
+        roles: ["admin"],
+      },
+      {
+        label: "Schedule",
+        href: "/admin/attendance/schedule",
         icon: <Users size={18} />,
         roles: ["admin"],
       },
@@ -408,7 +415,11 @@ export function Sidebar({ employeeName, employeeRole }: SidebarProps) {
               {employeeRole}
             </span>
           </div>
-          <NotificationBell employeeRole={employeeRole} />
+          {employeeRole === "admin" ? (
+            <NotificationBell employeeRole={employeeRole} />
+          ) : (
+            <EmployeeNotificationBell />
+          )}
         </div>
         <button
           onClick={handleLogout}
