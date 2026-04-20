@@ -27,41 +27,85 @@ async function fbGet<T>(path: string, token: string): Promise<T> {
 }
 
 // Try to fetch the playable MP4 URL for a video the ad carries.
-// For dark-post videos, the direct /{video_id}?fields=source endpoint
-// often returns null because the user token doesn't have page-level
-// access. Fall back to the ad account's advideos edge, which runs
-// under the ad-account permission model and works for ads the token
-// has ads_management on.
+// Even System User tokens with full page control often get source=null
+// from /{video_id} because Meta requires a *Page* Access Token for the
+// raw MP4. We fetch one on the fly for the page that owns the video.
 async function resolveVideoSource(
   videoId: string,
   accountId: string,
+  storyId: string | null,
   token: string
-): Promise<{ source: string | null; note: string }> {
-  // Attempt 1: direct video lookup, richer field set.
+): Promise<{ source: string | null; note: string; tried: string[] }> {
+  const tried: string[] = [];
+
+  // Attempt 1: direct video lookup with the current (user/SU) token.
   try {
     type VideoResp = {
       source?: string | null;
       permalink_url?: string | null;
       muted_video_url?: string | null;
+      from?: { id?: string };
     };
     const v = await fbGet<VideoResp>(
-      `/${videoId}?fields=source,permalink_url,muted_video_url`,
+      `/${videoId}?fields=source,permalink_url,muted_video_url,from`,
       token
     );
-    if (v.source) return { source: v.source, note: "direct /{video_id}" };
+    tried.push("direct /{video_id} with SU token");
+    if (v.source) return { source: v.source, note: "direct", tried };
     if (v.muted_video_url) {
-      return { source: v.muted_video_url, note: "muted_video_url fallback" };
+      return { source: v.muted_video_url, note: "muted_video_url", tried };
+    }
+
+    // Attempt 2: page access token hop. This is THE reliable path for
+    // dark-post videos — even a SU with full control on the Page has
+    // to exchange for a Page token before Meta returns `source`.
+    const pageIdFromVideo = v.from?.id ?? null;
+    const pageIdFromStory = storyId ? storyId.split("_")[0] : null;
+    const pageId = pageIdFromVideo ?? pageIdFromStory;
+    if (pageId) {
+      try {
+        const pageTokenResp = await fbGet<{ access_token?: string }>(
+          `/${pageId}?fields=access_token`,
+          token
+        );
+        const pageToken = pageTokenResp.access_token;
+        tried.push(
+          pageToken
+            ? `page token obtained (page=${pageId})`
+            : `page token request returned no access_token (page=${pageId})`
+        );
+        if (pageToken) {
+          const vp = await fbGet<VideoResp>(
+            `/${videoId}?fields=source,muted_video_url`,
+            pageToken
+          );
+          tried.push("direct /{video_id} with PAGE token");
+          if (vp.source) {
+            return { source: vp.source, note: "page token", tried };
+          }
+          if (vp.muted_video_url) {
+            return {
+              source: vp.muted_video_url,
+              note: "page token (muted)",
+              tried,
+            };
+          }
+        }
+      } catch (err) {
+        tried.push(
+          `page token hop failed: ${err instanceof Error ? err.message : "unknown"}`
+        );
+      }
+    } else {
+      tried.push("no page id available for token hop");
     }
   } catch (err) {
-    // Continue to next attempt.
     const msg = err instanceof Error ? err.message : "unknown";
-    if (msg.includes("token")) {
-      // Token issue — no point trying more paths.
-      return { source: null, note: `direct video lookup failed: ${msg}` };
-    }
+    tried.push(`direct video lookup threw: ${msg}`);
   }
 
-  // Attempt 2: ad account's advideos edge with id filter.
+  // Attempt 3: ad account's advideos edge (rarely works when 1+2 don't,
+  // but keep as belt-and-braces).
   if (accountId) {
     try {
       type ListResp = {
@@ -76,19 +120,23 @@ async function resolveVideoSource(
         `/${accountId}/advideos?fields=source&filtering=${filtering}&limit=1`,
         token
       );
+      tried.push("advideos edge");
       const match = (res.data ?? []).find((d) => d.id === videoId);
       if (match?.source) {
-        return { source: match.source, note: "advideos edge" };
+        return { source: match.source, note: "advideos edge", tried };
       }
-    } catch {
-      // Fall through.
+    } catch (err) {
+      tried.push(
+        `advideos edge threw: ${err instanceof Error ? err.message : "unknown"}`
+      );
     }
   }
 
   return {
     source: null,
     note:
-      "Facebook returned no playable MP4 for this video on any endpoint. This is usually a dark post accessed with a token that lacks pages_read_engagement or full ads_management on the running page. Try a published (non-dark) ad, or refresh the FB token with broader scopes.",
+      "No playable MP4 on any endpoint. Next to check: is the System User assigned to the Page (not just the ad account) with Full Control? Graph API Explorer test: GET /{page_id}?fields=access_token — if that returns no access_token, the SU isn't actually a Page admin.",
+    tried,
   };
 }
 
@@ -269,12 +317,14 @@ export async function resolveAdVideo(
   }
 
   // Resolve the actual playable source URL for the video, with fallbacks.
-  const { source, note } = await resolveVideoSource(
+  const { source, note, tried } = await resolveVideoSource(
     video_id,
     accountId ?? "",
+    cr.effective_object_story_id ?? null,
     token
   );
-  attempts.push(`video source: ${note}`);
+  for (const t of tried) attempts.push(`source: ${t}`);
+  attempts.push(`source result: ${note}`);
   return {
     ad_id: adId,
     creative_id,

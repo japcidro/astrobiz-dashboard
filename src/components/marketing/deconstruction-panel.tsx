@@ -130,6 +130,8 @@ export function DeconstructionPanel({
 
   const [analyzing, setAnalyzing] = useState(false);
   const [analyzeError, setAnalyzeError] = useState<string | null>(null);
+  const [analyzeAttempts, setAnalyzeAttempts] = useState<string[]>([]);
+  const [showAttempts, setShowAttempts] = useState(false);
   const [activeRow, setActiveRow] = useState<DeconstructionRow | null>(null);
 
   const adMap = useMemo(() => {
@@ -197,6 +199,8 @@ export function DeconstructionPanel({
       }
       setAnalyzing(true);
       setAnalyzeError(null);
+      setAnalyzeAttempts([]);
+      setShowAttempts(false);
       try {
         const res = await fetch(
           "/api/marketing/ai-analytics/deconstruct",
@@ -213,6 +217,9 @@ export function DeconstructionPanel({
         );
         const json = await res.json();
         if (!res.ok) {
+          if (Array.isArray(json.attempts)) {
+            setAnalyzeAttempts(json.attempts as string[]);
+          }
           throw new Error(json.error || `Analyze failed (${res.status})`);
         }
         await loadList();
@@ -414,9 +421,29 @@ export function DeconstructionPanel({
           </p>
         )}
         {analyzeError && (
-          <div className="mt-3 p-2.5 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-xs flex items-start gap-2">
-            <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
-            <div>{analyzeError}</div>
+          <div className="mt-3 p-2.5 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-xs">
+            <div className="flex items-start gap-2">
+              <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
+              <div className="flex-1">{analyzeError}</div>
+            </div>
+            {analyzeAttempts.length > 0 && (
+              <div className="mt-2 ml-5">
+                <button
+                  onClick={() => setShowAttempts((v) => !v)}
+                  className="text-[11px] text-red-200 underline cursor-pointer"
+                >
+                  {showAttempts ? "Hide" : "Show"} debug trail (
+                  {analyzeAttempts.length} steps)
+                </button>
+                {showAttempts && (
+                  <pre className="mt-1.5 p-2 bg-gray-900/60 border border-gray-700 rounded text-[10px] text-gray-300 whitespace-pre-wrap font-mono">
+                    {analyzeAttempts
+                      .map((a, i) => `${i + 1}. ${a}`)
+                      .join("\n")}
+                  </pre>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
