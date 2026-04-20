@@ -57,20 +57,40 @@ interface OrdersPayload {
   };
 }
 
-async function safeFetch<T>(url: string, cronSecret: string): Promise<T | null> {
+// 60s was too tight: morning cron fires 3 data-heavy endpoints
+// simultaneously on cold functions, and profit/daily alone can
+// cascade through 3 stores' Shopify orders + FB insights. Bump
+// to 180s and retry once so a single slow cold start doesn't
+// silently zero out the briefing.
+async function safeFetch<T>(
+  url: string,
+  cronSecret: string,
+  attempt = 1
+): Promise<T | null> {
   try {
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${cronSecret}` },
       cache: "no-store",
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.timeout(180_000),
     });
     if (!res.ok) {
-      console.error(`[briefings] ${url} returned ${res.status}`);
+      console.error(
+        `[briefings] ${url} returned ${res.status} (attempt ${attempt})`
+      );
+      if (attempt === 1 && (res.status >= 500 || res.status === 408)) {
+        return safeFetch<T>(url, cronSecret, 2);
+      }
       return null;
     }
     return (await res.json()) as T;
   } catch (err) {
-    console.error(`[briefings] ${url} error:`, err);
+    const message = err instanceof Error ? err.message : "unknown";
+    console.error(`[briefings] ${url} error (attempt ${attempt}):`, message);
+    // Retry once on timeout / network blip. Second failure = give up
+    // so we don't stall the whole cron.
+    if (attempt === 1) {
+      return safeFetch<T>(url, cronSecret, 2);
+    }
     return null;
   }
 }
