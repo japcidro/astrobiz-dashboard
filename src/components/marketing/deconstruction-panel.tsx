@@ -15,6 +15,10 @@ import {
   ExternalLink,
   TrendingUp,
 } from "lucide-react";
+import {
+  PromoteToScalingModal,
+  type PromoteSubject,
+} from "@/components/marketing/promote-to-scaling-modal";
 
 interface AdBrief {
   ad_id: string;
@@ -145,6 +149,10 @@ export function DeconstructionPanel({
   const [analyzeAttempts, setAnalyzeAttempts] = useState<string[]>([]);
   const [showAttempts, setShowAttempts] = useState(false);
   const [activeRow, setActiveRow] = useState<DeconstructionRow | null>(null);
+
+  const [promoteSubject, setPromoteSubject] =
+    useState<PromoteSubject | null>(null);
+  const [promoteToast, setPromoteToast] = useState<string | null>(null);
 
   const adMap = useMemo(() => {
     const m = new Map<string, AdBrief>();
@@ -448,6 +456,30 @@ export function DeconstructionPanel({
                   View analysis
                 </button>
               )}
+              {(() => {
+                const info = scalingMap.get(selectedAdId);
+                const isPromotable =
+                  !info?.in_scaling && !info?.self_is_scaling;
+                if (!isPromotable) return null;
+                return (
+                  <button
+                    onClick={() => {
+                      setPromoteSubject({
+                        ad_id: selectedAd.ad_id,
+                        ad_name: selectedAd.ad,
+                        thumbnail_url: selectedAd.thumbnail_url,
+                        campaign_name: selectedAd.campaign,
+                      });
+                    }}
+                    disabled={analyzing}
+                    title="Copy this ad into your scaling campaign"
+                    className="flex items-center gap-1.5 bg-orange-600 hover:bg-orange-500 text-white text-sm font-medium px-3 py-2 rounded-lg transition-colors disabled:opacity-40 cursor-pointer"
+                  >
+                    <TrendingUp size={14} />
+                    Promote
+                  </button>
+                );
+              })()}
               <button
                 onClick={() => runAnalyze(selectedAdId, selectedIsAnalyzed)}
                 disabled={analyzing}
@@ -797,6 +829,31 @@ export function DeconstructionPanel({
           onRerun={() => runAnalyze(activeRow.ad_id, true)}
           rerunning={analyzing}
         />
+      )}
+
+      {promoteSubject && (
+        <PromoteToScalingModal
+          subject={promoteSubject}
+          onClose={() => setPromoteSubject(null)}
+          onSuccess={({ status }) => {
+            setPromoteSubject(null);
+            setPromoteToast(
+              status === "ACTIVE"
+                ? "Ad copied to scaling campaign (ACTIVE)."
+                : "Ad copied to scaling campaign (PAUSED — review in Ads Manager)."
+            );
+            // Nudge the parent to refresh detection: we invalidate by
+            // re-firing the detect effect. The server cache refreshes
+            // within 5 minutes; meantime the user already sees the toast.
+            setTimeout(() => setPromoteToast(null), 5000);
+          }}
+        />
+      )}
+
+      {promoteToast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-orange-700/90 border border-orange-500 text-white text-sm px-4 py-2.5 rounded-lg shadow-lg max-w-sm">
+          {promoteToast}
+        </div>
       )}
     </div>
   );

@@ -16,11 +16,16 @@ import {
   Zap,
   Bot,
   Sparkles,
+  TrendingUp,
 } from "lucide-react";
 import Link from "next/link";
 import type { DatePreset } from "@/lib/facebook/types";
 import { QuickActionsModal } from "@/components/marketing/quick-actions-modal";
 import { AutopilotModal } from "@/components/marketing/autopilot-modal";
+import {
+  PromoteToScalingModal,
+  type PromoteSubject,
+} from "@/components/marketing/promote-to-scaling-modal";
 
 const DATE_PRESETS: { label: string; value: DatePreset }[] = [
   { label: "Today", value: "today" },
@@ -313,6 +318,10 @@ export default function AdsPage() {
       }
     >
   >(new Map());
+
+  const [promoteSubject, setPromoteSubject] =
+    useState<PromoteSubject | null>(null);
+  const [promoteToast, setPromoteToast] = useState<string | null>(null);
 
   useEffect(() => {
     if (drillLevel !== "ad" || !selectedCampaign || !selectedAdset) return;
@@ -1495,6 +1504,38 @@ export default function AdsPage() {
                               <Sparkles size={13} />
                               Analyze
                             </Link>
+                            {(() => {
+                              const info = scalingInfo.get(
+                                rowData.ad_id as string
+                              );
+                              // Hide Promote on ads that are themselves in
+                              // scaling or whose creative already is.
+                              if (info?.in_scaling || info?.self_is_scaling) {
+                                return null;
+                              }
+                              return (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setPromoteSubject({
+                                      ad_id: rowData.ad_id as string,
+                                      ad_name: rowData.ad as string,
+                                      thumbnail_url:
+                                        (rowData.thumbnail_url as
+                                          | string
+                                          | null) ?? null,
+                                      campaign_name:
+                                        (rowData.campaign as string) ?? null,
+                                    });
+                                  }}
+                                  title="Copy this ad into your scaling campaign"
+                                  className="inline-flex items-center gap-1 text-orange-400 hover:text-orange-300 transition-colors text-xs cursor-pointer"
+                                >
+                                  <TrendingUp size={13} />
+                                  Promote
+                                </button>
+                              );
+                            })()}
                           </div>
                         </td>
                       )}
@@ -1579,6 +1620,30 @@ export default function AdsPage() {
           campaignOptions={campaignOptions}
           onRefreshData={() => fetchData(true)}
         />
+      )}
+
+      {promoteSubject && (
+        <PromoteToScalingModal
+          subject={promoteSubject}
+          onClose={() => setPromoteSubject(null)}
+          onSuccess={({ status }) => {
+            setPromoteSubject(null);
+            setPromoteToast(
+              status === "ACTIVE"
+                ? "Ad copied to scaling campaign (ACTIVE)."
+                : "Ad copied to scaling campaign (PAUSED — review in Ads Manager)."
+            );
+            // Refresh ads + detection so the orange chip appears.
+            fetchData(true);
+            setTimeout(() => setPromoteToast(null), 5000);
+          }}
+        />
+      )}
+
+      {promoteToast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-orange-700/90 border border-orange-500 text-white text-sm px-4 py-2.5 rounded-lg shadow-lg max-w-sm">
+          {promoteToast}
+        </div>
       )}
     </div>
   );

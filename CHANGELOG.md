@@ -1,5 +1,28 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-04-20: Scaling-campaign promote action (Phase B)
+
+Actually copies a testing ad into the store's scaling campaign.
+Per-ad, one click, review-first by default.
+
+- **New endpoint** `POST /api/marketing/scaling/promote` wraps
+  Meta's `POST /{ad_id}/copies`. Safety check before firing:
+  verifies the target adset is actually inside the store's
+  configured scaling campaign so a malformed request can't drop
+  the ad anywhere arbitrary. Logs every promote with employee id,
+  source ad, target adset, and resulting copied_ad_id.
+- **PromoteToScalingModal** — pick store (auto-derived from the
+  ad's campaign name), pick adset (live from FB), choose status
+  option (PAUSED default for review, ACTIVE for fast-path).
+  Surfaces FB error codes + human-readable messages on failure.
+- **Promote button on Ad Performance** — appears beside View /
+  Analyze on ad-level rows, hidden when the ad is already scaled
+  or is itself inside a scaling campaign. Toast + refetch on
+  success so the ↑ SCALED chip updates.
+- **Promote button on Creative Deconstruction** — next to the
+  Analyze / Re-run buttons in the selection action bar, same
+  guard rules.
+
 ## 2026-04-20: Scaling-campaign detection (Phase A)
 
 Links testing-campaign ads to their "already in scaling" status so
