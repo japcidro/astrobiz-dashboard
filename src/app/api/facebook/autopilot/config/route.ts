@@ -39,10 +39,6 @@ export async function PUT(request: Request) {
     enabled: boolean;
     kill_no_purchase_spend_min: number;
     kill_high_cpa_max: number;
-    min_age_hours: number;
-    max_pauses_per_run: number;
-    auto_resume: boolean;
-    resume_lookback_hours: number;
   }>;
 
   const supabase = await createClient();
@@ -69,14 +65,6 @@ export async function PUT(request: Request) {
     update.kill_no_purchase_spend_min = body.kill_no_purchase_spend_min;
   if (typeof body.kill_high_cpa_max === "number")
     update.kill_high_cpa_max = body.kill_high_cpa_max;
-  if (typeof body.min_age_hours === "number")
-    update.min_age_hours = body.min_age_hours;
-  if (typeof body.max_pauses_per_run === "number")
-    update.max_pauses_per_run = body.max_pauses_per_run;
-  if (typeof body.auto_resume === "boolean")
-    update.auto_resume = body.auto_resume;
-  if (typeof body.resume_lookback_hours === "number")
-    update.resume_lookback_hours = body.resume_lookback_hours;
 
   const { data, error } = await supabase
     .from("autopilot_config")

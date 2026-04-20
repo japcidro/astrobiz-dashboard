@@ -14,18 +14,15 @@ create table if not exists autopilot_config (
   -- Rule 2: High CPA. Pause if purchases >= 1 AND CPA > X.
   kill_high_cpa_max numeric(10,2) not null default 380,
 
-  -- Safety rails
-  min_age_hours int not null default 12,
-  max_pauses_per_run int not null default 20,
-
-  -- Auto-resume: if Autopilot paused an ad but stats have since recovered
-  -- (purchases came in after FB API delay), turn it back ON.
-  auto_resume boolean not null default true,
-  resume_lookback_hours int not null default 48,
-
   updated_by uuid references employees(id),
   updated_at timestamptz not null default now()
 );
+
+-- Drop legacy safety-rail / auto-resume columns on existing installations.
+alter table autopilot_config drop column if exists min_age_hours;
+alter table autopilot_config drop column if exists max_pauses_per_run;
+alter table autopilot_config drop column if exists auto_resume;
+alter table autopilot_config drop column if exists resume_lookback_hours;
 
 -- Only one row allowed (singleton)
 create unique index if not exists autopilot_config_singleton

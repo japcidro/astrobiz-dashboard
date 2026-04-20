@@ -20,10 +20,6 @@ interface AutopilotConfig {
   enabled: boolean;
   kill_no_purchase_spend_min: number;
   kill_high_cpa_max: number;
-  min_age_hours: number;
-  max_pauses_per_run: number;
-  auto_resume: boolean;
-  resume_lookback_hours: number;
   updated_at: string;
 }
 
@@ -258,7 +254,7 @@ export function AutopilotModal({
         setRunResult((json.reason as string) ?? "Skipped");
       } else {
         setRunResult(
-          `Scanned ${json.scanned_ads} ads · paused ${json.paused} · resumed ${json.resumed} · skipped young ${json.skipped_young} · errors ${json.errors}`
+          `Scanned ${json.scanned_ads} ads · paused ${json.paused} · errors ${json.errors}`
         );
       }
       await loadActions();
@@ -298,7 +294,7 @@ export function AutopilotModal({
             <h2 className="text-lg font-semibold text-white">Autopilot</h2>
             {enabledBadge}
             <span className="text-xs text-gray-500 ml-2">
-              Auto-pause losers · Auto-resume recoveries · Runs hourly
+              Auto-pause losers · Runs hourly · No safety rails
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -422,62 +418,6 @@ export function AutopilotModal({
                   />
                 </div>
 
-                {/* Auto-resume */}
-                <div className="p-4 bg-gray-800/40 border border-gray-700/50 rounded-xl space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <TrendingUp size={14} className="text-green-400" />
-                      <p className="text-sm text-white font-medium">
-                        Auto-resume (FB delay recovery)
-                      </p>
-                    </div>
-                    <Switch
-                      value={!!form.auto_resume}
-                      onChange={(v) =>
-                        setForm((f) => ({ ...f, auto_resume: v }))
-                      }
-                    />
-                  </div>
-                  <p className="text-xs text-gray-400">
-                    If Autopilot paused an ad but its stats later improved
-                    (FB Insights delay), turn it back ON.
-                  </p>
-                  <RuleRow
-                    label="Only resume pauses from the last"
-                    value={form.resume_lookback_hours ?? 48}
-                    suffix="hours"
-                    onChange={(v) =>
-                      setForm((f) => ({
-                        ...f,
-                        resume_lookback_hours: v,
-                      }))
-                    }
-                  />
-                </div>
-
-                {/* Safety rails */}
-                <div className="p-4 bg-gray-800/40 border border-gray-700/50 rounded-xl space-y-3">
-                  <p className="text-sm text-white font-medium">
-                    Safety rails
-                  </p>
-                  <RuleRow
-                    label="Skip ads younger than"
-                    value={form.min_age_hours ?? 12}
-                    suffix="hours"
-                    onChange={(v) =>
-                      setForm((f) => ({ ...f, min_age_hours: v }))
-                    }
-                  />
-                  <RuleRow
-                    label="Max pauses per run"
-                    value={form.max_pauses_per_run ?? 20}
-                    suffix="ads"
-                    onChange={(v) =>
-                      setForm((f) => ({ ...f, max_pauses_per_run: v }))
-                    }
-                  />
-                </div>
-
                 <div className="flex items-center justify-end gap-2">
                   <span className="text-xs text-gray-500">
                     Last updated:{" "}
@@ -576,8 +516,7 @@ export function AutopilotModal({
           {tab === "activity" && (
             <div>
               <p className="text-sm text-gray-400 mb-3">
-                Last 100 actions taken by Autopilot. Resumes unlink from
-                their original pause.
+                Last 100 actions taken by Autopilot.
               </p>
               {loadingActions ? (
                 <SkeletonBlock />

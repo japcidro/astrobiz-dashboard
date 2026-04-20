@@ -53,6 +53,7 @@ export async function updateSession(request: NextRequest) {
     "/api/auth/callback",
     "/api/shopify/auth/callback",
     "/api/cron/",
+    "/api/facebook/autopilot/run",
     "/privacy-policy",
     "/terms-of-service",
     "/data-deletion",
