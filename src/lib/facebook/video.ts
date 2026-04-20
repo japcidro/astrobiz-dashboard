@@ -106,22 +106,21 @@ async function resolveVideoSource(
   const tried: string[] = [];
 
   // Attempt 1: direct video lookup with the current (user/SU) token.
+  // Keep the field list minimal — muted_video_url is no longer a valid
+  // field on Video, requesting it triggers a 400 that kills the whole
+  // response including `source`.
   try {
     type VideoResp = {
       source?: string | null;
       permalink_url?: string | null;
-      muted_video_url?: string | null;
       from?: { id?: string };
     };
     const v = await fbGet<VideoResp>(
-      `/${videoId}?fields=source,permalink_url,muted_video_url,from`,
+      `/${videoId}?fields=source,permalink_url,from`,
       token
     );
     tried.push("direct /{video_id} with SU token");
     if (v.source) return { source: v.source, note: "direct", tried };
-    if (v.muted_video_url) {
-      return { source: v.muted_video_url, note: "muted_video_url", tried };
-    }
 
     // Attempt 2: page access token hop. This is THE reliable path for
     // dark-post videos — even a SU with full control on the Page has
@@ -131,6 +130,7 @@ async function resolveVideoSource(
     const pageId = pageIdFromVideo ?? pageIdFromStory;
     if (pageId) {
       try {
+        // `tasks` needs pages_read_engagement, so ask only for access_token.
         const pageTokenResp = await fbGet<{ access_token?: string }>(
           `/${pageId}?fields=access_token`,
           token
@@ -143,19 +143,12 @@ async function resolveVideoSource(
         );
         if (pageToken) {
           const vp = await fbGet<VideoResp>(
-            `/${videoId}?fields=source,muted_video_url`,
+            `/${videoId}?fields=source`,
             pageToken
           );
           tried.push("direct /{video_id} with PAGE token");
           if (vp.source) {
             return { source: vp.source, note: "page token", tried };
-          }
-          if (vp.muted_video_url) {
-            return {
-              source: vp.muted_video_url,
-              note: "page token (muted)",
-              tried,
-            };
           }
         }
       } catch (err) {
@@ -211,14 +204,14 @@ async function resolveVideoSource(
   );
   probes.push(
     await probe(
-      `/${videoId}?fields=source,muted_video_url,permalink_url,from,status,permissions`,
+      `/${videoId}?fields=source,permalink_url,from,status`,
       token
     )
   );
   if (storyId) {
     const pageId = storyId.split("_")[0];
     probes.push(
-      await probe(`/${pageId}?fields=id,name,access_token,tasks`, token)
+      await probe(`/${pageId}?fields=id,name,access_token`, token)
     );
   } else {
     probes.push("(no story_id — can't derive page_id)");
