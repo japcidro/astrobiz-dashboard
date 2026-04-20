@@ -10,7 +10,14 @@ const FB_API_BASE = "https://graph.facebook.com/v21.0";
 interface PromoteBody {
   ad_id?: string;
   target_store?: string;
+  // Mode 1: put the ad in an existing adset.
   target_adset_id?: string;
+  // Mode 2: first create a new adset by cloning a template inside the
+  //         scaling campaign, then put the ad in that new adset.
+  new_adset?: {
+    template_adset_id: string;
+    name: string;
+  };
   status_option?: "PAUSED" | "ACTIVE";
   // Optional name override; if omitted FB defaults to "Copy of {ad_name}".
   name_suffix?: string | null;
@@ -28,13 +35,34 @@ export async function POST(request: Request) {
   const body = (await request.json()) as PromoteBody;
   const adId = (body.ad_id ?? "").trim();
   const targetStore = (body.target_store ?? "").trim();
-  const targetAdsetId = (body.target_adset_id ?? "").trim();
+  let targetAdsetId = (body.target_adset_id ?? "").trim();
+  const newAdsetReq = body.new_adset;
   const statusOption =
     body.status_option === "ACTIVE" ? "ACTIVE" : "PAUSED";
 
-  if (!adId || !targetStore || !targetAdsetId) {
+  if (!adId || !targetStore) {
     return Response.json(
-      { error: "ad_id, target_store, target_adset_id are required" },
+      { error: "ad_id and target_store are required" },
+      { status: 400 }
+    );
+  }
+  if (!targetAdsetId && !newAdsetReq) {
+    return Response.json(
+      {
+        error:
+          "Either target_adset_id or new_adset (template + name) is required",
+      },
+      { status: 400 }
+    );
+  }
+  if (
+    newAdsetReq &&
+    (!newAdsetReq.template_adset_id || !newAdsetReq.name?.trim())
+  ) {
+    return Response.json(
+      {
+        error: "new_adset.template_adset_id and new_adset.name are required",
+      },
       { status: 400 }
     );
   }
@@ -71,33 +99,142 @@ export async function POST(request: Request) {
     );
   }
 
-  // Safety: verify the target adset actually belongs to this store's
-  // scaling campaign. Prevents a malformed request from dropping the ad
-  // into an arbitrary adset on any account the token touches.
-  try {
-    const verifyRes = await fetch(
-      `${FB_API_BASE}/${targetAdsetId}?fields=campaign_id&access_token=${encodeURIComponent(token)}`,
-      { cache: "no-store" }
-    );
-    const verifyJson = await verifyRes.json();
-    if (!verifyRes.ok) {
-      throw new Error(verifyJson?.error?.message ?? "adset lookup failed");
-    }
-    if (verifyJson.campaign_id !== scalingRow.campaign_id) {
+  // If creating a new adset: clone a template (inside the same scaling
+  // campaign), rename it, and use its id as the target. Template must
+  // belong to the configured scaling campaign for safety.
+  let createdAdsetId: string | null = null;
+  if (newAdsetReq) {
+    const templateId = newAdsetReq.template_adset_id;
+    const newName = newAdsetReq.name.trim();
+
+    // Verify template is inside the scaling campaign.
+    try {
+      const verifyRes = await fetch(
+        `${FB_API_BASE}/${templateId}?fields=campaign_id&access_token=${encodeURIComponent(token)}`,
+        { cache: "no-store" }
+      );
+      const verifyJson = await verifyRes.json();
+      if (!verifyRes.ok) {
+        throw new Error(
+          verifyJson?.error?.message ?? "template lookup failed"
+        );
+      }
+      if (verifyJson.campaign_id !== scalingRow.campaign_id) {
+        return Response.json(
+          {
+            error: `Template adset is not inside the scaling campaign for "${targetStore}".`,
+          },
+          { status: 400 }
+        );
+      }
+    } catch (err) {
       return Response.json(
         {
-          error: `Target adset is not inside the scaling campaign for "${targetStore}". Expected campaign ${scalingRow.campaign_id}, got ${verifyJson.campaign_id}.`,
+          error: `Could not verify template adset: ${err instanceof Error ? err.message : "unknown"}`,
         },
-        { status: 400 }
+        { status: 502 }
       );
     }
-  } catch (err) {
-    return Response.json(
-      {
-        error: `Could not verify target adset: ${err instanceof Error ? err.message : "unknown"}`,
-      },
-      { status: 502 }
-    );
+
+    // Clone the template. deep_copy=false keeps it at the adset level
+    // and does not deep-copy the creative — we only want the targeting
+    // and budget scaffolding.
+    try {
+      const copyParams = new URLSearchParams({
+        deep_copy: "false",
+        status_option: "PAUSED",
+      });
+      const copyRes = await fetch(
+        `${FB_API_BASE}/${templateId}/copies?access_token=${encodeURIComponent(token)}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: copyParams.toString(),
+        }
+      );
+      const copyJson = await copyRes.json();
+      if (!copyRes.ok) {
+        const msg =
+          copyJson?.error?.message ??
+          copyJson?.error_user_msg ??
+          `FB adset /copies ${copyRes.status}`;
+        return Response.json(
+          { error: `Adset clone failed: ${msg}` },
+          { status: 502 }
+        );
+      }
+      createdAdsetId = (copyJson?.copied_adset_id ?? null) as string | null;
+      if (!createdAdsetId) {
+        return Response.json(
+          { error: "Adset clone returned no id" },
+          { status: 502 }
+        );
+      }
+    } catch (err) {
+      return Response.json(
+        {
+          error: `Adset clone failed: ${err instanceof Error ? err.message : "unknown"}`,
+        },
+        { status: 502 }
+      );
+    }
+
+    // Rename the new adset.
+    try {
+      const renameParams = new URLSearchParams({ name: newName });
+      const renameRes = await fetch(
+        `${FB_API_BASE}/${createdAdsetId}?access_token=${encodeURIComponent(token)}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: renameParams.toString(),
+        }
+      );
+      if (!renameRes.ok) {
+        const renameJson = await renameRes.json().catch(() => ({}));
+        console.warn(
+          `[scaling/promote] rename failed for ${createdAdsetId}:`,
+          renameJson?.error?.message ?? renameRes.status
+        );
+        // Non-fatal: the adset still exists with the default name.
+      }
+    } catch {
+      // Non-fatal, continue.
+    }
+
+    targetAdsetId = createdAdsetId;
+  } else {
+    // Safety: verify the existing target adset belongs to this store's
+    // scaling campaign. Prevents dropping the ad anywhere arbitrary.
+    try {
+      const verifyRes = await fetch(
+        `${FB_API_BASE}/${targetAdsetId}?fields=campaign_id&access_token=${encodeURIComponent(token)}`,
+        { cache: "no-store" }
+      );
+      const verifyJson = await verifyRes.json();
+      if (!verifyRes.ok) {
+        throw new Error(verifyJson?.error?.message ?? "adset lookup failed");
+      }
+      if (verifyJson.campaign_id !== scalingRow.campaign_id) {
+        return Response.json(
+          {
+            error: `Target adset is not inside the scaling campaign for "${targetStore}". Expected campaign ${scalingRow.campaign_id}, got ${verifyJson.campaign_id}.`,
+          },
+          { status: 400 }
+        );
+      }
+    } catch (err) {
+      return Response.json(
+        {
+          error: `Could not verify target adset: ${err instanceof Error ? err.message : "unknown"}`,
+        },
+        { status: 502 }
+      );
+    }
   }
 
   // Fire the Meta copy. Uses application/x-www-form-urlencoded for the
@@ -153,7 +290,7 @@ export async function POST(request: Request) {
   }
 
   console.info(
-    `[scaling/promote] employee=${employee.id} ad=${adId} → adset=${targetAdsetId} (store=${targetStore}) copied_ad=${copiedAdId} status=${statusOption}`
+    `[scaling/promote] employee=${employee.id} ad=${adId} → adset=${targetAdsetId} (store=${targetStore}) copied_ad=${copiedAdId} status=${statusOption} new_adset=${createdAdsetId ?? "no"}`
   );
 
   return Response.json({
@@ -161,6 +298,7 @@ export async function POST(request: Request) {
     copied_ad_id: copiedAdId,
     status: statusOption,
     target_adset_id: targetAdsetId,
+    created_adset_id: createdAdsetId,
     target_campaign_id: scalingRow.campaign_id,
     target_campaign_name: scalingRow.campaign_name,
   });

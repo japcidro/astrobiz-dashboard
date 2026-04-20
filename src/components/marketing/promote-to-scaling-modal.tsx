@@ -80,6 +80,13 @@ export function PromoteToScalingModal({
     "PAUSED"
   );
 
+  // "Existing" = drop ad into a chosen adset.
+  // "New"      = clone a template adset in the scaling campaign, rename it,
+  //              then drop the ad in there.
+  const [mode, setMode] = useState<"existing" | "new">("existing");
+  const [newAdsetName, setNewAdsetName] = useState("");
+  const [templateAdsetId, setTemplateAdsetId] = useState("");
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fbCode, setFbCode] = useState<number | null>(null);
@@ -146,8 +153,11 @@ export function PromoteToScalingModal({
     [configs]
   );
 
-  const canSubmit =
-    !!selectedStore && !!selectedAdsetId && !submitting && !loadingAdsets;
+  const canSubmit = (() => {
+    if (submitting || loadingAdsets || !selectedStore) return false;
+    if (mode === "existing") return !!selectedAdsetId;
+    return !!templateAdsetId && newAdsetName.trim().length >= 3;
+  })();
 
   async function handleSubmit() {
     if (!canSubmit) return;
@@ -155,15 +165,23 @@ export function PromoteToScalingModal({
     setError(null);
     setFbCode(null);
     try {
+      const payload: Record<string, unknown> = {
+        ad_id: subject.ad_id,
+        target_store: selectedStore,
+        status_option: statusOption,
+      };
+      if (mode === "existing") {
+        payload.target_adset_id = selectedAdsetId;
+      } else {
+        payload.new_adset = {
+          template_adset_id: templateAdsetId,
+          name: newAdsetName.trim(),
+        };
+      }
       const res = await fetch("/api/marketing/scaling/promote", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ad_id: subject.ad_id,
-          target_store: selectedStore,
-          target_adset_id: selectedAdsetId,
-          status_option: statusOption,
-        }),
+        body: JSON.stringify(payload),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -273,8 +291,38 @@ export function PromoteToScalingModal({
             )}
           </div>
 
-          {/* Adset picker */}
+          {/* Mode toggle */}
           {selectedStore && (
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setMode("existing")}
+                disabled={submitting}
+                className={`flex-1 text-xs px-3 py-2 rounded-lg border transition-colors cursor-pointer ${
+                  mode === "existing"
+                    ? "bg-gray-700 border-gray-500 text-white"
+                    : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500"
+                }`}
+              >
+                Existing adset
+              </button>
+              <button
+                type="button"
+                onClick={() => setMode("new")}
+                disabled={submitting}
+                className={`flex-1 text-xs px-3 py-2 rounded-lg border transition-colors cursor-pointer ${
+                  mode === "new"
+                    ? "bg-gray-700 border-gray-500 text-white"
+                    : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500"
+                }`}
+              >
+                + New adset
+              </button>
+            </div>
+          )}
+
+          {/* Existing-adset picker */}
+          {selectedStore && mode === "existing" && (
             <div>
               <label className="block text-xs text-gray-400 mb-1.5">
                 Target adset{" "}
@@ -293,8 +341,8 @@ export function PromoteToScalingModal({
                 </div>
               ) : adsets.length === 0 ? (
                 <div className="text-xs text-yellow-400 p-2 bg-yellow-900/20 border border-yellow-700/40 rounded-lg">
-                  No adsets found in the configured scaling campaign.
-                  Create one in Ads Manager first.
+                  No adsets in scaling campaign. Switch to &quot;+ New adset&quot;
+                  to clone one into place.
                 </div>
               ) : (
                 <select
@@ -312,6 +360,63 @@ export function PromoteToScalingModal({
                   ))}
                 </select>
               )}
+            </div>
+          )}
+
+          {/* New-adset flow */}
+          {selectedStore && mode === "new" && (
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1.5">
+                  Template adset (targeting + budget gets cloned)
+                </label>
+                {loadingAdsets ? (
+                  <div className="flex items-center gap-2 text-xs text-gray-500 py-2">
+                    <Loader2 size={12} className="animate-spin" />
+                    Loading adsets from scaling campaign…
+                  </div>
+                ) : adsets.length === 0 ? (
+                  <div className="text-xs text-yellow-400 p-2 bg-yellow-900/20 border border-yellow-700/40 rounded-lg">
+                    No adsets yet. Create one manually in Ads Manager first
+                    — the dashboard clones an existing one to save the
+                    targeting/budget setup.
+                  </div>
+                ) : (
+                  <select
+                    value={templateAdsetId}
+                    onChange={(e) => setTemplateAdsetId(e.target.value)}
+                    disabled={submitting}
+                    className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500"
+                  >
+                    <option value="">— Pick template adset —</option>
+                    {adsets.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                        {a.effective_status === "PAUSED" ? " (paused)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <div>
+                <label className="block text-xs text-gray-400 mb-1.5">
+                  New adset name{" "}
+                  <span className="text-gray-500">(min 3 chars)</span>
+                </label>
+                <input
+                  type="text"
+                  value={newAdsetName}
+                  onChange={(e) => setNewAdsetName(e.target.value)}
+                  disabled={submitting}
+                  placeholder="e.g. ANGLE 24 — WINNER"
+                  className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500"
+                />
+                <p className="text-[11px] text-gray-500 mt-1">
+                  The new adset will start PAUSED regardless of the setting
+                  below. The ad itself respects the &quot;After copy&quot;
+                  choice.
+                </p>
+              </div>
             </div>
           )}
 
