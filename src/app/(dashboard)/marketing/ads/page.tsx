@@ -370,51 +370,59 @@ export default function AdsPage() {
     };
   }, [drillLevel, selectedCampaign, selectedAdset, allRows, loadedCreatives]);
 
-  // Scaling detection — run at ad-level drill. Server caches per-campaign
-  // for 5 min so repeated drills aren't pounding FB.
+  // Scaling detection — run on every ads load (not just at ad-level drill)
+  // so adset + campaign rollups can show "N of M scaled" without the user
+  // needing to click into each one. Server caches per-campaign for 5 min
+  // so the 500-cap batch call is cheap on repeat.
   useEffect(() => {
-    if (drillLevel !== "ad" || !selectedCampaign || !selectedAdset) return;
-    const adIds = allRows
-      .filter(
-        (r) => r.campaign === selectedCampaign && r.adset === selectedAdset
-      )
-      .map((r) => r.ad_id);
+    const adIds = allRows.map((r) => r.ad_id).filter(Boolean);
     if (adIds.length === 0) return;
 
     let cancelled = false;
     (async () => {
-      try {
-        const res = await fetch("/api/marketing/scaling/detect", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ad_ids: adIds }),
-        });
-        if (!res.ok) return;
-        const json = (await res.json()) as {
-          results?: Record<
-            string,
-            {
-              in_scaling: boolean;
-              scaled_in_store: string | null;
-              self_is_scaling: boolean;
-            }
-          >;
-        };
-        if (cancelled) return;
-        const next = new Map(scalingInfo);
-        for (const [id, info] of Object.entries(json.results ?? {})) {
-          next.set(id, info);
+      // Chunk into <=500 per request — the endpoint enforces that cap.
+      const CHUNK = 500;
+      const merged = new Map<
+        string,
+        {
+          in_scaling: boolean;
+          scaled_in_store: string | null;
+          self_is_scaling: boolean;
         }
-        setScalingInfo(next);
-      } catch {
-        // non-fatal
+      >();
+      for (let i = 0; i < adIds.length; i += CHUNK) {
+        const slice = adIds.slice(i, i + CHUNK);
+        try {
+          const res = await fetch("/api/marketing/scaling/detect", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ad_ids: slice }),
+          });
+          if (!res.ok) continue;
+          const json = (await res.json()) as {
+            results?: Record<
+              string,
+              {
+                in_scaling: boolean;
+                scaled_in_store: string | null;
+                self_is_scaling: boolean;
+              }
+            >;
+          };
+          for (const [id, info] of Object.entries(json.results ?? {})) {
+            merged.set(id, info);
+          }
+        } catch {
+          // non-fatal — badges just won't appear for this chunk
+        }
+        if (cancelled) return;
       }
+      if (!cancelled) setScalingInfo(merged);
     })();
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drillLevel, selectedCampaign, selectedAdset]);
+  }, [allRows]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -561,6 +569,38 @@ export default function AdsPage() {
 
   // Raw ad rows in current scope (respects account/status filter + drill)
   // Used by Quick Actions so bulk pause/boost only affects what user sees.
+  // Rollup of "how many ads in this entity are already scaled".
+  // Keyed by entity_id (campaign_id OR adset_id). Used to render the
+  // "↑ N/M SCALED" chip on aggregate rows without needing to drill.
+  const scalingRollup = useMemo(() => {
+    const byCampaign = new Map<string, { scaled: number; total: number }>();
+    const byAdset = new Map<string, { scaled: number; total: number }>();
+    for (const r of allRows) {
+      const info = scalingInfo.get(r.ad_id);
+      const isScaled = info?.in_scaling === true;
+      const selfScaling = info?.self_is_scaling === true;
+      // "self_is_scaling" means the ad itself is inside the scaling
+      // campaign — don't count it as "scaled" (it's the destination,
+      // not the source). A row's scaling ads are either the testing
+      // ones that got promoted, or ads whose creative is elsewhere.
+      const cId = r.campaign_id;
+      const aId = r.adset_id;
+      if (cId) {
+        const c = byCampaign.get(cId) ?? { scaled: 0, total: 0 };
+        c.total += 1;
+        if (isScaled && !selfScaling) c.scaled += 1;
+        byCampaign.set(cId, c);
+      }
+      if (aId) {
+        const a = byAdset.get(aId) ?? { scaled: 0, total: 0 };
+        a.total += 1;
+        if (isScaled && !selfScaling) a.scaled += 1;
+        byAdset.set(aId, a);
+      }
+    }
+    return { byCampaign, byAdset };
+  }, [allRows, scalingInfo]);
+
   const scopedRawRows = useMemo(() => {
     if (drillLevel === "campaign") return filteredRows;
     if (drillLevel === "adset" && selectedCampaign) {
@@ -1364,6 +1404,23 @@ export default function AdsPage() {
                           })()}
                           {drillLevel !== "ad" &&
                             renderBudgetBadge(entityId, name)}
+                          {drillLevel !== "ad" &&
+                            (() => {
+                              const map =
+                                drillLevel === "campaign"
+                                  ? scalingRollup.byCampaign
+                                  : scalingRollup.byAdset;
+                              const stat = map.get(entityId);
+                              if (!stat || stat.scaled === 0) return null;
+                              return (
+                                <span
+                                  title={`${stat.scaled} of ${stat.total} ads already have a creative live in a scaling campaign`}
+                                  className="text-[10px] px-1.5 py-0.5 rounded bg-orange-600/20 text-orange-300 font-medium flex-shrink-0"
+                                >
+                                  ↑ {stat.scaled}/{stat.total} SCALED
+                                </span>
+                              );
+                            })()}
                         </span>
                       </td>
                       {/* Status (ad level) */}
