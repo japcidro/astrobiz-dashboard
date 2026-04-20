@@ -127,38 +127,6 @@ export async function GET() {
           store.api_token
         );
 
-        // Shopify orders API doesn't include variant.barcode in line_items —
-        // fetch each variant's barcode separately so pack verify can match
-        // custom barcodes set in Shopify admin.
-        const variantIds = new Set<number>();
-        for (const raw of rawOrders) {
-          for (const li of raw.line_items || []) {
-            if (li.variant_id) variantIds.add(li.variant_id);
-          }
-        }
-        const barcodeMap = new Map<number, string>();
-        await Promise.all(
-          Array.from(variantIds).map(async (vid) => {
-            try {
-              const res = await fetch(
-                `https://${store.store_url}/admin/api/${SHOPIFY_API_VERSION}/variants/${vid}.json?fields=id,barcode`,
-                {
-                  headers: { "X-Shopify-Access-Token": store.api_token },
-                  cache: "no-store",
-                }
-              );
-              if (res.ok) {
-                const json = await res.json();
-                if (json.variant?.barcode) {
-                  barcodeMap.set(vid, json.variant.barcode);
-                }
-              }
-            } catch {
-              // swallow — fall back to null barcode for this variant
-            }
-          })
-        );
-
         for (const raw of rawOrders) {
           const lineItems: OrderLineItem[] = (raw.line_items || []).map(
             (li) => ({
@@ -166,7 +134,7 @@ export async function GET() {
               title: li.title,
               variant_title: li.variant_title || null,
               sku: li.sku || null,
-              barcode: barcodeMap.get(li.variant_id) || li.barcode || null,
+              barcode: li.barcode || null,
               quantity: li.quantity,
               price: li.price,
               variant_id: li.variant_id,
