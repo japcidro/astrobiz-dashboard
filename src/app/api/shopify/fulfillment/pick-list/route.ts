@@ -97,7 +97,9 @@ export async function GET(request: Request) {
     return Response.json({ items: [], order_count: 0, total_items: 0 });
   }
 
-  // Fetch barcodes from Shopify variants (line_items don't include barcode)
+  // Fetch current variant SKU + barcode from Shopify — order line_items snapshot
+  // the SKU at order-creation time, so if the product's SKU was changed after
+  // the order was placed, we need the CURRENT SKU to match today's labels.
   const variantIds = new Set<number>();
   for (const order of allOrders) {
     for (const li of order.line_items) {
@@ -105,21 +107,23 @@ export async function GET(request: Request) {
     }
   }
 
-  const barcodeMap = new Map<number, string>();
-  // Fetch variants in parallel per store (Shopify has variant endpoint)
+  const variantMap = new Map<number, { sku: string | null; barcode: string | null }>();
   await Promise.all(
     stores.map(async (store) => {
       for (const vid of variantIds) {
-        if (barcodeMap.has(vid)) continue;
+        if (variantMap.has(vid)) continue;
         try {
           const res = await fetch(
-            `https://${store.store_url}/admin/api/${SHOPIFY_API_VERSION}/variants/${vid}.json?fields=id,barcode`,
+            `https://${store.store_url}/admin/api/${SHOPIFY_API_VERSION}/variants/${vid}.json?fields=id,sku,barcode`,
             { headers: { "X-Shopify-Access-Token": store.api_token }, cache: "no-store" }
           );
           if (res.ok) {
             const json = await res.json();
-            if (json.variant?.barcode) {
-              barcodeMap.set(vid, json.variant.barcode);
+            if (json.variant) {
+              variantMap.set(vid, {
+                sku: json.variant.sku || null,
+                barcode: json.variant.barcode || null,
+              });
             }
           }
         } catch {}
@@ -134,19 +138,20 @@ export async function GET(request: Request) {
     binMap.set((b.sku || "").toLowerCase(), { bin_code: b.bin_code, zone: b.zone });
   }
 
-  // Consolidate by SKU
+  // Consolidate by current SKU (falls back to historical sku if variant fetch failed)
   const skuMap = new Map<string, PickListItem>();
 
   for (const order of allOrders) {
     for (const li of order.line_items) {
-      const sku = li.sku || `NO-SKU-${li.id}`;
+      const current = variantMap.get(li.variant_id);
+      const sku = current?.sku || li.sku || `NO-SKU-${li.id}`;
       const key = sku.toLowerCase();
 
       if (!skuMap.has(key)) {
         const bin = binMap.get(key);
         skuMap.set(key, {
           sku,
-          barcode: barcodeMap.get(li.variant_id) || li.barcode || null,
+          barcode: current?.barcode || li.barcode || null,
           product_title: li.title,
           variant_title: li.variant_title,
           total_qty: 0,
