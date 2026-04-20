@@ -82,7 +82,8 @@ export async function collectBriefingData(
   type: BriefingType,
   period: PeriodRange
 ): Promise<BriefingData> {
-  // 1. P&L from /api/profit/daily
+  // 1. P&L from /api/profit/daily — refresh=1 bypasses stale cache that
+  // may have been populated before the RLS fix landed.
   const pnlPromise = safeFetch<{
     rows: ProfitRow[];
     summary: {
@@ -98,6 +99,7 @@ export async function collectBriefingData(
     `${baseUrl}/api/profit/daily?${new URLSearchParams({
       store: "ALL",
       date_filter: period.dateFilter,
+      refresh: "1",
     })}`,
     cronSecret
   );
@@ -107,6 +109,7 @@ export async function collectBriefingData(
     `${baseUrl}/api/facebook/all-ads?${new URLSearchParams({
       date_preset: period.datePreset,
       account: "ALL",
+      refresh: "1",
     })}`,
     cronSecret
   );
@@ -116,6 +119,7 @@ export async function collectBriefingData(
     `${baseUrl}/api/shopify/orders?${new URLSearchParams({
       store: "ALL",
       date_filter: period.dateFilter,
+      refresh: "1",
     })}`,
     cronSecret
   );
@@ -327,6 +331,7 @@ export async function collectBriefingData(
       store: "ALL",
       date_from: phtDateString(prevStart),
       date_to: phtDateString(prevEnd),
+      refresh: "1",
     })}`,
     cronSecret
   );
