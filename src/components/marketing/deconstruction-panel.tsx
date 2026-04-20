@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   Eye,
   ExternalLink,
+  TrendingUp,
 } from "lucide-react";
 
 interface AdBrief {
@@ -119,6 +120,17 @@ export function DeconstructionPanel({
   const [loadingList, setLoadingList] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [storeNames, setStoreNames] = useState<string[]>([]);
+  // ad_id → "in scaling" detection result from /api/marketing/scaling/detect
+  const [scalingMap, setScalingMap] = useState<
+    Map<
+      string,
+      {
+        in_scaling: boolean;
+        scaled_in_store: string | null;
+        self_is_scaling: boolean;
+      }
+    >
+  >(new Map());
 
   // Picker state
   const [selectedAdId, setSelectedAdId] = useState<string>("");
@@ -176,6 +188,56 @@ export function DeconstructionPanel({
       cancelled = true;
     };
   }, []);
+
+  // Detection: for every ad currently in view, ask the server which ones
+  // already have a matching creative_id live in a scaling campaign.
+  // Runs once per {ads} batch and is cached by the server (5 min).
+  useEffect(() => {
+    let cancelled = false;
+    if (ads.length === 0) {
+      setScalingMap(new Map());
+      return;
+    }
+    (async () => {
+      try {
+        const adIds = ads.slice(0, 500).map((a) => a.ad_id);
+        const res = await fetch("/api/marketing/scaling/detect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ad_ids: adIds }),
+        });
+        if (!res.ok) return;
+        const json = (await res.json()) as {
+          results?: Record<
+            string,
+            {
+              in_scaling: boolean;
+              scaled_in_store: string | null;
+              self_is_scaling: boolean;
+            }
+          >;
+        };
+        if (cancelled) return;
+        const next = new Map<
+          string,
+          {
+            in_scaling: boolean;
+            scaled_in_store: string | null;
+            self_is_scaling: boolean;
+          }
+        >();
+        for (const [id, info] of Object.entries(json.results ?? {})) {
+          next.set(id, info);
+        }
+        setScalingMap(next);
+      } catch {
+        // non-fatal — badges just won't appear
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ads]);
 
   const rowByAdId = useMemo(() => {
     const m = new Map<string, DeconstructionRow>();
@@ -566,6 +628,34 @@ export function DeconstructionPanel({
                         {a.store}
                       </span>
                       <div className="absolute top-2 right-2 flex items-center gap-1">
+                        {(() => {
+                          const info = scalingMap.get(a.ad_id);
+                          if (info?.self_is_scaling) {
+                            return (
+                              <span
+                                title="This ad itself is inside a scaling campaign"
+                                className="inline-flex items-center gap-1 bg-orange-600/90 text-white text-[10px] font-medium px-2 py-0.5 rounded"
+                              >
+                                <TrendingUp size={10} /> In scaling
+                              </span>
+                            );
+                          }
+                          if (info?.in_scaling) {
+                            return (
+                              <span
+                                title={
+                                  info.scaled_in_store
+                                    ? `Already scaled in ${info.scaled_in_store}`
+                                    : "Already scaled"
+                                }
+                                className="inline-flex items-center gap-1 bg-orange-600/90 text-white text-[10px] font-medium px-2 py-0.5 rounded"
+                              >
+                                <TrendingUp size={10} /> Scaled
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
                         {isAnalyzed && (
                           <span className="inline-flex items-center gap-1 bg-emerald-600/90 text-white text-[10px] font-medium px-2 py-0.5 rounded">
                             <CheckCircle2 size={10} /> Analyzed

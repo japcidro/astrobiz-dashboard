@@ -301,6 +301,19 @@ export default function AdsPage() {
     new Set()
   );
 
+  // "Already in scaling" detection (see /api/marketing/scaling/detect).
+  // Keyed by ad_id. Populated when drilled to ad level.
+  const [scalingInfo, setScalingInfo] = useState<
+    Map<
+      string,
+      {
+        in_scaling: boolean;
+        scaled_in_store: string | null;
+        self_is_scaling: boolean;
+      }
+    >
+  >(new Map());
+
   useEffect(() => {
     if (drillLevel !== "ad" || !selectedCampaign || !selectedAdset) return;
 
@@ -356,6 +369,52 @@ export default function AdsPage() {
       cancelled = true;
     };
   }, [drillLevel, selectedCampaign, selectedAdset, allRows, loadedCreatives]);
+
+  // Scaling detection — run at ad-level drill. Server caches per-campaign
+  // for 5 min so repeated drills aren't pounding FB.
+  useEffect(() => {
+    if (drillLevel !== "ad" || !selectedCampaign || !selectedAdset) return;
+    const adIds = allRows
+      .filter(
+        (r) => r.campaign === selectedCampaign && r.adset === selectedAdset
+      )
+      .map((r) => r.ad_id);
+    if (adIds.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/marketing/scaling/detect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ad_ids: adIds }),
+        });
+        if (!res.ok) return;
+        const json = (await res.json()) as {
+          results?: Record<
+            string,
+            {
+              in_scaling: boolean;
+              scaled_in_store: string | null;
+              self_is_scaling: boolean;
+            }
+          >;
+        };
+        if (cancelled) return;
+        const next = new Map(scalingInfo);
+        for (const [id, info] of Object.entries(json.results ?? {})) {
+          next.set(id, info);
+        }
+        setScalingInfo(next);
+      } catch {
+        // non-fatal
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drillLevel, selectedCampaign, selectedAdset]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -1310,7 +1369,39 @@ export default function AdsPage() {
                       {/* Status (ad level) */}
                       {drillLevel === "ad" && (
                         <td className="px-3 py-2.5 text-left whitespace-nowrap">
-                          {renderStatusBadge(rowData.status as string)}
+                          <div className="flex items-center gap-1.5">
+                            {renderStatusBadge(rowData.status as string)}
+                            {(() => {
+                              const info = scalingInfo.get(
+                                rowData.ad_id as string
+                              );
+                              if (info?.self_is_scaling) {
+                                return (
+                                  <span
+                                    title="This ad is inside a scaling campaign"
+                                    className="text-[10px] px-1.5 py-0.5 rounded bg-orange-600/20 text-orange-300 font-medium"
+                                  >
+                                    ↑ SCALING
+                                  </span>
+                                );
+                              }
+                              if (info?.in_scaling) {
+                                return (
+                                  <span
+                                    title={
+                                      info.scaled_in_store
+                                        ? `Creative already scaled in ${info.scaled_in_store}`
+                                        : "Creative already scaled"
+                                    }
+                                    className="text-[10px] px-1.5 py-0.5 rounded bg-orange-600/20 text-orange-300 font-medium"
+                                  >
+                                    ↑ SCALED
+                                  </span>
+                                );
+                              }
+                              return null;
+                            })()}
+                          </div>
                         </td>
                       )}
                       {/* Count (aggregated levels) */}

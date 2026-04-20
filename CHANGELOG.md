@@ -1,5 +1,33 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-04-20: Scaling-campaign detection (Phase A)
+
+Links testing-campaign ads to their "already in scaling" status so
+you can tell at a glance which creatives have already been promoted.
+
+- **Per-store scaling mapping**. New `store_scaling_campaigns`
+  table; admin picks one FB campaign per Shopify store in
+  Admin → Settings → Scaling Campaigns. Dropdown lists all
+  active + paused campaigns across your ad accounts.
+- **Creative-ID match**. `POST /api/marketing/scaling/detect`
+  takes ad_ids, resolves each creative_id via a batch Graph call,
+  and compares against creative_ids live in every configured
+  scaling campaign. Server-side 5-minute cache per scaling
+  campaign so detection doesn't re-walk Graph on every view.
+- **Badges**:
+  - **Ad Performance** (ad-level drill) — orange "↑ SCALED" chip
+    beside the status badge; "↑ SCALING" if the row itself is
+    inside a scaling campaign.
+  - **Creative Deconstruction** cards — same badge, rendered on
+    the thumbnail next to "✓ Analyzed".
+- **Prep for Phase B**. New endpoints scaffolded for the upcoming
+  "promote to scaling" action: GET/PUT/DELETE
+  `/api/marketing/scaling/config`, `GET
+  /api/marketing/scaling/adsets?store=X`, `GET
+  /api/marketing/scaling/campaigns-available`.
+- Migration: `supabase/scaling-campaigns-migration.sql`
+  (idempotent). Admin-only writes, marketing read-only.
+
 ## 2026-04-19: Attendance improvements — shifts + reminders + auto-close
 
 Added the supervisor-style attendance system to fix forgotten clock-ins,

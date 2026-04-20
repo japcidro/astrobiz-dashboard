@@ -5,6 +5,7 @@ import { TokenManager } from "@/components/marketing/token-manager";
 import { StoreManager } from "@/components/orders/store-manager";
 import { TeamManager } from "@/components/settings/team-manager";
 import { AiKeyManager } from "@/components/settings/ai-key-manager";
+import { ScalingCampaignsManager } from "@/components/settings/scaling-campaigns-manager";
 import type { ShopifyStore } from "@/lib/shopify/types";
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
@@ -135,6 +136,22 @@ export default async function SettingsPage() {
           Add your Shopify stores to view orders in the dashboard.
         </p>
         <StoreManager stores={(shopifyStores as ShopifyStore[]) || []} />
+      </div>
+
+      <div className="mt-10">
+        <h2 className="text-lg font-semibold text-white mb-1">
+          Scaling Campaigns
+        </h2>
+        <p className="text-gray-400 text-sm mb-4">
+          Map each Shopify store to the FB campaign you scale winners into.
+          Used by AI Analytics to flag already-scaled ads and promote new
+          winners.
+        </p>
+        <ScalingCampaignsManager
+          storeNames={((shopifyStores as ShopifyStore[]) || [])
+            .filter((s) => s.is_active !== false)
+            .map((s) => s.name)}
+        />
       </div>
 
       <div className="mt-10 space-y-6">
