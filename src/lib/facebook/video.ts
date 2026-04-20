@@ -26,6 +26,73 @@ async function fbGet<T>(path: string, token: string): Promise<T> {
   return json as T;
 }
 
+// Returns a compact, shareable diagnostic for one Graph call. Swallows
+// errors (they become part of the diagnostic). Never throws.
+async function probe(
+  path: string,
+  token: string
+): Promise<string> {
+  const sep = path.includes("?") ? "&" : "?";
+  try {
+    const res = await fetch(
+      `${FB_API_BASE}${path}${sep}access_token=${encodeURIComponent(token)}`,
+      { cache: "no-store" }
+    );
+    const text = await res.text();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = text.slice(0, 300);
+    }
+    const summary = summarize(parsed);
+    return `${res.status} ${path} → ${summary}`;
+  } catch (err) {
+    return `THREW ${path} → ${err instanceof Error ? err.message : "unknown"}`;
+  }
+}
+
+function summarize(val: unknown): string {
+  if (val === null || val === undefined) return "null";
+  if (typeof val === "string") return val.slice(0, 200);
+  if (typeof val !== "object") return String(val);
+  const obj = val as Record<string, unknown>;
+  if (obj.error) {
+    const e = obj.error as Record<string, unknown>;
+    return `ERROR ${e.code ?? ""}/${e.type ?? ""}: ${e.message ?? ""}`;
+  }
+  // Pick the interesting fields and stringify a trimmed version.
+  const keep: Record<string, unknown> = {};
+  const interesting = [
+    "id",
+    "name",
+    "source",
+    "muted_video_url",
+    "permalink_url",
+    "status",
+    "from",
+    "access_token",
+    "tasks",
+    "data",
+  ];
+  for (const k of interesting) {
+    if (k in obj) {
+      const v = obj[k];
+      if (k === "access_token" && typeof v === "string") {
+        keep[k] = v.length > 0 ? `<token len=${v.length}>` : "<empty>";
+      } else if (k === "data" && Array.isArray(v)) {
+        keep[k] = `[${v.length} items]`;
+      } else if (k === "source" && typeof v === "string") {
+        keep[k] = v ? `<url len=${v.length}>` : "<empty>";
+      } else {
+        keep[k] = v;
+      }
+    }
+  }
+  const out = JSON.stringify(keep);
+  return out.length > 300 ? out.slice(0, 300) + "…" : out;
+}
+
 // Try to fetch the playable MP4 URL for a video the ad carries.
 // Even System User tokens with full page control often get source=null
 // from /{video_id} because Meta requires a *Page* Access Token for the
@@ -132,10 +199,48 @@ async function resolveVideoSource(
     }
   }
 
+  // Nothing worked — dump raw probes of every path so the UI can
+  // show exactly what Graph said at each step, without needing a
+  // separate tracer endpoint.
+  const probes: string[] = [];
+  probes.push(
+    await probe(
+      `/debug_token?input_token=${encodeURIComponent(token)}`,
+      token
+    )
+  );
+  probes.push(
+    await probe(
+      `/${videoId}?fields=source,muted_video_url,permalink_url,from,status,permissions`,
+      token
+    )
+  );
+  if (storyId) {
+    const pageId = storyId.split("_")[0];
+    probes.push(
+      await probe(`/${pageId}?fields=id,name,access_token,tasks`, token)
+    );
+  } else {
+    probes.push("(no story_id — can't derive page_id)");
+  }
+  if (accountId) {
+    const filtering = encodeURIComponent(
+      JSON.stringify([{ field: "id", operator: "IN", value: [videoId] }])
+    );
+    probes.push(
+      await probe(
+        `/${accountId}/advideos?fields=source,from&filtering=${filtering}&limit=1`,
+        token
+      )
+    );
+  }
+
+  for (const p of probes) tried.push(`probe: ${p}`);
+
   return {
     source: null,
     note:
-      "No playable MP4 on any endpoint. Next to check: is the System User assigned to the Page (not just the ad account) with Full Control? Graph API Explorer test: GET /{page_id}?fields=access_token — if that returns no access_token, the SU isn't actually a Page admin.",
+      "No playable MP4 on any endpoint. See debug trail for the raw Graph responses — usually one of the probes shows exactly why (token lacks pages_read_engagement, video owned by different page, etc.).",
     tried,
   };
 }
