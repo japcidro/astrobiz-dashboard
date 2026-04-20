@@ -26,6 +26,7 @@ import {
   CheckCircle,
   Bell,
   Newspaper,
+  ScanLine,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -158,6 +159,12 @@ const navEntries: NavEntry[] = [
         label: "Barcodes",
         href: "/fulfillment/pick-pack/barcodes",
         icon: <FileText size={18} />,
+        roles: ["admin", "fulfillment"],
+      },
+      {
+        label: "Scanner Test",
+        href: "/fulfillment/pick-pack/scanner-test",
+        icon: <ScanLine size={18} />,
         roles: ["admin", "fulfillment"],
       },
       {

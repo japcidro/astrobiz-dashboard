@@ -123,7 +123,7 @@ export default function VerifyPage() {
         setFeedback({
           type: "error",
           message: "WRONG ITEM",
-          subMessage: trimmed,
+          subMessage: `Scanned: "${trimmed}" (${trimmed.length} chars) — no match in order`,
         });
         return;
       }

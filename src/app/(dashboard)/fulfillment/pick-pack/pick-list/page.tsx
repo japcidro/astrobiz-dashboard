@@ -83,7 +83,7 @@ export default function PickListPage() {
       setFeedback({
         type: "error",
         message: "NOT FOUND",
-        subMessage: trimmed,
+        subMessage: `Scanned: "${trimmed}" (${trimmed.length} chars) — not in pick list`,
       });
       return;
     }

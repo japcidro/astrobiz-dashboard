@@ -8,6 +8,7 @@ interface Props {
   placeholder?: string;
   disabled?: boolean;
   autoFocus?: boolean;
+  onRawScan?: (raw: string) => void;
 }
 
 export function BarcodeScannerInput({
@@ -15,8 +16,12 @@ export function BarcodeScannerInput({
   placeholder = "Scan barcode or type...",
   disabled = false,
   autoFocus = true,
+  onRawScan,
 }: Props) {
-  const { inputRef, handleKeyDown, refocus } = useBarcodeScan({ onScan });
+  const { inputRef, handleKeyDown, handleInput, refocus } = useBarcodeScan({
+    onScan,
+    onRawScan,
+  });
 
   return (
     <div className="relative">
@@ -28,6 +33,7 @@ export function BarcodeScannerInput({
         ref={inputRef}
         type="text"
         onKeyDown={handleKeyDown}
+        onInput={handleInput}
         placeholder={placeholder}
         disabled={disabled}
         autoFocus={autoFocus}
