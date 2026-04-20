@@ -18,3 +18,19 @@ export async function generateBarcodeDataUrl(
   });
   return canvas.toDataURL("image/png");
 }
+
+/**
+ * Generate a QR code data URL.
+ * QR encodes any value reliably at small label sizes and scans from any angle.
+ */
+export async function generateQRDataUrl(
+  value: string,
+  options?: { size?: number; margin?: number; errorCorrectionLevel?: "L" | "M" | "Q" | "H" }
+): Promise<string> {
+  const QRCode = (await import("qrcode")).default;
+  return QRCode.toDataURL(value, {
+    width: options?.size ?? 240,
+    margin: options?.margin ?? 1,
+    errorCorrectionLevel: options?.errorCorrectionLevel ?? "M",
+  });
+}

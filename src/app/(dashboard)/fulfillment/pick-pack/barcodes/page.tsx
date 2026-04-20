@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { RefreshCw, Printer, Tag } from "lucide-react";
-import { generateBarcodeDataUrl } from "@/lib/fulfillment/barcode";
+import { generateQRDataUrl } from "@/lib/fulfillment/barcode";
 
 interface Product {
   sku: string;
@@ -109,10 +109,10 @@ export default function BarcodesPage() {
 
       const barcodeValue = product.barcode || sku;
       try {
-        const dataUrl = await generateBarcodeDataUrl(barcodeValue, {
-          width: 2,
-          height: 25,
-          fontSize: 10,
+        const dataUrl = await generateQRDataUrl(barcodeValue, {
+          size: 240,
+          margin: 1,
+          errorCorrectionLevel: "M",
         });
         generated.push({
           sku,
@@ -134,9 +134,9 @@ export default function BarcodesPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-white">Barcode Labels</h1>
+          <h1 className="text-2xl font-bold text-white">QR Code Labels</h1>
           <p className="text-gray-400 mt-1">
-            Generate and print barcode labels for products
+            Generate and print QR labels for products — scans any SKU length, any angle
           </p>
         </div>
       </div>
@@ -316,11 +316,14 @@ export default function BarcodesPage() {
                   if (!printWindow) return;
                   const labelsHtml = labels.map((label) => {
                     const variantText = label.variant_title && label.variant_title !== "Default" && label.variant_title !== "Default Title"
-                      ? `<p style="font-size:5pt;margin:0;text-align:center;color:#333">${label.variant_title}</p>` : "";
-                    return `<div style="width:30mm;height:20mm;padding:1mm;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;page-break-after:always;overflow:hidden">
-                      <img src="${label.dataUrl}" style="max-width:28mm;max-height:12mm;height:auto" />
-                      <p style="font-size:5pt;margin:1px 0 0;text-align:center;color:#333;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:28mm">${label.product_title}</p>
-                      ${variantText}
+                      ? `<div style="font-size:5pt;line-height:1.1;color:#333;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${label.variant_title}</div>` : "";
+                    return `<div style="width:30mm;height:20mm;padding:1mm;box-sizing:border-box;display:flex;flex-direction:row;align-items:center;gap:1mm;page-break-after:always;overflow:hidden">
+                      <img src="${label.dataUrl}" style="width:16mm;height:16mm;flex-shrink:0" />
+                      <div style="flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;overflow:hidden">
+                        <div style="font-size:6pt;font-weight:600;line-height:1.1;color:#000;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${label.sku}</div>
+                        <div style="font-size:5pt;line-height:1.1;color:#333;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:0.5mm">${label.product_title}</div>
+                        ${variantText}
+                      </div>
                     </div>`;
                   }).join("");
                   printWindow.document.write(`<!DOCTYPE html><html><head><title>Barcode Labels</title><style>@page{size:30mm 20mm;margin:0}body{margin:0;padding:0;font-family:Arial,sans-serif}</style></head><body>${labelsHtml}</body></html>`);
@@ -346,7 +349,7 @@ export default function BarcodesPage() {
             {labels.map((label) => (
               <div
                 key={label.sku}
-                className="barcode-label bg-white rounded-lg p-2 flex flex-col items-center justify-center"
+                className="barcode-label bg-white rounded-lg p-1 flex flex-row items-center gap-1"
                 style={{
                   width: SIZE_STYLES[labelSize].width,
                   height: SIZE_STYLES[labelSize].height,
@@ -355,16 +358,21 @@ export default function BarcodesPage() {
                 <img
                   src={label.dataUrl}
                   alt={label.sku}
-                  className="max-w-full max-h-[60%] object-contain"
+                  className="h-full aspect-square object-contain flex-shrink-0"
                 />
-                <p className="barcode-label-text text-[8px] text-gray-700 text-center leading-tight mt-1 truncate w-full">
-                  {label.product_title}
-                </p>
-                {label.variant_title && label.variant_title !== "Default" && label.variant_title !== "Default Title" && (
-                  <p className="barcode-label-text text-[7px] text-gray-500 text-center leading-tight truncate w-full">
-                    {label.variant_title}
+                <div className="flex-1 min-w-0 flex flex-col justify-center">
+                  <p className="barcode-label-text text-[8px] font-semibold text-black leading-tight truncate">
+                    {label.sku}
                   </p>
-                )}
+                  <p className="barcode-label-text text-[7px] text-gray-700 leading-tight truncate">
+                    {label.product_title}
+                  </p>
+                  {label.variant_title && label.variant_title !== "Default" && label.variant_title !== "Default Title" && (
+                    <p className="barcode-label-text text-[7px] text-gray-500 leading-tight truncate">
+                      {label.variant_title}
+                    </p>
+                  )}
+                </div>
               </div>
             ))}
           </div>
