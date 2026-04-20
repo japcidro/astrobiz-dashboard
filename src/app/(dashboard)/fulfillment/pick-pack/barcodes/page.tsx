@@ -4,8 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import { RefreshCw, Printer, Tag } from "lucide-react";
 import { generateBarcodeDataUrl } from "@/lib/fulfillment/barcode";
 
-// CODE128 at 30x20mm gets unreliable above this value length
-const SCAN_WARN_LENGTH = 10;
+// Standard SKU length for this workspace — longer than this will scan poorly at 30x20mm
+const SCAN_WARN_LENGTH = 6;
 
 interface Product {
   sku: string;
@@ -113,8 +113,8 @@ export default function BarcodesPage() {
       const barcodeValue = product.barcode || sku;
       try {
         const dataUrl = await generateBarcodeDataUrl(barcodeValue, {
-          width: 2,
-          height: 40,
+          width: 3,
+          height: 60,
           fontSize: 10,
         });
         generated.push({
@@ -139,7 +139,7 @@ export default function BarcodesPage() {
         <div>
           <h1 className="text-2xl font-bold text-white">Barcode Labels</h1>
           <p className="text-gray-400 mt-1">
-            Generate and print barcode labels. Keep scan values ≤ {SCAN_WARN_LENGTH} chars for reliable 30×20mm scan.
+            Generate and print barcode labels. Standard scan value = {SCAN_WARN_LENGTH} chars; longer will be flagged.
           </p>
         </div>
       </div>
@@ -287,7 +287,7 @@ export default function BarcodesPage() {
                           ({scanValue.length})
                         </span>
                         {tooLong && (
-                          <span className="text-xs text-orange-400" title="Will scan poorly at 30x20mm — set shorter Shopify barcode">
+                          <span className="text-xs text-orange-400" title={`Longer than standard ${SCAN_WARN_LENGTH} chars — update SKU or Shopify barcode field`}>
                             ⚠️
                           </span>
                         )}
@@ -331,7 +331,7 @@ export default function BarcodesPage() {
                     const variantText = label.variant_title && label.variant_title !== "Default" && label.variant_title !== "Default Title"
                       ? `<p style="font-size:5pt;margin:0;text-align:center;color:#333;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:28mm">${label.variant_title}</p>` : "";
                     return `<div style="width:30mm;height:20mm;padding:1mm;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;page-break-after:always;overflow:hidden">
-                      <img src="${label.dataUrl}" style="max-width:28mm;max-height:13mm;height:auto" />
+                      <img src="${label.dataUrl}" style="max-width:28mm;max-height:14mm;height:auto" />
                       <p style="font-size:5pt;margin:1px 0 0;text-align:center;color:#333;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:28mm">${label.product_title}</p>
                       ${variantText}
                     </div>`;
