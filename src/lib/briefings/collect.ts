@@ -131,8 +131,17 @@ export async function collectBriefingData(
   const orders = pnl?.summary.order_count ?? ordersData?.summary?.total_orders ?? 0;
   const adSpend = pnl?.summary.ad_spend ?? adsData?.totals?.spend ?? 0;
   const netProfitEst = pnl?.summary.net_profit ?? 0;
-  const roas = adsData?.totals?.roas ?? (adSpend > 0 ? revenue / adSpend : 0);
-  const cpa = adsData?.totals?.cpa ?? 0;
+
+  // Prefer FB's reported ROAS (pixel-attributed), but fall back to blended
+  // (Shopify revenue / ad spend) when FB reports 0 — common when the pixel
+  // or CAPI isn't wired to capture purchase events.
+  const fbRoas = adsData?.totals?.roas ?? 0;
+  const blendedRoas = adSpend > 0 ? revenue / adSpend : 0;
+  const roas = fbRoas > 0 ? fbRoas : blendedRoas;
+
+  const fbCpa = adsData?.totals?.cpa ?? 0;
+  const blendedCpa = orders > 0 ? adSpend / orders : 0;
+  const cpa = fbCpa > 0 ? fbCpa : blendedCpa;
 
   // --- Top ads (by ROAS among ads with spend) ---
   const ads = (adsData?.ads ?? []).filter((a) => a.spend >= 500);
