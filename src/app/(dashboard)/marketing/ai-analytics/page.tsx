@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   BarChart3,
@@ -55,14 +55,17 @@ export default function AiAnalyticsPage() {
   const [loadingAds, setLoadingAds] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function loadAds() {
+  const [refreshNonce, setRefreshNonce] = useState(0);
+
+  const loadAds = useCallback(
+    async (forceRefresh: boolean) => {
+      let cancelled = false;
       setLoadingAds(true);
       setLoadError(null);
       try {
+        const refreshParam = forceRefresh ? "&refresh=1" : "";
         const res = await fetch(
-          `/api/facebook/all-ads?date_preset=${datePreset}&account=${accountFilter}`
+          `/api/facebook/all-ads?date_preset=${datePreset}&account=${accountFilter}${refreshParam}`
         );
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "Failed to load ads");
@@ -72,8 +75,6 @@ export default function AiAnalyticsPage() {
         setAccounts((json.accounts as AccountInfo[]) ?? []);
         if (json.totals) setTotals(json.totals as ChatTotals);
 
-        // Lazy-load creatives (thumbnails + FB preview URLs) for the top
-        // ads by spend — /all-ads strips creatives for performance.
         const targetIds = [...initialAds]
           .sort((a, b) => b.spend - a.spend)
           .slice(0, 60)
@@ -106,7 +107,7 @@ export default function AiAnalyticsPage() {
               );
             }
           } catch {
-            // Creatives are non-critical; fail silently
+            // non-critical
           }
         }
       } catch (e) {
@@ -116,12 +117,17 @@ export default function AiAnalyticsPage() {
       } finally {
         if (!cancelled) setLoadingAds(false);
       }
-    }
-    loadAds();
-    return () => {
-      cancelled = true;
-    };
-  }, [datePreset, accountFilter]);
+      return () => {
+        cancelled = true;
+      };
+    },
+    [datePreset, accountFilter]
+  );
+
+  useEffect(() => {
+    loadAds(refreshNonce > 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [datePreset, accountFilter, refreshNonce]);
 
   const deconstructAds = useMemo(
     () =>
@@ -147,34 +153,51 @@ export default function AiAnalyticsPage() {
   return (
     <div className="max-w-6xl">
       {/* Header */}
-      <div className="flex items-center gap-3 mb-4">
-        <div className="p-2 bg-emerald-600/20 rounded-lg">
-          <BarChart3 size={20} className="text-emerald-400" />
+      <div className="flex items-start justify-between gap-3 mb-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-emerald-600/20 rounded-lg">
+            <BarChart3 size={20} className="text-emerald-400" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-white">AI Analytics</h1>
+            <p className="text-gray-400 text-sm mt-0.5">
+              Chat with your ads data. Deconstruct winning creatives.
+            </p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-2xl font-bold text-white">AI Analytics</h1>
-          <p className="text-gray-400 text-sm mt-0.5">
-            Chat with your ads data. Deconstruct winning creatives.
-          </p>
-        </div>
+        <button
+          onClick={() => setRefreshNonce((n) => n + 1)}
+          disabled={loadingAds}
+          title="Force-refresh ads data + thumbnails (skips cache)"
+          className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm px-3 py-2 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+        >
+          <RefreshCw size={14} className={loadingAds ? "animate-spin" : ""} />
+          Refresh
+        </button>
       </div>
 
-      {/* Filters */}
+      {/* Date preset chips */}
+      <div className="flex flex-wrap items-center gap-1.5 mb-3">
+        {DATE_PRESETS.map((p) => {
+          const active = datePreset === p.value;
+          return (
+            <button
+              key={p.value}
+              onClick={() => setDatePreset(p.value)}
+              className={`text-xs px-3 py-1.5 rounded-lg border transition-colors cursor-pointer ${
+                active
+                  ? "bg-emerald-600 border-emerald-500 text-white"
+                  : "bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-500"
+              }`}
+            >
+              {p.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Secondary filters */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
-        <div className="flex items-center gap-1.5">
-          <label className="text-xs text-gray-400">Date:</label>
-          <select
-            value={datePreset}
-            onChange={(e) => setDatePreset(e.target.value as DatePreset)}
-            className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-gray-200 focus:ring-emerald-500 focus:border-emerald-500"
-          >
-            {DATE_PRESETS.map((p) => (
-              <option key={p.value} value={p.value}>
-                {p.label}
-              </option>
-            ))}
-          </select>
-        </div>
         <div className="flex items-center gap-1.5">
           <label className="text-xs text-gray-400">Account:</label>
           <select

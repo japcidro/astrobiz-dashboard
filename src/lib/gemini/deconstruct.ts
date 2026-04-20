@@ -1,4 +1,7 @@
-const GEMINI_MODEL = "gemini-2.5-pro";
+// Gemini 2.5 Flash — native video understanding, strong for this task,
+// and crucially has a free tier (Pro requires billing). Swap to
+// "gemini-2.5-pro" once Google AI Studio billing is enabled for the key.
+const GEMINI_MODEL = "gemini-2.5-flash";
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com";
 
 // Inline vs File API threshold. Gemini's documented inline cap is 20MB;
