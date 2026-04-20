@@ -31,20 +31,48 @@ export default function VerifyPage() {
   // ── Phase 1: Scan or type order number ──
 
   // Helper to set up order for verification
-  const setupOrder = useCallback((match: UnfulfilledOrder) => {
+  const setupOrder = useCallback(async (match: UnfulfilledOrder) => {
     playSuccess();
     setOrderNumber(match.name);
     setOrderDetails(match);
 
-    const items: VerifyItem[] = match.line_items.map((li) => ({
-      sku: li.sku || `NOSKU-${li.id}`,
-      barcode: li.barcode,
-      title: li.title,
-      variant_title: li.variant_title,
-      expected_qty: li.quantity,
-      scanned_qty: 0,
-      status: "pending" as const,
-    }));
+    // Shopify order line_items store the SKU as a snapshot at order-creation
+    // time. Fetch current variant SKU/barcode so scans of newly-renamed
+    // SKUs match against the current label value.
+    const variantIds = Array.from(
+      new Set(
+        match.line_items
+          .map((li) => li.variant_id)
+          .filter((v): v is number => typeof v === "number" && v > 0)
+      )
+    );
+    let enriched: Record<string, { sku: string | null; barcode: string | null }> = {};
+    if (variantIds.length > 0 && match.store_name) {
+      try {
+        const res = await fetch(
+          `/api/shopify/variants?store=${encodeURIComponent(match.store_name)}&ids=${variantIds.join(",")}`
+        );
+        if (res.ok) {
+          const json = await res.json();
+          enriched = json.variants || {};
+        }
+      } catch {
+        // fall back to historical line_item values
+      }
+    }
+
+    const items: VerifyItem[] = match.line_items.map((li) => {
+      const current = enriched[String(li.variant_id)];
+      return {
+        sku: current?.sku || li.sku || `NOSKU-${li.id}`,
+        barcode: current?.barcode || li.barcode,
+        title: li.title,
+        variant_title: li.variant_title,
+        expected_qty: li.quantity,
+        scanned_qty: 0,
+        status: "pending" as const,
+      };
+    });
     setVerifyItems(items);
     setStartedAt(new Date().toISOString());
     setPhase("scan_items");
@@ -74,7 +102,7 @@ export default function VerifyPage() {
         );
 
         if (nameMatch) {
-          setupOrder(nameMatch);
+          await setupOrder(nameMatch);
           return;
         }
 
@@ -86,7 +114,7 @@ export default function VerifyPage() {
         );
 
         if (waybillMatch) {
-          setupOrder(waybillMatch);
+          await setupOrder(waybillMatch);
           return;
         }
 
