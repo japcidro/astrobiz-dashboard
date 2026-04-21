@@ -9,8 +9,15 @@ import {
   History,
   Plus,
   Trash2,
+  Wrench,
+  CheckCircle2,
+  XCircle,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 
+// Kept exported for any legacy importer; no longer consumed by ChatPanel
+// since the agent pulls live data via tools instead of receiving snapshots.
 export interface ChatAd {
   account: string;
   account_id: string;
@@ -31,7 +38,6 @@ export interface ChatAd {
   impressions: number;
   ctr: number;
 }
-
 export interface ChatTotals {
   spend: number;
   purchases: number;
@@ -39,34 +45,37 @@ export interface ChatTotals {
   impressions: number;
 }
 
+interface ToolCallChip {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+  status: "running" | "ok" | "error";
+  duration_ms?: number;
+  result_rows?: number;
+  error_message?: string;
+}
+
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  // Tool calls made while producing THIS assistant message. Only
+  // populated on assistant turns.
+  tool_calls?: ToolCallChip[];
 }
 
 interface SessionSummary {
   id: string;
   title: string;
-  account_id: string | null;
   date_preset: string | null;
   updated_at: string;
   message_count: number;
 }
 
-interface Props {
-  ads: ChatAd[];
-  totals: ChatTotals;
-  datePreset: string;
-  accountFilter: string;
-  accountCount: number;
-  loadingAds: boolean;
-}
-
 const SAMPLE_PROMPTS = [
-  "Ano yung top 3 ads based on ROAS?",
-  "Anong ads ang bleeding ng pera? Ano dapat i-kill?",
-  "Compare performance ng top ad vs bottom ad — ano difference?",
-  "Mag-summarize ka ng overall account health ngayon.",
+  "Ano yung top 3 ads ko ngayong week based on ROAS?",
+  "Anong ads ang bleeding? Ano dapat i-pause?",
+  "I-summarize mo yung pinaka-recent comparative analysis ko.",
+  "May mga na-deconstruct na ba akong ads last 30 days? Ano yung common hooks?",
 ];
 
 function formatRelative(iso: string): string {
@@ -80,14 +89,7 @@ function formatRelative(iso: string): string {
   return d.toLocaleDateString("en-PH", { month: "short", day: "numeric" });
 }
 
-export function ChatPanel({
-  ads,
-  totals,
-  datePreset,
-  accountFilter,
-  accountCount,
-  loadingAds,
-}: Props) {
+export function ChatPanel() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -118,7 +120,6 @@ export function ChatPanel({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streaming]);
 
-  // Close history dropdown on outside click
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
       if (
@@ -140,18 +141,15 @@ export function ChatPanel({
         body: JSON.stringify({
           id: sessionId,
           messages: next,
-          account_id: accountFilter,
-          date_preset: datePreset,
         }),
       });
       const json = await res.json();
       if (res.ok && json.row?.id) {
         setSessionId(json.row.id as string);
-        // Refresh sessions list so the sidebar reflects the new entry.
         void loadSessions();
       }
     } catch {
-      // Non-fatal; user can still chat.
+      // non-fatal — user can still chat.
     }
   }
 
@@ -162,10 +160,7 @@ export function ChatPanel({
       const res = await fetch(`/api/marketing/ai-analytics/sessions/${id}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to load");
-      const row = json.row as {
-        id: string;
-        messages: ChatMessage[];
-      };
+      const row = json.row as { id: string; messages: ChatMessage[] };
       setSessionId(row.id);
       setMessages(row.messages ?? []);
       setChatError(null);
@@ -204,10 +199,6 @@ export function ChatPanel({
   async function handleSend(textOverride?: string) {
     const text = (textOverride ?? input).trim();
     if (!text || streaming) return;
-    if (ads.length === 0) {
-      setChatError("No ads data loaded yet. Try refreshing.");
-      return;
-    }
 
     const userMsg: ChatMessage = { role: "user", content: text };
     const nextMessages = [...messages, userMsg];
@@ -216,18 +207,37 @@ export function ChatPanel({
     setStreaming(true);
     setChatError(null);
 
-    setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
+    // Placeholder assistant message — we'll fill content + tool_calls as
+    // events stream in.
+    setMessages((prev) => [
+      ...prev,
+      { role: "assistant", content: "", tool_calls: [] },
+    ]);
 
-    let acc = "";
+    function updateLastAssistant(
+      patch: (m: ChatMessage) => ChatMessage | void
+    ) {
+      setMessages((prev) => {
+        const copy = [...prev];
+        const last = copy[copy.length - 1];
+        if (last?.role !== "assistant") return prev;
+        const updated = patch({ ...last });
+        if (updated) copy[copy.length - 1] = updated;
+        else copy[copy.length - 1] = last;
+        return copy;
+      });
+    }
+
+    let accText = "";
+    const liveToolCalls: ToolCallChip[] = [];
+
     try {
       const res = await fetch("/api/marketing/ai-analytics/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: nextMessages,
-          ads_snapshot: ads,
-          date_preset: datePreset,
-          totals,
+          session_id: sessionId,
         }),
       });
 
@@ -235,8 +245,8 @@ export function ChatPanel({
         const errJson = await res.json().catch(() => ({}));
         throw new Error(errJson.error || `Chat error (${res.status})`);
       }
-
       if (!res.body) throw new Error("No response body");
+
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
@@ -249,45 +259,101 @@ export function ChatPanel({
         const events = buffer.split("\n\n");
         buffer = events.pop() ?? "";
         for (const event of events) {
+          let eventType = "message";
+          let payload = "";
           for (const line of event.split("\n")) {
-            if (!line.startsWith("data: ")) continue;
-            const payload = line.slice(6);
-            if (!payload || payload === "[DONE]") continue;
-            try {
-              const obj = JSON.parse(payload);
-              if (
-                obj.type === "content_block_delta" &&
-                obj.delta?.type === "text_delta"
-              ) {
-                acc += obj.delta.text;
-                setMessages((prev) => {
-                  const copy = [...prev];
-                  const last = copy[copy.length - 1];
-                  if (last?.role === "assistant") {
-                    copy[copy.length - 1] = { ...last, content: acc };
-                  }
-                  return copy;
-                });
-              }
-            } catch {
-              // ignore malformed event frames
+            if (line.startsWith("event: ")) eventType = line.slice(7).trim();
+            else if (line.startsWith("data: ")) payload = line.slice(6);
+          }
+          if (!payload || payload === "[DONE]") continue;
+          let obj: Record<string, unknown>;
+          try {
+            obj = JSON.parse(payload);
+          } catch {
+            continue;
+          }
+
+          if (eventType === "tool_call") {
+            const chip: ToolCallChip = {
+              id: obj.id as string,
+              name: obj.name as string,
+              input: (obj.input as Record<string, unknown>) ?? {},
+              status: "running",
+            };
+            liveToolCalls.push(chip);
+            updateLastAssistant((m) => {
+              m.tool_calls = [...liveToolCalls];
+              return m;
+            });
+          } else if (eventType === "tool_result") {
+            const idx = liveToolCalls.findIndex((c) => c.id === obj.id);
+            if (idx >= 0) {
+              liveToolCalls[idx] = {
+                ...liveToolCalls[idx],
+                status: obj.status === "ok" ? "ok" : "error",
+                duration_ms: obj.duration_ms as number | undefined,
+                result_rows: obj.result_rows as number | undefined,
+                error_message: obj.error_message as string | undefined,
+              };
+              updateLastAssistant((m) => {
+                m.tool_calls = [...liveToolCalls];
+                return m;
+              });
+            }
+          } else if (eventType === "content_block_delta") {
+            const delta = obj.delta as
+              | { type: string; text?: string }
+              | undefined;
+            if (delta?.type === "text_delta" && typeof delta.text === "string") {
+              accText += delta.text;
+              updateLastAssistant((m) => {
+                m.content = accText;
+                return m;
+              });
+            }
+          } else if (eventType === "cost_cap") {
+            setChatError(
+              (obj.message as string) ??
+                "Session cost cap reached — mag-new chat ka."
+            );
+          } else if (eventType === "error") {
+            throw new Error(
+              (obj.message as string) ?? "Agent error"
+            );
+          } else if (eventType === "done") {
+            const finalText = obj.final_text as string | undefined;
+            if (finalText && !accText) {
+              accText = finalText;
+              updateLastAssistant((m) => {
+                m.content = finalText;
+                return m;
+              });
             }
           }
         }
       }
 
       // Persist after stream completes
-      if (acc.trim()) {
-        void saveSession([...nextMessages, { role: "assistant", content: acc }]);
+      if (accText.trim()) {
+        const finalMessages: ChatMessage[] = [
+          ...nextMessages,
+          {
+            role: "assistant",
+            content: accText,
+            tool_calls: liveToolCalls.length > 0 ? liveToolCalls : undefined,
+          },
+        ];
+        void saveSession(finalMessages);
       }
     } catch (e) {
       setChatError(e instanceof Error ? e.message : "Chat failed");
-      setMessages((prev) =>
-        prev[prev.length - 1]?.role === "assistant" &&
-        prev[prev.length - 1].content === ""
-          ? prev.slice(0, -1)
-          : prev
-      );
+      setMessages((prev) => {
+        const last = prev[prev.length - 1];
+        if (last?.role === "assistant" && last.content === "") {
+          return prev.slice(0, -1);
+        }
+        return prev;
+      });
     } finally {
       setStreaming(false);
     }
@@ -330,7 +396,8 @@ export function ChatPanel({
                             {s.title}
                           </p>
                           <p className="text-[10px] text-gray-500">
-                            {s.message_count} msg · {formatRelative(s.updated_at)}
+                            {s.message_count} msg ·{" "}
+                            {formatRelative(s.updated_at)}
                           </p>
                         </div>
                         <button
@@ -382,15 +449,15 @@ export function ChatPanel({
               Ask me anything about your ads.
             </p>
             <p className="text-gray-500 text-xs mb-6">
-              I see {ads.length} ads from {accountCount || "your"} account(s)
-              for the selected date range.
+              I can pull live FB performance, past deconstructions, comparative
+              reports, scaling campaigns, and autopilot activity.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 w-full max-w-xl">
               {SAMPLE_PROMPTS.map((p) => (
                 <button
                   key={p}
                   onClick={() => handleSend(p)}
-                  disabled={loadingAds || ads.length === 0}
+                  disabled={streaming}
                   className="text-left text-xs text-gray-300 bg-gray-800/70 hover:bg-gray-700/70 border border-gray-700 rounded-lg px-3 py-2.5 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                 >
                   {p}
@@ -400,27 +467,51 @@ export function ChatPanel({
           </div>
         )}
 
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
-          >
+        {messages.map((m, i) => {
+          const isLastAssistant =
+            m.role === "assistant" && i === messages.length - 1;
+          const showSpinner = streaming && isLastAssistant && !m.content;
+          return (
             <div
-              className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap ${
-                m.role === "user"
-                  ? "bg-emerald-600 text-white"
-                  : "bg-gray-800 text-gray-200 border border-gray-700"
-              }`}
+              key={i}
+              className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
             >
-              {m.content ||
-                (streaming && i === messages.length - 1 ? (
-                  <Loader2 size={14} className="animate-spin text-gray-400" />
-                ) : (
-                  ""
-                ))}
+              <div
+                className={`max-w-[85%] space-y-2 ${
+                  m.role === "user" ? "" : "w-full"
+                }`}
+              >
+                {m.role === "assistant" &&
+                  m.tool_calls &&
+                  m.tool_calls.length > 0 && (
+                    <ToolCallChips
+                      chips={m.tool_calls}
+                      streaming={streaming && isLastAssistant}
+                    />
+                  )}
+                {(m.content || showSpinner) && (
+                  <div
+                    className={`rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap ${
+                      m.role === "user"
+                        ? "bg-emerald-600 text-white"
+                        : "bg-gray-800 text-gray-200 border border-gray-700"
+                    }`}
+                  >
+                    {m.content ||
+                      (showSpinner ? (
+                        <Loader2
+                          size={14}
+                          className="animate-spin text-gray-400"
+                        />
+                      ) : (
+                        ""
+                      ))}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
 
         {chatError && (
           <div className="flex justify-start">
@@ -452,21 +543,17 @@ export function ChatPanel({
               }
             }}
             placeholder={
-              loadingAds
-                ? "Loading ads…"
-                : ads.length === 0
-                  ? "No ads data yet"
-                  : "Ask about your ads… (Enter to send, Shift+Enter for newline)"
+              streaming
+                ? "AI is working…"
+                : "Ask about your ads… (Enter to send, Shift+Enter for newline)"
             }
-            disabled={loadingAds || streaming || ads.length === 0}
+            disabled={streaming}
             rows={2}
             className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:ring-emerald-500 focus:border-emerald-500 resize-none disabled:opacity-50"
           />
           <button
             type="submit"
-            disabled={
-              loadingAds || streaming || !input.trim() || ads.length === 0
-            }
+            disabled={streaming || !input.trim()}
             className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
           >
             {streaming ? (
@@ -477,6 +564,96 @@ export function ChatPanel({
             Send
           </button>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Tool call chips ────────────────────────────────────────────────
+// Renders the live "AI is querying X…" indicator plus the collapsible
+// "Data used" section underneath each assistant message.
+function ToolCallChips({
+  chips,
+  streaming,
+}: {
+  chips: ToolCallChip[];
+  streaming: boolean;
+}) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const running = chips.find((c) => c.status === "running");
+
+  return (
+    <div className="space-y-1.5">
+      {running && streaming && (
+        <div className="inline-flex items-center gap-1.5 bg-blue-900/30 border border-blue-700/40 text-blue-300 text-[11px] rounded-full px-2.5 py-1">
+          <Loader2 size={10} className="animate-spin" />
+          <span>
+            AI is querying <span className="font-mono">{running.name}</span>…
+          </span>
+        </div>
+      )}
+      <div className="flex flex-wrap gap-1.5">
+        {chips.map((c) => {
+          const isExpanded = expandedId === c.id;
+          const Icon =
+            c.status === "running"
+              ? Loader2
+              : c.status === "ok"
+                ? CheckCircle2
+                : XCircle;
+          const color =
+            c.status === "running"
+              ? "text-blue-300 border-blue-700/40 bg-blue-900/20"
+              : c.status === "ok"
+                ? "text-emerald-300 border-emerald-700/40 bg-emerald-900/20"
+                : "text-red-300 border-red-700/40 bg-red-900/20";
+          return (
+            <div key={c.id} className="w-full">
+              <button
+                onClick={() => setExpandedId(isExpanded ? null : c.id)}
+                className={`w-full flex items-center gap-1.5 text-[11px] border rounded-md px-2 py-1 transition-colors hover:brightness-110 cursor-pointer ${color}`}
+              >
+                {isExpanded ? (
+                  <ChevronDown size={11} />
+                ) : (
+                  <ChevronRight size={11} />
+                )}
+                <Wrench size={10} />
+                <span className="font-mono font-medium">{c.name}</span>
+                {c.result_rows !== undefined && (
+                  <span className="opacity-70">· {c.result_rows} rows</span>
+                )}
+                {c.duration_ms !== undefined && (
+                  <span className="opacity-70">
+                    · {(c.duration_ms / 1000).toFixed(1)}s
+                  </span>
+                )}
+                <Icon
+                  size={11}
+                  className={`ml-auto ${c.status === "running" ? "animate-spin" : ""}`}
+                />
+              </button>
+              {isExpanded && (
+                <div className="mt-1 ml-4 p-2 bg-gray-900/60 border border-gray-700/50 rounded text-[11px] text-gray-300 font-mono">
+                  <div className="text-gray-500 mb-0.5">Input:</div>
+                  <pre className="whitespace-pre-wrap break-all">
+                    {Object.keys(c.input).length > 0
+                      ? JSON.stringify(c.input, null, 2)
+                      : "(no arguments)"}
+                  </pre>
+                  {c.error_message && (
+                    <>
+                      <div className="text-red-400 mt-1.5 mb-0.5">Error:</div>
+                      <pre className="whitespace-pre-wrap break-all text-red-300">
+                        {c.error_message}
+                      </pre>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

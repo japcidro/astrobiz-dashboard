@@ -1,197 +1,54 @@
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { getEmployee } from "@/lib/supabase/get-employee";
+import { buildToolRegistry } from "@/lib/ai/tools/registry";
+import type { AgentRole } from "@/lib/ai/tools/permissions";
+import {
+  runAgentLoop,
+  type AgentMessage,
+  type ToolCallTrace,
+} from "@/lib/ai/agent-loop";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+// Tool-use loops can chain up to MAX_TOOL_ITERATIONS Anthropic calls plus
+// tool execution + final streaming — give it headroom past Vercel's
+// default 60s for complex multi-tool questions.
+export const maxDuration = 120;
 
-const MODEL = "claude-sonnet-4-6";
-const MAX_TOKENS = 4096;
+const SYSTEM_PROMPT = `You are a senior Facebook Ads performance analyst for Astrobiz, a Philippine e-commerce company running Shopify + Meta Ads. The operator is the CEO or a marketing team lead asking decision-oriented questions.
 
-interface AdSnapshot {
-  account: string;
-  account_id: string;
-  campaign: string;
-  adset: string;
-  ad: string;
-  ad_id: string;
-  status: string;
-  spend: number;
-  link_clicks: number;
-  cpa: number;
-  roas: number;
-  add_to_cart: number;
-  purchases: number;
-  landing_page_views: number;
-  cost_per_lpv: number;
-  reach: number;
-  impressions: number;
-  ctr: number;
-}
+You have TOOLS that pull live data. USE THEM — never invent numbers. If the user asks anything about ad performance, recent analyses, comparative reports, scaling campaigns, or autopilot activity, call the appropriate tool. Only answer from memory for general marketing concepts or when the user is just chatting.
 
-interface ChatMessage {
+Rules:
+1. Quote exact numbers from tool results. If a metric isn't in any tool output, say "wala ako niyan" and offer to pull another tool.
+2. Lead with the specific answer first, then reasoning. Don't open with caveats.
+3. Be decisive. If an ad is bleeding (spend > ₱3,000 and ROAS < 0.8 for 3+ days), say "i-pause mo" with the reason.
+4. Use Taglish naturally — English analysis with Filipino connective phrases, as you would talk to a colleague. Don't force Taglish or English either way.
+5. Peso amounts: ₱ symbol, whole pesos for spend/CPP, 2 decimals for ROAS and CTR %.
+6. Default date range to last_7d if the user doesn't specify, but follow their lead (e.g. "yesterday", "last 30 days").
+7. When you need to look up a specific ad's deconstruction, first call list_deconstructions to find its ad_id unless the user already gave you one.
+8. Never surface or discuss net profit, COGS, shipping costs, or P&L — those aren't in your tools.
+9. You can call multiple tools in one turn when they're independent (e.g. get_ad_performance + list_deconstructions together). Prefer parallel tool calls over sequential when possible.
+
+Glossary: roas = purchase value ÷ spend; cpa / CPP = cost per purchase (peso); ctr = link CTR %; lpv = landing page views; atc = add-to-cart; stable_winner = CPP < ₱200, ≥3 purchases/day for 2-3 consecutive days.`;
+
+interface IncomingMessage {
   role: "user" | "assistant";
   content: string;
+  tool_calls?: ToolCallTrace[];
 }
 
-function money(n: number) {
-  return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : n.toFixed(0);
-}
-
-interface Aggregate {
-  name: string;
-  ad_count: number;
-  spend: number;
-  purchases: number;
-  purchase_value: number;
-  link_clicks: number;
-  landing_page_views: number;
-  add_to_cart: number;
-  impressions: number;
-  reach: number;
-}
-
-function rollup(
-  ads: AdSnapshot[],
-  keyFn: (a: AdSnapshot) => string
-): Aggregate[] {
-  const map = new Map<string, Aggregate>();
-  for (const a of ads) {
-    const key = keyFn(a) || "(unknown)";
-    const existing = map.get(key);
-    // roas = value / spend, so value = roas * spend
-    const purchaseValue = (a.roas || 0) * (a.spend || 0);
-    if (existing) {
-      existing.ad_count += 1;
-      existing.spend += a.spend;
-      existing.purchases += a.purchases;
-      existing.purchase_value += purchaseValue;
-      existing.link_clicks += a.link_clicks;
-      existing.landing_page_views += a.landing_page_views;
-      existing.add_to_cart += a.add_to_cart;
-      existing.impressions += a.impressions;
-      existing.reach += a.reach;
-    } else {
-      map.set(key, {
-        name: key,
-        ad_count: 1,
-        spend: a.spend,
-        purchases: a.purchases,
-        purchase_value: purchaseValue,
-        link_clicks: a.link_clicks,
-        landing_page_views: a.landing_page_views,
-        add_to_cart: a.add_to_cart,
-        impressions: a.impressions,
-        reach: a.reach,
-      });
-    }
-  }
-  return [...map.values()].sort((a, b) => b.spend - a.spend);
-}
-
-function aggregateTsv(rows: Aggregate[], label: string): string {
-  const header = `${label}\tad_count\tspend\tpurchases\troas\tcpa\tctr%\tlpv\tclicks\tatc\timpr`;
-  const body = rows
-    .slice(0, 30)
-    .map((r) => {
-      const roas = r.spend > 0 ? r.purchase_value / r.spend : 0;
-      const cpa = r.purchases > 0 ? r.spend / r.purchases : 0;
-      const ctr = r.impressions > 0 ? (r.link_clicks / r.impressions) * 100 : 0;
-      return [
-        r.name.slice(0, 60),
-        r.ad_count,
-        r.spend.toFixed(0),
-        r.purchases.toFixed(0),
-        roas.toFixed(2),
-        cpa.toFixed(0),
-        ctr.toFixed(2),
-        r.landing_page_views.toFixed(0),
-        r.link_clicks.toFixed(0),
-        r.add_to_cart.toFixed(0),
-        r.impressions.toFixed(0),
-      ].join("\t");
-    })
-    .join("\n");
-  return `${header}\n${body}`;
-}
-
-function buildSystemPrompt(
-  ads: AdSnapshot[],
-  datePreset: string,
-  totals: {
-    spend: number;
-    purchases: number;
-    link_clicks: number;
-    impressions: number;
-  }
-): string {
-  // Ad-level (top 50 by spend) — detailed, includes adset + campaign.
-  const topAds = [...ads].sort((a, b) => b.spend - a.spend).slice(0, 50);
-  const adTsvHeader =
-    "ad_id\tad\tadset\tcampaign\tstatus\tspend\tpurchases\troas\tcpa\tctr%\tlpv\tclicks\tatc\timpr\treach";
-  const adTsvRows = topAds
-    .map((a) =>
-      [
-        a.ad_id,
-        a.ad?.slice(0, 60) ?? "",
-        a.adset?.slice(0, 60) ?? "",
-        a.campaign?.slice(0, 60) ?? "",
-        a.status,
-        a.spend.toFixed(0),
-        a.purchases.toFixed(0),
-        a.roas.toFixed(2),
-        a.cpa.toFixed(0),
-        (a.ctr * 100).toFixed(2),
-        a.landing_page_views.toFixed(0),
-        a.link_clicks.toFixed(0),
-        a.add_to_cart.toFixed(0),
-        a.impressions.toFixed(0),
-        a.reach.toFixed(0),
-      ].join("\t")
-    )
-    .join("\n");
-
-  // Pre-computed rollups so Claude doesn't have to do the math
-  // (and so questions about adsets/campaigns work even when their
-  //  ads are outside the top 50 shown above).
-  const adsetRollup = rollup(ads, (a) => a.adset);
-  const campaignRollup = rollup(ads, (a) => a.campaign);
-
-  const totalsLine = `spend=₱${money(totals.spend)}  purchases=${totals.purchases}  clicks=${money(totals.link_clicks)}  impr=${money(totals.impressions)}`;
-
-  return `You are a senior Facebook Ads performance analyst for Astrobiz, a Philippine e-commerce company running Shopify + Meta Ads. The operator is a marketing team lead looking for clear, decision-oriented insights — not textbook explanations.
-
-Current context:
-- Date range: ${datePreset}
-- Total ads in view: ${ads.length}
-- Account-level totals: ${totalsLine}
-
-### Ad-level data (top 50 by spend, TSV)
-${adTsvHeader}
-${adTsvRows}
-
-### Adset-level rollup (all adsets in view, aggregated from ads, TSV)
-${aggregateTsv(adsetRollup, "adset")}
-
-### Campaign-level rollup (all campaigns in view, aggregated from ads, TSV)
-${aggregateTsv(campaignRollup, "campaign")}
-
-Glossary:
-- roas = purchase value ÷ spend  (>1.5 healthy, >2.5 strong for cold PH traffic)
-- cpa = cost per purchase (peso)
-- ctr = link click-through rate (link clicks ÷ impressions × 100)
-- lpv = landing page views
-- atc = add-to-cart count
-- status = FB delivery status (ACTIVE, PAUSED, etc.) — only present on ad-level rows
-
-How to answer:
-1. Lead with the specific answer, not caveats. If the user asks "top 3 adsets", read from the Adset-level rollup and name them.
-2. Use the right table for the question: ad questions → ad-level; adset questions → adset rollup; campaign questions → campaign rollup.
-3. When patterns exist, call them out (e.g. "the top 3 ROAS ads all share the same adset").
-4. When data is genuinely missing, say so in one line and suggest what you'd need — but always check the rollup tables first before claiming you don't have data.
-5. Be decisive. If the user asks for a recommendation, give one with reasoning. If an ad/adset is bleeding (ROAS < 0.8, spend > ₱3,000), say "kill it" or "pause" and explain.
-6. Use Taglish naturally — mix English analysis with Filipino phrases when it feels right, like talking to a colleague. Don't force it.
-7. Peso amounts: use ₱ symbol, round to whole pesos for spend/CPA, 2 decimals for ROAS/CTR.
-8. Never invent data. If you weren't given a metric, say so.`;
+// Normalize incoming chat history to the block format the agent loop
+// expects. The UI stores plain strings; we only need to preserve
+// assistant→tool_result→assistant chains WITHIN a single turn (those
+// live in the agent loop's local state). Previous turns can safely be
+// flattened back to strings since the model doesn't need to re-execute
+// those tool calls.
+function normalizeMessages(raw: IncomingMessage[]): AgentMessage[] {
+  return raw
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .filter((m) => typeof m.content === "string" && m.content.length > 0)
+    .map((m) => ({ role: m.role, content: m.content }));
 }
 
 export async function POST(request: Request) {
@@ -204,51 +61,36 @@ export async function POST(request: Request) {
   }
 
   const body = (await request.json()) as {
-    messages?: ChatMessage[];
-    ads_snapshot?: AdSnapshot[];
-    date_preset?: string;
-    totals?: {
-      spend: number;
-      purchases: number;
-      link_clicks: number;
-      impressions: number;
-    };
+    messages?: IncomingMessage[];
+    session_id?: string | null;
   };
 
-  const messages = Array.isArray(body.messages) ? body.messages : [];
-  const adsSnapshot = Array.isArray(body.ads_snapshot) ? body.ads_snapshot : [];
-  const datePreset = body.date_preset ?? "last_7d";
-  const totals = body.totals ?? {
-    spend: 0,
-    purchases: 0,
-    link_clicks: 0,
-    impressions: 0,
-  };
-
-  if (messages.length === 0) {
+  const incoming = Array.isArray(body.messages) ? body.messages : [];
+  if (incoming.length === 0) {
     return Response.json(
       { error: "At least one message is required" },
       { status: 400 }
     );
   }
-  if (adsSnapshot.length === 0) {
-    return Response.json(
-      {
-        error:
-          "No ads data available. Load the Ad Performance page first, then return.",
-      },
-      { status: 400 }
-    );
-  }
 
   const supabase = await createClient();
-  const { data: keyRow } = await supabase
-    .from("app_settings")
-    .select("value")
-    .eq("key", "anthropic_api_key")
-    .single();
 
-  if (!keyRow?.value) {
+  // Pull API keys + feature flag + session base cost in parallel.
+  const [keyRes, fbRes, flagRes, sessionRes] = await Promise.all([
+    supabase.from("app_settings").select("value").eq("key", "anthropic_api_key").single(),
+    supabase.from("app_settings").select("value").eq("key", "fb_access_token").single(),
+    supabase.from("app_settings").select("value").eq("key", "ai_agent_mode_enabled").maybeSingle(),
+    body.session_id
+      ? supabase
+          .from("ai_chat_sessions")
+          .select("total_cost_usd")
+          .eq("id", body.session_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
+
+  const anthropicKey = keyRes.data?.value as string | undefined;
+  if (!anthropicKey) {
     return Response.json(
       {
         error:
@@ -258,38 +100,122 @@ export async function POST(request: Request) {
     );
   }
 
-  const systemPrompt = buildSystemPrompt(adsSnapshot, datePreset, totals);
-
-  const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": keyRow.value,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
-      system: systemPrompt,
-      messages,
-      stream: true,
-    }),
-  });
-
-  if (!claudeRes.ok || !claudeRes.body) {
-    const errText = await claudeRes.text();
-    console.error("[ai-analytics/chat] Claude error:", claudeRes.status, errText);
+  const fbToken = fbRes.data?.value as string | undefined;
+  if (!fbToken) {
     return Response.json(
-      {
-        error: `Claude API error (${claudeRes.status})`,
-        details: errText.slice(0, 300),
-      },
-      { status: 502 }
+      { error: "Facebook token not configured. Go to Admin → Settings." },
+      { status: 400 }
     );
   }
 
-  // Pass through Claude's SSE stream directly. The client parses the same format.
-  return new Response(claudeRes.body, {
+  const agentModeEnabled =
+    (flagRes.data?.value as string | undefined) !== "false";
+  if (!agentModeEnabled) {
+    return Response.json(
+      {
+        error:
+          "AI agent mode is disabled. An admin can re-enable it in app_settings.",
+      },
+      { status: 503 }
+    );
+  }
+
+  const sessionBaseCostUsd = Number(
+    (sessionRes.data as { total_cost_usd?: number } | null)?.total_cost_usd ?? 0
+  );
+
+  const role = employee.role as AgentRole;
+  const { definitions, handlers } = buildToolRegistry(role);
+
+  const messages = normalizeMessages(incoming);
+  if (messages.length === 0 || messages[messages.length - 1].role !== "user") {
+    return Response.json(
+      { error: "The last message must be from the user." },
+      { status: 400 }
+    );
+  }
+
+  // We want to stream SSE to the client AND run the tool loop. The loop
+  // calls Anthropic non-streaming until tool_use stops, then streams the
+  // final text. We wrap everything in a ReadableStream so we can emit
+  // custom `tool_call` / `tool_result` frames ahead of Claude's SSE.
+  const encoder = new TextEncoder();
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      function send(event: string, data: unknown) {
+        controller.enqueue(
+          encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+        );
+      }
+
+      try {
+        const result = await runAgentLoop({
+          messages,
+          systemPrompt: SYSTEM_PROMPT,
+          tools: definitions,
+          handlers,
+          toolContext: {
+            // Service client: handlers need to read across tables that
+            // would otherwise be blocked by RLS for the marketing role
+            // (autopilot_actions, store_scaling_campaigns). The allowlist
+            // in permissions.ts is what actually gates visibility.
+            supabase: createServiceClient(),
+            fbToken,
+          },
+          anthropicKey,
+          sessionBaseCostUsd,
+          onToolCallStart: (t) => send("tool_call", t),
+          onToolCallEnd: (t) => send("tool_result", t),
+          onTextDelta: (text) =>
+            send("content_block_delta", {
+              type: "content_block_delta",
+              delta: { type: "text_delta", text },
+            }),
+          onCostCap: (message) => send("cost_cap", { message }),
+        });
+
+        // Persist tool call audit rows + increment session cost totals
+        // (best effort — a failure here should not break the chat).
+        void persistAuditRows({
+          traces: result.toolTraces,
+          employeeId: employee.id,
+          sessionId: body.session_id ?? null,
+        });
+        if (body.session_id) {
+          void incrementSessionCost({
+            sessionId: body.session_id,
+            inputTokens: result.totalInputTokens,
+            outputTokens: result.totalOutputTokens,
+            cacheReadTokens: result.totalCacheReadTokens,
+            costUsd: result.totalCostUsd,
+          });
+        }
+
+        // Send a final summary event so the UI can save the session
+        // with the full trace + cost.
+        send("done", {
+          total_input_tokens: result.totalInputTokens,
+          total_output_tokens: result.totalOutputTokens,
+          total_cache_read_tokens: result.totalCacheReadTokens,
+          total_cost_usd: result.totalCostUsd,
+          iterations: result.iterations,
+          final_text: result.finalText,
+          tool_calls: result.toolTraces,
+          hit_cost_cap: result.hitCostCap,
+        });
+
+        controller.close();
+      } catch (e) {
+        send("error", {
+          message: e instanceof Error ? e.message : "Agent loop failed",
+        });
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
     headers: {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
@@ -297,4 +223,73 @@ export async function POST(request: Request) {
       "X-Accel-Buffering": "no",
     },
   });
+}
+
+async function incrementSessionCost(args: {
+  sessionId: string;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  costUsd: number;
+}) {
+  try {
+    const service = createServiceClient();
+    // Read-modify-write. Single-user-per-session today so no race risk.
+    const { data } = await service
+      .from("ai_chat_sessions")
+      .select(
+        "total_input_tokens, total_output_tokens, total_cache_read_tokens, total_cost_usd"
+      )
+      .eq("id", args.sessionId)
+      .maybeSingle();
+    if (!data) return;
+    await service
+      .from("ai_chat_sessions")
+      .update({
+        total_input_tokens:
+          (data.total_input_tokens ?? 0) + args.inputTokens,
+        total_output_tokens:
+          (data.total_output_tokens ?? 0) + args.outputTokens,
+        total_cache_read_tokens:
+          (data.total_cache_read_tokens ?? 0) + args.cacheReadTokens,
+        total_cost_usd: Number(
+          ((data.total_cost_usd ?? 0) + args.costUsd).toFixed(4)
+        ),
+      })
+      .eq("id", args.sessionId);
+  } catch (e) {
+    console.warn(
+      "[ai-chat] cost increment failed:",
+      e instanceof Error ? e.message : e
+    );
+  }
+}
+
+async function persistAuditRows(args: {
+  traces: ToolCallTrace[];
+  employeeId: string;
+  sessionId: string | null;
+}) {
+  if (args.traces.length === 0) return;
+  try {
+    const service = createServiceClient();
+    await service.from("ai_tool_calls").insert(
+      args.traces.map((t) => ({
+        session_id: args.sessionId,
+        employee_id: args.employeeId,
+        tool_name: t.name,
+        input: t.input,
+        output_preview: t.output_preview,
+        result_rows: t.result_rows ?? null,
+        duration_ms: t.duration_ms,
+        status: t.status === "ok" ? "ok" : "error",
+        error_message: t.error_message ?? null,
+      }))
+    );
+  } catch (e) {
+    console.warn(
+      "[ai-chat] audit insert failed:",
+      e instanceof Error ? e.message : e
+    );
+  }
 }

@@ -256,16 +256,7 @@ export default function AiAnalyticsPage() {
         </button>
       </div>
 
-      {tab === "chat" && (
-        <ChatPanel
-          ads={ads}
-          totals={totals}
-          datePreset={datePreset}
-          accountFilter={accountFilter}
-          accountCount={accounts.length}
-          loadingAds={loadingAds}
-        />
-      )}
+      {tab === "chat" && <ChatPanel />}
 
       {tab === "deconstruct" && (
         <DeconstructionPanel
