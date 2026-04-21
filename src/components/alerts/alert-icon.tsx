@@ -6,6 +6,7 @@ import {
   Truck,
   AlertTriangle,
   Wifi,
+  Tag,
 } from "lucide-react";
 import type { AlertType, AlertSeverity } from "@/lib/alerts/types";
 
@@ -17,6 +18,7 @@ const ICON_BY_TYPE: Record<AlertType, React.ReactNode> = {
   rts_spike: <Truck size={16} />,
   cash_at_risk: <AlertTriangle size={16} />,
   store_outage: <Wifi size={16} />,
+  waybill_sender_mismatch: <Tag size={16} />,
 };
 
 const BG_BY_SEVERITY: Record<AlertSeverity, string> = {

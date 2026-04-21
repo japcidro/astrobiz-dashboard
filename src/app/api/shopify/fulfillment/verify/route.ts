@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
+import { insertAlert } from "@/lib/alerts/insert";
 
 export const dynamic = "force-dynamic";
 
@@ -21,11 +22,16 @@ export async function POST(request: Request) {
     items_scanned?: number;
     mismatches?: unknown;
     started_at?: string;
+    waybill?: string;
+    actual_sender?: string;
   };
 
   const store_id = (body.store_id ?? "").toString();
+  const store_name = (body.store_name ?? "").toString();
   const order_id = body.order_id != null ? String(body.order_id) : "";
   const order_number = (body.order_number ?? "").toString();
+  const waybill = (body.waybill ?? "").toString().trim() || null;
+  const actualSender = (body.actual_sender ?? "").toString().trim();
 
   if (!store_id || !order_id || !order_number) {
     return Response.json(
@@ -82,6 +88,16 @@ export async function POST(request: Request) {
       );
     }
 
+    await logSenderAudit({
+      supabase,
+      employeeId: employee.id,
+      store_name,
+      actualSender,
+      order_id,
+      order_number,
+      waybill,
+    });
+
     return Response.json({ success: true, id: existing.id });
   }
 
@@ -110,5 +126,78 @@ export async function POST(request: Request) {
     );
   }
 
+  await logSenderAudit({
+    supabase,
+    employeeId: employee.id,
+    store_name,
+    actualSender,
+    order_id,
+    order_number,
+    waybill,
+  });
+
   return Response.json({ success: true, id: inserted?.id });
+}
+
+async function logSenderAudit(args: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  employeeId: string;
+  store_name: string;
+  actualSender: string;
+  order_id: string;
+  order_number: string;
+  waybill: string | null;
+}) {
+  const { supabase, employeeId, store_name, actualSender, order_id, order_number, waybill } = args;
+
+  if (!store_name || !actualSender) return;
+
+  const isMismatch = normalize(actualSender) !== normalize(store_name);
+
+  const { error: auditError } = await supabase
+    .from("waybill_sender_audits")
+    .insert({
+      order_id,
+      order_number,
+      waybill,
+      expected_store: store_name,
+      actual_sender: actualSender,
+      is_mismatch: isMismatch,
+      packed_by: employeeId,
+    });
+
+  if (auditError) {
+    console.error("[verify] Sender audit insert failed:", auditError.message);
+  }
+
+  if (!isMismatch) return;
+
+  await insertAlert(supabase, {
+    type: "waybill_sender_mismatch",
+    severity: "action",
+    title: `Wrong sender on ${order_number || "order"} — expected ${store_name}, label says ${actualSender}`,
+    body: [
+      `Order: ${order_number || order_id}`,
+      waybill ? `Waybill: ${waybill}` : null,
+      `Expected: ${store_name}`,
+      `Packer saw: ${actualSender}`,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    resource_type: "store",
+    resource_id: waybill || order_id,
+    payload: {
+      order_id,
+      order_number,
+      waybill,
+      expected_store: store_name,
+      actual_sender: actualSender,
+      packed_by: employeeId,
+    },
+    dedup_hours: 1,
+  });
+}
+
+function normalize(value: string): string {
+  return value.trim().toUpperCase().replace(/\s+/g, " ");
 }

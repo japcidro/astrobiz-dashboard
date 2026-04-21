@@ -22,6 +22,13 @@ export function matchAdToStore(
   return ""; // unattributed
 }
 
+export const KNOWN_STORES = ["I LOVE PATCHES", "CAPSULED", "HIBI", "SERINA"] as const;
+
+export function isKnownStore(storeName: string | null | undefined): boolean {
+  if (!storeName) return false;
+  return (KNOWN_STORES as readonly string[]).includes(storeName);
+}
+
 /**
  * Normalize a J&T sender name to a standard store name.
  * Uses contains-based matching to handle variations like

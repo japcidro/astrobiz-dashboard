@@ -7,7 +7,8 @@ export type AlertType =
   | "autopilot_big_action"
   | "rts_spike"
   | "cash_at_risk"
-  | "store_outage";
+  | "store_outage"
+  | "waybill_sender_mismatch";
 
 export type AlertResourceType =
   | "product"
@@ -57,6 +58,7 @@ export const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   rts_spike: "RTS spike",
   cash_at_risk: "Cash at risk",
   store_outage: "Store connection failing",
+  waybill_sender_mismatch: "Wrong sender on waybill",
 };
 
 export const SEVERITY_ORDER: Record<AlertSeverity, number> = {

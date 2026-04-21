@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type { JtDelivery, JtClassification } from "@/lib/profit/types";
 import { JtUploader } from "@/components/profit/jt-uploader";
+import { isKnownStore, KNOWN_STORES } from "@/lib/profit/store-matching";
 
 interface JtSummary {
   total: number;
@@ -197,6 +198,20 @@ export default function JtDashboardPage() {
     return Array.from(map.values()).sort((a, b) => b.total - a.total);
   }, [deliveries]);
 
+  // Unknown senders — parcels whose store_name is not a recognized brand.
+  // Usually caused by typos or wrong sender name at waybill creation.
+  const unknownSenderRows = useMemo(() => {
+    return deliveries.filter((d) => !isKnownStore(d.store_name));
+  }, [deliveries]);
+
+  const unknownSenderNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const d of unknownSenderRows) {
+      if (d.store_name) names.add(d.store_name);
+    }
+    return Array.from(names).sort();
+  }, [unknownSenderRows]);
+
   // RTS deliveries
   const rtsClassifications: JtClassification[] = ["Returned", "For Return", "Returned (Aged)"];
   const rtsDeliveries = useMemo(() => {
@@ -286,6 +301,36 @@ export default function JtDashboardPage() {
       {error && (
         <div className="mb-4 p-3 bg-red-900/30 border border-red-700/50 rounded-xl text-red-300 text-sm">
           {error}
+        </div>
+      )}
+
+      {/* Unknown sender warning */}
+      {!loading && unknownSenderNames.length > 0 && (
+        <div className="mb-4 p-4 bg-yellow-900/20 border border-yellow-600/50 rounded-xl">
+          <div className="flex items-start gap-3">
+            <AlertTriangle size={20} className="text-yellow-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <h3 className="text-sm font-semibold text-yellow-300 mb-1">
+                {unknownSenderRows.length} parcel{unknownSenderRows.length === 1 ? "" : "s"} with unknown sender name
+              </h3>
+              <p className="text-xs text-yellow-200/80 mb-2">
+                Hindi matukoy ang store dahil hindi tumugma ang sender name sa alinman sa: {KNOWN_STORES.join(", ")}.
+                Likely typo o mali ang sender name sa waybill. Please verify at ayusin sa J&T system.
+              </p>
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {unknownSenderNames.map((name) => (
+                  <button
+                    key={name}
+                    onClick={() => setStoreFilter(name)}
+                    className="px-2 py-1 bg-yellow-900/40 hover:bg-yellow-900/60 border border-yellow-700/50 rounded text-xs text-yellow-200 font-medium cursor-pointer transition-colors"
+                    title="Click to filter by this sender"
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -488,9 +533,29 @@ export default function JtDashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {storeBreakdown.map((row) => (
-                  <tr key={row.store} className="border-b border-gray-700/30 hover:bg-gray-700/20">
-                    <td className="px-4 py-2.5 text-white font-medium">{row.store}</td>
+                {storeBreakdown.map((row) => {
+                  const unknown = !isKnownStore(row.store);
+                  return (
+                  <tr
+                    key={row.store}
+                    className={`border-b border-gray-700/30 hover:bg-gray-700/20 ${unknown ? "bg-yellow-900/10" : ""}`}
+                  >
+                    <td className="px-4 py-2.5 text-white font-medium">
+                      <div className="flex items-center gap-2">
+                        {unknown && (
+                          <AlertTriangle
+                            size={14}
+                            className="text-yellow-400 flex-shrink-0"
+                          />
+                        )}
+                        <span className={unknown ? "text-yellow-300" : ""}>{row.store}</span>
+                        {unknown && (
+                          <span className="text-[10px] uppercase px-1.5 py-0.5 bg-yellow-900/40 border border-yellow-700/50 rounded text-yellow-300 font-medium">
+                            Unknown sender
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="px-4 py-2.5 text-right text-gray-300">{row.total}</td>
                     <td className="px-4 py-2.5 text-right text-green-400">{row.delivered}</td>
                     <td className="px-4 py-2.5 text-right text-red-400">{row.returned}</td>
@@ -501,7 +566,8 @@ export default function JtDashboardPage() {
                     </td>
                     <td className="px-4 py-2.5 text-right text-green-400">{formatCurrency(row.cod_collected)}</td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
