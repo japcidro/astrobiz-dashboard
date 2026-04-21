@@ -22,14 +22,14 @@ export function StorePicker({
 
   return (
     <div className="flex items-center gap-2">
-      <Store size={14} className="text-neutral-400" />
-      <label className="text-[10px] font-bold font-mono uppercase tracking-widest text-neutral-500">
+      <Store size={14} className="text-gray-400" />
+      <label className="text-[10px] font-bold font-mono uppercase tracking-widest text-gray-400">
         Store
       </label>
       <select
         value={current}
         onChange={(e) => handleChange(e.target.value)}
-        className="h-7 border border-neutral-300 px-2 text-[11px] font-mono bg-white"
+        className="h-8 bg-gray-800 border border-gray-700 rounded-lg px-2 text-[11px] font-mono text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
       >
         {stores.map((s) => (
           <option key={s.name} value={s.name}>

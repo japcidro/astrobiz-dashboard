@@ -45,9 +45,9 @@ export function StudioLayout({
 
   return (
     <div className="grid grid-cols-[220px_220px_1fr] gap-3 h-[calc(100vh-220px)]">
-      <div className="border border-neutral-200 h-full flex flex-col">
-        <div className="px-3 py-2 border-b border-neutral-200">
-          <span className="text-[10px] font-bold font-mono uppercase tracking-widest text-neutral-400">
+      <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl h-full flex flex-col overflow-hidden">
+        <div className="px-3 py-2 border-b border-gray-700/50">
+          <span className="text-[10px] font-bold font-mono uppercase tracking-widest text-gray-500">
             References {moodboard.length}
           </span>
         </div>
@@ -60,9 +60,9 @@ export function StudioLayout({
         </div>
       </div>
 
-      <div className="border border-neutral-200 h-full flex flex-col">
-        <div className="px-3 py-2 border-b border-neutral-200">
-          <span className="text-[10px] font-bold font-mono uppercase tracking-widest text-neutral-400">
+      <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl h-full flex flex-col overflow-hidden">
+        <div className="px-3 py-2 border-b border-gray-700/50">
+          <span className="text-[10px] font-bold font-mono uppercase tracking-widest text-gray-500">
             Product {selectedProducts.length}/{products.length}
           </span>
         </div>

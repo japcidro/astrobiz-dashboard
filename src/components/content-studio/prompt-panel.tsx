@@ -396,16 +396,16 @@ export function PromptPanel({
   };
 
   return (
-    <div className="border border-neutral-200 h-full flex flex-col min-w-0 overflow-hidden">
-      <div className="px-3 py-2 border-b border-neutral-200 flex items-center justify-between">
-        <span className="text-[10px] font-bold font-mono uppercase tracking-widest text-neutral-400">
+    <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl h-full flex flex-col min-w-0 overflow-hidden">
+      <div className="px-3 py-2 border-b border-gray-700/50 flex items-center justify-between">
+        <span className="text-[10px] font-bold font-mono uppercase tracking-widest text-gray-500">
           Prompt
         </span>
-        <div className="flex border border-neutral-200">
+        <div className="flex border border-gray-700/50">
           <button
             onClick={() => setMode("product")}
             className={`px-3 py-1 text-[10px] font-bold font-mono cursor-pointer ${
-              mode === "product" ? "bg-neutral-900 text-white" : "text-neutral-400"
+              mode === "product" ? "bg-purple-600 text-white" : "text-gray-500"
             }`}
           >
             Product
@@ -413,7 +413,7 @@ export function PromptPanel({
           <button
             onClick={() => setMode("vibe")}
             className={`px-3 py-1 text-[10px] font-bold font-mono cursor-pointer ${
-              mode === "vibe" ? "bg-neutral-900 text-white" : "text-neutral-400"
+              mode === "vibe" ? "bg-purple-600 text-white" : "text-gray-500"
             }`}
           >
             Vibe
@@ -421,7 +421,7 @@ export function PromptPanel({
         </div>
       </div>
 
-      <div className="p-3 border-b border-neutral-200 space-y-2">
+      <div className="p-3 border-b border-gray-700/50 space-y-2">
         <button onClick={() => setShowPrompt(!showPrompt)} className="w-full text-left">
           {showPrompt ? (
             <Textarea
@@ -435,9 +435,9 @@ export function PromptPanel({
               className="text-[11px] font-mono leading-relaxed"
             />
           ) : (
-            <p className="text-[10px] font-mono text-neutral-400 truncate">
+            <p className="text-[10px] font-mono text-gray-500 truncate">
               {prompt.slice(0, 120)}...{" "}
-              <span className="text-neutral-300 hover:text-neutral-600">
+              <span className="text-gray-600 hover:text-gray-300">
                 (click to edit)
               </span>
             </p>
@@ -448,7 +448,7 @@ export function PromptPanel({
             value={customDirection}
             onChange={(e) => setCustomDirection(e.target.value)}
             placeholder="Add direction (e.g., woman in linen dress at sunset)"
-            className="flex-1 h-7 border border-neutral-300 px-2 text-[10px] font-mono"
+            className="flex-1 h-7 bg-gray-800 border border-gray-700 rounded-lg px-2 text-[10px] font-mono text-white placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
           />
           <Button onClick={handleGenerate} size="sm">
             <Wand2 className="h-3.5 w-3.5 mr-1" />
@@ -459,7 +459,7 @@ export function PromptPanel({
           value={productContext}
           onChange={(e) => setProductContext(e.target.value)}
           placeholder="Product context (optional) e.g., use nature materials — leaves, wood, greenery"
-          className="w-full h-7 border border-neutral-300 px-2 text-[10px] font-mono text-neutral-500"
+          className="w-full h-7 bg-gray-800 border border-gray-700 rounded-lg px-2 text-[10px] font-mono text-gray-300 placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
         />
         <div className="flex items-center gap-2 flex-wrap">
           <button
@@ -469,8 +469,8 @@ export function PromptPanel({
             }}
             className={`px-2 py-0.5 text-[9px] font-mono font-bold border transition-colors cursor-pointer ${
               withModel
-                ? "bg-neutral-900 text-white border-neutral-900"
-                : "border-neutral-200 text-neutral-400 hover:border-neutral-400"
+                ? "bg-purple-600 text-white border-purple-500"
+                : "border-gray-700/50 text-gray-500 hover:border-gray-500"
             }`}
           >
             {withModel ? "✓ With Model" : "+ With Model"}
@@ -496,8 +496,8 @@ export function PromptPanel({
                   onClick={() => setModelType(modelType === m.desc ? "" : m.desc)}
                   className={`px-1.5 py-0.5 text-[8px] font-mono border transition-colors cursor-pointer ${
                     modelType === m.desc
-                      ? "border-blue-500 bg-blue-50 text-blue-700"
-                      : "border-neutral-200 text-neutral-500 hover:border-neutral-400"
+                      ? "border-blue-400 bg-blue-900/30 text-blue-300"
+                      : "border-gray-700/50 text-gray-400 hover:border-gray-500"
                   }`}
                 >
                   {m.label}
@@ -507,31 +507,31 @@ export function PromptPanel({
                 value={modelType}
                 onChange={(e) => setModelType(e.target.value)}
                 placeholder="Or type custom model description..."
-                className="flex-1 min-w-[150px] h-6 border border-neutral-200 px-1.5 text-[9px] font-mono outline-none focus:border-neutral-400"
+                className="flex-1 min-w-[150px] h-6 bg-gray-800 border border-gray-700 rounded px-1.5 text-[9px] font-mono text-white placeholder:text-gray-500 outline-none focus:border-gray-500"
               />
             </>
           )}
         </div>
         {signatureStyle && (
           <div className="flex items-center gap-1">
-            <span className="text-[8px] font-mono font-bold text-amber-600 uppercase tracking-widest shrink-0">
+            <span className="text-[8px] font-mono font-bold text-amber-400 uppercase tracking-widest shrink-0">
               Style:
             </span>
             <input
               value={signatureStyle}
               onChange={(e) => setSignatureStyle(e.target.value)}
-              className="flex-1 h-6 border border-amber-200 bg-amber-50 px-2 text-[9px] font-mono text-amber-800"
+              className="flex-1 h-6 border border-amber-700/50 bg-amber-900/20 px-2 text-[9px] font-mono text-amber-200"
             />
             <button
               onClick={() => setSignatureStyle("")}
-              className="text-amber-400 hover:text-red-500 text-[10px] font-mono px-1 cursor-pointer"
+              className="text-amber-400 hover:text-red-400 text-[10px] font-mono px-1 cursor-pointer"
             >
               x
             </button>
           </div>
         )}
         <div className="flex items-center gap-1 flex-wrap">
-          <span className="text-[8px] font-mono font-bold text-purple-500 uppercase tracking-widest mr-1">
+          <span className="text-[8px] font-mono font-bold text-purple-400 uppercase tracking-widest mr-1">
             Auto Mix
           </span>
           {[
@@ -568,7 +568,7 @@ export function PromptPanel({
                   openBrandPicker(combo.label, combo.search);
                 }
               }}
-              className="px-2 py-0.5 text-[8px] font-mono font-bold border border-purple-200 text-purple-600 hover:bg-purple-50 hover:border-purple-400 transition-colors cursor-pointer"
+              className="px-2 py-0.5 text-[8px] font-mono font-bold border border-purple-700/50 text-purple-400 hover:bg-purple-900/20 hover:border-purple-500/50 transition-colors cursor-pointer"
             >
               {combo.label}
             </button>
@@ -625,7 +625,7 @@ export function PromptPanel({
               );
               toast.success("Random mix applied!");
             }}
-            className="px-2 py-0.5 text-[8px] font-mono font-bold border border-purple-400 bg-purple-50 text-purple-700 hover:bg-purple-100 transition-colors cursor-pointer"
+            className="px-2 py-0.5 text-[8px] font-mono font-bold border border-purple-500/50 bg-purple-900/20 text-purple-300 hover:bg-purple-900/40 transition-colors cursor-pointer"
           >
             Shuffle
           </button>
@@ -638,8 +638,8 @@ export function PromptPanel({
                 onClick={() => setAspectRatio(r)}
                 className={`px-2 py-0.5 text-[9px] font-mono font-bold border transition-colors cursor-pointer ${
                   aspectRatio === r
-                    ? "bg-neutral-900 text-white border-neutral-900"
-                    : "border-neutral-200 text-neutral-400 hover:border-neutral-400"
+                    ? "bg-purple-600 text-white border-purple-500"
+                    : "border-gray-700/50 text-gray-500 hover:border-gray-500"
                 }`}
               >
                 {r}
@@ -653,19 +653,19 @@ export function PromptPanel({
                 onClick={() => setImageCount(n)}
                 className={`h-5 w-5 text-[9px] font-mono font-bold border transition-colors cursor-pointer ${
                   imageCount === n
-                    ? "bg-neutral-900 text-white border-neutral-900"
-                    : "border-neutral-200 text-neutral-400 hover:border-neutral-400"
+                    ? "bg-purple-600 text-white border-purple-500"
+                    : "border-gray-700/50 text-gray-500 hover:border-gray-500"
                 }`}
               >
                 {n}
               </button>
             ))}
-            <span className="text-[9px] font-mono text-neutral-400 ml-0.5">images</span>
+            <span className="text-[9px] font-mono text-gray-500 ml-0.5">images</span>
           </div>
         </div>
         <button
           onClick={() => setShowKeywords(!showKeywords)}
-          className="text-[9px] font-mono font-bold text-neutral-400 hover:text-neutral-900 flex items-center gap-1 cursor-pointer"
+          className="text-[9px] font-mono font-bold text-gray-500 hover:text-white flex items-center gap-1 cursor-pointer"
         >
           {showKeywords ? "▾ Hide Keywords" : "▸ Show Keywords"}
         </button>
@@ -688,8 +688,8 @@ export function PromptPanel({
                     }}
                     className={`px-1.5 py-0.5 text-[8px] font-mono border transition-colors cursor-pointer ${
                       f.category === "Signature"
-                        ? "border-amber-300 bg-amber-50 text-amber-700"
-                        : "border-red-200 bg-red-50 text-red-600 hover:bg-red-100"
+                        ? "border-amber-600/50 bg-amber-900/20 text-amber-300"
+                        : "border-red-700/50 bg-red-900/20 text-red-400 hover:bg-red-100"
                     }`}
                   >
                     {f.label}
@@ -795,7 +795,7 @@ export function PromptPanel({
               ]},
             ].map((cat) => (
               <div key={cat.category} className="flex flex-wrap items-center gap-1">
-                <span className="text-[8px] font-mono font-bold text-neutral-400 uppercase tracking-widest mr-1">
+                <span className="text-[8px] font-mono font-bold text-gray-500 uppercase tracking-widest mr-1">
                   {cat.category}
                 </span>
                 {cat.keywords.map((k) => (
@@ -811,10 +811,10 @@ export function PromptPanel({
                       className={`px-1.5 py-0.5 text-[8px] font-mono border-y border-l transition-colors cursor-pointer ${
                         cat.category === "Signature"
                           ? signatureStyle === k.tag
-                            ? "border-amber-500 bg-amber-100 text-amber-800"
-                            : "border-amber-200 text-amber-700 hover:bg-amber-50 hover:border-amber-400"
-                          : "border-neutral-200 hover:bg-neutral-100 hover:border-neutral-400"
-                      } ${isFavorite(k.tag) ? "border-red-300" : ""}`}
+                            ? "border-amber-400 bg-amber-900/40 text-amber-200"
+                            : "border-amber-700/50 text-amber-300 hover:bg-amber-900/20 hover:border-amber-400"
+                          : "border-gray-700/50 hover:bg-gray-800 hover:border-gray-500"
+                      } ${isFavorite(k.tag) ? "border-red-600/50" : ""}`}
                     >
                       {k.label}
                     </button>
@@ -822,8 +822,8 @@ export function PromptPanel({
                       onClick={() => toggleFavorite(k.label, k.tag, cat.category)}
                       className={`px-0.5 py-0.5 text-[8px] border-y border-r transition-colors cursor-pointer ${
                         isFavorite(k.tag)
-                          ? "text-red-400 border-red-300 bg-red-50"
-                          : "text-neutral-200 border-neutral-200 hover:text-red-400 opacity-0 group-hover/kw:opacity-100"
+                          ? "text-red-400 border-red-600/50 bg-red-900/20"
+                          : "text-gray-700 border-gray-700/50 hover:text-red-400 opacity-0 group-hover/kw:opacity-100"
                       }`}
                     >
                       {isFavorite(k.tag) ? "★" : "☆"}
@@ -840,9 +840,9 @@ export function PromptPanel({
         {generated.length === 0 ? (
           <div className="flex items-center justify-center h-full text-center">
             <div>
-              <Wand2 className="h-8 w-8 text-neutral-200 mx-auto mb-2" />
-              <p className="text-xs font-bold text-neutral-400">No images yet</p>
-              <p className="text-[10px] text-neutral-300">
+              <Wand2 className="h-8 w-8 text-gray-700 mx-auto mb-2" />
+              <p className="text-xs font-bold text-gray-500">No images yet</p>
+              <p className="text-[10px] text-gray-600">
                 Add refs + product, then generate
               </p>
             </div>
@@ -850,11 +850,11 @@ export function PromptPanel({
         ) : (
           <div className="grid grid-cols-4 gap-2">
             {generated.map((img) => (
-              <div key={img.id} className="border border-neutral-200">
+              <div key={img.id} className="border border-gray-700/50">
                 {!img.image_url ? (
-                  <div className="w-full aspect-square bg-neutral-100 flex flex-col items-center justify-center">
-                    <Loader2 className="h-6 w-6 animate-spin text-neutral-300 mb-1" />
-                    <span className="text-[9px] font-mono text-neutral-400">
+                  <div className="w-full aspect-square bg-gray-800 flex flex-col items-center justify-center">
+                    <Loader2 className="h-6 w-6 animate-spin text-gray-600 mb-1" />
+                    <span className="text-[9px] font-mono text-gray-500">
                       Generating...
                     </span>
                   </div>
@@ -874,20 +874,20 @@ export function PromptPanel({
                   </button>
                 )}
                 {img.prompt && img.prompt.startsWith("STYLE:") && (
-                  <div className="px-2 py-0.5 border-t border-neutral-100 bg-amber-50">
-                    <p className="text-[7px] font-mono text-amber-600 truncate">
+                  <div className="px-2 py-0.5 border-t border-gray-800 bg-amber-900/20">
+                    <p className="text-[7px] font-mono text-amber-400 truncate">
                       {img.prompt.split("\n")[0].replace("STYLE: ", "").replace(".", "")}
                     </p>
                   </div>
                 )}
-                <div className="flex items-center justify-between px-2 py-1 border-t border-neutral-100 bg-neutral-50">
+                <div className="flex items-center justify-between px-2 py-1 border-t border-gray-800 bg-gray-900/50">
                   <div className="flex gap-0.5">
                     <button
                       onClick={() => handleRate(img.id, 5)}
                       className={`p-1 cursor-pointer ${
                         img.rating === 5
-                          ? "text-emerald-600"
-                          : "text-neutral-300 hover:text-emerald-600"
+                          ? "text-emerald-400"
+                          : "text-gray-600 hover:text-emerald-400"
                       }`}
                     >
                       <ThumbsUp className="h-3 w-3" />
@@ -896,8 +896,8 @@ export function PromptPanel({
                       onClick={() => handleRate(img.id, 1)}
                       className={`p-1 cursor-pointer ${
                         img.rating === 1
-                          ? "text-red-500"
-                          : "text-neutral-300 hover:text-red-500"
+                          ? "text-red-400"
+                          : "text-gray-600 hover:text-red-400"
                       }`}
                     >
                       <ThumbsDown className="h-3 w-3" />
@@ -969,7 +969,7 @@ export function PromptPanel({
                               );
                             });
                         }}
-                        className="p-1 text-neutral-400 hover:text-purple-600 cursor-pointer"
+                        className="p-1 text-gray-500 hover:text-purple-400 cursor-pointer"
                         title="More like this"
                       >
                         <Wand2 className="h-3 w-3" />
@@ -986,7 +986,7 @@ export function PromptPanel({
                         });
                         toast.success("Saved to library!");
                       }}
-                      className="p-1 text-neutral-400 hover:text-amber-600 cursor-pointer"
+                      className="p-1 text-gray-500 hover:text-amber-400 cursor-pointer"
                       title="Save as Reference"
                     >
                       <BookOpen className="h-3 w-3" />
@@ -994,13 +994,13 @@ export function PromptPanel({
                     <a
                       href={img.image_url}
                       download
-                      className="p-1 text-neutral-400 hover:text-neutral-900"
+                      className="p-1 text-gray-500 hover:text-white"
                     >
                       <Download className="h-3 w-3" />
                     </a>
                     <button
                       onClick={() => handleDelete(img.id)}
-                      className="p-1 text-neutral-400 hover:text-red-500 cursor-pointer"
+                      className="p-1 text-gray-500 hover:text-red-400 cursor-pointer"
                     >
                       <Trash2 className="h-3 w-3" />
                     </button>
@@ -1018,34 +1018,34 @@ export function PromptPanel({
           onClick={() => !brandAdding && setBrandPicker(null)}
         >
           <div
-            className="bg-white w-[600px] max-h-[80vh] flex flex-col shadow-xl"
+            className="bg-gray-900 border border-gray-700/50 rounded-xl w-[600px] max-h-[80vh] flex flex-col shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-4 py-3 border-b border-neutral-200 flex items-center justify-between shrink-0">
+            <div className="px-4 py-3 border-b border-gray-700/50 flex items-center justify-between shrink-0">
               <div>
                 <h3 className="text-sm font-bold font-mono">
                   {brandPicker.label} References
                 </h3>
-                <p className="text-[10px] font-mono text-neutral-400">
+                <p className="text-[10px] font-mono text-gray-500">
                   Select images to add as references
                 </p>
               </div>
               <div className="flex items-center gap-2">
                 {brandSelectedUrls.size > 0 && (
-                  <span className="text-[10px] font-mono font-bold text-purple-600">
+                  <span className="text-[10px] font-mono font-bold text-purple-400">
                     {brandSelectedUrls.size} selected
                   </span>
                 )}
                 <button
                   onClick={addSelectedBrandRefs}
                   disabled={brandSelectedUrls.size === 0 || brandAdding}
-                  className="px-3 py-1.5 bg-neutral-900 text-white text-[10px] font-mono font-bold disabled:opacity-30 hover:bg-neutral-800 cursor-pointer"
+                  className="px-3 py-1.5 bg-purple-600 text-white text-[10px] font-mono font-bold disabled:opacity-30 hover:bg-purple-900/200 cursor-pointer"
                 >
                   {brandAdding ? "Adding..." : `Add Selected (${brandSelectedUrls.size})`}
                 </button>
                 <button
                   onClick={() => setBrandPicker(null)}
-                  className="text-neutral-400 hover:text-neutral-900 text-lg px-1 cursor-pointer"
+                  className="text-gray-500 hover:text-white text-lg px-1 cursor-pointer"
                 >
                   x
                 </button>
@@ -1054,8 +1054,8 @@ export function PromptPanel({
             <div className="flex-1 overflow-y-auto p-4">
               {brandLoading ? (
                 <div className="flex items-center justify-center py-12">
-                  <Loader2 className="h-6 w-6 animate-spin text-neutral-300" />
-                  <span className="ml-2 text-xs font-mono text-neutral-400">
+                  <Loader2 className="h-6 w-6 animate-spin text-gray-600" />
+                  <span className="ml-2 text-xs font-mono text-gray-500">
                     Searching {brandPicker.label}...
                   </span>
                 </div>
@@ -1077,7 +1077,7 @@ export function PromptPanel({
                         className={`relative border-2 transition-colors ${
                           isSelected
                             ? "border-purple-500"
-                            : "border-neutral-200 hover:border-neutral-400"
+                            : "border-gray-700/50 hover:border-gray-500"
                         }`}
                       >
                         <img
@@ -1090,7 +1090,7 @@ export function PromptPanel({
                           }}
                         />
                         {isSelected && (
-                          <div className="absolute top-1 right-1 bg-purple-500 text-white p-0.5 rounded-sm">
+                          <div className="absolute top-1 right-1 bg-purple-900/200 text-white p-0.5 rounded-sm">
                             <span className="text-[8px] font-bold">✓</span>
                           </div>
                         )}
@@ -1099,7 +1099,7 @@ export function PromptPanel({
                   })}
                 </div>
               ) : (
-                <p className="text-center text-xs font-mono text-neutral-400 py-12">
+                <p className="text-center text-xs font-mono text-gray-500 py-12">
                   No results found
                 </p>
               )}
@@ -1114,14 +1114,14 @@ export function PromptPanel({
           onClick={() => setPreviewUrl(null)}
         >
           <div
-            className="bg-white p-2 shadow-xl max-w-[600px]"
+            className="bg-gray-900 border border-gray-700/50 rounded-xl p-2 shadow-2xl max-w-[600px]"
             onClick={(e) => e.stopPropagation()}
           >
             <img src={previewUrl} alt="" className="w-full h-auto object-contain" />
             {previewPrompt && (
-              <div className="px-2 py-2 space-y-1 border-t border-neutral-100 mt-1">
+              <div className="px-2 py-2 space-y-1 border-t border-gray-800 mt-1">
                 {previewPrompt.startsWith("STYLE:") && (
-                  <p className="text-[9px] font-mono text-amber-600 font-bold">
+                  <p className="text-[9px] font-mono text-amber-400 font-bold">
                     {previewPrompt
                       .split("\n")[0]
                       .replace("STYLE: ", "")
@@ -1140,7 +1140,7 @@ export function PromptPanel({
                       !l.includes("product photo")
                   );
                   return directionLine ? (
-                    <p className="text-[8px] font-mono text-neutral-400 truncate">
+                    <p className="text-[8px] font-mono text-gray-500 truncate">
                       {directionLine}
                     </p>
                   ) : null;
@@ -1151,13 +1151,13 @@ export function PromptPanel({
               <a
                 href={previewUrl}
                 download
-                className="px-3 py-1 text-[10px] font-mono text-neutral-500 hover:text-neutral-900 flex items-center gap-1"
+                className="px-3 py-1 text-[10px] font-mono text-gray-400 hover:text-white flex items-center gap-1"
               >
                 <Download className="h-3 w-3" /> Download
               </a>
               <button
                 onClick={() => setPreviewUrl(null)}
-                className="px-3 py-1 text-[10px] font-mono text-neutral-400 hover:text-neutral-900 cursor-pointer"
+                className="px-3 py-1 text-[10px] font-mono text-gray-500 hover:text-white cursor-pointer"
               >
                 Close
               </button>

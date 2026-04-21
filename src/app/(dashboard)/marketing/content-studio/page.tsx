@@ -27,17 +27,17 @@ export default async function ContentStudioPage({
 
   if (stores.length === 0) {
     return (
-      <div className="p-6">
+      <div>
         <div className="mb-6">
-          <p className="text-[10px] font-bold font-mono uppercase tracking-widest text-neutral-400">
+          <p className="text-[10px] font-bold font-mono uppercase tracking-widest text-gray-500">
             /content-studio · image generation
           </p>
-          <h1 className="text-2xl font-bold tracking-tight mt-1">Content Studio</h1>
+          <h1 className="text-2xl font-bold tracking-tight mt-1 text-white">Content Studio</h1>
         </div>
-        <div className="border border-neutral-200 p-8 text-center">
-          <p className="text-sm text-neutral-500">
+        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-8 text-center">
+          <p className="text-sm text-gray-400">
             No Shopify stores connected yet. Go to{" "}
-            <a href="/admin/settings" className="underline font-medium">
+            <a href="/admin/settings" className="underline font-medium text-white">
               Settings
             </a>{" "}
             to add one.
@@ -67,14 +67,14 @@ export default async function ContentStudioPage({
   ]);
 
   return (
-    <div className="p-6">
+    <div>
       <div className="mb-6 flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <p className="text-[10px] font-bold font-mono uppercase tracking-widest text-neutral-400">
+          <p className="text-[10px] font-bold font-mono uppercase tracking-widest text-gray-500">
             /content-studio · image generation
           </p>
-          <h1 className="text-2xl font-bold tracking-tight mt-1">Content Studio</h1>
-          <p className="text-sm text-neutral-500 mt-1">
+          <h1 className="text-2xl font-bold tracking-tight mt-1 text-white">Content Studio</h1>
+          <p className="text-sm text-gray-400 mt-1">
             Generate on-brand images from moodboards, product photos, and prompts.
           </p>
         </div>

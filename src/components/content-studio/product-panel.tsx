@@ -96,7 +96,7 @@ export function ProductPanel({
       <div className="flex-1 overflow-y-auto p-2 space-y-2">
         {grouped.size === 0 ? (
           <div className="text-center py-8">
-            <span className="text-[10px] text-neutral-400">No product photos yet</span>
+            <span className="text-[10px] text-gray-500">No product photos yet</span>
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-2">
@@ -118,8 +118,8 @@ export function ProductPanel({
                   }}
                   className={`relative border-2 text-left group ${
                     allSelected
-                      ? "border-neutral-900"
-                      : "border-neutral-200 hover:border-neutral-400"
+                      ? "border-purple-500"
+                      : "border-gray-700/50 hover:border-gray-500"
                   }`}
                 >
                   <img
@@ -129,13 +129,13 @@ export function ProductPanel({
                   />
                   <div
                     className={`px-1.5 py-1 text-[9px] font-mono font-bold truncate ${
-                      someSelected ? "text-neutral-900" : "text-neutral-400"
+                      someSelected ? "text-white" : "text-gray-500"
                     }`}
                   >
                     {name}
                   </div>
                   {allSelected && (
-                    <div className="absolute top-0.5 left-0.5 bg-neutral-900 text-white p-0.5">
+                    <div className="absolute top-0.5 left-0.5 bg-purple-600 text-white p-0.5">
                       <Check className="h-2.5 w-2.5" />
                     </div>
                   )}
@@ -155,17 +155,17 @@ export function ProductPanel({
         )}
       </div>
 
-      <div className="p-2 border-t border-neutral-200 space-y-1.5">
+      <div className="p-2 border-t border-gray-700/50 space-y-1.5">
         <input
           value={productName}
           onChange={(e) => setProductName(e.target.value)}
           placeholder="Product name (e.g. Discovery Set)"
-          className="w-full h-7 border border-neutral-300 px-2 text-[10px] font-mono"
+          className="w-full h-7 bg-gray-800 border border-gray-700 rounded-lg px-2 text-[10px] font-mono text-white placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
         />
         <button
           onClick={() => fileRef.current?.click()}
           disabled={uploading || !productName.trim()}
-          className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-mono font-bold text-neutral-500 hover:text-neutral-900 hover:bg-neutral-50 border border-neutral-200 transition-colors disabled:opacity-50 cursor-pointer"
+          className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-mono font-bold text-gray-400 hover:text-white hover:bg-gray-800 border border-gray-700/50 transition-colors disabled:opacity-50 cursor-pointer"
         >
           {uploading ? (
             <Loader2 className="h-3 w-3 animate-spin" />

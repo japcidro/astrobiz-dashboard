@@ -265,7 +265,7 @@ export function MoodboardPanel({
   if (view === "refs") {
     return (
       <div className="h-full flex flex-col">
-        <div className="p-2 border-b border-neutral-200">
+        <div className="p-2 border-b border-gray-700/50">
           <div className="flex gap-1">
             <input
               value={searchQuery}
@@ -278,7 +278,7 @@ export function MoodboardPanel({
                 }
               }}
               placeholder="Search or paste URL"
-              className="flex-1 h-7 border border-neutral-300 px-2 text-[10px] font-mono"
+              className="flex-1 h-7 bg-gray-800 border border-gray-700 rounded-lg px-2 text-[10px] font-mono text-white placeholder:text-gray-500 focus:outline-none focus:ring-1 focus:ring-purple-500"
             />
             <button
               onClick={() =>
@@ -287,7 +287,7 @@ export function MoodboardPanel({
                   : handleSearch()
               }
               disabled={searching || !searchQuery.trim()}
-              className="px-2 h-7 border border-neutral-300 hover:bg-neutral-50 disabled:opacity-50 cursor-pointer"
+              className="px-2 h-7 border border-gray-700 hover:bg-gray-800/50 disabled:opacity-50 cursor-pointer"
             >
               {searching ? (
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -303,7 +303,7 @@ export function MoodboardPanel({
         <div className="flex-1 overflow-y-auto p-2">
           {searchResults.length > 0 && (
             <div className="mb-3">
-              <p className="text-[9px] font-bold font-mono text-neutral-400 uppercase mb-1">
+              <p className="text-[9px] font-bold font-mono text-gray-500 uppercase mb-1">
                 Tap to add
               </p>
               <div className="grid grid-cols-2 gap-1.5 max-h-[500px] overflow-y-auto">
@@ -317,8 +317,8 @@ export function MoodboardPanel({
                       disabled={isAdding || isAdded}
                       className={`relative border ${
                         isAdded
-                          ? "border-emerald-300 opacity-60"
-                          : "border-neutral-200 hover:border-neutral-400"
+                          ? "border-emerald-600/50 opacity-60"
+                          : "border-gray-700/50 hover:border-gray-500"
                       }`}
                     >
                       <img
@@ -333,7 +333,7 @@ export function MoodboardPanel({
                         </div>
                       )}
                       {isAdded && (
-                        <div className="absolute top-1 right-1 bg-emerald-500 text-white p-0.5">
+                        <div className="absolute top-1 right-1 bg-emerald-600 text-white p-0.5">
                           <Check className="h-2.5 w-2.5" />
                         </div>
                       )}
@@ -343,7 +343,7 @@ export function MoodboardPanel({
               </div>
               <button
                 onClick={() => setSearchResults([])}
-                className="w-full mt-1 text-[9px] text-neutral-400 hover:text-neutral-900 font-mono cursor-pointer"
+                className="w-full mt-1 text-[9px] text-gray-500 hover:text-white font-mono cursor-pointer"
               >
                 Clear
               </button>
@@ -351,7 +351,7 @@ export function MoodboardPanel({
           )}
 
           {selectedRefs.size > 0 && (
-            <div className="flex items-center justify-between mb-1.5 bg-neutral-50 px-2 py-1.5 border border-neutral-200">
+            <div className="flex items-center justify-between mb-1.5 bg-gray-800/50 px-2 py-1.5 border border-gray-700/50">
               <span className="text-[9px] font-mono font-bold">
                 {selectedRefs.size} selected
               </span>
@@ -365,7 +365,7 @@ export function MoodboardPanel({
                     setSelectedRefs(new Set());
                     toast.success("Saved to library!");
                   }}
-                  className="px-2 py-0.5 text-[9px] font-mono font-bold bg-neutral-900 text-white cursor-pointer"
+                  className="px-2 py-0.5 text-[9px] font-mono font-bold bg-purple-600 text-white cursor-pointer"
                 >
                   Save
                 </button>
@@ -382,13 +382,13 @@ export function MoodboardPanel({
                     setSelectedRefs(new Set());
                     toast.success("Deleted");
                   }}
-                  className="px-2 py-0.5 text-[9px] font-mono font-bold text-red-500 border border-red-200 cursor-pointer"
+                  className="px-2 py-0.5 text-[9px] font-mono font-bold text-red-400 border border-red-700/50 cursor-pointer"
                 >
                   Delete
                 </button>
                 <button
                   onClick={() => setSelectedRefs(new Set())}
-                  className="px-1 py-0.5 text-[9px] text-neutral-400 cursor-pointer"
+                  className="px-1 py-0.5 text-[9px] text-gray-500 cursor-pointer"
                 >
                   ✕
                 </button>
@@ -411,7 +411,7 @@ export function MoodboardPanel({
                       })
                     }
                     className={`relative border-2 ${
-                      isSelected ? "border-neutral-900" : "border-transparent"
+                      isSelected ? "border-purple-500" : "border-transparent"
                     }`}
                   >
                     <img
@@ -420,7 +420,7 @@ export function MoodboardPanel({
                       className="w-full aspect-square object-cover"
                     />
                     {isSelected && (
-                      <div className="absolute top-0.5 right-0.5 bg-neutral-900 text-white p-0.5">
+                      <div className="absolute top-0.5 right-0.5 bg-purple-600 text-white p-0.5">
                         <Check className="h-2.5 w-2.5" />
                       </div>
                     )}
@@ -429,16 +429,16 @@ export function MoodboardPanel({
               })}
             </div>
           ) : (
-            <p className="text-[10px] text-neutral-400 text-center py-8">
+            <p className="text-[10px] text-gray-500 text-center py-8">
               Search, paste URL, upload, or pick from library
             </p>
           )}
         </div>
 
-        <div className="p-2 border-t border-neutral-200 space-y-1">
+        <div className="p-2 border-t border-gray-700/50 space-y-1">
           <button
             onClick={() => setView("library")}
-            className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-mono font-bold text-neutral-500 hover:text-neutral-900 hover:bg-neutral-50 border border-neutral-200 cursor-pointer"
+            className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-mono font-bold text-gray-400 hover:text-white hover:bg-gray-800/50 border border-gray-700/50 cursor-pointer"
           >
             <BookOpen className="h-3 w-3" /> Saved Library{" "}
             {savedImages.length > 0 ? `(${savedImages.length})` : ""}
@@ -446,7 +446,7 @@ export function MoodboardPanel({
           <button
             onClick={() => fileRef.current?.click()}
             disabled={uploading}
-            className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-mono font-bold text-neutral-500 hover:text-neutral-900 hover:bg-neutral-50 border border-neutral-200 disabled:opacity-50 cursor-pointer"
+            className="w-full flex items-center justify-center gap-1.5 py-1.5 text-[10px] font-mono font-bold text-gray-400 hover:text-white hover:bg-gray-800/50 border border-gray-700/50 disabled:opacity-50 cursor-pointer"
           >
             {uploading ? (
               <Loader2 className="h-3 w-3 animate-spin" />
@@ -473,36 +473,36 @@ export function MoodboardPanel({
 
   return (
     <div className="h-full flex flex-col">
-      <div className="p-2 border-b border-neutral-200 flex items-center justify-between">
+      <div className="p-2 border-b border-gray-700/50 flex items-center justify-between">
         <button
           onClick={() => {
             setView("refs");
             setSelectedLibrary(new Set());
           }}
-          className="flex items-center gap-1 text-[10px] font-mono font-bold text-neutral-500 hover:text-neutral-900 cursor-pointer"
+          className="flex items-center gap-1 text-[10px] font-mono font-bold text-gray-400 hover:text-white cursor-pointer"
         >
           <ArrowLeft className="h-3 w-3" /> Back
         </button>
-        <span className="text-[10px] font-mono text-neutral-400">
+        <span className="text-[10px] font-mono text-gray-500">
           {savedImages.length} saved
         </span>
       </div>
 
       {selectedLibrary.size > 0 && (
-        <div className="px-2 py-1.5 border-b border-neutral-200 flex items-center justify-between bg-neutral-50">
+        <div className="px-2 py-1.5 border-b border-gray-700/50 flex items-center justify-between bg-gray-800/50">
           <span className="text-[9px] font-mono font-bold">
             {selectedLibrary.size} selected
           </span>
           <div className="flex gap-1">
             <button
               onClick={useSelectedAsRefs}
-              className="px-2 py-1 text-[9px] font-mono font-bold bg-neutral-900 text-white hover:bg-neutral-800 cursor-pointer"
+              className="px-2 py-1 text-[9px] font-mono font-bold bg-purple-600 text-white hover:bg-purple-500 cursor-pointer"
             >
               Use as Refs
             </button>
             <button
               onClick={deleteSelectedFromLibrary}
-              className="px-2 py-1 text-[9px] font-mono font-bold text-red-500 border border-red-200 hover:bg-red-50 cursor-pointer"
+              className="px-2 py-1 text-[9px] font-mono font-bold text-red-400 border border-red-700/50 hover:bg-red-900/20 cursor-pointer"
             >
               Delete
             </button>
@@ -512,7 +512,7 @@ export function MoodboardPanel({
 
       <div className="flex-1 overflow-y-auto p-2">
         {savedImages.length === 0 ? (
-          <p className="text-[10px] text-neutral-400 text-center py-8">
+          <p className="text-[10px] text-gray-500 text-center py-8">
             No saved images yet. Search, paste, or upload to build your library.
           </p>
         ) : (
@@ -533,9 +533,9 @@ export function MoodboardPanel({
                   }}
                   className={`relative border-2 ${
                     isSelected
-                      ? "border-neutral-900"
+                      ? "border-purple-500"
                       : isActive
-                      ? "border-emerald-300"
+                      ? "border-emerald-600/50"
                       : "border-transparent"
                   }`}
                 >
@@ -545,12 +545,12 @@ export function MoodboardPanel({
                     className="w-full aspect-square object-cover"
                   />
                   {isSelected && (
-                    <div className="absolute top-0.5 right-0.5 bg-neutral-900 text-white p-0.5">
+                    <div className="absolute top-0.5 right-0.5 bg-purple-600 text-white p-0.5">
                       <Check className="h-2.5 w-2.5" />
                     </div>
                   )}
                   {isActive && !isSelected && (
-                    <div className="absolute top-0.5 right-0.5 bg-emerald-500 text-white p-0.5">
+                    <div className="absolute top-0.5 right-0.5 bg-emerald-600 text-white p-0.5">
                       <Check className="h-2.5 w-2.5" />
                     </div>
                   )}
