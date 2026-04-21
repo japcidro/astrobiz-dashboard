@@ -153,6 +153,33 @@ export function DeconstructionPanel({
     inputs_snapshot: unknown;
     store_name: string | null;
   } | null>(null);
+  const [comparisons, setComparisons] = useState<
+    Array<{
+      id: string;
+      ad_ids: string[];
+      store_name: string | null;
+      date_preset: string;
+      analysis: ComparativeReport;
+      inputs_snapshot: unknown;
+      model: string | null;
+      created_at: string;
+    }>
+  >([]);
+  const [loadingComparisons, setLoadingComparisons] = useState(false);
+
+  const loadComparisons = useCallback(async () => {
+    setLoadingComparisons(true);
+    try {
+      const res = await fetch("/api/marketing/ai-analytics/comparisons?limit=20");
+      if (!res.ok) return;
+      const json = (await res.json()) as { rows: typeof comparisons };
+      setComparisons(json.rows ?? []);
+    } catch {
+      // non-fatal
+    } finally {
+      setLoadingComparisons(false);
+    }
+  }, []);
 
   const adMap = useMemo(() => {
     const m = new Map<string, AdBrief>();
@@ -308,8 +335,12 @@ export function DeconstructionPanel({
     if (mode === "single") {
       setSelectedIds(new Set());
       setCompareError(null);
+    } else {
+      // Refresh history when entering compare mode so freshly-saved
+      // analyses from another tab/user appear right away.
+      loadComparisons();
     }
-  }, [mode]);
+  }, [mode, loadComparisons]);
 
   const toggleSelection = useCallback((adId: string) => {
     setCompareError(null);
@@ -541,6 +572,8 @@ export function DeconstructionPanel({
           inputs_snapshot: row.inputs_snapshot,
           store_name: row.store_name,
         });
+        // Refresh history so the new (or re-run) entry appears immediately.
+        loadComparisons();
       } catch (e) {
         setCompareError(e instanceof Error ? e.message : "Compare failed");
       } finally {
@@ -555,6 +588,7 @@ export function DeconstructionPanel({
       alreadyAnalyzedIds,
       datePreset,
       loadList,
+      loadComparisons,
     ]
   );
 
@@ -741,6 +775,22 @@ export function DeconstructionPanel({
           </>
         )}
       </div>
+
+      {/* Compare mode: past analyses history */}
+      {mode === "compare" && (
+        <ComparisonHistory
+          rows={comparisons}
+          loading={loadingComparisons}
+          onOpen={(row) =>
+            setCompareReport({
+              report: row.analysis,
+              inputs_snapshot: row.inputs_snapshot,
+              store_name: row.store_name,
+            })
+          }
+          onRefresh={loadComparisons}
+        />
+      )}
 
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-2">
@@ -1211,6 +1261,153 @@ function CompareActionBar({
           Winning Template docs.
         </p>
       )}
+    </div>
+  );
+}
+
+function ComparisonHistory({
+  rows,
+  loading,
+  onOpen,
+  onRefresh,
+}: {
+  rows: Array<{
+    id: string;
+    ad_ids: string[];
+    store_name: string | null;
+    date_preset: string;
+    analysis: ComparativeReport;
+    inputs_snapshot: unknown;
+    model: string | null;
+    created_at: string;
+  }>;
+  loading: boolean;
+  onOpen: (row: {
+    analysis: ComparativeReport;
+    inputs_snapshot: unknown;
+    store_name: string | null;
+  }) => void;
+  onRefresh: () => void;
+}) {
+  if (rows.length === 0 && !loading) {
+    return (
+      <div className="bg-gray-900/30 border border-dashed border-gray-700/50 rounded-xl p-4 text-center">
+        <p className="text-xs text-gray-500">
+          Wala pang comparative analyses na na-save. Mag-run ng &quot;Analyze
+          &amp; Compare&quot; para mag-build ng history.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+          Past Analyses ({rows.length})
+        </h3>
+        <button
+          onClick={onRefresh}
+          disabled={loading}
+          className="flex items-center gap-1 text-[11px] text-gray-500 hover:text-gray-300 disabled:opacity-40 cursor-pointer"
+        >
+          <RefreshCw
+            size={10}
+            className={loading ? "animate-spin" : ""}
+          />
+          Refresh
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+        {rows.map((r) => {
+          const snap = r.inputs_snapshot as
+            | {
+                ads?: Array<{
+                  ad_id: string;
+                  ad_name: string;
+                  thumbnail_url: string | null;
+                  consistency?: { tier: string };
+                }>;
+              }
+            | null;
+          const ads = snap?.ads ?? [];
+          const winners = ads.filter(
+            (a) => a.consistency?.tier === "stable_winner"
+          ).length;
+          const thumbs = ads.slice(0, 4);
+          const remaining = ads.length - thumbs.length;
+
+          return (
+            <button
+              key={r.id}
+              onClick={() =>
+                onOpen({
+                  analysis: r.analysis,
+                  inputs_snapshot: r.inputs_snapshot,
+                  store_name: r.store_name,
+                })
+              }
+              className="text-left bg-gray-900/50 border border-gray-700/50 hover:border-emerald-600/50 rounded-lg p-3 transition-colors cursor-pointer"
+            >
+              <div className="flex items-start justify-between gap-2 mb-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium text-white truncate">
+                    {r.store_name ?? "Unknown store"} · {ads.length} ads
+                  </p>
+                  <p className="text-[10px] text-gray-500 mt-0.5">
+                    {r.date_preset} ·{" "}
+                    {new Date(r.created_at).toLocaleDateString("en-PH", {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
+                    {winners > 0 && (
+                      <span className="ml-1 text-emerald-400">
+                        · {winners} winner{winners === 1 ? "" : "s"}
+                      </span>
+                    )}
+                  </p>
+                </div>
+                <Eye
+                  size={12}
+                  className="text-gray-500 flex-shrink-0 mt-0.5"
+                />
+              </div>
+
+              {thumbs.length > 0 && (
+                <div className="flex items-center gap-1 mb-2">
+                  {thumbs.map((a) =>
+                    a.thumbnail_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        key={a.ad_id}
+                        src={a.thumbnail_url}
+                        alt=""
+                        className="w-9 h-9 rounded border border-gray-700 object-cover flex-shrink-0"
+                      />
+                    ) : (
+                      <div
+                        key={a.ad_id}
+                        className="w-9 h-9 rounded bg-gray-800 border border-gray-700 flex-shrink-0"
+                      />
+                    )
+                  )}
+                  {remaining > 0 && (
+                    <span className="text-[10px] text-gray-500 ml-1">
+                      +{remaining}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              <p className="text-[11px] text-gray-300 line-clamp-2 leading-relaxed">
+                {r.analysis.summary || "No summary."}
+              </p>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
