@@ -37,7 +37,7 @@ export default async function SettingsPage() {
 
   const supabase = await createClient();
 
-  const [{ data: tokenSetting }, { data: selectedSetting }, { data: shopifyStores }, { data: employees }, { data: aiKeySetting }, { data: geminiKeySetting }] = await Promise.all([
+  const [{ data: tokenSetting }, { data: selectedSetting }, { data: shopifyStores }, { data: employees }, { data: aiKeySetting }, { data: geminiKeySetting }, { data: serperKeySetting }] = await Promise.all([
     supabase
       .from("app_settings")
       .select("value, updated_at")
@@ -65,6 +65,11 @@ export default async function SettingsPage() {
       .from("app_settings")
       .select("value")
       .eq("key", "gemini_api_key")
+      .single(),
+    supabase
+      .from("app_settings")
+      .select("value")
+      .eq("key", "serper_api_key")
       .single(),
   ]);
 
@@ -160,12 +165,23 @@ export default async function SettingsPage() {
           currentKey={geminiKeySetting?.value || ""}
           settingKey="gemini_api_key"
           title="Gemini API Key"
-          description="Google Gemini key — used for video creative deconstruction"
+          description="Google Gemini key — used for video deconstruction and Content Studio image generation"
           label="Google Gemini API Key"
           placeholder="AIza..."
           docsUrl="https://aistudio.google.com/apikey"
           docsLabel="aistudio.google.com"
           accent="blue"
+        />
+        <AiKeyManager
+          currentKey={serperKeySetting?.value || ""}
+          settingKey="serper_api_key"
+          title="Serper API Key"
+          description="Google Images search for Content Studio moodboard (free tier: 2,500 searches/mo)"
+          label="Serper API Key"
+          placeholder="Your Serper key..."
+          docsUrl="https://serper.dev"
+          docsLabel="serper.dev"
+          accent="emerald"
         />
       </div>
     </div>
