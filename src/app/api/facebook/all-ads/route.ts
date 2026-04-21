@@ -108,13 +108,23 @@ export async function GET(request: Request) {
   const accountFilter = searchParams.get("account") || "ALL";
   const forceRefresh = searchParams.get("refresh") === "1";
 
+  // Optional explicit date range (YYYY-MM-DD PHT). When both present, we pass
+  // time_range to FB insights instead of date_preset so briefings can backfill
+  // arbitrary historical dates (e.g. two Mondays ago) that no preset covers.
+  const dateFrom = searchParams.get("date_from");
+  const dateTo = searchParams.get("date_to");
+  const useTimeRange = Boolean(dateFrom && dateTo);
+  const insightsDateParam: { date_preset: string } | { time_range: string } = useTimeRange
+    ? { time_range: JSON.stringify({ since: dateFrom, until: dateTo }) }
+    : { date_preset: datePreset };
+
   // Cron invocations have no user session — use service client so
   // RLS on app_settings doesn't silently return empty FB token.
   const supabase = isCron ? createServiceClient() : await createClient();
 
   // Check Supabase cache first
   const cacheKey = buildCacheKey("ads", {
-    date_preset: datePreset,
+    date_preset: useTimeRange ? `range:${dateFrom}:${dateTo}` : datePreset,
     account: accountFilter,
   });
 
@@ -253,7 +263,7 @@ export async function GET(request: Request) {
               ...(cachedStruct.data as [CampaignRaw[], AdsetRaw[], AdRaw[]]),
               await fbFetchAll<Record<string, unknown>>(
                 `/${account.id}/insights`, token,
-                { fields: INSIGHTS_FIELDS, date_preset: datePreset, level: "ad", limit: "500" }
+                { fields: INSIGHTS_FIELDS, ...insightsDateParam, level: "ad", limit: "500" }
               ).catch(() => [] as Array<Record<string, unknown>>),
             ]
           : await Promise.all([
@@ -295,7 +305,7 @@ export async function GET(request: Request) {
               token,
               {
                 fields: INSIGHTS_FIELDS,
-                date_preset: datePreset,
+                ...insightsDateParam,
                 level: "ad",
                 limit: "500",
               }

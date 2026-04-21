@@ -102,6 +102,13 @@ export async function collectBriefingData(
   type: BriefingType,
   period: PeriodRange
 ): Promise<BriefingData> {
+  // Always pass explicit PHT date range (date_from / date_to) derived from
+  // the period so historical backfills work. Preset strings like "yesterday"
+  // only make sense at the moment the cron fires — they're useless when we
+  // later rebuild an old briefing. Explicit dates are period-agnostic.
+  const dateFrom = phtDateString(period.start);
+  const dateTo = phtDateString(period.end);
+
   // 1. P&L from /api/profit/daily — refresh=1 bypasses stale cache that
   // may have been populated before the RLS fix landed.
   const pnlPromise = safeFetch<{
@@ -118,16 +125,21 @@ export async function collectBriefingData(
   }>(
     `${baseUrl}/api/profit/daily?${new URLSearchParams({
       store: "ALL",
-      date_filter: period.dateFilter,
+      date_filter: "custom",
+      date_from: dateFrom,
+      date_to: dateTo,
       refresh: "1",
     })}`,
     cronSecret
   );
 
-  // 2. Ads
+  // 2. Ads — pass date_from/date_to so FB insights uses time_range instead of
+  // date_preset (presets can't target arbitrary historical dates).
   const adsPromise = safeFetch<{ ads?: AdRow[]; totals?: { spend: number; roas: number; cpa: number; purchases: number } }>(
     `${baseUrl}/api/facebook/all-ads?${new URLSearchParams({
       date_preset: period.datePreset,
+      date_from: dateFrom,
+      date_to: dateTo,
       account: "ALL",
       refresh: "1",
     })}`,
@@ -138,7 +150,9 @@ export async function collectBriefingData(
   const ordersPromise = safeFetch<OrdersPayload>(
     `${baseUrl}/api/shopify/orders?${new URLSearchParams({
       store: "ALL",
-      date_filter: period.dateFilter,
+      date_filter: "custom",
+      date_from: dateFrom,
+      date_to: dateTo,
       refresh: "1",
     })}`,
     cronSecret
@@ -358,6 +372,7 @@ export async function collectBriefingData(
   const prevPnl = await safeFetch<{ summary: { revenue: number; net_profit: number } }>(
     `${baseUrl}/api/profit/daily?${new URLSearchParams({
       store: "ALL",
+      date_filter: "custom",
       date_from: phtDateString(prevStart),
       date_to: phtDateString(prevEnd),
       refresh: "1",

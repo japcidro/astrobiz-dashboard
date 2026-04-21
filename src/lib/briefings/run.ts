@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { BriefingType } from "./types";
+import type { BriefingType, PeriodRange } from "./types";
 import { getPeriod, phtDateString } from "./period";
 import { collectBriefingData } from "./collect";
 import { generateAISummary } from "./summarize";
@@ -11,18 +11,28 @@ function formatPHP(n: number): string {
   return `₱${n.toLocaleString("en-PH", { maximumFractionDigits: 0 })}`;
 }
 
+interface RunOptions {
+  // Skip email on backfill reruns — we don't want admins getting yesterday's
+  // report re-delivered in their inbox every time someone clicks Rebuild.
+  skipEmail?: boolean;
+  // Override the period — used by the backfill endpoint when rebuilding a
+  // historical briefing. Falls back to getPeriod(type) (the "current" period).
+  period?: PeriodRange;
+}
+
 export async function runBriefing(
   supabase: SupabaseClient,
   baseUrl: string,
   cronSecret: string,
-  type: BriefingType
+  type: BriefingType,
+  options: RunOptions = {}
 ): Promise<{
   success: boolean;
   briefing_id?: string;
   email?: { sent: number; error?: string };
   error?: string;
 }> {
-  const period = getPeriod(type);
+  const period = options.period ?? getPeriod(type);
   const periodStart = phtDateString(period.start);
   const periodEnd = phtDateString(period.end);
 
@@ -80,6 +90,14 @@ export async function runBriefing(
   }
 
   const briefingId = inserted.id as string;
+
+  if (options.skipEmail) {
+    return {
+      success: true,
+      briefing_id: briefingId,
+      email: { sent: 0, error: "skipped" },
+    };
+  }
 
   // 5. Send email
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? baseUrl;

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Sunrise, Moon, CalendarDays, CalendarRange, ArrowRight, RefreshCw, Play } from "lucide-react";
+import { Sunrise, Moon, CalendarDays, CalendarRange, ArrowRight, RefreshCw, Play, Hammer } from "lucide-react";
 import type { BriefingType } from "@/lib/briefings/types";
 
 interface BriefingRow {
@@ -46,6 +46,7 @@ export function BriefingsList() {
   const [loading, setLoading] = useState(true);
   const [rerunning, setRerunning] = useState<BriefingType | null>(null);
   const [rerunMsg, setRerunMsg] = useState<string | null>(null);
+  const [rebuildingId, setRebuildingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -63,6 +64,42 @@ export function BriefingsList() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const rebuild = useCallback(
+    async (id: string, label: string) => {
+      const confirmed = window.confirm(
+        `Rebuild this briefing (${label})? The existing row will be deleted and re-generated with fresh data for its original period. No email will be re-sent.`
+      );
+      if (!confirmed) return;
+      setRebuildingId(id);
+      setRerunMsg(null);
+      try {
+        const res = await fetch(`/api/admin/briefing-backfill?id=${id}`, {
+          method: "POST",
+          cache: "no-store",
+        });
+        const body = (await res.json()) as {
+          result?: { success?: boolean; error?: string };
+          error?: string;
+        };
+        if (!res.ok || body.error || body.result?.success === false) {
+          setRerunMsg(
+            `Rebuild failed: ${body.error ?? body.result?.error ?? "unknown error"}`
+          );
+        } else {
+          setRerunMsg(`Rebuild ok — ${label} regenerated.`);
+          await load();
+        }
+      } catch (err) {
+        setRerunMsg(
+          `Rebuild failed: ${err instanceof Error ? err.message : "unknown"}`
+        );
+      } finally {
+        setRebuildingId(null);
+      }
+    },
+    [load]
+  );
 
   const rerun = useCallback(
     async (type: BriefingType) => {
@@ -176,39 +213,63 @@ export function BriefingsList() {
             ? b.ai_summary.split(/\n\n+/)[0].slice(0, 160) +
               (b.ai_summary.length > 160 ? "…" : "")
             : null;
+          const rebuildLabel = `${meta.label} · ${b.period_label}`;
+          const isRebuilding = rebuildingId === b.id;
           return (
-            <Link
+            <div
               key={b.id}
-              href={`/admin/briefings/${b.id}`}
-              className="block bg-gray-900/40 hover:bg-gray-900 border border-gray-800 hover:border-gray-700 rounded-xl p-4 transition-colors"
+              className="group relative bg-gray-900/40 hover:bg-gray-900 border border-gray-800 hover:border-gray-700 rounded-xl transition-colors"
             >
-              <div className="flex items-start gap-3">
-                <div
-                  className={`w-8 h-8 rounded-lg border flex items-center justify-center flex-shrink-0 ${meta.color}`}
-                >
-                  {meta.icon}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span
-                      className={`text-[10px] font-semibold uppercase tracking-wider ${meta.color.split(" ")[1]}`}
-                    >
-                      {meta.label}
-                    </span>
-                    <span className="text-xs text-gray-500">{b.period_label}</span>
+              <Link
+                href={`/admin/briefings/${b.id}`}
+                className="block p-4"
+              >
+                <div className="flex items-start gap-3">
+                  <div
+                    className={`w-8 h-8 rounded-lg border flex items-center justify-center flex-shrink-0 ${meta.color}`}
+                  >
+                    {meta.icon}
                   </div>
-                  <p className="text-sm font-medium text-white leading-snug">
-                    {b.headline}
-                  </p>
-                  {summaryPreview && (
-                    <p className="text-xs text-gray-500 mt-1 leading-relaxed">
-                      {summaryPreview}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span
+                        className={`text-[10px] font-semibold uppercase tracking-wider ${meta.color.split(" ")[1]}`}
+                      >
+                        {meta.label}
+                      </span>
+                      <span className="text-xs text-gray-500">{b.period_label}</span>
+                    </div>
+                    <p className="text-sm font-medium text-white leading-snug">
+                      {b.headline}
                     </p>
-                  )}
+                    {summaryPreview && (
+                      <p className="text-xs text-gray-500 mt-1 leading-relaxed">
+                        {summaryPreview}
+                      </p>
+                    )}
+                  </div>
+                  <ArrowRight size={16} className="text-gray-600 flex-shrink-0 mt-1" />
                 </div>
-                <ArrowRight size={16} className="text-gray-600 flex-shrink-0 mt-1" />
-              </div>
-            </Link>
+              </Link>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  rebuild(b.id, rebuildLabel);
+                }}
+                disabled={isRebuilding || rebuildingId !== null}
+                title="Delete + regenerate this briefing for its original period (no email)"
+                className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-md border border-gray-700 bg-gray-900/80 text-gray-400 hover:text-white hover:border-gray-600 opacity-0 group-hover:opacity-100 disabled:opacity-100 disabled:cursor-not-allowed transition-opacity cursor-pointer"
+              >
+                {isRebuilding ? (
+                  <RefreshCw size={10} className="animate-spin" />
+                ) : (
+                  <Hammer size={10} />
+                )}
+                {isRebuilding ? "Rebuilding…" : "Rebuild"}
+              </button>
+            </div>
           );
         })}
       </div>
