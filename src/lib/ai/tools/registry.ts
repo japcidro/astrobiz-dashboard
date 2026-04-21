@@ -72,11 +72,13 @@ const ALL_DEFINITIONS: ToolDefinition[] = [
             "last_7d",
             "last_14d",
             "last_30d",
+            "last_90d",
             "this_month",
             "last_month",
+            "lifetime",
           ],
           description:
-            "Which date range to pull. Infer from user message (e.g. 'this week' → last_7d).",
+            "Which date range to pull. Infer from user message. For single-period questions ('this week' → last_7d, 'yesterday' → yesterday). For retrospective/compilation questions ('lahat ng winners', 'every ad that hit X purchases', 'all-time'), use last_90d or lifetime so you don't miss ads that already wound down.",
         },
         account_filter: {
           type: "string",
@@ -107,7 +109,7 @@ const ALL_DEFINITIONS: ToolDefinition[] = [
       properties: {
         date_preset: {
           type: "string",
-          enum: ["last_7d", "last_14d", "last_30d"],
+          enum: ["last_7d", "last_14d", "last_30d", "last_90d", "lifetime"],
           description: "Window to analyze. Default last_7d.",
         },
         account_filter: { type: "string", description: "FB ad account ID. Required." },
@@ -137,7 +139,7 @@ const ALL_DEFINITIONS: ToolDefinition[] = [
         },
         date_preset: {
           type: "string",
-          enum: ["last_7d", "last_14d", "last_30d"],
+          enum: ["last_7d", "last_14d", "last_30d", "last_90d", "lifetime"],
           description: "Window to pull. Default last_7d.",
         },
       },
@@ -215,7 +217,7 @@ const ALL_DEFINITIONS: ToolDefinition[] = [
         },
         date_preset: {
           type: "string",
-          enum: ["last_7d", "last_14d", "last_30d"],
+          enum: ["last_7d", "last_14d", "last_30d", "last_90d", "lifetime"],
           description: "Window for metrics (if account_id is provided). Default last_7d.",
         },
       },

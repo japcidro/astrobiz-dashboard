@@ -50,8 +50,10 @@ export type DatePreset =
   | "last_7d"
   | "last_14d"
   | "last_30d"
+  | "last_90d"
   | "this_month"
-  | "last_month";
+  | "last_month"
+  | "lifetime";
 
 export type DrillLevel = "campaign" | "adset" | "ad";
 

@@ -22,7 +22,8 @@ const ACCOUNT_STATUS_MAP: Record<number, string> = {
 
 export type DatePreset =
   | "today" | "yesterday" | "last_7d" | "last_14d"
-  | "last_30d" | "this_month" | "last_month";
+  | "last_30d" | "last_90d" | "this_month" | "last_month"
+  | "lifetime";
 
 export interface AccountInfo {
   id: string;

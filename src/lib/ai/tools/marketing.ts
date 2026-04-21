@@ -27,8 +27,10 @@ const VALID_DATE_PRESETS: DatePreset[] = [
   "last_7d",
   "last_14d",
   "last_30d",
+  "last_90d",
   "this_month",
   "last_month",
+  "lifetime",
 ];
 
 function coerceDatePreset(raw: unknown): DatePreset {
