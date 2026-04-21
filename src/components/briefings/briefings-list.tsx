@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Sunrise, Moon, CalendarDays, CalendarRange, ArrowRight, RefreshCw } from "lucide-react";
+import { Sunrise, Moon, CalendarDays, CalendarRange, ArrowRight, RefreshCw, Play } from "lucide-react";
 import type { BriefingType } from "@/lib/briefings/types";
 
 interface BriefingRow {
@@ -44,6 +44,8 @@ export function BriefingsList() {
   const [filter, setFilter] = useState<Filter>("all");
   const [briefings, setBriefings] = useState<BriefingRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [rerunning, setRerunning] = useState<BriefingType | null>(null);
+  const [rerunMsg, setRerunMsg] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -61,6 +63,42 @@ export function BriefingsList() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const rerun = useCallback(
+    async (type: BriefingType) => {
+      const confirmed = window.confirm(
+        `Rerun ${type} briefing? This will delete the existing row for the current period and rebuild it with fresh data.`
+      );
+      if (!confirmed) return;
+      setRerunning(type);
+      setRerunMsg(null);
+      try {
+        const res = await fetch(`/api/admin/briefing-rerun?type=${type}`, {
+          method: "POST",
+          cache: "no-store",
+        });
+        const body = (await res.json()) as {
+          result?: { success?: boolean; error?: string };
+          error?: string;
+        };
+        if (!res.ok || body.error || body.result?.success === false) {
+          setRerunMsg(
+            `Rerun failed: ${body.error ?? body.result?.error ?? "unknown error"}`
+          );
+        } else {
+          setRerunMsg(`Rerun ok — ${type} briefing rebuilt.`);
+          await load();
+        }
+      } catch (err) {
+        setRerunMsg(
+          `Rerun failed: ${err instanceof Error ? err.message : "unknown"}`
+        );
+      } finally {
+        setRerunning(null);
+      }
+    },
+    [load]
+  );
 
   return (
     <div>
@@ -86,6 +124,40 @@ export function BriefingsList() {
         >
           <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
         </button>
+      </div>
+
+      <div className="mb-4 bg-gray-900/30 border border-gray-800 rounded-xl p-3">
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-gray-500">
+            Rerun current period
+          </p>
+          {rerunMsg && (
+            <span
+              className={`text-[11px] ${
+                rerunMsg.startsWith("Rerun ok") ? "text-green-400" : "text-red-400"
+              }`}
+            >
+              {rerunMsg}
+            </span>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {(["morning", "evening", "weekly", "monthly"] as BriefingType[]).map((t) => (
+            <button
+              key={t}
+              onClick={() => rerun(t)}
+              disabled={rerunning !== null}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-700 text-gray-300 hover:bg-white/5 hover:text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors capitalize"
+            >
+              {rerunning === t ? (
+                <RefreshCw size={12} className="animate-spin" />
+              ) : (
+                <Play size={12} />
+              )}
+              {rerunning === t ? `Rerunning ${t}…` : `Rerun ${t}`}
+            </button>
+          ))}
+        </div>
       </div>
 
       {!loading && briefings.length === 0 && (
