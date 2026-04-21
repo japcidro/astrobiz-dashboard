@@ -1,14 +1,15 @@
 "use client";
 
 import { useState, useCallback, useMemo } from "react";
-import { ArrowLeft, CheckCircle, Package, XCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle, Package, XCircle, AlertTriangle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { VerifyItem, UnfulfilledOrder } from "@/lib/fulfillment/types";
 import { playSuccess, playError, playWarning } from "@/lib/fulfillment/audio";
 import { BarcodeScannerInput } from "@/components/fulfillment/barcode-scanner-input";
 import { ScanFeedback } from "@/components/fulfillment/scan-feedback";
+import { KNOWN_STORES } from "@/lib/profit/store-matching";
 
-type Phase = "scan_order" | "scan_items" | "verified";
+type Phase = "scan_order" | "scan_items" | "confirm_sender" | "verified";
 
 export default function VerifyPage() {
   const router = useRouter();
@@ -22,6 +23,7 @@ export default function VerifyPage() {
   const [startedAt, setStartedAt] = useState<string | null>(null);
   const [fulfilling, setFulfilling] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [selectedSender, setSelectedSender] = useState<string>("");
   const [feedback, setFeedback] = useState<{
     type: "success" | "error" | "warning" | null;
     message: string;
@@ -61,18 +63,37 @@ export default function VerifyPage() {
       }
     }
 
-    const items: VerifyItem[] = match.line_items.map((li) => {
+    // Merge line items by scan key (SKU, falling back to barcode, falling
+    // back to line-item id). The scanner matches by SKU or barcode, so any
+    // rows that would match the same scan must be collapsed into one row —
+    // otherwise cascading fails (e.g. 3pcs + 2pcs of GLWPTC across two
+    // line items must count as 5 scans against one row instead of locking
+    // the packer out with "already scanned" after the first 3).
+    const merged = new Map<string, VerifyItem>();
+    for (const li of match.line_items) {
       const current = enriched[String(li.variant_id)];
-      return {
-        sku: current?.sku || li.sku || `NOSKU-${li.id}`,
-        barcode: current?.barcode || li.barcode,
-        title: li.title,
-        variant_title: li.variant_title,
-        expected_qty: li.quantity,
-        scanned_qty: 0,
-        status: "pending" as const,
-      };
-    });
+      const sku = current?.sku || li.sku || "";
+      const barcode = current?.barcode || li.barcode || "";
+      const key =
+        sku.toLowerCase() ||
+        barcode.toLowerCase() ||
+        `NOSKU-${li.id}`;
+      const existing = merged.get(key);
+      if (existing) {
+        existing.expected_qty += li.quantity;
+      } else {
+        merged.set(key, {
+          sku: sku || `NOSKU-${li.id}`,
+          barcode: barcode || null,
+          title: li.title,
+          variant_title: li.variant_title,
+          expected_qty: li.quantity,
+          scanned_qty: 0,
+          status: "pending",
+        });
+      }
+    }
+    const items: VerifyItem[] = Array.from(merged.values());
     setVerifyItems(items);
     setStartedAt(new Date().toISOString());
     setPhase("scan_items");
@@ -215,10 +236,11 @@ export default function VerifyPage() {
       : 0;
 
   async function handleVerifyComplete() {
-    if (!orderDetails || fulfilling) return;
+    if (!orderDetails || fulfilling || !selectedSender) return;
     setFulfilling(true);
     try {
       // Log verification to pack_verifications table (don't call Shopify — BigSeller already fulfilled)
+      const waybill = orderDetails.tracking_numbers?.[0] ?? null;
       const res = await fetch("/api/shopify/fulfillment/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -230,6 +252,8 @@ export default function VerifyPage() {
           items_expected: totalExpected,
           items_scanned: totalScanned,
           started_at: startedAt,
+          waybill,
+          actual_sender: selectedSender,
           mismatches: verifyItems
             .filter((i) => i.scanned_qty !== i.expected_qty)
             .map((i) => ({ sku: i.sku, expected: i.expected_qty, scanned: i.scanned_qty })),
@@ -262,6 +286,7 @@ export default function VerifyPage() {
     setOrderDetails(null);
     setVerifyItems([]);
     setStartedAt(null);
+    setSelectedSender("");
     setFeedback({ type: null, message: "" });
     setFetchError(null);
   }
@@ -368,7 +393,7 @@ export default function VerifyPage() {
                   const done = item.scanned_qty >= item.expected_qty;
                   return (
                     <tr
-                      key={item.sku}
+                      key={`${item.sku}__${item.variant_title ?? ""}`}
                       className={`border-b border-gray-800 ${
                         done
                           ? "bg-emerald-900/10"
@@ -419,20 +444,119 @@ export default function VerifyPage() {
             </table>
           </div>
 
-          {/* Fulfill button */}
+          {/* Proceed to sender confirm */}
           {allVerified && (
             <button
-              onClick={handleVerifyComplete}
-              disabled={fulfilling}
-              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
+              onClick={() => {
+                setSelectedSender(orderDetails?.store_name ?? "");
+                setPhase("confirm_sender");
+              }}
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-xl transition-colors cursor-pointer"
             >
-              {fulfilling ? "Saving..." : "Confirm Packed ✓"}
+              Next — Verify Sender →
             </button>
           )}
         </div>
       )}
 
-      {/* ─── Phase 3: Verified ─── */}
+      {/* ─── Phase 3: Confirm sender on label ─── */}
+      {phase === "confirm_sender" && orderDetails && (
+        <div className="max-w-2xl mx-auto py-8">
+          <div className="mb-6">
+            <h2 className="text-2xl font-bold text-white mb-2">Verify Sender on Label</h2>
+            <p className="text-gray-400 text-sm">
+              Order {orderNumber} &middot; {orderDetails.customer_name}
+            </p>
+          </div>
+
+          {/* Expected sender callout */}
+          <div className="mb-6 p-5 bg-emerald-900/20 border border-emerald-700/50 rounded-xl">
+            <p className="text-xs uppercase tracking-wide text-emerald-300/80 mb-1">
+              Expected sender (from Shopify)
+            </p>
+            <p className="text-2xl font-bold text-emerald-300">
+              {orderDetails.store_name}
+            </p>
+            {orderDetails.tracking_numbers?.[0] && (
+              <p className="text-xs text-gray-400 mt-2 font-mono">
+                Waybill: {orderDetails.tracking_numbers[0]}
+              </p>
+            )}
+          </div>
+
+          <div className="mb-4">
+            <label className="text-sm text-gray-400 mb-2 block">
+              Ano ang nakasulat sa label?
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {KNOWN_STORES.map((store) => {
+                const selected = selectedSender === store;
+                const expected = orderDetails.store_name === store;
+                return (
+                  <button
+                    key={store}
+                    onClick={() => setSelectedSender(store)}
+                    className={`px-4 py-3 rounded-xl border text-left transition-colors cursor-pointer ${
+                      selected
+                        ? expected
+                          ? "bg-emerald-600/20 border-emerald-500 text-emerald-200"
+                          : "bg-yellow-600/20 border-yellow-500 text-yellow-200"
+                        : "bg-gray-800/50 border-gray-700 text-gray-300 hover:bg-gray-700/50"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">{store}</span>
+                      {expected && (
+                        <span className="text-[10px] uppercase px-1.5 py-0.5 bg-emerald-700/40 border border-emerald-600/50 rounded text-emerald-300 font-medium">
+                          Expected
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Mismatch warning (soft — doesn't block) */}
+          {selectedSender && selectedSender !== orderDetails.store_name && (
+            <div className="mb-4 p-4 bg-yellow-900/20 border border-yellow-600/50 rounded-xl">
+              <div className="flex items-start gap-3">
+                <AlertTriangle size={20} className="text-yellow-400 flex-shrink-0 mt-0.5" />
+                <div className="text-sm">
+                  <p className="font-semibold text-yellow-300 mb-1">
+                    Mismatch detected
+                  </p>
+                  <p className="text-yellow-200/80">
+                    Shopify says <strong>{orderDetails.store_name}</strong> pero pinili mo{" "}
+                    <strong>{selectedSender}</strong>. Pwede pa ring ituloy — pero
+                    ma-noni-notify ang admin.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-3">
+            <button
+              onClick={() => setPhase("scan_items")}
+              disabled={fulfilling}
+              className="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-medium py-3 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              ← Back
+            </button>
+            <button
+              onClick={handleVerifyComplete}
+              disabled={!selectedSender || fulfilling}
+              className="flex-[2] bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              {fulfilling ? "Saving..." : "Confirm Packed ✓"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Phase 4: Verified ─── */}
       {phase === "verified" && (
         <div className="flex flex-col items-center justify-center py-20">
           <CheckCircle size={80} className="text-emerald-400 mb-6" />
