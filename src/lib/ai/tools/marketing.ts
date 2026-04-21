@@ -15,6 +15,11 @@ import {
   type DatePreset,
   type AdRow,
 } from "@/lib/fb-ads-module/fetch-performance";
+import {
+  fetchAdDailyInsights,
+  classifyConsistency,
+  DEFAULT_WINNER_THRESHOLDS,
+} from "@/lib/facebook/insights-daily";
 
 const VALID_DATE_PRESETS: DatePreset[] = [
   "today",
@@ -341,5 +346,347 @@ export async function getAutopilotActivity(
     total_actions: data?.length ?? 0,
     by_action: Object.fromEntries(byAction),
     actions: data ?? [],
+  };
+}
+
+// ─── 8. list_ad_accounts ──────────────────────────────────────────────
+// Fast discovery: one small FB call to /me/adaccounts, no insights.
+// Lets the model narrow the scope BEFORE hitting the slow get_ad_performance
+// (which iterates campaigns+adsets+ads+insights per account).
+export async function listAdAccounts(
+  _input: Record<string, never>,
+  ctx: { fbToken: string }
+): Promise<{
+  count: number;
+  accounts: Array<{
+    id: string;
+    account_id: string;
+    name: string;
+    status: string;
+    is_active: boolean;
+  }>;
+}> {
+  const url = `https://graph.facebook.com/v21.0/me/adaccounts?fields=id,name,account_id,account_status&limit=100&access_token=${encodeURIComponent(ctx.fbToken)}`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(
+      (err as { error?: { message?: string } }).error?.message ??
+        `FB adaccounts error ${res.status}`
+    );
+  }
+  const json = (await res.json()) as {
+    data?: Array<{
+      id: string;
+      name: string;
+      account_id: string;
+      account_status: number;
+    }>;
+  };
+  const STATUS: Record<number, string> = {
+    1: "ACTIVE",
+    2: "DISABLED",
+    3: "UNSETTLED",
+    7: "PENDING_REVIEW",
+    8: "PENDING_SETTLEMENT",
+    9: "GRACE_PERIOD",
+    100: "PENDING_CLOSURE",
+    101: "CLOSED",
+  };
+  const accounts = (json.data ?? []).map((a) => ({
+    id: a.id,
+    account_id: a.account_id,
+    name: a.name,
+    status: STATUS[a.account_status] ?? "UNKNOWN",
+    is_active: a.account_status === 1,
+  }));
+  return { count: accounts.length, accounts };
+}
+
+// ─── 9. get_winners ───────────────────────────────────────────────────
+// Applies the project's canonical winner criteria (CPP < ₱200,
+// ≥3 purchases/day, 2+ consecutive days) across all ads in the selection.
+// Needs an account_filter since it has to run fetchAdDailyInsights per ad.
+export async function getWinners(
+  input: {
+    date_preset?: string;
+    account_filter?: string;
+    max_ads_to_check?: number;
+    min_spend?: number;
+  },
+  ctx: { fbToken: string }
+) {
+  const datePreset = coerceDatePreset(input.date_preset);
+  const accountFilter = input.account_filter ?? "ALL";
+  if (accountFilter === "ALL") {
+    return {
+      error:
+        "get_winners needs account_filter (call list_ad_accounts first). Scanning every account for daily winner consistency is too slow — narrow to one account.",
+    };
+  }
+  const maxToCheck = Math.min(Math.max(input.max_ads_to_check ?? 20, 1), 50);
+  const minSpend = input.min_spend ?? 500;
+
+  const perf = await fetchAdPerformance({
+    token: ctx.fbToken,
+    datePreset,
+    accountFilter,
+  });
+  const candidates = perf.data
+    .filter((r) => r.spend >= minSpend && r.purchases > 0)
+    .sort((a, b) => b.purchases - a.purchases)
+    .slice(0, maxToCheck);
+
+  if (candidates.length === 0) {
+    return {
+      date_preset: datePreset,
+      account_filter: accountFilter,
+      checked: 0,
+      winners: [],
+      spikes: [],
+      note: "No ads with purchases >= 1 and spend >= ₱" + minSpend + " in this range.",
+    };
+  }
+
+  // Parallel (capped at 4) per-ad daily insights pulls.
+  const CONCURRENCY = 4;
+  const classified: Array<{
+    ad_id: string;
+    ad: string;
+    campaign: string;
+    adset: string;
+    tier: string;
+    winning_days: number;
+    max_consecutive: number;
+    total: { spend: number; purchases: number; cpp: number; roas: number };
+  }> = [];
+
+  for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+    const slice = candidates.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(
+      slice.map(async (ad) => {
+        try {
+          const metrics = await fetchAdDailyInsights(
+            ad.ad_id,
+            ad.account_id,
+            ctx.fbToken,
+            datePreset as DatePreset
+          );
+          const c = classifyConsistency(metrics, DEFAULT_WINNER_THRESHOLDS);
+          return {
+            ad_id: ad.ad_id,
+            ad: ad.ad,
+            campaign: ad.campaign,
+            adset: ad.adset,
+            tier: c.tier,
+            winning_days: c.winning_days,
+            max_consecutive: c.max_consecutive,
+            total: {
+              spend: round(metrics.total.spend),
+              purchases: metrics.total.purchases,
+              cpp: round(metrics.total.cpp),
+              roas: round(metrics.total.roas),
+            },
+          };
+        } catch {
+          return null;
+        }
+      })
+    );
+    for (const r of results) if (r) classified.push(r);
+  }
+
+  return {
+    date_preset: datePreset,
+    account_filter: accountFilter,
+    criteria: {
+      max_cpp: DEFAULT_WINNER_THRESHOLDS.max_cpp,
+      min_purchases_per_day: DEFAULT_WINNER_THRESHOLDS.min_purchases_per_day,
+      min_consecutive_days: DEFAULT_WINNER_THRESHOLDS.min_consecutive_days,
+    },
+    checked: candidates.length,
+    winners: classified.filter((c) => c.tier === "stable_winner"),
+    spikes: classified.filter((c) => c.tier === "spike"),
+    stable_losers: classified.filter((c) => c.tier === "stable_loser"),
+  };
+}
+
+// ─── 10. get_ad_timeline ──────────────────────────────────────────────
+// Day-by-day metrics for a single ad so the model can answer "consistent
+// ba si X o 1-day spike?" without pulling the whole account.
+export async function getAdTimeline(
+  input: { ad_id: string; account_id: string; date_preset?: string },
+  ctx: { fbToken: string }
+) {
+  if (!input.ad_id || !input.account_id) {
+    return { error: "ad_id and account_id are required" };
+  }
+  const datePreset = coerceDatePreset(input.date_preset);
+  const metrics = await fetchAdDailyInsights(
+    input.ad_id,
+    input.account_id,
+    ctx.fbToken,
+    datePreset as DatePreset
+  );
+  const classification = classifyConsistency(
+    metrics,
+    DEFAULT_WINNER_THRESHOLDS
+  );
+  return {
+    ad_id: input.ad_id,
+    date_preset: datePreset,
+    tier: classification.tier,
+    winning_days: classification.winning_days,
+    max_consecutive: classification.max_consecutive,
+    total: {
+      spend: round(metrics.total.spend),
+      purchases: metrics.total.purchases,
+      purchase_value: round(metrics.total.purchase_value),
+      cpp: round(metrics.total.cpp),
+      roas: round(metrics.total.roas),
+      ctr: round(metrics.total.ctr * 100, 2),
+    },
+    daily: metrics.daily.map((d) => ({
+      date: d.date,
+      spend: round(d.spend),
+      purchases: d.purchases,
+      cpp: round(d.cpp),
+      roas: round(d.roas),
+      ctr: round(d.ctr * 100, 2),
+    })),
+  };
+}
+
+// ─── 11. search_store_knowledge ───────────────────────────────────────
+// Returns per-store brand docs (Avatar, Winning Template, Market Soph,
+// etc.) so the AI can reference the store's own strategy when
+// recommending angles/creatives. Skips the system_* docs — those are
+// tool-specific prompts for the Angle/Script generator, not context.
+export async function searchStoreKnowledge(
+  input: { store_name?: string; doc_type?: string; query?: string },
+  ctx: { supabase: SupabaseClient }
+) {
+  let query = ctx.supabase
+    .from("ai_store_docs")
+    .select("store_name, doc_type, title, content, updated_at")
+    .order("updated_at", { ascending: false });
+
+  if (input.store_name) query = query.eq("store_name", input.store_name);
+  if (input.doc_type) query = query.eq("doc_type", input.doc_type);
+
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+
+  let rows = (data ?? []).filter((d) => !String(d.doc_type).startsWith("system_"));
+
+  if (input.query) {
+    const q = input.query.toLowerCase();
+    rows = rows.filter(
+      (d) =>
+        String(d.title ?? "").toLowerCase().includes(q) ||
+        String(d.content ?? "").toLowerCase().includes(q)
+    );
+  }
+
+  // Trim content previews — full docs can be 5k+ chars each.
+  return {
+    count: rows.length,
+    docs: rows.map((d) => ({
+      store_name: d.store_name,
+      doc_type: d.doc_type,
+      title: d.title,
+      content: typeof d.content === "string" ? d.content.slice(0, 3000) : d.content,
+      updated_at: d.updated_at,
+      truncated:
+        typeof d.content === "string" && d.content.length > 3000,
+    })),
+  };
+}
+
+// ─── 12. compare_ads_quick ────────────────────────────────────────────
+// Side-by-side metrics + deconstruction hook/tone/cta previews for 2-10
+// ads. Much faster than the full Claude Opus comparative report — use
+// for "anong pagkakaiba?" questions, then suggest the full compare.
+export async function compareAdsQuick(
+  input: { ad_ids: string[]; date_preset?: string; account_id?: string },
+  ctx: { supabase: SupabaseClient; fbToken: string }
+) {
+  const adIds = Array.isArray(input.ad_ids)
+    ? [...new Set(input.ad_ids.filter(Boolean))].slice(0, 10)
+    : [];
+  if (adIds.length < 2) {
+    return { error: "Provide at least 2 and at most 10 ad_ids." };
+  }
+  const datePreset = coerceDatePreset(input.date_preset);
+
+  // Parallel: deconstructions from Supabase + daily insights from FB.
+  const [deconRes, dailyResults] = await Promise.all([
+    ctx.supabase
+      .from("ad_creative_analyses")
+      .select("ad_id, account_id, thumbnail_url, analysis")
+      .in("ad_id", adIds),
+    (async () => {
+      if (!input.account_id) return [];
+      const CONCURRENCY = 4;
+      const out: Array<{ ad_id: string; total: unknown; tier: string }> = [];
+      for (let i = 0; i < adIds.length; i += CONCURRENCY) {
+        const slice = adIds.slice(i, i + CONCURRENCY);
+        const results = await Promise.all(
+          slice.map(async (adId) => {
+            try {
+              const metrics = await fetchAdDailyInsights(
+                adId,
+                input.account_id!,
+                ctx.fbToken,
+                datePreset as DatePreset
+              );
+              const c = classifyConsistency(metrics, DEFAULT_WINNER_THRESHOLDS);
+              return {
+                ad_id: adId,
+                total: {
+                  spend: round(metrics.total.spend),
+                  purchases: metrics.total.purchases,
+                  cpp: round(metrics.total.cpp),
+                  roas: round(metrics.total.roas),
+                  ctr: round(metrics.total.ctr * 100, 2),
+                },
+                tier: c.tier,
+              };
+            } catch {
+              return null;
+            }
+          })
+        );
+        for (const r of results) if (r) out.push(r);
+      }
+      return out;
+    })(),
+  ]);
+
+  const deconRows = deconRes.data ?? [];
+  const byAdId = new Map<string, (typeof dailyResults)[number]>();
+  for (const r of dailyResults) byAdId.set(r.ad_id, r);
+
+  return {
+    date_preset: datePreset,
+    ads: adIds.map((adId) => {
+      const decon = deconRows.find((d) => d.ad_id === adId);
+      const a = decon?.analysis as
+        | { hook?: { description?: string }; tone?: string; cta?: string }
+        | null;
+      const metrics = byAdId.get(adId);
+      return {
+        ad_id: adId,
+        account_id: decon?.account_id ?? null,
+        hook: a?.hook?.description?.slice(0, 200) ?? null,
+        tone: a?.tone ?? null,
+        cta: a?.cta?.slice(0, 200) ?? null,
+        metrics: metrics?.total ?? null,
+        consistency_tier: metrics?.tier ?? null,
+      };
+    }),
+    note: input.account_id
+      ? null
+      : "Pass account_id to include live metrics + consistency tier. Without it only creative deconstruction data is returned.",
   };
 }

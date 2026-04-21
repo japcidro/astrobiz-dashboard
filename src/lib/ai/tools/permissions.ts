@@ -3,13 +3,15 @@
 // to admin-only; add to MARKETING_TOOLS explicitly to expose it to the
 // marketing role.
 //
-// v1 scope is marketing-only — no Shopify, no profit, no fulfillment.
-// Marketing role MUST NOT see net profit ever (P&L is CEO-only per
-// the Net Profit tab spec), so never add profit tools to MARKETING_TOOLS.
+// Hard rule: marketing role MUST NEVER see net profit, COGS, or P&L.
+// Profit tools stay in ADMIN_ONLY_TOOLS forever — that's a business
+// rule from project_net_profit_tab.md.
 
 export type AgentRole = "admin" | "marketing";
 
+// Tools marketing can use. Admin always inherits this set.
 export const MARKETING_TOOLS = new Set<string>([
+  // Phase 1 — marketing basics
   "get_ad_performance",
   "list_deconstructions",
   "get_ad_deconstruction",
@@ -17,11 +19,38 @@ export const MARKETING_TOOLS = new Set<string>([
   "get_comparative_report",
   "list_scaling_campaigns",
   "get_autopilot_activity",
+  // Phase 2 — marketing depth
+  "list_ad_accounts",
+  "get_winners",
+  "get_ad_timeline",
+  "search_store_knowledge",
+  "compare_ads_quick",
+  // Phase 2 — Shopify (read-only, shared with marketing so they
+  // can cross-reference ad performance with real order flow)
+  "search_orders",
+  "get_order",
+  "list_products",
+  // Phase 2 — Ops (marketing sees a filtered view; see ops.ts for
+  // type-based narrowing)
+  "get_stock_alerts",
+  "get_recent_notifications",
 ]);
 
-// Admin sees everything marketing sees, plus admin-only tools we add later.
-// For v1 they're identical.
-export const ADMIN_TOOLS = new Set<string>([...MARKETING_TOOLS]);
+// Admin-only tools. These are NEVER added to MARKETING_TOOLS, even
+// implicitly — we spell out the full admin set below.
+export const ADMIN_ONLY_TOOLS = new Set<string>([
+  // Fulfillment — operational throughput + quality audits
+  "get_jt_delivery_stats",
+  "get_pickpack_stats",
+  "get_waybill_mismatches",
+  // Profit — CEO-only per net profit tab spec
+  "get_net_profit",
+]);
+
+export const ADMIN_TOOLS = new Set<string>([
+  ...MARKETING_TOOLS,
+  ...ADMIN_ONLY_TOOLS,
+]);
 
 export function allowedToolsFor(role: AgentRole): Set<string> {
   if (role === "admin") return ADMIN_TOOLS;

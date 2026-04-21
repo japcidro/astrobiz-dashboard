@@ -15,6 +15,8 @@ import {
   ChevronDown,
   ChevronRight,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 // Kept exported for any legacy importer; no longer consumed by ChatPanel
 // since the agent pulls live data via tools instead of receiving snapshots.
@@ -491,21 +493,24 @@ export function ChatPanel() {
                   )}
                 {(m.content || showSpinner) && (
                   <div
-                    className={`rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap ${
+                    className={`rounded-2xl px-4 py-2.5 text-sm ${
                       m.role === "user"
-                        ? "bg-emerald-600 text-white"
+                        ? "bg-emerald-600 text-white whitespace-pre-wrap"
                         : "bg-gray-800 text-gray-200 border border-gray-700"
                     }`}
                   >
-                    {m.content ||
-                      (showSpinner ? (
-                        <Loader2
-                          size={14}
-                          className="animate-spin text-gray-400"
-                        />
-                      ) : (
-                        ""
-                      ))}
+                    {m.role === "assistant" && m.content ? (
+                      <AssistantMarkdown content={m.content} />
+                    ) : m.content ? (
+                      m.content
+                    ) : showSpinner ? (
+                      <Loader2
+                        size={14}
+                        className="animate-spin text-gray-400"
+                      />
+                    ) : (
+                      ""
+                    )}
                   </div>
                 )}
               </div>
@@ -565,6 +570,107 @@ export function ChatPanel() {
           </button>
         </form>
       </div>
+    </div>
+  );
+}
+
+// ── Assistant markdown ────────────────────────────────────────────
+// Minimal markdown renderer for assistant replies — GFM tables are the
+// main reason we pulled in react-markdown (tables rendered as raw pipes
+// before). Tailwind-styled elements keep rendering consistent with the
+// rest of the dashboard's dark UI.
+function AssistantMarkdown({ content }: { content: string }) {
+  // Tailwind v4; @tailwindcss/typography isn't installed, so we hand-style
+  // every markdown element via components overrides.
+  return (
+    <div className="space-y-1.5">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          p: ({ children }) => (
+            <p className="my-1.5 leading-relaxed">{children}</p>
+          ),
+          h1: ({ children }) => (
+            <h1 className="text-base font-bold mt-3 mb-1.5 text-white">
+              {children}
+            </h1>
+          ),
+          h2: ({ children }) => (
+            <h2 className="text-sm font-bold mt-3 mb-1.5 text-white">
+              {children}
+            </h2>
+          ),
+          h3: ({ children }) => (
+            <h3 className="text-sm font-semibold mt-2.5 mb-1 text-white">
+              {children}
+            </h3>
+          ),
+          ul: ({ children }) => (
+            <ul className="list-disc pl-5 my-1.5 space-y-0.5">{children}</ul>
+          ),
+          ol: ({ children }) => (
+            <ol className="list-decimal pl-5 my-1.5 space-y-0.5">{children}</ol>
+          ),
+          li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+          strong: ({ children }) => (
+            <strong className="font-semibold text-white">{children}</strong>
+          ),
+          em: ({ children }) => <em className="italic">{children}</em>,
+          table: ({ children }) => (
+            <div className="overflow-x-auto my-2">
+              <table className="border-collapse border border-gray-700 text-xs">
+                {children}
+              </table>
+            </div>
+          ),
+          thead: ({ children }) => (
+            <thead className="bg-gray-900/70">{children}</thead>
+          ),
+          th: ({ children }) => (
+            <th className="border border-gray-700 px-2 py-1 text-left font-semibold text-gray-200">
+              {children}
+            </th>
+          ),
+          td: ({ children }) => (
+            <td className="border border-gray-700 px-2 py-1 text-gray-300">
+              {children}
+            </td>
+          ),
+          code: ({ children, className }) => {
+            const isBlock = className?.includes("language-");
+            if (isBlock) {
+              return (
+                <pre className="bg-gray-900/70 border border-gray-700 rounded p-2 overflow-x-auto text-[11px]">
+                  <code>{children}</code>
+                </pre>
+              );
+            }
+            return (
+              <code className="bg-gray-900/70 px-1 py-0.5 rounded text-[0.9em] font-mono">
+                {children}
+              </code>
+            );
+          },
+          a: ({ href, children }) => (
+            <a
+              href={href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-emerald-400 underline hover:text-emerald-300"
+            >
+              {children}
+            </a>
+          ),
+          blockquote: ({ children }) => (
+            <blockquote className="border-l-2 border-gray-600 pl-3 my-2 text-gray-400 italic">
+              {children}
+            </blockquote>
+          ),
+          hr: () => <hr className="border-gray-700 my-3" />,
+        }}
+      >
+        {content}
+      </ReactMarkdown>
     </div>
   );
 }
