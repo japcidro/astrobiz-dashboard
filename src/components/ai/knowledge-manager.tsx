@@ -397,7 +397,7 @@ export function KnowledgeManager() {
                     <div className="flex items-center gap-2">
                       {existing ? (
                         <>
-                          <button onClick={() => startEdit(dt.key)} className="text-xs text-gray-400 hover:text-white flex items-center gap-1 cursor-pointer"><Pencil size={12} /> Edit</button>
+                          <button onClick={() => startEdit(dt.key, existing)} className="text-xs text-gray-400 hover:text-white flex items-center gap-1 cursor-pointer"><Pencil size={12} /> Edit</button>
                           <button onClick={() => handleDelete(existing)} className="text-xs text-gray-400 hover:text-red-400 flex items-center gap-1 cursor-pointer"><Trash2 size={12} /> Delete</button>
                         </>
                       ) : (
