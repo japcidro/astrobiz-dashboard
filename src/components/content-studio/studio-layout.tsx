@@ -44,7 +44,7 @@ export function StudioLayout({
   const selectedProducts = products.filter((p) => selectedProductIds.has(p.id));
 
   return (
-    <div className="grid grid-cols-[220px_220px_1fr] gap-3 h-[calc(100vh-220px)]">
+    <div className="grid grid-cols-[220px_220px_1fr] gap-3 h-[calc(100vh-260px)]">
       <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl h-full flex flex-col overflow-hidden">
         <div className="px-3 py-2 border-b border-gray-700/50">
           <span className="text-[10px] font-bold font-mono uppercase tracking-widest text-gray-500">

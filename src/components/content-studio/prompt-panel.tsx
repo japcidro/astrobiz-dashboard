@@ -478,18 +478,16 @@ export function PromptPanel({
           {withModel && (
             <>
               {[
-                { label: "Mestiza", desc: "Filipino-Spanish mestiza woman, fair warm skin, soft features, elegant effortless beauty, aspirational Filipina" },
+                { label: "Mestiza", desc: "Filipino-Spanish mestiza woman, fair warm skin, soft features, natural beauty, aspirational Filipina" },
                 { label: "Morena Glow", desc: "morena Filipina woman, warm brown skin, radiant glow, confident beautiful, natural sun-kissed" },
-                { label: "Chinita", desc: "Filipino-Chinese chinita woman, soft monolid eyes, porcelain skin, delicate features, elegant minimal" },
-                { label: "K-Beauty", desc: "Korean woman, glass skin, soft features, dewy minimal makeup, K-beauty editorial, idol-like" },
-                { label: "East Asian Editorial", desc: "East Asian woman, sharp bone structure, minimal makeup, editorial gaze, effortless elegance" },
-                { label: "High Fashion", desc: "racially ambiguous model, striking features, editorial bone structure, luxury campaign look" },
-                { label: "Scandinavian", desc: "Nordic woman, fair skin, natural freckles, understated beauty, clean minimal look" },
-                { label: "Mediterranean", desc: "Mediterranean woman, olive skin, dark features, warm sensual, editorial confidence" },
-                { label: "South Asian", desc: "South Asian woman, sharp features, rich warm skin, regal editorial presence" },
-                { label: "Fit Mommy", desc: "fit young mother, toned body, glowing healthy skin, effortless put-together look, warm confident smile, lifestyle editorial" },
-                { label: "Male Filipino", desc: "Filipino male model, mestizo features, clean grooming, confident warm, editorial casual" },
-                { label: "Male Editorial", desc: "male model, sharp jawline, editorial grooming, confident relaxed pose, luxury campaign" },
+                { label: "Chinita", desc: "Filipino-Chinese chinita woman, soft monolid eyes, porcelain skin, delicate features, fresh minimal" },
+                { label: "Fit Mommy", desc: "fit young Filipina mother, toned body, glowing healthy skin, effortless put-together look, warm confident smile" },
+                { label: "Teen Filipina", desc: "Gen Z Filipina teen, fresh natural skin, bubbly youthful vibe, casual everyday style" },
+                { label: "Titas", desc: "stylish Filipina tita in her 30s-40s, well-kept, confident, warm aspirational, mom-next-door feel" },
+                { label: "UGC / Real Customer", desc: "regular Filipina customer, natural unposed, candid phone-photo feel, authentic real-person look, no makeup or minimal makeup" },
+                { label: "Male Filipino", desc: "Filipino male, mestizo or morena features, clean grooming, confident warm, casual lifestyle" },
+                { label: "Male Fit", desc: "fit Filipino male, toned healthy physique, athletic lifestyle, grounded confident" },
+                { label: "Gym Lifestyle", desc: "athletic Filipino in gym or fitness setting, workout attire, active energetic, healthy lifestyle" },
               ].map((m) => (
                 <button
                   key={m.label}
@@ -535,28 +533,16 @@ export function PromptPanel({
             Auto Mix
           </span>
           {[
-            { label: "Dark Luxury", signature: "still life Dutch masters painting, rich dark dramatic chiaroscuro", direction: "dark moody atmosphere, deep shadows, dramatic contrast, shallow depth of field, creamy circular bokeh", pose: "product laying on its side, casual relaxed placement" },
-            { label: "Editorial Clean", signature: "shot on medium format Hasselblad, ultra sharp, creamy tones", direction: "extreme minimalism, vast negative space, single subject, harsh directional light, sharp crisp shadows", pose: "product on reflective surface showing mirror reflection below" },
-            { label: "Dreamy Film", signature: "Kodak Portra 800 pushed 2 stops, heavy grain, warm skin tones", direction: "soft dreamy focus, ethereal glow, warm golden hour sunlight, long shadows, amber tones", pose: "product nestled among props, partially hidden, peeking out" },
-            { label: "Fashion Bold", signature: "fashion editorial Vogue Italia, bold avant-garde styling", direction: "harsh directional light, sharp crisp shadows, cinematic wide shot, 35mm anamorphic lens, letterbox feel", pose: "product held naturally in a human hand, fingers visible" },
-            { label: "Chaos Art", signature: "paint splatter explosion, chaotic artistic color burst", direction: "motion blur, dynamic movement, slightly overexposed, blown-out highlights, airy feel", pose: "product mid-fall, frozen motion, objects scattering around it" },
-            { label: "Vintage Mood", signature: "tintype wet plate photography, antique dark edges, metallic sheen", direction: "dark moody atmosphere, deep shadows, dramatic contrast, fine film grain, Kodak Portra 400 texture", pose: "product partially wrapped in fabric or paper, gift-like reveal" },
-            { label: "Surreal Float", signature: "surreal product floating in air, gravity-defying, clean", direction: "extreme minimalism, vast negative space, single subject, soft diffused light, no harsh shadows, even illumination", pose: "product suspended, dangling, hanging from above" },
-            { label: "Nature Raw", signature: "Annie Leibovitz editorial, dramatic intimate portrait lighting", direction: "natural green leaves, botanical, garden setting, water droplets, condensation, dewy moisture on surfaces", pose: "product partially submerged in liquid or sand" },
-            { label: "BTSO Rebel", search: "BORNTOSTANDOUT BTSO perfume product photography editorial", signature: "raw confrontational editorial, high contrast white and crimson red, provocative dirty luxury", direction: "harsh directional light, sharp crisp shadows, extreme close-up macro shot, 100mm lens, shallow DOF", pose: "product laying on its side, casual relaxed placement" },
-            { label: "Loewe Botanical", search: "Loewe perfume product photography botanical editorial campaign", signature: "Karl Blossfeldt botanical still life, scientific specimen photography, museum-quality art object", direction: "soft diffused light, no harsh shadows, even illumination, natural green leaves, botanical, garden setting", pose: "product nestled among props, partially hidden, peeking out" },
-            { label: "Tom Ford Noir", search: "Tom Ford Black Orchid perfume dark luxury product photography", signature: "Tom Ford dark seduction, black and gold palette, skin texture close-up, velvet shadow", direction: "dark moody atmosphere, deep shadows, dramatic contrast, extreme close-up macro shot, 100mm lens, shallow DOF", pose: "product on reflective surface showing mirror reflection below" },
-            { label: "Byredo Museum", search: "Byredo perfume product photography minimalist editorial", signature: "Scandinavian museum-like precision, curated negative space, clinical luxury still life", direction: "extreme minimalism, vast negative space, single subject, soft diffused light, no harsh shadows, even illumination", pose: "product slightly tilted at an angle, dynamic leaning" },
-            { label: "Le Labo Raw", search: "Le Labo perfume product photography industrial apothecary", signature: "Brooklyn industrial apothecary, handcraft raw aesthetic, concrete and amber warmth", direction: "raw gritty texture, high contrast, urban feel, warm golden hour sunlight, long shadows, amber tones", pose: "product partially wrapped in fabric or paper, gift-like reveal" },
-            { label: "Aesop Science", search: "Aesop product photography botanical still life minimal", signature: "botanical science laboratory, warm clinical ingredient study, brown glass precision", direction: "extreme close-up macro shot, 100mm lens, shallow DOF, water droplets, condensation, dewy moisture on surfaces", pose: "product partially submerged in liquid or sand" },
-            { label: "Margiela Memory", search: "Maison Margiela Replica perfume product photography nostalgic", signature: "Maison Margiela Replica nostalgic memory, poetic everyday moment, pharmacy-style minimal", direction: "soft dreamy focus, ethereal glow, vintage film look, faded colors, warm nostalgic tone", pose: "product nestled among props, partially hidden, peeking out" },
-            { label: "Wong Surreal", search: "Stora Skuggan perfume surreal luxury product photography", signature: "Victorian surreal portraiture, anthropomorphic fantasy, ornate maximalist luxury", direction: "still life Dutch masters painting, rich dark dramatic chiaroscuro, perfectly symmetrical composition, centered subject", pose: "product partially wrapped in fabric or paper, gift-like reveal" },
-            { label: "AG1 Science", search: "AG1 Athletic Greens supplement product photography lifestyle", signature: "AG1-style aspirational science lifestyle, professional studio photography, grounded and real", direction: "soft diffused light, no harsh shadows, even illumination, extreme close-up macro shot, 100mm lens, shallow DOF", pose: "product held naturally in a human hand, fingers visible" },
-            { label: "Ritual Clear", search: "Ritual vitamins supplement product photography minimal clean", signature: "Ritual-style transparent honest minimalism, clean clinical warmth, clarity and trust", direction: "extreme minimalism, vast negative space, single subject, harsh directional light, sharp crisp shadows", pose: "product on reflective surface showing mirror reflection below" },
-            { label: "Seed Eco", search: "Seed probiotics supplement product photography dark eco luxury", signature: "Seed-style eco-luxury dark glass, scientific minimalist premium, sustainable beauty", direction: "dark moody atmosphere, deep shadows, dramatic contrast, natural green leaves, botanical, garden setting", pose: "product slightly tilted at an angle, dynamic leaning" },
-            { label: "Moon Juice", search: "Moon Juice supplement product photography dreamy mystical wellness", signature: "Moon Juice mystical wellness, dreamy pastels and amber glass, surreal dreamlike props, ritual not routine", direction: "soft dreamy focus, ethereal glow, warm golden hour sunlight, long shadows, amber tones", pose: "product nestled among props, partially hidden, peeking out" },
-            { label: "Sakara Luxe", search: "Sakara Life supplement product photography luxury feminine", signature: "Sakara beauty-as-wellness, display-worthy supplement, luxe feminine aesthetic", direction: "slightly overexposed, blown-out highlights, airy feel, draped silk or linen fabric, soft flowing textile", pose: "product laying on its side, casual relaxed placement" },
-            { label: "Lemme Pop", search: "Lemme supplements product photography colorful energetic pop", signature: "Lemme-style pop science, swirling ingredients, floating pills, energetic colorful", direction: "motion blur, dynamic movement, surreal product floating in air, gravity-defying, clean", pose: "product mid-fall, frozen motion, objects scattering around it" },
+            { label: "Hero Shot", signature: "clean professional product photography, commercial catalog quality, sharp ecommerce look", direction: "bright even studio lighting, pure white or soft neutral background, centered composition, no distractions", pose: "product standing upright front and center, hero angle, catalog-ready" },
+            { label: "Lifestyle", signature: "authentic lifestyle photography, real moment, warm natural feel", direction: "warm natural daylight, in-context real home or cafe setting, slightly candid, relatable everyday vibe", pose: "product placed naturally on a surface as part of a real scene, hand reaching or holding optional" },
+            { label: "UGC Phone", signature: "iPhone-style UGC content, casual phone photography, real-person feel", direction: "slightly imperfect lighting, phone-camera look, low-to-mid resolution feel, authentic not staged, no professional polish", pose: "product held up naturally by a hand like a customer sharing on social media" },
+            { label: "Flat Lay", signature: "overhead flat lay product photography, Instagram aesthetic", direction: "directly overhead flat lay perspective, birds eye view, soft diffused light, styled props around the product, neutral background", pose: "product centered with complementary props arranged around it" },
+            { label: "Sale / Promo", signature: "bold ecommerce promo visual, vibrant high-energy ad style", direction: "bold saturated colors, dynamic composition, high contrast, eye-catching energy, sale-banner feel, clean space for overlay text", pose: "product angled slightly toward the camera, confident hero placement" },
+            { label: "Bundle Shot", signature: "product bundle collection photography, ecommerce catalog", direction: "clean bright lighting, multiple products grouped, balanced composition, slightly elevated 3/4 angle", pose: "multiple products stacked or arranged together as a set" },
+            { label: "Before & After", signature: "split-panel before and after comparison, clean commercial feel", direction: "symmetrical split composition, consistent lighting both sides, clear visual contrast, clean typography-ready layout", pose: "product shown alongside the transformation context" },
+            { label: "Testimonial Vibe", signature: "happy customer testimonial style, warm real-person feel", direction: "natural warm light, genuine smile, authentic emotion, real home or everyday setting, relatable not staged", pose: "person holding or using product, looking happy and satisfied" },
+            { label: "Minimal Clean", signature: "premium minimalist ecommerce, curated negative space", direction: "extreme minimalism, vast negative space, single subject, soft even light, clean neutral background, quiet luxury feel", pose: "product centered with plenty of breathing room around it" },
+            { label: "Bold Graphic", signature: "bold graphic colorblock product shot, modern DTC ecommerce", direction: "solid bright color background, strong shadow, graphic modern composition, playful energetic vibe", pose: "product floating or casting strong colored shadow, dynamic placement" },
           ].map((combo) => (
             <button
               key={combo.label}
@@ -564,9 +550,6 @@ export function PromptPanel({
                 setSignatureStyle(combo.signature);
                 setCustomDirection(combo.direction + ", " + combo.pose);
                 toast.success(`Applied: ${combo.label}`);
-                if (combo.search && onMoodboardChange) {
-                  openBrandPicker(combo.label, combo.search);
-                }
               }}
               className="px-2 py-0.5 text-[8px] font-mono font-bold border border-purple-700/50 text-purple-400 hover:bg-purple-900/20 hover:border-purple-500/50 transition-colors cursor-pointer"
             >
@@ -576,22 +559,18 @@ export function PromptPanel({
           <button
             onClick={() => {
               const signatures = [
-                "shot on medium format Hasselblad, ultra sharp, creamy tones",
-                "Annie Leibovitz editorial, dramatic intimate portrait lighting",
-                "still life Dutch masters painting, rich dark dramatic chiaroscuro",
-                "fashion editorial Vogue Italia, bold avant-garde styling",
-                "Kodak Portra 800 pushed 2 stops, heavy grain, warm skin tones",
-                "Wes Anderson color palette, symmetrical, pastel, whimsical",
-                "chiaroscuro Caravaggio lighting, extreme contrast, single light source",
-                "tintype wet plate photography, antique dark edges, metallic sheen",
-                "raw confrontational editorial, high contrast white and crimson red, provocative dirty luxury",
-                "Karl Blossfeldt botanical still life, scientific specimen photography, museum-quality art object",
-                "Tom Ford dark seduction, black and gold palette, velvet shadow",
-                "Scandinavian museum-like precision, curated negative space, clinical luxury still life",
-                "Brooklyn industrial apothecary, handcraft raw aesthetic, concrete and amber warmth",
-                "botanical science laboratory, warm clinical ingredient study",
-                "Maison Margiela Replica nostalgic memory, poetic everyday moment",
-                "Victorian surreal portraiture, anthropomorphic fantasy, ornate maximalist luxury",
+                "clean professional product photography, commercial catalog quality, sharp ecommerce look",
+                "authentic lifestyle photography, real moment, warm natural feel",
+                "iPhone-style UGC content, casual phone photography, real-person feel",
+                "overhead flat lay product photography, Instagram aesthetic",
+                "bold ecommerce promo visual, vibrant high-energy ad style",
+                "product bundle collection photography, ecommerce catalog",
+                "premium minimalist ecommerce, curated negative space",
+                "bold graphic colorblock product shot, modern DTC ecommerce",
+                "happy customer testimonial style, warm real-person feel",
+                "bright pastel aspirational ecommerce, feminine-friendly, approachable luxury",
+                "warm golden hour lifestyle shot, aspirational yet attainable",
+                "clean studio white background, professional ecommerce catalog",
               ];
               const moods = [
                 "dark moody atmosphere, deep shadows, dramatic contrast",

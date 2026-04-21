@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
+import { BookOpen, AlertCircle } from "lucide-react";
 import { getEmployee } from "@/lib/supabase/get-employee";
 import { createClient } from "@/lib/supabase/server";
 import { StudioLayout } from "@/components/content-studio/studio-layout";
@@ -47,7 +49,12 @@ export default async function ContentStudioPage({
     );
   }
 
-  const [{ data: moodboard }, { data: products }, { data: generated }] = await Promise.all([
+  const [
+    { data: moodboard },
+    { data: products },
+    { data: generated },
+    { count: knowledgeDocCount },
+  ] = await Promise.all([
     supabase
       .from("moodboard_images")
       .select("id, image_url, label")
@@ -64,6 +71,11 @@ export default async function ContentStudioPage({
       .eq("store_name", storeName)
       .order("created_at", { ascending: false })
       .limit(50),
+    supabase
+      .from("ai_store_docs")
+      .select("id", { count: "exact", head: true })
+      .eq("store_name", storeName)
+      .not("doc_type", "like", "system_%"),
   ]);
 
   return (
@@ -80,6 +92,38 @@ export default async function ContentStudioPage({
         </div>
         <StorePicker stores={stores} current={storeName} />
       </div>
+
+      {(knowledgeDocCount ?? 0) > 0 ? (
+        <div className="mb-4 flex items-center gap-2 px-3 py-2 bg-emerald-900/20 border border-emerald-700/50 rounded-lg">
+          <BookOpen size={14} className="text-emerald-400 shrink-0" />
+          <p className="text-xs text-emerald-300">
+            Using <span className="font-semibold">{knowledgeDocCount}</span>{" "}
+            knowledge doc{knowledgeDocCount === 1 ? "" : "s"} from{" "}
+            <Link
+              href="/marketing/ai-settings"
+              className="underline hover:text-emerald-200"
+            >
+              AI Knowledge
+            </Link>{" "}
+            — every generation will be tuned to this store&apos;s brand voice.
+          </p>
+        </div>
+      ) : (
+        <div className="mb-4 flex items-center gap-2 px-3 py-2 bg-yellow-900/20 border border-yellow-700/50 rounded-lg">
+          <AlertCircle size={14} className="text-yellow-400 shrink-0" />
+          <p className="text-xs text-yellow-300">
+            No knowledge docs for <span className="font-semibold">{storeName}</span>{" "}
+            yet — generations won&apos;t know your brand voice.{" "}
+            <Link
+              href="/marketing/ai-settings"
+              className="underline hover:text-yellow-200 font-medium"
+            >
+              Upload brand docs →
+            </Link>
+          </p>
+        </div>
+      )}
+
       <StudioLayout
         key={storeName}
         moodboard={moodboard ?? []}
