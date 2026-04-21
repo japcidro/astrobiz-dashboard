@@ -18,6 +18,60 @@ const DOWNLOAD_TIMEOUT_MS = 90_000;
 const FILE_ACTIVATION_TIMEOUT_MS = 90_000;
 const FILE_POLL_INTERVAL_MS = 2_000;
 
+// Gemini periodically returns 503 "model overloaded / high demand" and 429
+// "resource exhausted" for Flash on busy periods. These are transient —
+// retrying with a short backoff almost always succeeds, and failing a
+// 6-ad Compare flow because one middle video hit a 503 is unacceptable.
+const TRANSIENT_STATUS = new Set([429, 500, 502, 503, 504]);
+const RETRY_BACKOFFS_MS = [2_000, 6_000, 15_000];
+
+function isTransientMessage(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    lower.includes("overload") ||
+    lower.includes("high demand") ||
+    lower.includes("try again") ||
+    lower.includes("unavailable") ||
+    lower.includes("rate limit") ||
+    lower.includes("resource exhausted")
+  );
+}
+
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  label: string
+): Promise<Response> {
+  let lastErrMsg = "";
+  for (let attempt = 0; attempt <= RETRY_BACKOFFS_MS.length; attempt++) {
+    try {
+      const res = await fetch(url, init);
+      if (res.ok) return res;
+      const bodyText = await res.clone().text().catch(() => "");
+      const transient =
+        TRANSIENT_STATUS.has(res.status) || isTransientMessage(bodyText);
+      lastErrMsg = `${res.status} ${res.statusText}: ${bodyText.slice(0, 300)}`;
+      if (!transient || attempt === RETRY_BACKOFFS_MS.length) {
+        return res;
+      }
+      const delay = RETRY_BACKOFFS_MS[attempt];
+      console.warn(
+        `[gemini] ${label} transient failure (attempt ${attempt + 1}) — retrying in ${delay}ms: ${lastErrMsg}`
+      );
+      await new Promise((r) => setTimeout(r, delay));
+    } catch (e) {
+      lastErrMsg = e instanceof Error ? e.message : "network error";
+      if (attempt === RETRY_BACKOFFS_MS.length) throw e;
+      const delay = RETRY_BACKOFFS_MS[attempt];
+      console.warn(
+        `[gemini] ${label} network failure (attempt ${attempt + 1}) — retrying in ${delay}ms: ${lastErrMsg}`
+      );
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+  throw new Error(`${label} failed after retries: ${lastErrMsg}`);
+}
+
 export interface AdDeconstruction {
   transcript: string;
   hook: {
@@ -177,7 +231,7 @@ async function uploadToFileApi(
   const size = buffer.byteLength;
 
   // 1. Start the resumable upload session.
-  const startRes = await fetch(
+  const startRes = await fetchWithRetry(
     `${GEMINI_API_BASE}/upload/v1beta/files?key=${encodeURIComponent(apiKey)}`,
     {
       method: "POST",
@@ -191,7 +245,8 @@ async function uploadToFileApi(
       body: JSON.stringify({
         file: { display_name: `ad-${Date.now()}` },
       }),
-    }
+    },
+    "File API start"
   );
   if (!startRes.ok) {
     const text = await startRes.text();
@@ -327,13 +382,14 @@ export async function deconstructAdVideo(
   };
 
   try {
-    const res = await fetch(
+    const res = await fetchWithRetry(
       `${GEMINI_API_BASE}/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
-      }
+      },
+      "generateContent"
     );
 
     const json = await res.json();
