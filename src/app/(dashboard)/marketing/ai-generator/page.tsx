@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Sparkles,
   Send,
@@ -36,6 +37,9 @@ let cachedToolType: "angles" | "scripts" | "formats" = "angles";
 let cachedStoreName = "";
 
 export default function AiGeneratorPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
   const [stores, setStores] = useState<{ name: string }[]>([]);
   const [storeName, setStoreName] = useState(cachedStoreName);
   const [docs, setDocs] = useState<AiStoreDoc[]>([]);
@@ -81,6 +85,27 @@ export default function AiGeneratorPage() {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+  }, []);
+
+  // Handoff from Comparative Report (or anywhere): consume URL params
+  // ?store=...&tool=angles|scripts|formats&prompt=...
+  // Pre-fills the store, tool, and chat input. Does NOT auto-send so the
+  // user can review the prompt first. Strips params from the URL after
+  // consuming so refresh doesn't re-trigger.
+  useEffect(() => {
+    const storeParam = searchParams.get("store");
+    const toolParam = searchParams.get("tool");
+    const promptParam = searchParams.get("prompt");
+    if (!storeParam && !toolParam && !promptParam) return;
+
+    if (storeParam) setStoreName(storeParam);
+    if (toolParam === "angles" || toolParam === "scripts" || toolParam === "formats") {
+      setToolType(toolParam);
+    }
+    if (promptParam) setInput(promptParam);
+
+    router.replace("/marketing/ai-generator");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Fetch docs when store changes

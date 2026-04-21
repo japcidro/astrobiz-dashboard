@@ -14,11 +14,17 @@ import {
   Eye,
   ExternalLink,
   TrendingUp,
+  GitCompareArrows,
+  Trash2,
 } from "lucide-react";
 import {
   PromoteToScalingModal,
   type PromoteSubject,
 } from "@/components/marketing/promote-to-scaling-modal";
+import { deriveStore } from "@/lib/shopify/derive-store";
+import { ComparativeReportView } from "@/components/marketing/comparative-report";
+import type { ComparativeReport } from "@/lib/ai/compare-types";
+import type { DatePreset } from "@/lib/facebook/types";
 
 interface AdBrief {
   ad_id: string;
@@ -60,14 +66,18 @@ interface Analysis {
 
 interface Props {
   ads: AdBrief[];
+  datePreset: DatePreset;
   initialAdId?: string | null;
   onAutoAnalyzeHandled?: () => void;
 }
 
 type SortKey = "purchases" | "spend" | "roas" | "cpa";
+type Mode = "single" | "compare";
 
 const INITIAL_VISIBLE = 12;
 const LOAD_MORE_STEP = 12;
+const COMPARE_MAX = 10;
+const COMPARE_MIN = 2;
 
 // For most keys we sort descending (bigger = better). CPP is the exception —
 // lower cost per purchase is better, so it sorts ascending.
@@ -86,37 +96,10 @@ function money(n: number): string {
   return `₱${Math.round(n)}`;
 }
 
-// Lowercases + strips non-alphanumerics so "I Love Patches" and
-// "ilovepatches" and "ILP" → "ilovepatches" / "ilp" respectively
-// and match regardless of spacing/casing.
-function normalize(s: string): string {
-  return (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-// Returns the store whose (normalized) name appears as a substring of
-// the (normalized) campaign. Longest match wins so "i love patches"
-// beats a sub-match like "patches". Returns null if none match.
-function deriveStore(
-  campaign: string,
-  storeNames: string[]
-): string | null {
-  const normCampaign = normalize(campaign);
-  if (!normCampaign) return null;
-  let best: { name: string; len: number } | null = null;
-  for (const name of storeNames) {
-    const key = normalize(name);
-    if (!key) continue;
-    if (normCampaign.includes(key)) {
-      if (!best || key.length > best.len) {
-        best = { name, len: key.length };
-      }
-    }
-  }
-  return best?.name ?? null;
-}
 
 export function DeconstructionPanel({
   ads,
+  datePreset,
   initialAdId,
   onAutoAnalyzeHandled,
 }: Props) {
@@ -153,6 +136,23 @@ export function DeconstructionPanel({
   const [promoteSubject, setPromoteSubject] =
     useState<PromoteSubject | null>(null);
   const [promoteToast, setPromoteToast] = useState<string | null>(null);
+
+  // Compare-mode state
+  const [mode, setMode] = useState<Mode>("single");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [comparing, setComparing] = useState(false);
+  const [compareError, setCompareError] = useState<string | null>(null);
+  const [compareProgress, setCompareProgress] = useState<{
+    stage: "deconstructing" | "comparing";
+    current: number;
+    total: number;
+    label: string;
+  } | null>(null);
+  const [compareReport, setCompareReport] = useState<{
+    report: ComparativeReport;
+    inputs_snapshot: unknown;
+    store_name: string | null;
+  } | null>(null);
 
   const adMap = useMemo(() => {
     const m = new Map<string, AdBrief>();
@@ -303,6 +303,28 @@ export function DeconstructionPanel({
     [adMap, loadList]
   );
 
+  // Reset selection when leaving compare mode
+  useEffect(() => {
+    if (mode === "single") {
+      setSelectedIds(new Set());
+      setCompareError(null);
+    }
+  }, [mode]);
+
+  const toggleSelection = useCallback((adId: string) => {
+    setCompareError(null);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(adId)) {
+        next.delete(adId);
+      } else {
+        if (next.size >= COMPARE_MAX) return prev;
+        next.add(adId);
+      }
+      return next;
+    });
+  }, []);
+
   // Deep-link: auto-trigger if ?deconstruct_ad=ID was passed.
   useEffect(() => {
     if (!initialAdId) return;
@@ -402,16 +424,192 @@ export function DeconstructionPanel({
     return rows.filter((r) => !currentIds.has(r.ad_id));
   }, [rows, ads]);
 
+  const selectedStores = useMemo(() => {
+    const s = new Set<string>();
+    for (const id of selectedIds) {
+      const a = adsWithStore.find((x) => x.ad_id === id);
+      if (a && a.store !== "Unmatched") s.add(a.store);
+    }
+    return [...s];
+  }, [selectedIds, adsWithStore]);
+
+  // Run comparative analysis. Two stages:
+  //   1. Ensure each selected ad has a video deconstruction (sequential —
+  //      Gemini File API doesn't love high parallelism on large videos).
+  //   2. POST to /compare which fetches per-day metrics + brand docs +
+  //      calls Claude Opus.
+  const runCompare = useCallback(
+    async (forceRefresh = false) => {
+      const ids = [...selectedIds];
+      if (ids.length < COMPARE_MIN) {
+        setCompareError(
+          `Pumili ng ${COMPARE_MIN}-${COMPARE_MAX} ads para mag-compare.`
+        );
+        return;
+      }
+
+      setComparing(true);
+      setCompareError(null);
+      setCompareReport(null);
+
+      if (selectedStores.length > 1) {
+        setCompareError(
+          `Mixed stores sa selection (${selectedStores.join(", ")}). Pumili ng ads from one store lang para fully applied yung Avatar/Winning Template docs.`
+        );
+        setComparing(false);
+        return;
+      }
+
+      // Stage 1: deconstruct any unanalyzed ad (sequential)
+      const needDecon = ids.filter((id) => !alreadyAnalyzedIds.has(id));
+      for (let i = 0; i < needDecon.length; i++) {
+        const id = needDecon[i];
+        const ad = adMap.get(id);
+        if (!ad) continue;
+        setCompareProgress({
+          stage: "deconstructing",
+          current: i + 1,
+          total: needDecon.length,
+          label: ad.ad,
+        });
+        try {
+          const res = await fetch(
+            "/api/marketing/ai-analytics/deconstruct",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                ad_id: id,
+                account_id: ad.account_id,
+                trigger_source: "on_demand",
+              }),
+            }
+          );
+          if (!res.ok) {
+            const j = await res.json().catch(() => ({}));
+            throw new Error(
+              (j as { error?: string }).error ||
+                `Failed to deconstruct "${ad.ad}" (${res.status})`
+            );
+          }
+        } catch (e) {
+          setCompareError(
+            e instanceof Error
+              ? `${e.message} — tanggalin yung ad sa selection o i-retry.`
+              : "Deconstruction failed"
+          );
+          setCompareProgress(null);
+          setComparing(false);
+          return;
+        }
+      }
+      if (needDecon.length > 0) await loadList();
+
+      // Stage 2: comparative analysis
+      setCompareProgress({
+        stage: "comparing",
+        current: 0,
+        total: 0,
+        label: "Running Claude Opus strategic analysis…",
+      });
+      try {
+        const res = await fetch("/api/marketing/ai-analytics/compare", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ad_ids: ids,
+            date_preset: datePreset,
+            force_refresh: forceRefresh,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          throw new Error(
+            (json as { error?: string }).error ||
+              `Compare failed (${res.status})`
+          );
+        }
+        const row = (json as {
+          row: {
+            analysis: ComparativeReport;
+            inputs_snapshot: unknown;
+            store_name: string | null;
+          };
+        }).row;
+        setCompareReport({
+          report: row.analysis,
+          inputs_snapshot: row.inputs_snapshot,
+          store_name: row.store_name,
+        });
+      } catch (e) {
+        setCompareError(e instanceof Error ? e.message : "Compare failed");
+      } finally {
+        setComparing(false);
+        setCompareProgress(null);
+      }
+    },
+    [
+      selectedIds,
+      selectedStores,
+      adMap,
+      alreadyAnalyzedIds,
+      datePreset,
+      loadList,
+    ]
+  );
+
   return (
     <div className="space-y-5">
+      {/* Mode toggle */}
+      <div className="flex items-center gap-1 bg-gray-800/50 border border-gray-700/50 rounded-lg p-1 w-fit">
+        <button
+          onClick={() => setMode("single")}
+          disabled={comparing}
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors disabled:opacity-40 ${
+            mode === "single"
+              ? "bg-gray-700 text-white"
+              : "text-gray-400 hover:text-gray-200 cursor-pointer"
+          }`}
+        >
+          <Wand2 size={12} /> Single
+        </button>
+        <button
+          onClick={() => setMode("compare")}
+          disabled={comparing || analyzing}
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md transition-colors disabled:opacity-40 ${
+            mode === "compare"
+              ? "bg-gray-700 text-white"
+              : "text-gray-400 hover:text-gray-200 cursor-pointer"
+          }`}
+          title="Pick 2-10 ads to compare side-by-side with Claude Opus"
+        >
+          <GitCompareArrows size={12} /> Compare & Strategize
+        </button>
+      </div>
+
       {/* Selection / action bar */}
       <div className="bg-gray-900/60 border border-gray-700/50 rounded-xl p-4">
         <div className="flex items-center gap-2 mb-3">
           <Wand2 size={16} className="text-blue-400" />
           <h3 className="text-sm font-semibold text-white">
-            Pick an ad to analyze
+            {mode === "single"
+              ? "Pick an ad to analyze"
+              : `Pick ${COMPARE_MIN}-${COMPARE_MAX} ads to compare (${selectedIds.size} selected)`}
           </h3>
         </div>
+
+        {mode === "compare" ? (
+          <CompareActionBar
+            selectedCount={selectedIds.size}
+            stores={selectedStores}
+            comparing={comparing}
+            progress={compareProgress}
+            error={compareError}
+            onRun={() => runCompare(false)}
+            onClear={() => setSelectedIds(new Set())}
+          />
+        ) : (
+          <>
 
         {selectedAd ? (
           <div className="flex flex-wrap items-center gap-3">
@@ -540,6 +738,8 @@ export function DeconstructionPanel({
             )}
           </div>
         )}
+          </>
+        )}
       </div>
 
       {/* Controls */}
@@ -626,17 +826,50 @@ export function DeconstructionPanel({
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {visibleAds.slice(0, visibleCount).map((a) => {
                 const isAnalyzed = alreadyAnalyzedIds.has(a.ad_id);
-                const isSelected = selectedAdId === a.ad_id;
+                const isSingleSelected =
+                  mode === "single" && selectedAdId === a.ad_id;
+                const isCompareSelected =
+                  mode === "compare" && selectedIds.has(a.ad_id);
+                const isCapHit =
+                  mode === "compare" &&
+                  !isCompareSelected &&
+                  selectedIds.size >= COMPARE_MAX;
+                const handleCardClick = () => {
+                  if (comparing) return;
+                  if (mode === "compare") {
+                    if (isCapHit) return;
+                    toggleSelection(a.ad_id);
+                  } else {
+                    setSelectedAdId(a.ad_id);
+                  }
+                };
                 return (
                   <div
                     key={a.ad_id}
-                    onClick={() => setSelectedAdId(a.ad_id)}
-                    className={`relative text-left bg-gray-900/50 border rounded-xl overflow-hidden transition-all cursor-pointer ${
-                      isSelected
+                    onClick={handleCardClick}
+                    className={`relative text-left bg-gray-900/50 border rounded-xl overflow-hidden transition-all ${
+                      isCapHit ? "cursor-not-allowed opacity-50" : "cursor-pointer"
+                    } ${
+                      isSingleSelected || isCompareSelected
                         ? "border-blue-500 ring-2 ring-blue-500/40"
                         : "border-gray-700/50 hover:border-gray-500"
                     }`}
                   >
+                    {mode === "compare" && (
+                      <div className="absolute top-2 left-2 z-10">
+                        <div
+                          className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+                            isCompareSelected
+                              ? "bg-blue-500 border-blue-500"
+                              : "bg-gray-900/80 border-gray-500"
+                          }`}
+                        >
+                          {isCompareSelected && (
+                            <CheckCircle2 size={12} className="text-white" />
+                          )}
+                        </div>
+                      </div>
+                    )}
                     <div className="aspect-video bg-gray-800 relative">
                       {a.thumbnail_url ? (
                         // eslint-disable-next-line @next/next/no-img-element
@@ -651,7 +884,7 @@ export function DeconstructionPanel({
                         </div>
                       )}
                       <span
-                        className={`absolute top-2 left-2 text-[10px] px-1.5 py-0.5 rounded ${
+                        className={`absolute top-2 ${mode === "compare" ? "left-9" : "left-2"} text-[10px] px-1.5 py-0.5 rounded ${
                           a.store === "Unmatched"
                             ? "bg-gray-700/80 text-gray-400"
                             : "bg-gray-900/80 text-gray-200"
@@ -850,11 +1083,196 @@ export function DeconstructionPanel({
         />
       )}
 
+      {compareReport && (
+        <ComparativeReportModal
+          report={compareReport.report}
+          inputsSnapshot={compareReport.inputs_snapshot}
+          storeName={compareReport.store_name}
+          onClose={() => setCompareReport(null)}
+          onRerun={() => runCompare(true)}
+          rerunning={comparing}
+        />
+      )}
+
       {promoteToast && (
         <div className="fixed bottom-6 right-6 z-50 bg-orange-700/90 border border-orange-500 text-white text-sm px-4 py-2.5 rounded-lg shadow-lg max-w-sm">
           {promoteToast}
         </div>
       )}
+    </div>
+  );
+}
+
+function CompareActionBar({
+  selectedCount,
+  stores,
+  comparing,
+  progress,
+  error,
+  onRun,
+  onClear,
+}: {
+  selectedCount: number;
+  stores: string[];
+  comparing: boolean;
+  progress: {
+    stage: "deconstructing" | "comparing";
+    current: number;
+    total: number;
+    label: string;
+  } | null;
+  error: string | null;
+  onRun: () => void;
+  onClear: () => void;
+}) {
+  const canRun = selectedCount >= COMPARE_MIN && !comparing;
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+          <span className="text-2xl font-bold text-white">{selectedCount}</span>
+          <div className="text-xs text-gray-400 leading-tight">
+            <p>
+              of {COMPARE_MAX} max
+              {selectedCount < COMPARE_MIN && ` · need ≥${COMPARE_MIN}`}
+            </p>
+            <p>
+              Store:{" "}
+              {stores.length === 0 ? (
+                <span className="text-gray-500">—</span>
+              ) : stores.length === 1 ? (
+                <span className="text-emerald-400">{stores[0]}</span>
+              ) : (
+                <span className="text-red-400">
+                  Mixed ({stores.join(", ")})
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {selectedCount > 0 && !comparing && (
+            <button
+              onClick={onClear}
+              className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm px-3 py-2 rounded-lg transition-colors cursor-pointer"
+            >
+              <Trash2 size={14} />
+              Clear
+            </button>
+          )}
+          <button
+            onClick={onRun}
+            disabled={!canRun}
+            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            title="Deconstruct any unanalyzed videos, then run Claude Opus comparative analysis"
+          >
+            {comparing ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <GitCompareArrows size={14} />
+            )}
+            {comparing ? "Working…" : "Analyze & Compare"}
+          </button>
+        </div>
+      </div>
+
+      {progress && (
+        <div className="p-3 bg-blue-900/20 border border-blue-700/30 rounded-lg text-xs text-blue-200">
+          <div className="flex items-center gap-2 mb-1">
+            <Loader2 size={12} className="animate-spin flex-shrink-0" />
+            <span className="font-semibold">
+              {progress.stage === "deconstructing"
+                ? `Deconstructing video ${progress.current} of ${progress.total}`
+                : "Strategic analysis"}
+            </span>
+          </div>
+          <p className="text-blue-300/80 truncate ml-5">{progress.label}</p>
+          {progress.stage === "deconstructing" && (
+            <p className="text-[10px] text-blue-400/60 ml-5 mt-1">
+              ~30-90s per video. Do not close the tab.
+            </p>
+          )}
+        </div>
+      )}
+
+      {error && (
+        <div className="p-2.5 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-xs">
+          <div className="flex items-start gap-2">
+            <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
+            <div className="flex-1">{error}</div>
+          </div>
+        </div>
+      )}
+
+      {selectedCount === 0 && !comparing && !error && (
+        <p className="text-xs text-gray-500">
+          Click cards below to add ads to the comparison. Pick from one store
+          for best results — yung store na yon ang i-i-inject sa Avatar +
+          Winning Template docs.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ComparativeReportModal({
+  report,
+  inputsSnapshot,
+  storeName,
+  onClose,
+  onRerun,
+  rerunning,
+}: {
+  report: ComparativeReport;
+  inputsSnapshot: unknown;
+  storeName: string | null;
+  onClose: () => void;
+  onRerun: () => void;
+  rerunning: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 p-4 overflow-y-auto">
+      <div className="w-full max-w-5xl bg-gray-900 border border-gray-700 rounded-xl shadow-xl my-6">
+        <div className="flex items-center justify-between p-5 border-b border-gray-700">
+          <div className="min-w-0">
+            <h2 className="text-lg font-bold text-white">
+              Comparative Analysis Report
+            </h2>
+            {storeName && (
+              <p className="text-xs text-gray-400 mt-0.5">Store: {storeName}</p>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onRerun}
+              disabled={rerunning}
+              className="flex items-center gap-1.5 text-xs text-gray-300 hover:text-white disabled:opacity-40 cursor-pointer px-2 py-1"
+            >
+              {rerunning ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <RefreshCw size={12} />
+              )}
+              Re-run
+            </button>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-white p-1 cursor-pointer"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+        <div className="p-5 max-h-[80vh] overflow-y-auto">
+          <ComparativeReportView
+            report={report}
+            inputsSnapshot={
+              inputsSnapshot as Parameters<typeof ComparativeReportView>[0]["inputsSnapshot"]
+            }
+            storeName={storeName}
+          />
+        </div>
+      </div>
     </div>
   );
 }

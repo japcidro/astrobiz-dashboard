@@ -270,6 +270,7 @@ export default function AiAnalyticsPage() {
       {tab === "deconstruct" && (
         <DeconstructionPanel
           ads={deconstructAds}
+          datePreset={datePreset}
           initialAdId={deconstructAdParam}
           onAutoAnalyzeHandled={() => {
             router.replace("/marketing/ai-analytics");
