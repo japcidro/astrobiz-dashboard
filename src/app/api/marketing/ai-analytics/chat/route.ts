@@ -10,12 +10,12 @@ import {
 } from "@/lib/ai/agent-loop";
 
 export const dynamic = "force-dynamic";
-// Long retrospective compilations with full transcripts can generate
-// 8-15k output tokens (~2-4 minutes at Sonnet's ~60 tok/s). Plus multi-tool
-// loops. Vercel Fluid Compute supports up to 300s which covers this;
-// agent-loop uses SSE streaming so the function stays alive through
-// the full response (no 504 even near the cap).
-export const maxDuration = 300;
+// Long retrospective compilations with multiple deconstructions + a huge
+// codeblock output can run 5-8 minutes end-to-end. Vercel Fluid Compute
+// supports up to 800s on Pro; 600 gives comfortable headroom. Agent-loop
+// also emits SSE keepalive comments during idle periods so the edge
+// doesn't drop the connection while tools run.
+export const maxDuration = 600;
 
 const SYSTEM_PROMPT = `You are the operations assistant for Astrobiz, a Philippine e-commerce company running Shopify + Meta Ads + J&T courier. The operator is the CEO or a marketing team lead asking decision-oriented questions.
 
@@ -173,13 +173,40 @@ export async function POST(request: Request) {
   // custom `tool_call` / `tool_result` frames ahead of Claude's SSE.
   const encoder = new TextEncoder();
 
+  // Hoisted so both start() and cancel() can flip/clear them.
+  let closed = false;
+  let keepaliveHandle: ReturnType<typeof setInterval> | null = null;
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       function send(event: string, data: unknown) {
-        controller.enqueue(
-          encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
-        );
+        if (closed) return;
+        try {
+          controller.enqueue(
+            encoder.encode(
+              `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+            )
+          );
+        } catch {
+          // controller was closed underneath us (client disconnected)
+          closed = true;
+        }
       }
+
+      // Keepalive ping: SSE comment frames every 5s. Prevents Vercel edge
+      // from dropping the connection during long idle stretches like
+      // deconstruction tool execution (30-90s) or LLM time-to-first-token
+      // on a huge context. Comments (lines starting with ":") are ignored
+      // by the client SSE parser but keep the TCP + HTTP/2 stream active.
+      keepaliveHandle = setInterval(() => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(`: keepalive\n\n`));
+        } catch {
+          closed = true;
+          if (keepaliveHandle) clearInterval(keepaliveHandle);
+        }
+      }, 5000);
 
       try {
         const result = await runAgentLoop({
@@ -242,13 +269,23 @@ export async function POST(request: Request) {
           hit_cost_cap: result.hitCostCap,
         });
 
+        if (keepaliveHandle) clearInterval(keepaliveHandle);
+        closed = true;
         controller.close();
       } catch (e) {
+        if (keepaliveHandle) clearInterval(keepaliveHandle);
         send("error", {
           message: e instanceof Error ? e.message : "Agent loop failed",
         });
+        closed = true;
         controller.close();
       }
+    },
+    cancel() {
+      // Client disconnected (user closed tab, reloaded, etc.) — stop
+      // emitting so the next send() doesn't throw.
+      closed = true;
+      if (keepaliveHandle) clearInterval(keepaliveHandle);
     },
   });
 
