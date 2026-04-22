@@ -14,6 +14,10 @@ import {
   Wrench,
   AlertCircle,
   StickyNote,
+  Trophy,
+  Zap,
+  TrendingDown,
+  Minus,
 } from "lucide-react";
 import {
   APPROVED_SCRIPT_STATUSES,
@@ -23,6 +27,7 @@ import {
   type ApprovedScriptStatus,
   type ApprovedScriptAngleType,
 } from "@/lib/ai/approved-scripts-types";
+import type { ScriptPerformance, AdPerformanceSummary } from "@/lib/ai/script-performance";
 
 interface Props {
   storeName: string;
@@ -56,6 +61,9 @@ type TypeFilter = ApprovedScriptAngleType | "all";
 
 export function ApprovedLibrary({ storeName }: Props) {
   const [scripts, setScripts] = useState<ApprovedScript[]>([]);
+  const [perf, setPerf] = useState<Record<string, ScriptPerformance>>({});
+  const [perfLoading, setPerfLoading] = useState(false);
+  const [perfWarning, setPerfWarning] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
@@ -81,9 +89,33 @@ export function ApprovedLibrary({ storeName }: Props) {
     }
   }, [storeName]);
 
+  const loadPerf = useCallback(async () => {
+    if (!storeName) return;
+    setPerfLoading(true);
+    setPerfWarning(null);
+    try {
+      const res = await fetch(
+        `/api/ai/approved-scripts/performance?store=${encodeURIComponent(storeName)}`
+      );
+      const json = await res.json();
+      if (res.ok) {
+        setPerf(json.performance || {});
+        if (json.warning) setPerfWarning(json.warning as string);
+      }
+    } catch {
+      // Perf failures are non-blocking — the library still renders scripts.
+    } finally {
+      setPerfLoading(false);
+    }
+  }, [storeName]);
+
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    loadPerf();
+  }, [loadPerf]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -151,11 +183,17 @@ export function ApprovedLibrary({ storeName }: Props) {
         </select>
 
         <button
-          onClick={load}
-          disabled={loading}
+          onClick={() => {
+            load();
+            loadPerf();
+          }}
+          disabled={loading || perfLoading}
           className="flex items-center gap-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white text-sm px-3 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
         >
-          <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+          <RefreshCw
+            size={14}
+            className={loading || perfLoading ? "animate-spin" : ""}
+          />
           Refresh
         </button>
 
@@ -168,6 +206,13 @@ export function ApprovedLibrary({ storeName }: Props) {
         <div className="p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-sm flex items-center gap-2">
           <AlertCircle size={14} />
           {error}
+        </div>
+      )}
+
+      {perfWarning && (
+        <div className="p-2 bg-yellow-900/20 border border-yellow-700/50 rounded-lg text-yellow-300 text-xs flex items-center gap-2">
+          <AlertCircle size={12} />
+          {perfWarning}
         </div>
       )}
 
@@ -189,6 +234,7 @@ export function ApprovedLibrary({ storeName }: Props) {
               <ScriptCard
                 key={script.id}
                 script={script}
+                perf={perf[script.id] ?? null}
                 onClick={() => setSelected(script)}
               />
             ))}
@@ -209,9 +255,11 @@ export function ApprovedLibrary({ storeName }: Props) {
 
 function ScriptCard({
   script,
+  perf,
   onClick,
 }: {
   script: ApprovedScript;
+  perf: ScriptPerformance | null;
   onClick: () => void;
 }) {
   const StatusIcon = STATUS_ICONS[script.status];
@@ -226,9 +274,12 @@ function ScriptCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold text-white truncate">
-            {script.angle_title}
-          </h3>
+          <div className="flex items-center gap-1.5 mb-0.5">
+            <h3 className="text-sm font-semibold text-white truncate">
+              {script.angle_title}
+            </h3>
+            {perf && <TierBadge tier={perf.tier} size="sm" />}
+          </div>
           {script.avatar && (
             <p className="text-xs text-gray-400 truncate">{script.avatar}</p>
           )}
@@ -242,6 +293,39 @@ function ScriptCard({
       </div>
 
       <p className="text-sm text-gray-300 line-clamp-2">{script.hook}</p>
+
+      {/* Performance strip — only if at least one ad has been launched. */}
+      {perf && perf.submitted_count > 0 && (
+        <div className="flex items-center flex-wrap gap-x-3 gap-y-1 text-[11px] text-gray-400 pt-2 border-t border-gray-700/50">
+          <span>
+            <span className="text-gray-500">Spend</span>{" "}
+            <span className="text-gray-200 font-medium">
+              ₱{formatCompact(perf.spend)}
+            </span>
+          </span>
+          <span>
+            <span className="text-gray-500">Purch</span>{" "}
+            <span className="text-gray-200 font-medium">{perf.purchases}</span>
+          </span>
+          <span>
+            <span className="text-gray-500">CPP</span>{" "}
+            <span
+              className={`font-medium ${cppColor(perf.cpp, perf.purchases)}`}
+            >
+              {perf.purchases > 0 ? `₱${formatCompact(perf.cpp)}` : "—"}
+            </span>
+          </span>
+          <span>
+            <span className="text-gray-500">ROAS</span>{" "}
+            <span className="text-gray-200 font-medium">
+              {perf.roas > 0 ? perf.roas.toFixed(1) : "—"}
+            </span>
+          </span>
+          <span className="ml-auto text-gray-500">
+            {perf.submitted_count} ad{perf.submitted_count === 1 ? "" : "s"}
+          </span>
+        </div>
+      )}
 
       <div className="flex items-center gap-1.5 text-[10px] text-gray-500 mt-auto pt-2 border-t border-gray-700/50">
         {script.angle_type && (
@@ -264,6 +348,72 @@ function ScriptCard({
   );
 }
 
+function TierBadge({
+  tier,
+  size = "sm",
+}: {
+  tier: ScriptPerformance["tier"];
+  size?: "sm" | "md";
+}) {
+  if (tier === "no_data") return null;
+
+  const config: Record<
+    Exclude<ScriptPerformance["tier"], "no_data">,
+    { label: string; icon: typeof Trophy; className: string }
+  > = {
+    stable_winner: {
+      label: "Winner",
+      icon: Trophy,
+      className: "bg-yellow-500/20 text-yellow-300 border-yellow-500/50",
+    },
+    spike: {
+      label: "Spike",
+      icon: Zap,
+      className: "bg-sky-500/20 text-sky-300 border-sky-500/50",
+    },
+    stable_loser: {
+      label: "Losing",
+      icon: TrendingDown,
+      className: "bg-red-900/30 text-red-300 border-red-700/50",
+    },
+    dead: {
+      label: "Dead",
+      icon: Minus,
+      className: "bg-gray-800 text-gray-500 border-gray-700",
+    },
+  };
+
+  const c = config[tier];
+  const Icon = c.icon;
+  const sizing =
+    size === "sm"
+      ? "text-[10px] px-1.5 py-0.5 gap-0.5"
+      : "text-xs px-2 py-0.5 gap-1";
+  return (
+    <span
+      className={`inline-flex items-center rounded border font-medium ${c.className} ${sizing}`}
+    >
+      <Icon size={size === "sm" ? 10 : 12} />
+      {c.label}
+    </span>
+  );
+}
+
+function formatCompact(n: number): string {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+  if (n >= 10000) return `${(n / 1000).toFixed(1)}k`;
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
+  if (Number.isInteger(n)) return String(n);
+  return n.toFixed(0);
+}
+
+function cppColor(cpp: number, purchases: number): string {
+  if (purchases === 0) return "text-gray-500";
+  if (cpp > 0 && cpp <= 200) return "text-emerald-400";
+  if (cpp <= 300) return "text-yellow-300";
+  return "text-red-300";
+}
+
 function ScriptDetailModal({
   script,
   onClose,
@@ -280,6 +430,33 @@ function ScriptDetailModal({
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
   const [notesDirty, setNotesDirty] = useState(false);
   const [videoDirty, setVideoDirty] = useState(false);
+
+  const [detailPerf, setDetailPerf] = useState<ScriptPerformance | null>(null);
+  const [perfLoading, setPerfLoading] = useState(true);
+  const [perfWarning, setPerfWarning] = useState<string | null>(null);
+
+  const loadDetailPerf = useCallback(async () => {
+    setPerfLoading(true);
+    setPerfWarning(null);
+    try {
+      const res = await fetch(
+        `/api/ai/approved-scripts/${script.id}/performance`
+      );
+      const json = await res.json();
+      if (res.ok) {
+        setDetailPerf(json.performance || null);
+        if (json.warning) setPerfWarning(json.warning as string);
+      }
+    } catch {
+      // Non-blocking
+    } finally {
+      setPerfLoading(false);
+    }
+  }, [script.id]);
+
+  useEffect(() => {
+    loadDetailPerf();
+  }, [loadDetailPerf]);
 
   const updateStatus = async (status: ApprovedScriptStatus) => {
     setSaving(true);
@@ -388,6 +565,12 @@ function ScriptDetailModal({
 
         {/* Content */}
         <div className="px-6 py-4 space-y-5">
+          <PerformanceSection
+            perf={detailPerf}
+            loading={perfLoading}
+            warning={perfWarning}
+          />
+
           <DetailSection
             label="HOOK"
             text={script.hook}
@@ -567,6 +750,140 @@ function DetailSection({
       </div>
       <div className="whitespace-pre-wrap text-sm leading-relaxed text-gray-200 bg-gray-800/50 border border-gray-700/50 rounded-lg px-3 py-2">
         {text}
+      </div>
+    </div>
+  );
+}
+
+function PerformanceSection({
+  perf,
+  loading,
+  warning,
+}: {
+  perf: ScriptPerformance | null;
+  loading: boolean;
+  warning: string | null;
+}) {
+  if (loading) {
+    return (
+      <div className="bg-gray-800/50 border border-gray-700/50 rounded-lg px-4 py-3 flex items-center gap-2 text-xs text-gray-400">
+        <RefreshCw size={12} className="animate-spin" />
+        Loading performance...
+      </div>
+    );
+  }
+
+  if (warning) {
+    return (
+      <div className="bg-yellow-900/20 border border-yellow-700/50 rounded-lg px-4 py-3 text-xs text-yellow-300 flex items-center gap-2">
+        <AlertCircle size={12} />
+        {warning}
+      </div>
+    );
+  }
+
+  if (!perf || perf.submitted_count === 0) {
+    return (
+      <div className="bg-gray-800/30 border border-dashed border-gray-700/50 rounded-lg px-4 py-3 text-xs text-gray-500">
+        Not launched yet. Pick this script in Create Ad to start tracking
+        performance.
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-gray-800/50 border border-gray-700/50 rounded-lg p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
+            Performance (last 14d)
+          </p>
+          <TierBadge tier={perf.tier} size="md" />
+        </div>
+        <span className="text-[10px] text-gray-500">
+          {perf.submitted_count} ad{perf.submitted_count === 1 ? "" : "s"}
+          {perf.live_count > 0 && ` · ${perf.live_count} live`}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-4 gap-3 text-center">
+        <Stat label="Spend" value={`₱${formatCompact(perf.spend)}`} />
+        <Stat label="Purchases" value={String(perf.purchases)} />
+        <Stat
+          label="CPP"
+          value={perf.purchases > 0 ? `₱${formatCompact(perf.cpp)}` : "—"}
+          className={cppColor(perf.cpp, perf.purchases)}
+        />
+        <Stat
+          label="ROAS"
+          value={perf.roas > 0 ? perf.roas.toFixed(2) : "—"}
+        />
+      </div>
+
+      {perf.ads && perf.ads.length > 0 && (
+        <div className="pt-3 border-t border-gray-700/50">
+          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-2">
+            Per-ad breakdown
+          </p>
+          <div className="space-y-1.5">
+            {perf.ads.map((ad) => (
+              <AdRow key={ad.fb_ad_id} ad={ad} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: string;
+  className?: string;
+}) {
+  return (
+    <div>
+      <p className="text-[10px] text-gray-500 uppercase tracking-wide">
+        {label}
+      </p>
+      <p className={`text-sm font-semibold text-white ${className ?? ""}`}>
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function AdRow({ ad }: { ad: AdPerformanceSummary }) {
+  return (
+    <div className="bg-gray-900/50 border border-gray-800 rounded-md px-3 py-2 flex items-center gap-3">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-1.5">
+          <p className="text-xs text-white truncate">{ad.draft_name}</p>
+          {ad.tier !== "no_data" && (
+            <TierBadge
+              tier={ad.tier as ScriptPerformance["tier"]}
+              size="sm"
+            />
+          )}
+        </div>
+        <p className="text-[10px] text-gray-500 font-mono truncate">
+          {ad.fb_ad_id}
+        </p>
+      </div>
+      <div className="flex-shrink-0 flex items-center gap-3 text-[10px]">
+        <span className="text-gray-400">
+          ₱{formatCompact(ad.spend)}
+        </span>
+        <span className="text-gray-400">
+          {ad.purchases} purch
+        </span>
+        <span className={`font-medium ${cppColor(ad.cpp, ad.purchases)}`}>
+          {ad.purchases > 0 ? `₱${formatCompact(ad.cpp)}` : "—"}
+        </span>
       </div>
     </div>
   );
