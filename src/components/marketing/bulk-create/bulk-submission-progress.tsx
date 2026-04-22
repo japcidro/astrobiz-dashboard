@@ -17,6 +17,8 @@ export interface BulkAdRow {
   description: string;
   status: "pending" | "uploading" | "submitting" | "done" | "error";
   error: string | null;
+  source_script_id: string | null;
+  source_script_title: string | null;
 }
 
 interface BulkSubmissionProgressProps {
@@ -92,18 +94,55 @@ export function BulkSubmissionProgress({
         onUpdateRowStatus(row.id, "submitting");
 
         try {
+          const effectiveMode = isFirstEver ? "new" : "existing_campaign";
+          const effectiveCampaignId = isFirstEver ? null : fbCampaignId;
+          const effectiveCampaignData = isFirstEver ? campaign : null;
+          const rowAdsetData = buildAdSetData(
+            row,
+            rows.findIndex((r) => r.id === row.id)
+          );
+          const rowAdData = buildAdData(row);
+
+          // If this row is linked to an approved script, create an ad_draft
+          // first so source_script_id gets persisted on the same row that the
+          // create endpoint will later stamp with fb_ad_id. This keeps the
+          // script → ad chain intact for Phase 2 performance aggregation.
+          let draftId: string | null = null;
+          if (row.source_script_id) {
+            const draftRes = await fetch("/api/facebook/drafts", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                ad_account_id: adAccountId,
+                name: row.ad_name || row.adset_name || "Bulk Script Ad",
+                mode: effectiveMode,
+                existing_campaign_id: effectiveCampaignId,
+                existing_adset_id: null,
+                campaign_data: effectiveCampaignData,
+                adset_data: rowAdsetData,
+                ad_data: rowAdData,
+                source_script_id: row.source_script_id,
+              }),
+            });
+            const draftJson = await draftRes.json();
+            if (!draftRes.ok) {
+              throw new Error(
+                draftJson?.error ||
+                  `Failed to create draft for script-linked row (HTTP ${draftRes.status})`
+              );
+            }
+            draftId = draftJson?.data?.id ?? null;
+          }
+
           const payload = {
-            draft_id: null,
+            draft_id: draftId,
             ad_account_id: adAccountId,
-            mode: isFirstEver ? "new" : "existing_campaign",
-            existing_campaign_id: isFirstEver ? null : fbCampaignId,
+            mode: effectiveMode,
+            existing_campaign_id: effectiveCampaignId,
             existing_adset_id: null,
-            campaign_data: isFirstEver ? campaign : null,
-            adset_data: buildAdSetData(
-              row,
-              rows.findIndex((r) => r.id === row.id)
-            ),
-            ad_data: buildAdData(row),
+            campaign_data: effectiveCampaignData,
+            adset_data: rowAdsetData,
+            ad_data: rowAdData,
           };
 
           const res = await fetch("/api/facebook/create", {

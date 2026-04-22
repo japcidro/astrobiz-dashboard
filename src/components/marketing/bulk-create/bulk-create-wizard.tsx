@@ -1,16 +1,24 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { ArrowLeft, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  Sparkles,
+} from "lucide-react";
 import Link from "next/link";
 import type {
   CampaignFormData,
   AdSetFormData,
   CTAType,
 } from "@/lib/facebook/types";
+import type { ApprovedScript } from "@/lib/ai/approved-scripts-types";
 import { StepCampaign } from "@/components/marketing/create/step-campaign";
 import { StepAdset } from "@/components/marketing/create/step-adset";
 import { PageSelector } from "@/components/marketing/create/page-selector";
+import { ScriptPickerModal } from "../script-picker-modal";
 import { AdRowsTable } from "./ad-rows-table";
 import { BulkSubmissionProgress } from "./bulk-submission-progress";
 
@@ -43,6 +51,12 @@ export interface BulkAdRow {
   description: string;
   status: "pending" | "uploading" | "submitting" | "done" | "error";
   error: string | null;
+  // Link back to the approved script that sourced this ad copy. Persisted
+  // on the ad_draft row so Phase 2 performance aggregation can trace the
+  // ad → fb_ad_id → source_script_id. Nullable: rows can still be written
+  // from scratch.
+  source_script_id: string | null;
+  source_script_title: string | null;
 }
 
 // ─── CTA Options ───
@@ -79,6 +93,8 @@ function makeEmptyRow(): BulkAdRow {
     description: "",
     status: "pending",
     error: null,
+    source_script_id: null,
+    source_script_title: null,
   };
 }
 
@@ -182,6 +198,9 @@ export function BulkCreateWizard() {
   // Section D: Submission
   const [submitting, setSubmitting] = useState(false);
 
+  // Script importing (multi-pick from Approved Library)
+  const [scriptPickerOpen, setScriptPickerOpen] = useState(false);
+
   // ─── Fetch accounts on mount ───
   useEffect(() => {
     const init = async () => {
@@ -252,6 +271,33 @@ export function BulkCreateWizard() {
 
   const handleRemoveRow = useCallback((id: string) => {
     setRows((prev) => prev.filter((r) => r.id !== id));
+  }, []);
+
+  // Turns selected approved scripts into pre-filled rows. Hook → headline,
+  // body → primary text, angle title → ad name. If the only current rows
+  // are untouched empties, replace them; otherwise append.
+  const handleImportScripts = useCallback((scripts: ApprovedScript[]) => {
+    if (scripts.length === 0) return;
+    const newRows: BulkAdRow[] = scripts.map((s) => ({
+      ...makeEmptyRow(),
+      ad_name: s.angle_title.slice(0, 80),
+      primary_text: s.body_script,
+      headline: s.hook.slice(0, 255),
+      description: "",
+      source_script_id: s.id,
+      source_script_title: s.angle_title,
+    }));
+    setRows((prev) => {
+      const existingHasContent = prev.some(
+        (r) =>
+          r.ad_name.trim() ||
+          r.primary_text.trim() ||
+          r.headline.trim() ||
+          r.image_hash ||
+          r.video_id
+      );
+      return existingHasContent ? [...prev, ...newRows] : newRows;
+    });
   }, []);
 
   const handleUpdateRowStatus = useCallback(
@@ -537,6 +583,31 @@ export function BulkCreateWizard() {
               </div>
             </div>
           </div>
+
+          {/* Import from Approved Scripts */}
+          <div className="mb-4">
+            <button
+              type="button"
+              onClick={() => setScriptPickerOpen(true)}
+              className="flex items-center gap-2 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-600/50 text-emerald-300 hover:text-emerald-200 text-sm px-4 py-2 rounded-lg transition-colors cursor-pointer"
+            >
+              <Sparkles size={14} />
+              Import from Approved Scripts
+            </button>
+            <p className="mt-1.5 text-[11px] text-gray-500">
+              Pick N scripts from the Approved Library. Each becomes a row with
+              hook → headline, body → primary text. Source script is saved so
+              performance rolls up in the Library.
+            </p>
+          </div>
+
+          <ScriptPickerModal
+            open={scriptPickerOpen}
+            mode="multi"
+            onClose={() => setScriptPickerOpen(false)}
+            onPickMany={handleImportScripts}
+            confirmLabel="Add rows"
+          />
 
           {/* Default Copy (fill all rows) */}
           <div className="mb-4 bg-gray-700/20 border border-gray-700/50 rounded-lg p-4">

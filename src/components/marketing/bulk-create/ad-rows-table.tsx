@@ -1,7 +1,17 @@
 "use client";
 
-import { useRef, useCallback } from "react";
-import { Upload, X, CheckCircle, AlertCircle, Loader2, Plus } from "lucide-react";
+import { useRef, useCallback, useState } from "react";
+import {
+  Upload,
+  X,
+  CheckCircle,
+  AlertCircle,
+  Loader2,
+  Plus,
+  Sparkles,
+} from "lucide-react";
+import type { ApprovedScript } from "@/lib/ai/approved-scripts-types";
+import { ScriptPickerModal } from "../script-picker-modal";
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
 
@@ -20,6 +30,8 @@ export interface BulkAdRow {
   description: string;
   status: "pending" | "uploading" | "submitting" | "done" | "error";
   error: string | null;
+  source_script_id: string | null;
+  source_script_title: string | null;
 }
 
 interface AdRowsTableProps {
@@ -201,6 +213,30 @@ export function AdRowsTable({
   const bulkInputRef = useRef<HTMLInputElement>(null);
   const rowInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
+  // Per-row script picker: track which row is picking so we know which row
+  // to fill when the user selects a script from the modal.
+  const [pickerTargetRowId, setPickerTargetRowId] = useState<string | null>(
+    null
+  );
+
+  const handlePickScript = useCallback(
+    (script: ApprovedScript) => {
+      if (!pickerTargetRowId) return;
+      const row = rows.find((r) => r.id === pickerTargetRowId);
+      onUpdateRow(pickerTargetRowId, {
+        ad_name: row?.ad_name?.trim()
+          ? row.ad_name
+          : script.angle_title.slice(0, 80),
+        primary_text: script.body_script,
+        headline: script.hook.slice(0, 255),
+        source_script_id: script.id,
+        source_script_title: script.angle_title,
+      });
+      setPickerTargetRowId(null);
+    },
+    [pickerTargetRowId, rows, onUpdateRow]
+  );
+
   // Upload a single file for a given row — detect type from file MIME
   const uploadFileForRow = useCallback(
     async (file: File, rowId: string, token: string) => {
@@ -363,19 +399,57 @@ export function AdRowsTable({
                   />
                 </td>
 
-                {/* Ad Name */}
+                {/* Ad Name + optional script link */}
                 <td className="px-2 py-1.5 bg-gray-800/50">
-                  <input
-                    type="text"
-                    value={row.ad_name}
-                    placeholder={`Ad ${idx + 1}`}
-                    onChange={(e) =>
-                      onUpdateRow(row.id, { ad_name: e.target.value })
-                    }
-                    className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
-                      !row.ad_name.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
-                    }`}
-                  />
+                  <div className="space-y-1">
+                    <input
+                      type="text"
+                      value={row.ad_name}
+                      placeholder={`Ad ${idx + 1}`}
+                      onChange={(e) =>
+                        onUpdateRow(row.id, { ad_name: e.target.value })
+                      }
+                      className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
+                        !row.ad_name.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
+                      }`}
+                    />
+                    {row.source_script_id ? (
+                      <div className="flex items-center gap-1 text-[10px]">
+                        <Sparkles
+                          size={9}
+                          className="text-emerald-400 flex-shrink-0"
+                        />
+                        <span
+                          className="text-emerald-400 truncate flex-1"
+                          title={row.source_script_title ?? ""}
+                        >
+                          {row.source_script_title}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onUpdateRow(row.id, {
+                              source_script_id: null,
+                              source_script_title: null,
+                            })
+                          }
+                          className="text-gray-600 hover:text-red-400 flex-shrink-0 cursor-pointer"
+                          title="Unlink script"
+                        >
+                          <X size={10} />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setPickerTargetRowId(row.id)}
+                        className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-emerald-400 cursor-pointer"
+                      >
+                        <Sparkles size={9} />
+                        Link script
+                      </button>
+                    )}
+                  </div>
                 </td>
 
                 {/* Creative */}
@@ -507,6 +581,12 @@ export function AdRowsTable({
         <Plus size={14} />
         Add Row
       </button>
+
+      <ScriptPickerModal
+        open={pickerTargetRowId !== null}
+        onClose={() => setPickerTargetRowId(null)}
+        onPick={handlePickScript}
+      />
     </div>
   );
 }

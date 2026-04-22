@@ -1,15 +1,33 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Search, X, RefreshCw, Sparkles, AlertCircle } from "lucide-react";
+import {
+  Search,
+  X,
+  RefreshCw,
+  Sparkles,
+  AlertCircle,
+  Check,
+} from "lucide-react";
 import type { ApprovedScript } from "@/lib/ai/approved-scripts-types";
 import { ANGLE_TYPE_LABELS } from "@/lib/ai/approved-scripts-types";
 
-interface Props {
+interface SingleProps {
   open: boolean;
   onClose: () => void;
+  mode?: "single";
   onPick: (script: ApprovedScript) => void;
 }
+
+interface MultiProps {
+  open: boolean;
+  onClose: () => void;
+  mode: "multi";
+  onPickMany: (scripts: ApprovedScript[]) => void;
+  confirmLabel?: string;
+}
+
+type Props = SingleProps | MultiProps;
 
 const ANGLE_TYPE_COLORS: Record<string, string> = {
   D: "bg-pink-900/30 text-pink-300 border-pink-700/50",
@@ -18,13 +36,17 @@ const ANGLE_TYPE_COLORS: Record<string, string> = {
   B: "bg-amber-900/30 text-amber-300 border-amber-700/50",
 };
 
-export function ScriptPickerModal({ open, onClose, onPick }: Props) {
+export function ScriptPickerModal(props: Props) {
+  const { open, onClose } = props;
+  const isMulti = props.mode === "multi";
+
   const [scripts, setScripts] = useState<ApprovedScript[]>([]);
   const [stores, setStores] = useState<string[]>([]);
   const [storeFilter, setStoreFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Library shows approved + in_production + shot + live (everything except
   // archived). Marketer picks whatever they're about to shoot / is running.
@@ -62,7 +84,32 @@ export function ScriptPickerModal({ open, onClose, onPick }: Props) {
     });
   }, [scripts, storeFilter, search]);
 
+  // Clear selection when modal reopens so stale selections don't stick.
+  useEffect(() => {
+    if (open) setSelectedIds(new Set());
+  }, [open]);
+
+  const toggleSelected = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleConfirmMulti = useCallback(() => {
+    if (!isMulti) return;
+    const picked = scripts.filter((s) => selectedIds.has(s.id));
+    (props as MultiProps).onPickMany(picked);
+    onClose();
+  }, [isMulti, scripts, selectedIds, props, onClose]);
+
   if (!open) return null;
+
+  const confirmLabel = isMulti
+    ? ((props as MultiProps).confirmLabel ?? "Add rows")
+    : "";
 
   return (
     <div
@@ -76,7 +123,14 @@ export function ScriptPickerModal({ open, onClose, onPick }: Props) {
         <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Sparkles size={18} className="text-emerald-400" />
-            <h2 className="text-lg font-bold text-white">Pick a script</h2>
+            <h2 className="text-lg font-bold text-white">
+              {isMulti ? "Pick scripts" : "Pick a script"}
+            </h2>
+            {isMulti && selectedIds.size > 0 && (
+              <span className="text-xs text-emerald-400 font-medium">
+                {selectedIds.size} selected
+              </span>
+            )}
           </div>
           <button
             onClick={onClose}
@@ -133,50 +187,107 @@ export function ScriptPickerModal({ open, onClose, onPick }: Props) {
             </div>
           ) : (
             <div className="space-y-2">
-              {filtered.map((script) => (
-                <button
-                  key={script.id}
-                  onClick={() => {
-                    onPick(script);
+              {filtered.map((script) => {
+                const selected = selectedIds.has(script.id);
+                const handleClick = () => {
+                  if (isMulti) {
+                    toggleSelected(script.id);
+                  } else {
+                    (props as SingleProps).onPick(script);
                     onClose();
-                  }}
-                  className="w-full text-left bg-gray-800/50 hover:bg-gray-800 border border-gray-700/50 hover:border-emerald-700/50 rounded-lg p-3 transition-colors cursor-pointer"
-                >
-                  <div className="flex items-start justify-between gap-2 mb-1">
-                    <h3 className="text-sm font-semibold text-white truncate">
-                      {script.angle_title}
-                    </h3>
-                    <span className="flex-shrink-0 text-[10px] text-gray-500">
-                      {script.store_name}
-                    </span>
-                  </div>
-                  <p className="text-xs text-gray-400 line-clamp-2 mb-1.5">
-                    {script.hook}
-                  </p>
-                  <div className="flex items-center flex-wrap gap-1.5 text-[10px] text-gray-500">
-                    {script.avatar && <span>{script.avatar}</span>}
-                    {script.angle_type && (
-                      <span
-                        className={`px-1.5 py-0.5 rounded border font-medium ${ANGLE_TYPE_COLORS[script.angle_type]}`}
-                      >
-                        {script.angle_type} — {ANGLE_TYPE_LABELS[script.angle_type]}
-                      </span>
-                    )}
-                    {script.intensity !== null && (
-                      <span>Int {script.intensity}</span>
-                    )}
-                    {script.capacity !== null && (
-                      <span>Cap {script.capacity}</span>
-                    )}
-                    <span className="ml-auto">
-                      Status: {script.status.replace("_", " ")}
-                    </span>
-                  </div>
-                </button>
-              ))}
+                  }
+                };
+                return (
+                  <button
+                    key={script.id}
+                    onClick={handleClick}
+                    className={`w-full text-left border rounded-lg p-3 transition-colors cursor-pointer ${
+                      selected
+                        ? "bg-emerald-900/20 border-emerald-700/50"
+                        : "bg-gray-800/50 hover:bg-gray-800 border-gray-700/50 hover:border-emerald-700/50"
+                    }`}
+                  >
+                    <div className="flex items-start gap-2">
+                      {isMulti && (
+                        <div
+                          className={`flex-shrink-0 w-4 h-4 mt-0.5 rounded border flex items-center justify-center ${
+                            selected
+                              ? "bg-emerald-500 border-emerald-500"
+                              : "border-gray-600"
+                          }`}
+                        >
+                          {selected && (
+                            <Check size={12} className="text-white" />
+                          )}
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <h3 className="text-sm font-semibold text-white truncate">
+                            {script.angle_title}
+                          </h3>
+                          <span className="flex-shrink-0 text-[10px] text-gray-500">
+                            {script.store_name}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-400 line-clamp-2 mb-1.5">
+                          {script.hook}
+                        </p>
+                        <div className="flex items-center flex-wrap gap-1.5 text-[10px] text-gray-500">
+                          {script.avatar && <span>{script.avatar}</span>}
+                          {script.angle_type && (
+                            <span
+                              className={`px-1.5 py-0.5 rounded border font-medium ${ANGLE_TYPE_COLORS[script.angle_type]}`}
+                            >
+                              {script.angle_type} —{" "}
+                              {ANGLE_TYPE_LABELS[script.angle_type]}
+                            </span>
+                          )}
+                          {script.intensity !== null && (
+                            <span>Int {script.intensity}</span>
+                          )}
+                          {script.capacity !== null && (
+                            <span>Cap {script.capacity}</span>
+                          )}
+                          <span className="ml-auto">
+                            Status: {script.status.replace("_", " ")}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
+
+        {/* Footer — multi-select confirm */}
+        {isMulti && (
+          <div className="px-6 py-3 border-t border-gray-800 flex items-center justify-between gap-3">
+            <span className="text-xs text-gray-500">
+              {selectedIds.size === 0
+                ? "Pick one or more scripts"
+                : `${selectedIds.size} script${selectedIds.size === 1 ? "" : "s"} selected`}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onClose}
+                className="text-sm text-gray-400 hover:text-white px-3 py-2 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmMulti}
+                disabled={selectedIds.size === 0}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {confirmLabel}
+                {selectedIds.size > 0 && ` (${selectedIds.size})`}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
