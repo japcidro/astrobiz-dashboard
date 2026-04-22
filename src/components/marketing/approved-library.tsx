@@ -858,33 +858,116 @@ function Stat({
 }
 
 function AdRow({ ad }: { ad: AdPerformanceSummary }) {
+  const [open, setOpen] = useState(false);
+  const hasDeconstruction = !!ad.deconstruction;
+
   return (
-    <div className="bg-gray-900/50 border border-gray-800 rounded-md px-3 py-2 flex items-center gap-3">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5">
-          <p className="text-xs text-white truncate">{ad.draft_name}</p>
-          {ad.tier !== "no_data" && (
-            <TierBadge
-              tier={ad.tier as ScriptPerformance["tier"]}
-              size="sm"
-            />
+    <div className="bg-gray-900/50 border border-gray-800 rounded-md overflow-hidden">
+      <div className="px-3 py-2 flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <p className="text-xs text-white truncate">{ad.draft_name}</p>
+            {ad.tier !== "no_data" && (
+              <TierBadge
+                tier={ad.tier as ScriptPerformance["tier"]}
+                size="sm"
+              />
+            )}
+            {hasDeconstruction && (
+              <span className="text-[9px] text-emerald-300 bg-emerald-900/30 border border-emerald-700/50 rounded px-1 py-px">
+                Video analysis
+              </span>
+            )}
+          </div>
+          <p className="text-[10px] text-gray-500 font-mono truncate">
+            {ad.fb_ad_id}
+          </p>
+        </div>
+        <div className="flex-shrink-0 flex items-center gap-3 text-[10px]">
+          <span className="text-gray-400">₱{formatCompact(ad.spend)}</span>
+          <span className="text-gray-400">{ad.purchases} purch</span>
+          <span className={`font-medium ${cppColor(ad.cpp, ad.purchases)}`}>
+            {ad.purchases > 0 ? `₱${formatCompact(ad.cpp)}` : "—"}
+          </span>
+          {hasDeconstruction && (
+            <button
+              type="button"
+              onClick={() => setOpen((v) => !v)}
+              className="text-[10px] text-emerald-300 hover:text-emerald-200 cursor-pointer"
+            >
+              {open ? "Hide" : "Show"}
+            </button>
           )}
         </div>
-        <p className="text-[10px] text-gray-500 font-mono truncate">
-          {ad.fb_ad_id}
-        </p>
       </div>
-      <div className="flex-shrink-0 flex items-center gap-3 text-[10px]">
-        <span className="text-gray-400">
-          ₱{formatCompact(ad.spend)}
-        </span>
-        <span className="text-gray-400">
-          {ad.purchases} purch
-        </span>
-        <span className={`font-medium ${cppColor(ad.cpp, ad.purchases)}`}>
-          {ad.purchases > 0 ? `₱${formatCompact(ad.cpp)}` : "—"}
-        </span>
-      </div>
+      {open && ad.deconstruction && (
+        <AdDeconstructionDetail d={ad.deconstruction} />
+      )}
+    </div>
+  );
+}
+
+function AdDeconstructionDetail({
+  d,
+}: {
+  d: NonNullable<AdPerformanceSummary["deconstruction"]>;
+}) {
+  return (
+    <div className="border-t border-gray-800 bg-gray-900/80 px-3 py-3 space-y-2 text-xs">
+      {d.hook && (
+        <Kv label="HOOK" text={d.hook} />
+      )}
+      {d.transcript && (
+        <Kv label="TRANSCRIPT" text={d.transcript} multiline />
+      )}
+      {d.tone && <Kv label="TONE" text={d.tone} />}
+      {d.visual_style && <Kv label="VISUAL STYLE" text={d.visual_style} />}
+      {d.cta && <Kv label="CTA" text={d.cta} />}
+      {d.scenes && d.scenes.length > 0 && (
+        <div>
+          <p className="text-[9px] font-semibold text-gray-500 uppercase tracking-wide mb-1">
+            Scenes
+          </p>
+          <ul className="space-y-0.5 text-gray-300">
+            {d.scenes.map((s, i) => (
+              <li key={i} className="flex gap-2">
+                <span className="font-mono text-gray-500 flex-shrink-0">
+                  {s.t}
+                </span>
+                <span>{s.description}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <p className="text-[9px] text-gray-600">
+        Analyzed {new Date(d.analyzed_at).toLocaleString()}
+      </p>
+    </div>
+  );
+}
+
+function Kv({
+  label,
+  text,
+  multiline = false,
+}: {
+  label: string;
+  text: string;
+  multiline?: boolean;
+}) {
+  return (
+    <div>
+      <p className="text-[9px] font-semibold text-gray-500 uppercase tracking-wide mb-0.5">
+        {label}
+      </p>
+      <p
+        className={`text-gray-200 ${
+          multiline ? "whitespace-pre-wrap" : "truncate"
+        }`}
+      >
+        {text}
+      </p>
     </div>
   );
 }

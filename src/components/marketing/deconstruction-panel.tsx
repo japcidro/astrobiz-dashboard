@@ -16,6 +16,7 @@ import {
   TrendingUp,
   GitCompareArrows,
   Trash2,
+  Sparkles,
 } from "lucide-react";
 import {
   PromoteToScalingModal,
@@ -185,6 +186,35 @@ export function DeconstructionPanel({
     const m = new Map<string, AdBrief>();
     for (const a of ads) m.set(a.ad_id, a);
     return m;
+  }, [ads]);
+
+  // Map of fb_ad_id → approved-script info, populated lazily from
+  // /api/ai/approved-scripts/by-ads. Drives the "Generated from Script" badge.
+  const [scriptByAd, setScriptByAd] = useState<
+    Record<
+      string,
+      { script_id: string; angle_title: string; store_name: string }
+    >
+  >({});
+
+  useEffect(() => {
+    if (ads.length === 0) return;
+    const adIds = ads.map((a) => a.ad_id);
+    let cancelled = false;
+    fetch("/api/ai/approved-scripts/by-ads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ad_ids: adIds }),
+    })
+      .then((r) => r.json())
+      .then((json) => {
+        if (cancelled) return;
+        setScriptByAd(json.mapping ?? {});
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [ads]);
 
   const loadList = useCallback(async () => {
@@ -672,6 +702,16 @@ export function DeconstructionPanel({
                     : "—"}{" "}
                   · {money(selectedAd.spend)}
                 </p>
+                {scriptByAd[selectedAdId] && (
+                  <a
+                    href={`/marketing/ai-generator?view=library&script=${scriptByAd[selectedAdId].script_id}`}
+                    className="mt-0.5 inline-flex items-center gap-1 text-[11px] text-emerald-300 hover:text-emerald-200"
+                    title="Open source script in Approved Library"
+                  >
+                    <Sparkles size={10} />
+                    From script: {scriptByAd[selectedAdId].angle_title}
+                  </a>
+                )}
               </div>
             </div>
             <div className="flex items-center gap-2">

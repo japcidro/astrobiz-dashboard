@@ -4,6 +4,7 @@ export type AlertType =
   | "stock_restocked_winner"
   | "stock_depleting_winner"
   | "new_winner"
+  | "script_winner_deconstructed"
   | "autopilot_big_action"
   | "rts_spike"
   | "cash_at_risk"
@@ -54,6 +55,7 @@ export const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   stock_restocked_winner: "Winner restocked",
   stock_depleting_winner: "Winner running out",
   new_winner: "New winner detected",
+  script_winner_deconstructed: "Script winner deconstructed",
   autopilot_big_action: "Autopilot action",
   rts_spike: "RTS spike",
   cash_at_risk: "Cash at risk",

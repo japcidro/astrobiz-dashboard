@@ -77,6 +77,7 @@ export async function GET(
       fbToken,
       datePreset,
       includeDaily: true,
+      supabaseForDeconstructions: supabase,
     });
     return Response.json({ performance, date_preset: datePreset });
   } catch (e) {

@@ -14,7 +14,57 @@ import {
 } from "@/lib/facebook/insights-daily";
 import type { DatePreset } from "@/lib/facebook/types";
 
+interface AdCreativeAnalysisRow {
+  ad_id: string;
+  thumbnail_url: string | null;
+  analysis: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export async function loadDeconstructions(
+  supabase: SupabaseClient,
+  adIds: string[]
+): Promise<Map<string, AdDeconstruction>> {
+  const out = new Map<string, AdDeconstruction>();
+  if (adIds.length === 0) return out;
+
+  const { data, error } = await supabase
+    .from("ad_creative_analyses")
+    .select("ad_id, thumbnail_url, analysis, created_at")
+    .in("ad_id", adIds);
+
+  if (error || !data) return out;
+
+  for (const row of data as AdCreativeAnalysisRow[]) {
+    const analysis = (row.analysis ?? {}) as Record<string, unknown>;
+    out.set(row.ad_id, {
+      transcript: (analysis.transcript as string | undefined) ?? null,
+      hook: (analysis.hook as string | undefined) ?? null,
+      scenes:
+        (analysis.scenes as Array<{ t: string; description: string }> | undefined) ??
+        null,
+      visual_style: (analysis.visual_style as string | undefined) ?? null,
+      tone: (analysis.tone as string | undefined) ?? null,
+      cta: (analysis.cta as string | undefined) ?? null,
+      thumbnail_url: row.thumbnail_url,
+      analyzed_at: row.created_at,
+    });
+  }
+  return out;
+}
+
 const CONCURRENCY = 4;
+
+export interface AdDeconstruction {
+  transcript: string | null;
+  hook: string | null;
+  scenes: Array<{ t: string; description: string }> | null;
+  visual_style: string | null;
+  tone: string | null;
+  cta: string | null;
+  thumbnail_url: string | null;
+  analyzed_at: string;
+}
 
 export interface AdPerformanceSummary {
   fb_ad_id: string;
@@ -31,6 +81,7 @@ export interface AdPerformanceSummary {
   winning_days: number;
   max_consecutive: number;
   daily?: DailyMetricPoint[];
+  deconstruction?: AdDeconstruction | null;
 }
 
 export interface ScriptPerformance {
@@ -89,6 +140,10 @@ interface ComputeOptions {
   datePreset: DatePreset;
   includeDaily?: boolean; // only true for the per-script detail endpoint
   accountIdByAdId?: Map<string, string>;
+  // When provided, joins ad_creative_analyses so each returned AdPerformanceSummary
+  // carries its deconstruction (transcript, hook, scenes, tone, cta). Only used
+  // by the per-script detail endpoint — the bulk endpoint skips this for speed.
+  supabaseForDeconstructions?: SupabaseClient;
 }
 
 // Fetch insights for a batch of fb_ad_ids with bounded concurrency. Account id
@@ -171,16 +226,22 @@ export async function computeScriptPerformance(
   }
 
   const adIds = submitted.map((d) => d.fb_ad_id as string);
-  const insights = await fetchInsightsForAds(
-    adIds,
-    opts.fbToken,
-    opts.datePreset,
-    opts.accountIdByAdId
-  );
+  const [insights, deconstructions] = await Promise.all([
+    fetchInsightsForAds(
+      adIds,
+      opts.fbToken,
+      opts.datePreset,
+      opts.accountIdByAdId
+    ),
+    opts.supabaseForDeconstructions
+      ? loadDeconstructions(opts.supabaseForDeconstructions, adIds)
+      : Promise.resolve(new Map<string, AdDeconstruction>()),
+  ]);
 
   const summaries: AdPerformanceSummary[] = submitted.map((draft) => {
     const adId = draft.fb_ad_id as string;
     const metrics = insights.get(adId) ?? null;
+    const deconstruction = deconstructions.get(adId) ?? null;
     if (!metrics) {
       return {
         fb_ad_id: adId,
@@ -197,6 +258,7 @@ export async function computeScriptPerformance(
         winning_days: 0,
         max_consecutive: 0,
         daily: opts.includeDaily ? [] : undefined,
+        deconstruction: opts.supabaseForDeconstructions ? deconstruction : undefined,
       };
     }
     const c = classifyConsistency(metrics, DEFAULT_WINNER_THRESHOLDS);
@@ -215,6 +277,7 @@ export async function computeScriptPerformance(
       winning_days: c.winning_days,
       max_consecutive: c.max_consecutive,
       daily: opts.includeDaily ? metrics.daily : undefined,
+      deconstruction: opts.supabaseForDeconstructions ? deconstruction : undefined,
     };
   });
 
