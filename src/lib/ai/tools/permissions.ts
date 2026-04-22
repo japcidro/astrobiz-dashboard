@@ -25,6 +25,9 @@ export const MARKETING_TOOLS = new Set<string>([
   "get_ad_timeline",
   "search_store_knowledge",
   "compare_ads_quick",
+  // Phase 2.5 — compilation specialists
+  "get_deconstructions_batch",
+  "compile_winners",
   // Phase 2 — Shopify (read-only, shared with marketing so they
   // can cross-reference ad performance with real order flow)
   "search_orders",
@@ -45,6 +48,9 @@ export const ADMIN_ONLY_TOOLS = new Set<string>([
   "get_waybill_mismatches",
   // Profit — CEO-only per net profit tab spec
   "get_net_profit",
+  // Phase 2.5 — first ACTION tool (side-effect: runs Gemini + upserts
+  // a row). Admin-only until we've validated real-world usage patterns.
+  "request_deconstruction",
 ]);
 
 export const ADMIN_TOOLS = new Set<string>([
@@ -63,14 +69,21 @@ export function isToolAllowed(role: AgentRole, toolName: string): boolean {
 }
 
 // ── Cost guardrails ────────────────────────────────────────────────
-// Claude Opus 4.7 list pricing per Anthropic:
-//   $15 / MTok input, $75 / MTok output, $1.50 / MTok cache read
-// Refuse new tool calls once a single session exceeds this cap.
-export const SESSION_COST_CAP_USD = 0.5;
+// Claude Sonnet 4.6 list pricing (chat agent uses Sonnet):
+//   $3 / MTok input, $15 / MTok output, $0.30 / MTok cache read
+// Soft warn at $1.50, hard refuse at $2.00 — gives headroom for deep
+// compilation tasks without letting runaway loops get expensive.
+export const SESSION_COST_CAP_USD = 2.0;
+export const SESSION_COST_SOFT_WARN_USD = 1.5;
 
 // Hard ceiling on tool-use iterations per user message. If the model
 // keeps calling tools without producing text, bail out gracefully.
 export const MAX_TOOL_ITERATIONS = 6;
+
+// Max request_deconstruction calls per session (each call kicks off a
+// real Gemini video analysis — costs ~$0.10 + 30-90s of wall time).
+// Counted against the current session_id via ai_tool_calls audit table.
+export const MAX_DECONSTRUCTIONS_PER_SESSION = 10;
 
 export function estimateCostUsd(
   inputTokens: number,
@@ -78,8 +91,8 @@ export function estimateCostUsd(
   cacheReadTokens: number
 ): number {
   return (
-    (inputTokens / 1_000_000) * 15 +
-    (outputTokens / 1_000_000) * 75 +
-    (cacheReadTokens / 1_000_000) * 1.5
+    (inputTokens / 1_000_000) * 3 +
+    (outputTokens / 1_000_000) * 15 +
+    (cacheReadTokens / 1_000_000) * 0.3
   );
 }

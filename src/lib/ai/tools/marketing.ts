@@ -692,3 +692,181 @@ export async function compareAdsQuick(
       : "Pass account_id to include live metrics + consistency tier. Without it only creative deconstruction data is returned.",
   };
 }
+
+// ─── 13. get_deconstructions_batch ────────────────────────────────────
+// Fetch multiple deconstructions in ONE tool call. Avoids the round-trip
+// cost of calling get_ad_deconstruction N times for compilation flows.
+export async function getDeconstructionsBatch(
+  input: { ad_ids: string[]; include_full_transcript?: boolean },
+  ctx: { supabase: SupabaseClient }
+) {
+  const adIds = Array.isArray(input.ad_ids)
+    ? [...new Set(input.ad_ids.filter(Boolean))].slice(0, 20)
+    : [];
+  if (adIds.length === 0) return { error: "ad_ids is required" };
+
+  const { data, error } = await ctx.supabase
+    .from("ad_creative_analyses")
+    .select(
+      "id, ad_id, account_id, thumbnail_url, analysis, model, created_at"
+    )
+    .in("ad_id", adIds);
+  if (error) throw new Error(error.message);
+
+  const found = new Map<string, (typeof data)[number]>();
+  for (const r of data ?? []) found.set(r.ad_id, r);
+
+  return {
+    requested: adIds.length,
+    found: found.size,
+    missing: adIds.filter((id) => !found.has(id)),
+    deconstructions: adIds
+      .filter((id) => found.has(id))
+      .map((id) => {
+        const r = found.get(id)!;
+        const a = r.analysis as {
+          transcript?: string;
+          hook?: { description?: string; timestamp?: string };
+          scenes?: Array<{ t: string; description: string }>;
+          visual_style?: string;
+          tone?: string;
+          cta?: string;
+          language?: string;
+          duration_seconds?: number;
+        };
+        return {
+          ad_id: r.ad_id,
+          thumbnail_url: r.thumbnail_url,
+          created_at: r.created_at,
+          hook: a?.hook ?? null,
+          tone: a?.tone ?? null,
+          cta: a?.cta ?? null,
+          visual_style: a?.visual_style ?? null,
+          language: a?.language ?? null,
+          duration_seconds: a?.duration_seconds ?? null,
+          scenes: a?.scenes ?? [],
+          transcript: input.include_full_transcript
+            ? a?.transcript ?? null
+            : typeof a?.transcript === "string"
+              ? a.transcript.slice(0, 500) +
+                (a.transcript.length > 500 ? "…" : "")
+              : null,
+        };
+      }),
+  };
+}
+
+// ─── 14. compile_winners ──────────────────────────────────────────────
+// Specialist tool for the most common compilation task: "give me every
+// ad matching criteria X, along with their deconstruction status."
+//
+// One tool call does: ad_performance + filter + deconstruction lookup +
+// compact rows. Replaces the 5-7 round-trip pattern where the AI pulled
+// performance, then fetched each deconstruction one at a time.
+export async function compileWinners(
+  input: {
+    account_filter: string;
+    date_preset?: string;
+    max_cpp?: number;
+    min_purchases?: number;
+    min_roas?: number;
+    min_spend?: number;
+    limit?: number;
+  },
+  ctx: { fbToken: string; supabase: SupabaseClient }
+) {
+  if (!input.account_filter || input.account_filter === "ALL") {
+    return {
+      error:
+        "compile_winners needs a specific account_filter (not 'ALL'). Call list_scaling_campaigns or list_ad_accounts first to narrow to one account.",
+    };
+  }
+  const datePreset = coerceDatePreset(input.date_preset ?? "last_90d");
+  const maxCpp = input.max_cpp ?? 280;
+  const minPurchases = input.min_purchases ?? 10;
+  const minRoas = input.min_roas ?? 0;
+  const minSpend = input.min_spend ?? 0;
+  const limit = Math.min(Math.max(input.limit ?? 20, 1), 50);
+
+  const perf = await fetchAdPerformance({
+    token: ctx.fbToken,
+    datePreset,
+    accountFilter: input.account_filter,
+  });
+
+  const qualifying = perf.data
+    .filter((a) => {
+      if (a.purchases < minPurchases) return false;
+      if (a.purchases > 0 && a.cpa > maxCpp) return false;
+      if (a.roas < minRoas) return false;
+      if (a.spend < minSpend) return false;
+      return true;
+    })
+    .sort((a, b) => b.purchases - a.purchases)
+    .slice(0, limit);
+
+  // Bulk fetch matching deconstructions in ONE query.
+  const ids = qualifying.map((a) => a.ad_id);
+  const deconMap = new Map<string, unknown>();
+  if (ids.length > 0) {
+    const { data } = await ctx.supabase
+      .from("ad_creative_analyses")
+      .select("ad_id, analysis")
+      .in("ad_id", ids);
+    for (const r of data ?? []) deconMap.set(r.ad_id, r.analysis);
+  }
+
+  const rows = qualifying.map((a) => {
+    const d = deconMap.get(a.ad_id) as
+      | {
+          hook?: { description?: string };
+          tone?: string;
+          cta?: string;
+        }
+      | undefined;
+    return {
+      ad_id: a.ad_id,
+      ad: a.ad,
+      campaign: a.campaign,
+      adset: a.adset,
+      account_id: a.account_id,
+      spend: round(a.spend),
+      purchases: a.purchases,
+      cpp: round(a.cpa),
+      roas: round(a.roas),
+      ctr: round(a.ctr * 100, 2),
+      has_deconstruction: Boolean(d),
+      hook_preview: d?.hook?.description?.slice(0, 150) ?? null,
+      tone_preview: d?.tone ?? null,
+      cta_preview: d?.cta?.slice(0, 100) ?? null,
+    };
+  });
+
+  const missingCount = rows.filter((r) => !r.has_deconstruction).length;
+
+  return {
+    date_preset: datePreset,
+    account_filter: input.account_filter,
+    criteria: { max_cpp: maxCpp, min_purchases: minPurchases, min_roas: minRoas, min_spend: minSpend },
+    total_qualifying: rows.length,
+    missing_deconstructions: missingCount,
+    missing_ad_ids: rows.filter((r) => !r.has_deconstruction).map((r) => r.ad_id),
+    totals: {
+      spend: round(rows.reduce((s, r) => s + r.spend, 0)),
+      purchases: rows.reduce((s, r) => s + r.purchases, 0),
+      avg_cpp: rows.length
+        ? round(
+            rows.reduce((s, r) => s + r.cpp, 0) / rows.length
+          )
+        : 0,
+      avg_roas: rows.length
+        ? round(rows.reduce((s, r) => s + r.roas, 0) / rows.length)
+        : 0,
+    },
+    winners: rows,
+    note:
+      missingCount > 0
+        ? `${missingCount} winners haven't been deconstructed yet. You can call request_deconstruction(ad_id) to analyze them on-the-fly (30-90s each, max 10 per session), or use get_ad_deconstruction on specific ones you need.`
+        : null,
+  };
+}

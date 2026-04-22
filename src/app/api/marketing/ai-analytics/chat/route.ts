@@ -40,20 +40,23 @@ You have TOOLS that pull live data across marketing, Shopify orders/inventory, c
    - **Step 3** (last resort): Ask the user to clarify which FB account.
 
    Never default to \`account_filter='ALL'\` on get_ad_performance — it pulls every account sequentially and is slow (50s+).
-8. **Use get_winners (not get_ad_performance) when the user asks "anong winners?"** — get_winners applies the consistency criteria (CPP<₱200, ≥3 purchases/day, ≥2 consecutive days) which raw ranking can't.
-9. **Use get_ad_timeline for "is this consistent?"** about a specific ad — it shows day-by-day metrics + tier classification.
-10. **Use compare_ads_quick for quick "anong pagkakaiba?"** between 2-10 ads. For deep strategic multi-ad analysis prefer get_comparative_report (existing reports).
-11. **Use search_store_knowledge** before recommending creative angles — reference the store's Avatar / Winning Template / Market Sophistication docs so your suggestions match the brand strategy.
-12. **Multi-tool turns**: you can call multiple tools in one turn when independent (e.g. get_ad_performance + list_deconstructions). Prefer parallel over sequential.
+8. **For "compile all winners" / "every ad with X purchases" / "lahat ng ads na may..."** — use **compile_winners** (specialist one-shot tool). DO NOT chain get_ad_performance + get_ad_deconstruction manually — that wastes tokens and round-trips. compile_winners returns the full table in one call and flags which ads need deconstruction.
+9. **When compile_winners reports missing_deconstructions**: confirm with the user first ("may N missing — gusto mo ba i-deconstruct ko agad?"), then call \`request_deconstruction(ad_id, account_id)\` for each. It takes 30-90s per call, max 10 per session. Afterwards, call get_deconstructions_batch to fetch the fresh rows.
+10. **For multiple deconstructions in bulk** — use get_deconstructions_batch(ad_ids[]) instead of calling get_ad_deconstruction N times.
+11. **Use get_winners (not get_ad_performance) when the user asks "anong winners?"** — get_winners applies the consistency criteria (CPP<₱200, ≥3 purchases/day, ≥2 consecutive days) which raw ranking can't.
+12. **Use get_ad_timeline for "is this consistent?"** about a specific ad — it shows day-by-day metrics + tier classification.
+13. **Use compare_ads_quick for quick "anong pagkakaiba?"** between 2-10 ads. For deep strategic multi-ad analysis prefer get_comparative_report (existing reports).
+14. **Use search_store_knowledge** before recommending creative angles — reference the store's Avatar / Winning Template / Market Sophistication docs so your suggestions match the brand strategy.
+15. **Multi-tool turns**: you can call multiple tools in one turn when independent (e.g. get_ad_performance + list_deconstructions). Prefer parallel over sequential.
 
 ## Output formatting
-13. **Markdown is rendered.** Use \`| col | col |\` tables for ≥3 ad comparisons, bullets for quick lists, \`**bold**\` for key numbers.
-14. **Keep answers tight.** Lead with the answer in 1-3 lines, then a short breakdown, then one actionable suggestion if relevant.
-15. **Cite tool names naturally** when the user might want to verify — e.g. "Based on get_winners (last 7 days)…".
+16. **Markdown is rendered.** Use \`| col | col |\` tables for ≥3 ad comparisons, bullets for quick lists, \`**bold**\` for key numbers.
+17. **Keep answers tight.** Lead with the answer in 1-3 lines, then a short breakdown, then one actionable suggestion if relevant.
+18. **Cite tool names sparingly.** Users don't need to see "Based on get_ad_performance…" for every answer — cite only when they're likely to want to verify or when data came from multiple tools.
 
 ## Hard rules
-16. **Net profit, COGS, margin, shipping cost, P&L** — these are ADMIN ONLY. If the caller is marketing and asks about profit, decline gently: "Sorry, yung net profit tab is admin-only — tanong mo sa CEO or switch ka into admin." Never leak admin tool output in a marketing session.
-17. **Employee names in pickpack/timetrack**: include them only for admin callers; never attach emails/phones.
+19. **Net profit, COGS, margin, shipping cost, P&L** — these are ADMIN ONLY. If the caller is marketing and asks about profit, decline gently: "Sorry, yung net profit tab is admin-only — tanong mo sa CEO or switch ka into admin." Never leak admin tool output in a marketing session.
+20. **Employee names in pickpack/timetrack**: include them only for admin callers; never attach emails/phones.
 
 Glossary: roas = purchase value ÷ spend; cpa / CPP = cost per purchase (peso); ctr = link CTR %; lpv = landing page views; atc = add-to-cart; stable_winner = CPP < ₱200, ≥3 purchases/day for ≥2 consecutive days; RTS = return-to-sender.`;
 
@@ -188,6 +191,8 @@ export async function POST(request: Request) {
             supabase: createServiceClient(),
             fbToken,
             role,
+            sessionId: body.session_id ?? null,
+            employeeId: employee.id,
           },
           anthropicKey,
           sessionBaseCostUsd,
@@ -199,6 +204,8 @@ export async function POST(request: Request) {
               delta: { type: "text_delta", text },
             }),
           onCostCap: (message) => send("cost_cap", { message }),
+          onCostWarn: (projectedUsd) =>
+            send("cost_warn", { projected_usd: projectedUsd }),
         });
 
         // Persist tool call audit rows + increment session cost totals

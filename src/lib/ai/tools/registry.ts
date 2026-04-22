@@ -16,6 +16,8 @@ import {
   getAdTimeline,
   searchStoreKnowledge,
   compareAdsQuick,
+  getDeconstructionsBatch,
+  compileWinners,
 } from "./marketing";
 import { searchOrders, getOrder, listProducts } from "./shopify";
 import { getStockAlerts, getRecentNotifications } from "./ops";
@@ -25,6 +27,7 @@ import {
   getWaybillMismatches,
 } from "./fulfillment";
 import { getNetProfit } from "./profit";
+import { requestDeconstruction } from "./actions";
 import { allowedToolsFor, type AgentRole } from "./permissions";
 
 export interface ToolDefinition {
@@ -41,6 +44,10 @@ export interface ToolContext {
   supabase: SupabaseClient;
   fbToken: string;
   role: AgentRole;
+  // Needed by action tools for per-session quota accounting + audit
+  // attribution. Null sessionId is fine for one-off first messages.
+  sessionId: string | null;
+  employeeId: string;
 }
 
 type Handler = (
@@ -225,6 +232,68 @@ const ALL_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
+    name: "compile_winners",
+    description:
+      "SPECIALIST TOOL — use for 'compile all winners' / 'every ad with X' / 'lahat ng ads na may ≥N purchases' requests. Does ad_performance + filter + deconstruction lookup in ONE call. Returns compact rows with spend/purchases/CPP/ROAS PLUS deconstruction preview (hook, tone, CTA) if it exists, or flags the ad as missing. Pair with request_deconstruction for filling in gaps. Much faster and cheaper than calling get_ad_performance + get_ad_deconstruction separately.",
+    input_schema: {
+      type: "object",
+      properties: {
+        account_filter: {
+          type: "string",
+          description:
+            "Specific FB ad account ID (required — 'ALL' is rejected for speed). Get it from list_scaling_campaigns.",
+        },
+        date_preset: {
+          type: "string",
+          enum: [
+            "last_7d",
+            "last_14d",
+            "last_30d",
+            "last_90d",
+            "this_month",
+            "last_month",
+            "lifetime",
+          ],
+          description:
+            "Window to scan. Default last_90d for compilation. Use lifetime for all-time.",
+        },
+        max_cpp: {
+          type: "number",
+          description: "CPP ceiling (peso). Default ₱280. Set from user's criteria.",
+        },
+        min_purchases: {
+          type: "number",
+          description: "Minimum cumulative purchases. Default 10.",
+        },
+        min_roas: { type: "number", description: "Optional ROAS floor." },
+        min_spend: { type: "number", description: "Optional spend floor (peso)." },
+        limit: { type: "number", description: "Max rows. Default 20, max 50." },
+      },
+      required: ["account_filter"],
+    },
+  },
+  {
+    name: "get_deconstructions_batch",
+    description:
+      "Fetch multiple creative deconstructions in ONE call — more efficient than calling get_ad_deconstruction N times. Use when you have a list of ad_ids (e.g. from compile_winners) and need hook/tone/CTA/scenes/transcript for all of them.",
+    input_schema: {
+      type: "object",
+      properties: {
+        ad_ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Up to 20 FB ad IDs.",
+        },
+        include_full_transcript: {
+          type: "boolean",
+          description:
+            "If true, returns full transcripts. Default false (500-char previews only) to save tokens.",
+        },
+      },
+      required: ["ad_ids"],
+    },
+  },
+  {
     name: "list_scaling_campaigns",
     description:
       "Get the mapping of Shopify stores → the ONE Facebook campaign designated as that store's scaling campaign. Use when the user asks 'saan ko ilalagay si X?' or 'which campaign is scaling for STORE?'.",
@@ -396,6 +465,31 @@ const ALL_DEFINITIONS: ToolDefinition[] = [
       },
     },
   },
+  // ── ACTIONS (admin-only) ──
+  {
+    name: "request_deconstruction",
+    description:
+      "ADMIN ONLY. ACTION TOOL — triggers a Gemini video analysis for an ad that hasn't been deconstructed yet. Takes 30-90 seconds per call. IDEMPOTENT: if the ad is already deconstructed and fresh (<7 days old), returns the cached row instead of re-running. Use this when compile_winners reports missing_deconstructions — ask the user first if they want you to fill in the gaps, then call for each ad_id. Max 10 calls per session (enforced by quota).",
+    input_schema: {
+      type: "object",
+      properties: {
+        ad_id: {
+          type: "string",
+          description: "Facebook ad ID (numeric string).",
+        },
+        account_id: {
+          type: "string",
+          description: "FB ad account ID (format 'act_...').",
+        },
+        force_refresh: {
+          type: "boolean",
+          description:
+            "Force re-run even if a fresh deconstruction exists. Default false.",
+        },
+      },
+      required: ["ad_id", "account_id"],
+    },
+  },
   // ── PROFIT (admin-only) ──
   {
     name: "get_net_profit",
@@ -475,6 +569,16 @@ const HANDLERS: Record<string, Handler> = {
       supabase: ctx.supabase,
       fbToken: ctx.fbToken,
     }),
+  compile_winners: (input, ctx) =>
+    compileWinners(input as Parameters<typeof compileWinners>[0], {
+      fbToken: ctx.fbToken,
+      supabase: ctx.supabase,
+    }),
+  get_deconstructions_batch: (input, ctx) =>
+    getDeconstructionsBatch(
+      input as Parameters<typeof getDeconstructionsBatch>[0],
+      { supabase: ctx.supabase }
+    ),
   // Shopify
   search_orders: (input, ctx) =>
     searchOrders(input as Parameters<typeof searchOrders>[0], {
@@ -518,6 +622,17 @@ const HANDLERS: Record<string, Handler> = {
   // Profit (admin-only)
   get_net_profit: (input) =>
     getNetProfit(input as Parameters<typeof getNetProfit>[0]),
+  // Actions (admin-only)
+  request_deconstruction: (input, ctx) =>
+    requestDeconstruction(
+      input as Parameters<typeof requestDeconstruction>[0],
+      {
+        supabase: ctx.supabase,
+        fbToken: ctx.fbToken,
+        sessionId: ctx.sessionId,
+        employeeId: ctx.employeeId,
+      }
+    ),
 };
 
 export function buildToolRegistry(role: AgentRole): {

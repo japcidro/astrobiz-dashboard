@@ -101,6 +101,7 @@ export function ChatPanel() {
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [chatError, setChatError] = useState<string | null>(null);
+  const [costWarning, setCostWarning] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const historyRef = useRef<HTMLDivElement>(null);
 
@@ -195,6 +196,7 @@ export function ChatPanel() {
     setSessionId(null);
     setMessages([]);
     setChatError(null);
+    setCostWarning(null);
     setInput("");
   }
 
@@ -317,6 +319,11 @@ export function ChatPanel() {
             setChatError(
               (obj.message as string) ??
                 "Session cost cap reached — mag-new chat ka."
+            );
+          } else if (eventType === "cost_warn") {
+            const projected = (obj.projected_usd as number) ?? 0;
+            setCostWarning(
+              `Mga $${projected.toFixed(2)} na yung session — malapit na sa $2 hard cap. Mag-new chat mamaya para mag-reset.`
             );
           } else if (eventType === "error") {
             throw new Error(
@@ -518,6 +525,14 @@ export function ChatPanel() {
           );
         })}
 
+        {costWarning && !chatError && (
+          <div className="flex justify-start">
+            <div className="bg-yellow-900/30 border border-yellow-700/50 text-yellow-200 text-xs rounded-2xl px-4 py-2 flex items-center gap-2">
+              <AlertCircle size={12} />
+              {costWarning}
+            </div>
+          </div>
+        )}
         {chatError && (
           <div className="flex justify-start">
             <div className="bg-red-900/30 border border-red-700/50 text-red-300 text-sm rounded-2xl px-4 py-2.5 flex items-center gap-2">
@@ -685,82 +700,119 @@ function ToolCallChips({
   chips: ToolCallChip[];
   streaming: boolean;
 }) {
+  // Collapsed by default — user said "hindi ko naman kailangan makita
+  // lahat ng tool calls". Summary bar shows count + total time + any
+  // running tool's name, click to expand for full detail.
+  const [expanded, setExpanded] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
   const running = chips.find((c) => c.status === "running");
+  const errored = chips.filter((c) => c.status === "error");
+  const totalMs = chips.reduce((sum, c) => sum + (c.duration_ms ?? 0), 0);
+
+  // When a tool is actively running, keep the summary bar visible with
+  // the live status so the user knows work is happening. Full list
+  // stays collapsed unless explicitly opened.
+  const barColor = running
+    ? "text-blue-300 border-blue-700/40 bg-blue-900/20"
+    : errored.length > 0
+      ? "text-red-300 border-red-700/40 bg-red-900/20"
+      : "text-gray-400 border-gray-700/40 bg-gray-900/40 hover:text-gray-200";
 
   return (
     <div className="space-y-1.5">
-      {running && streaming && (
-        <div className="inline-flex items-center gap-1.5 bg-blue-900/30 border border-blue-700/40 text-blue-300 text-[11px] rounded-full px-2.5 py-1">
-          <Loader2 size={10} className="animate-spin" />
-          <span>
-            AI is querying <span className="font-mono">{running.name}</span>…
-          </span>
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className={`inline-flex items-center gap-1.5 text-[11px] border rounded-full px-2.5 py-1 transition-colors cursor-pointer ${barColor}`}
+      >
+        {expanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+        {running && streaming ? (
+          <>
+            <Loader2 size={10} className="animate-spin" />
+            <span>
+              Running{" "}
+              <span className="font-mono">{running.name}</span>
+              {chips.length > 1 && ` · ${chips.length - 1} done`}
+            </span>
+          </>
+        ) : (
+          <>
+            <Wrench size={10} />
+            <span>
+              {chips.length} tool{chips.length === 1 ? "" : "s"} used
+              {totalMs > 0 && ` · ${(totalMs / 1000).toFixed(1)}s`}
+              {errored.length > 0 &&
+                ` · ${errored.length} error${errored.length === 1 ? "" : "s"}`}
+            </span>
+          </>
+        )}
+      </button>
+
+      {expanded && (
+        <div className="space-y-1 ml-2">
+          {chips.map((c) => {
+            const isExpanded = expandedId === c.id;
+            const Icon =
+              c.status === "running"
+                ? Loader2
+                : c.status === "ok"
+                  ? CheckCircle2
+                  : XCircle;
+            const color =
+              c.status === "running"
+                ? "text-blue-300 border-blue-700/40 bg-blue-900/20"
+                : c.status === "ok"
+                  ? "text-emerald-300/80 border-emerald-700/30 bg-emerald-900/10"
+                  : "text-red-300 border-red-700/40 bg-red-900/20";
+            return (
+              <div key={c.id}>
+                <button
+                  onClick={() => setExpandedId(isExpanded ? null : c.id)}
+                  className={`w-full flex items-center gap-1.5 text-[11px] border rounded-md px-2 py-1 transition-colors hover:brightness-125 cursor-pointer ${color}`}
+                >
+                  {isExpanded ? (
+                    <ChevronDown size={11} />
+                  ) : (
+                    <ChevronRight size={11} />
+                  )}
+                  <Wrench size={10} />
+                  <span className="font-mono font-medium">{c.name}</span>
+                  {c.result_rows !== undefined && (
+                    <span className="opacity-70">· {c.result_rows} rows</span>
+                  )}
+                  {c.duration_ms !== undefined && (
+                    <span className="opacity-70">
+                      · {(c.duration_ms / 1000).toFixed(1)}s
+                    </span>
+                  )}
+                  <Icon
+                    size={11}
+                    className={`ml-auto ${c.status === "running" ? "animate-spin" : ""}`}
+                  />
+                </button>
+                {isExpanded && (
+                  <div className="mt-1 ml-4 p-2 bg-gray-900/60 border border-gray-700/50 rounded text-[11px] text-gray-300 font-mono">
+                    <div className="text-gray-500 mb-0.5">Input:</div>
+                    <pre className="whitespace-pre-wrap break-all">
+                      {Object.keys(c.input).length > 0
+                        ? JSON.stringify(c.input, null, 2)
+                        : "(no arguments)"}
+                    </pre>
+                    {c.error_message && (
+                      <>
+                        <div className="text-red-400 mt-1.5 mb-0.5">Error:</div>
+                        <pre className="whitespace-pre-wrap break-all text-red-300">
+                          {c.error_message}
+                        </pre>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
-      <div className="flex flex-wrap gap-1.5">
-        {chips.map((c) => {
-          const isExpanded = expandedId === c.id;
-          const Icon =
-            c.status === "running"
-              ? Loader2
-              : c.status === "ok"
-                ? CheckCircle2
-                : XCircle;
-          const color =
-            c.status === "running"
-              ? "text-blue-300 border-blue-700/40 bg-blue-900/20"
-              : c.status === "ok"
-                ? "text-emerald-300 border-emerald-700/40 bg-emerald-900/20"
-                : "text-red-300 border-red-700/40 bg-red-900/20";
-          return (
-            <div key={c.id} className="w-full">
-              <button
-                onClick={() => setExpandedId(isExpanded ? null : c.id)}
-                className={`w-full flex items-center gap-1.5 text-[11px] border rounded-md px-2 py-1 transition-colors hover:brightness-110 cursor-pointer ${color}`}
-              >
-                {isExpanded ? (
-                  <ChevronDown size={11} />
-                ) : (
-                  <ChevronRight size={11} />
-                )}
-                <Wrench size={10} />
-                <span className="font-mono font-medium">{c.name}</span>
-                {c.result_rows !== undefined && (
-                  <span className="opacity-70">· {c.result_rows} rows</span>
-                )}
-                {c.duration_ms !== undefined && (
-                  <span className="opacity-70">
-                    · {(c.duration_ms / 1000).toFixed(1)}s
-                  </span>
-                )}
-                <Icon
-                  size={11}
-                  className={`ml-auto ${c.status === "running" ? "animate-spin" : ""}`}
-                />
-              </button>
-              {isExpanded && (
-                <div className="mt-1 ml-4 p-2 bg-gray-900/60 border border-gray-700/50 rounded text-[11px] text-gray-300 font-mono">
-                  <div className="text-gray-500 mb-0.5">Input:</div>
-                  <pre className="whitespace-pre-wrap break-all">
-                    {Object.keys(c.input).length > 0
-                      ? JSON.stringify(c.input, null, 2)
-                      : "(no arguments)"}
-                  </pre>
-                  {c.error_message && (
-                    <>
-                      <div className="text-red-400 mt-1.5 mb-0.5">Error:</div>
-                      <pre className="whitespace-pre-wrap break-all text-red-300">
-                        {c.error_message}
-                      </pre>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
     </div>
   );
 }

@@ -19,11 +19,15 @@
 import {
   MAX_TOOL_ITERATIONS,
   SESSION_COST_CAP_USD,
+  SESSION_COST_SOFT_WARN_USD,
   estimateCostUsd,
 } from "./tools/permissions";
 import type { ToolContext, ToolDefinition } from "./tools/registry";
 
-const ANTHROPIC_MODEL = "claude-opus-4-7";
+// Sonnet 4.6 is 5× cheaper than Opus ($3/$15 vs $15/$75 per MTok) and plenty
+// capable for tool-use + compilation chat. Opus stays reserved for the
+// Compare & Strategize panel's deep creative analysis.
+const ANTHROPIC_MODEL = "claude-sonnet-4-6";
 const MAX_TOKENS = 4096;
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 
@@ -107,6 +111,7 @@ interface RunAgentLoopArgs {
   onToolCallEnd?: (trace: ToolCallTrace) => void;
   onTextDelta?: (text: string) => void;
   onCostCap?: (message: string) => void;
+  onCostWarn?: (projectedUsd: number) => void;
 }
 
 function previewJson(value: unknown, max = 500): string {
@@ -188,6 +193,7 @@ export async function runAgentLoop(
   let finalText = "";
   let hitCostCap = false;
 
+  let softWarnFired = false;
   for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
     iterations++;
 
@@ -199,6 +205,10 @@ export async function runAgentLoop(
         `Naabot na yung session cost cap ($${SESSION_COST_CAP_USD.toFixed(2)}). Mag-start ka ng bagong chat para tumuloy.`
       );
       break;
+    }
+    if (!softWarnFired && projected >= SESSION_COST_SOFT_WARN_USD) {
+      softWarnFired = true;
+      args.onCostWarn?.(projected);
     }
 
     const res = await callAnthropic({
