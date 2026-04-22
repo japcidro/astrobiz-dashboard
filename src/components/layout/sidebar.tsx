@@ -28,6 +28,7 @@ import {
   Bell,
   Newspaper,
   ScanLine,
+  ClipboardList,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -62,6 +63,12 @@ const navEntries: NavEntry[] = [
     label: "Dashboard",
     href: "/dashboard",
     icon: <LayoutDashboard size={20} />,
+    roles: ["admin", "va", "fulfillment", "marketing"],
+  },
+  {
+    label: "Tasks",
+    href: "/tasks",
+    icon: <ClipboardList size={20} />,
     roles: ["admin", "va", "fulfillment", "marketing"],
   },
   {

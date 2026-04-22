@@ -9,7 +9,9 @@ export type AlertType =
   | "rts_spike"
   | "cash_at_risk"
   | "store_outage"
-  | "waybill_sender_mismatch";
+  | "waybill_sender_mismatch"
+  | "task_assigned"
+  | "task_completed";
 
 export type AlertResourceType =
   | "product"
@@ -18,7 +20,8 @@ export type AlertResourceType =
   | "campaign"
   | "store"
   | "autopilot_run"
-  | "system";
+  | "system"
+  | "task";
 
 export interface AdminAlert {
   id: string;
@@ -61,6 +64,8 @@ export const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   cash_at_risk: "Cash at risk",
   store_outage: "Store connection failing",
   waybill_sender_mismatch: "Wrong sender on waybill",
+  task_assigned: "Task assigned",
+  task_completed: "Task completed",
 };
 
 export const SEVERITY_ORDER: Record<AlertSeverity, number> = {
