@@ -10,10 +10,12 @@ import {
 } from "@/lib/ai/agent-loop";
 
 export const dynamic = "force-dynamic";
-// Tool-use loops can chain up to MAX_TOOL_ITERATIONS Anthropic calls plus
-// tool execution + final streaming — give it headroom past Vercel's
-// default 60s for complex multi-tool questions.
-export const maxDuration = 120;
+// Long retrospective compilations with full transcripts can generate
+// 8-15k output tokens (~2-4 minutes at Sonnet's ~60 tok/s). Plus multi-tool
+// loops. Vercel Fluid Compute supports up to 300s which covers this;
+// agent-loop uses SSE streaming so the function stays alive through
+// the full response (no 504 even near the cap).
+export const maxDuration = 300;
 
 const SYSTEM_PROMPT = `You are the operations assistant for Astrobiz, a Philippine e-commerce company running Shopify + Meta Ads + J&T courier. The operator is the CEO or a marketing team lead asking decision-oriented questions.
 

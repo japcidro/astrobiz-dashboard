@@ -147,7 +147,6 @@ async function callAnthropic(args: {
   systemPrompt: string;
   tools: ToolDefinition[];
   messages: AgentMessage[];
-  stream: boolean;
 }): Promise<Response> {
   // Cache the system prompt and the tools array — these are stable
   // across turns, so setting cache_control on them is free tokens saved.
@@ -165,6 +164,10 @@ async function callAnthropic(args: {
       : t
   );
 
+  // ALWAYS stream — two reasons:
+  // 1. Vercel SSE keeps the function alive across long generations; a
+  //    blocking call hits the 120-300s maxDuration and 504s.
+  // 2. Users see output progressively, not after a 2-minute silence.
   return fetch(ANTHROPIC_URL, {
     method: "POST",
     headers: {
@@ -178,9 +181,154 @@ async function callAnthropic(args: {
       system: cachedSystem,
       tools: toolsPayload,
       messages: args.messages,
-      stream: args.stream,
+      stream: true,
     }),
   });
+}
+
+// Parse Anthropic's SSE stream into the same structured shape that the
+// old non-streaming JSON returned, while emitting text deltas live
+// through onTextDelta. Tool_use blocks come back as {id,name,input}
+// after concatenating input_json_delta chunks and parsing the JSON.
+async function consumeAnthropicStream(
+  body: ReadableStream<Uint8Array>,
+  onTextDelta?: (text: string) => void
+): Promise<{
+  contentBlocks: AnthropicBlock[];
+  stopReason: AnthropicResponse["stop_reason"];
+  usage: AnthropicUsage;
+}> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  // index → partially-assembled content block
+  const blocks: Record<
+    number,
+    | { type: "text"; text: string }
+    | {
+        type: "tool_use";
+        id: string;
+        name: string;
+        partial_json: string;
+        input: Record<string, unknown>;
+      }
+  > = {};
+  let stopReason: AnthropicResponse["stop_reason"] = "end_turn";
+  const usage: AnthropicUsage = { input_tokens: 0, output_tokens: 0 };
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const events = buffer.split("\n\n");
+    buffer = events.pop() ?? "";
+    for (const event of events) {
+      let payload = "";
+      for (const line of event.split("\n")) {
+        if (line.startsWith("data: ")) payload = line.slice(6);
+      }
+      if (!payload || payload === "[DONE]") continue;
+      let obj: Record<string, unknown>;
+      try {
+        obj = JSON.parse(payload);
+      } catch {
+        continue;
+      }
+      const type = obj.type as string;
+
+      if (type === "message_start") {
+        const m = obj.message as { usage?: AnthropicUsage } | undefined;
+        if (m?.usage) {
+          usage.input_tokens = m.usage.input_tokens ?? 0;
+          usage.cache_creation_input_tokens =
+            m.usage.cache_creation_input_tokens;
+          usage.cache_read_input_tokens = m.usage.cache_read_input_tokens;
+          usage.output_tokens = m.usage.output_tokens ?? 0;
+        }
+      } else if (type === "content_block_start") {
+        const index = obj.index as number;
+        const cb = obj.content_block as {
+          type: "text" | "tool_use";
+          id?: string;
+          name?: string;
+        };
+        if (cb.type === "text") {
+          blocks[index] = { type: "text", text: "" };
+        } else if (cb.type === "tool_use") {
+          blocks[index] = {
+            type: "tool_use",
+            id: cb.id ?? "",
+            name: cb.name ?? "",
+            partial_json: "",
+            input: {},
+          };
+        }
+      } else if (type === "content_block_delta") {
+        const index = obj.index as number;
+        const delta = obj.delta as {
+          type: "text_delta" | "input_json_delta";
+          text?: string;
+          partial_json?: string;
+        };
+        const block = blocks[index];
+        if (!block) continue;
+        if (block.type === "text" && delta.type === "text_delta" && delta.text) {
+          block.text += delta.text;
+          onTextDelta?.(delta.text);
+        } else if (
+          block.type === "tool_use" &&
+          delta.type === "input_json_delta" &&
+          delta.partial_json !== undefined
+        ) {
+          block.partial_json += delta.partial_json;
+        }
+      } else if (type === "content_block_stop") {
+        const index = obj.index as number;
+        const block = blocks[index];
+        if (block && block.type === "tool_use") {
+          try {
+            block.input = block.partial_json
+              ? (JSON.parse(block.partial_json) as Record<string, unknown>)
+              : {};
+          } catch {
+            block.input = {};
+          }
+        }
+      } else if (type === "message_delta") {
+        const delta = obj.delta as {
+          stop_reason?: AnthropicResponse["stop_reason"];
+        };
+        if (delta?.stop_reason) stopReason = delta.stop_reason;
+        const u = obj.usage as { output_tokens?: number } | undefined;
+        if (u?.output_tokens !== undefined) {
+          usage.output_tokens = u.output_tokens;
+        }
+      }
+    }
+  }
+
+  // Assemble ordered content blocks (Anthropic uses numeric indexes).
+  const contentBlocks: AnthropicBlock[] = [];
+  const indexes = Object.keys(blocks)
+    .map((k) => Number(k))
+    .sort((a, b) => a - b);
+  for (const i of indexes) {
+    const b = blocks[i];
+    if (b.type === "text") {
+      contentBlocks.push({ type: "text", text: b.text });
+    } else {
+      contentBlocks.push({
+        type: "tool_use",
+        id: b.id,
+        name: b.name,
+        input: b.input,
+      });
+    }
+  }
+
+  return { contentBlocks, stopReason, usage };
 }
 
 export async function runAgentLoop(
@@ -219,49 +367,39 @@ export async function runAgentLoop(
       systemPrompt: args.systemPrompt,
       tools: args.tools,
       messages,
-      stream: false,
     });
 
-    if (!res.ok) {
-      const errText = await res.text();
+    if (!res.ok || !res.body) {
+      const errText = await res.text().catch(() => "");
       throw new Error(
         `Anthropic error (${res.status}): ${errText.slice(0, 300)}`
       );
     }
 
-    const json = (await res.json()) as AnthropicResponse;
-    totalInputTokens += json.usage.input_tokens;
-    totalOutputTokens += json.usage.output_tokens;
-    totalCacheReadTokens += json.usage.cache_read_input_tokens ?? 0;
+    // Text deltas get piped out to the UI as they arrive — that's what
+    // keeps the Vercel function alive through long generations (SSE
+    // output = continuous bytes = no 504).
+    const stream = await consumeAnthropicStream(res.body, args.onTextDelta);
+    totalInputTokens += stream.usage.input_tokens;
+    totalOutputTokens += stream.usage.output_tokens;
+    totalCacheReadTokens += stream.usage.cache_read_input_tokens ?? 0;
     totalCostThisRun = estimateCostUsd(
       totalInputTokens,
       totalOutputTokens,
       totalCacheReadTokens
     );
 
-    // Assistant message goes into the transcript regardless of stop reason.
-    messages.push({ role: "assistant", content: json.content });
+    // Record the assistant turn (as content blocks so any tool_use
+    // references round-trip cleanly to the next Anthropic call).
+    messages.push({ role: "assistant", content: stream.contentBlocks });
 
-    if (json.stop_reason !== "tool_use") {
-      // Model produced final text. Chunk it out through onTextDelta so
-      // the UI still animates — MUCH cheaper than re-calling Anthropic
-      // with stream=true (which would double output token cost for every
-      // turn). Prior implementation did the re-call and was burning
-      // ~50% of cost budget on each response.
-      const textBlocks = json.content.filter(
-        (b): b is { type: "text"; text: string } => b.type === "text"
+    if (stream.stopReason !== "tool_use") {
+      const textBlocks = stream.contentBlocks.filter(
+        (b): b is Extract<AnthropicBlock, { type: "text" }> => b.type === "text"
       );
       finalText = textBlocks.map((b) => b.text).join("");
 
-      // Emit the text in small chunks so the UI renders progressively.
-      const CHUNK = 40;
-      for (let pos = 0; pos < finalText.length; pos += CHUNK) {
-        args.onTextDelta?.(finalText.slice(pos, pos + CHUNK));
-      }
-
-      // Anthropic hit max_tokens mid-response — warn the user so they
-      // know the output was truncated, not complete.
-      if (json.stop_reason === "max_tokens") {
+      if (stream.stopReason === "max_tokens") {
         const truncNote =
           "\n\n---\n⚠️ **Na-truncate yung sagot — lumampas sa output token limit.** Pwede mo ako paki-tanong mag-continue from where I stopped, or pa-narrow yung scope (fewer ads / shorter transcripts).";
         args.onTextDelta?.(truncNote);
@@ -278,7 +416,7 @@ export async function runAgentLoop(
     // stop_reason === "tool_use" — dispatch every tool_use block in
     // parallel. Anthropic's contract says we must reply with a single
     // user message containing one tool_result per tool_use, in any order.
-    const toolUses = json.content.filter(
+    const toolUses = stream.contentBlocks.filter(
       (b): b is Extract<AnthropicBlock, { type: "tool_use" }> =>
         b.type === "tool_use"
     );
