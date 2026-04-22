@@ -49,6 +49,7 @@ export async function POST(request: Request) {
       campaign_data: body.campaign_data || null,
       adset_data: body.adset_data || null,
       ad_data: body.ad_data || {},
+      source_script_id: body.source_script_id || null,
     })
     .select()
     .single();

@@ -7,14 +7,22 @@ import {
   Send,
   RefreshCw,
   Copy,
-  CheckCircle,
   AlertTriangle,
   Trash2,
   MessageSquare,
   Plus,
+  CheckCircle,
+  Library,
+  MessageCircle,
 } from "lucide-react";
 import type { AiStoreDoc } from "@/lib/ai/types";
 import { DOC_TYPES, SYSTEM_PROMPT_TYPES } from "@/lib/ai/types";
+import {
+  AssistantMessageRenderer,
+  scriptKey,
+} from "@/components/marketing/assistant-message-renderer";
+import { ApprovedLibrary } from "@/components/marketing/approved-library";
+import type { ApprovedScript } from "@/lib/ai/approved-scripts-types";
 
 interface Message {
   role: "user" | "assistant";
@@ -30,11 +38,14 @@ interface Thread {
   messages: Message[];
 }
 
+type View = "chat" | "library";
+
 // Module-level cache — survives navigation
 let cachedMessages: Message[] = [];
 let cachedThreadId: string | null = null;
 let cachedToolType: "angles" | "scripts" | "formats" = "angles";
 let cachedStoreName = "";
+let cachedView: View = "chat";
 
 export default function AiGeneratorPage() {
   const router = useRouter();
@@ -46,6 +57,9 @@ export default function AiGeneratorPage() {
   const [docsReady, setDocsReady] = useState(0);
   const [loading, setLoading] = useState(true);
 
+  // View mode: chat (generate) or library (approved scripts)
+  const [view, setView] = useState<View>(cachedView);
+
   // Chat
   const [toolType, setToolType] = useState<"angles" | "scripts" | "formats">(cachedToolType);
   const [messages, setMessages] = useState<Message[]>(cachedMessages);
@@ -53,11 +67,16 @@ export default function AiGeneratorPage() {
   const [input, setInput] = useState("");
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copiedAll, setCopiedAll] = useState(false);
 
   // Thread history
   const [threads, setThreads] = useState<Thread[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+
+  // Approved scripts for the currently-loaded thread — keyed by scriptKey()
+  const [approvals, setApprovals] = useState<Map<string, ApprovedScript>>(
+    new Map()
+  );
 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -70,7 +89,28 @@ export default function AiGeneratorPage() {
     cachedThreadId = threadId;
     cachedToolType = toolType;
     cachedStoreName = storeName;
-  }, [messages, threadId, toolType, storeName]);
+    cachedView = view;
+  }, [messages, threadId, toolType, storeName, view]);
+
+  // Load existing approvals for the current thread so already-approved scripts
+  // show as "Approved" when the user returns to a past conversation.
+  useEffect(() => {
+    if (!threadId || !storeName) {
+      setApprovals(new Map());
+      return;
+    }
+    fetch(`/api/ai/approved-scripts?store=${encodeURIComponent(storeName)}`)
+      .then((r) => r.json())
+      .then((json) => {
+        const next = new Map<string, ApprovedScript>();
+        for (const s of (json.scripts || []) as ApprovedScript[]) {
+          if (s.source_thread_id !== threadId) continue;
+          next.set(scriptKey(s.script_number, s.angle_title), s);
+        }
+        setApprovals(next);
+      })
+      .catch(() => {});
+  }, [threadId, storeName]);
 
   // Fetch stores
   useEffect(() => {
@@ -220,20 +260,22 @@ export default function AiGeneratorPage() {
     }
   };
 
-  const handleCopyMessage = (content: string) => {
-    navigator.clipboard.writeText(content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
   const handleCopyAll = () => {
     const text = messages
       .filter((m) => m.role === "assistant")
       .map((m) => m.content)
       .join("\n\n---\n\n");
     navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopiedAll(true);
+    setTimeout(() => setCopiedAll(false), 2000);
+  };
+
+  const handleScriptApproved = (s: ApprovedScript) => {
+    setApprovals((prev) => {
+      const next = new Map(prev);
+      next.set(scriptKey(s.script_number, s.angle_title), s);
+      return next;
+    });
   };
 
   const handleNewThread = () => {
@@ -275,22 +317,26 @@ export default function AiGeneratorPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowHistory(!showHistory)}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer ${
-              showHistory ? "bg-emerald-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"
-            }`}
-          >
-            <MessageSquare size={14} />
-            History
-          </button>
-          <button
-            onClick={handleNewThread}
-            className="flex items-center gap-1.5 bg-gray-800 text-gray-400 hover:text-white px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer"
-          >
-            <Plus size={14} />
-            New Chat
-          </button>
+          {view === "chat" && (
+            <>
+              <button
+                onClick={() => setShowHistory(!showHistory)}
+                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer ${
+                  showHistory ? "bg-emerald-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"
+                }`}
+              >
+                <MessageSquare size={14} />
+                History
+              </button>
+              <button
+                onClick={handleNewThread}
+                className="flex items-center gap-1.5 bg-gray-800 text-gray-400 hover:text-white px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer"
+              >
+                <Plus size={14} />
+                New Chat
+              </button>
+            </>
+          )}
           <select
             value={storeName}
             onChange={(e) => { setStoreName(e.target.value); handleNewThread(); }}
@@ -303,42 +349,77 @@ export default function AiGeneratorPage() {
         </div>
       </div>
 
-      {/* Readiness */}
-      {docsReady >= totalRequired ? (
-        <div className="mb-2 p-2 bg-green-900/20 border border-green-700/50 rounded-lg text-green-300 text-xs flex items-center gap-2">
-          <CheckCircle size={14} />
-          {totalRequired}/{totalRequired} docs ready
-        </div>
-      ) : (
-        <div className="mb-2 p-2 bg-yellow-900/20 border border-yellow-700/50 rounded-lg text-yellow-300 text-xs flex items-center gap-2">
-          <AlertTriangle size={14} />
-          {docsReady}/{totalRequired} docs ready —{" "}
-          <a href="/marketing/ai-settings" className="underline">Fill missing docs</a>
+      {/* View tabs (sub-tab inside AI Generator) */}
+      <div className="flex items-center gap-1 mb-3 border-b border-gray-800">
+        <button
+          onClick={() => setView("chat")}
+          className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors cursor-pointer border-b-2 -mb-px ${
+            view === "chat"
+              ? "border-emerald-500 text-white"
+              : "border-transparent text-gray-500 hover:text-white"
+          }`}
+        >
+          <MessageCircle size={14} />
+          Chat
+        </button>
+        <button
+          onClick={() => setView("library")}
+          className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors cursor-pointer border-b-2 -mb-px ${
+            view === "library"
+              ? "border-emerald-500 text-white"
+              : "border-transparent text-gray-500 hover:text-white"
+          }`}
+        >
+          <Library size={14} />
+          Approved Library
+        </button>
+      </div>
+
+      {/* Readiness — only relevant when chatting */}
+      {view === "chat" && (
+        docsReady >= totalRequired ? (
+          <div className="mb-2 p-2 bg-green-900/20 border border-green-700/50 rounded-lg text-green-300 text-xs flex items-center gap-2">
+            <CheckCircle size={14} />
+            {totalRequired}/{totalRequired} docs ready
+          </div>
+        ) : (
+          <div className="mb-2 p-2 bg-yellow-900/20 border border-yellow-700/50 rounded-lg text-yellow-300 text-xs flex items-center gap-2">
+            <AlertTriangle size={14} />
+            {docsReady}/{totalRequired} docs ready —{" "}
+            <a href="/marketing/ai-settings" className="underline">Fill missing docs</a>
+          </div>
+        )
+      )}
+
+      {/* Tool selector (chat only) */}
+      {view === "chat" && (
+        <div className="flex items-center gap-2 mb-3">
+          {([
+            { value: "angles", label: "Angle Generator" },
+            { value: "scripts", label: "Script Creator" },
+            { value: "formats", label: "Format Expansion" },
+          ] as const).map((t) => (
+            <button
+              key={t.value}
+              onClick={() => { setToolType(t.value); }}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
+                toolType === t.value
+                  ? "bg-emerald-600 text-white"
+                  : "bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
         </div>
       )}
 
-      {/* Tool selector */}
-      <div className="flex items-center gap-2 mb-3">
-        {([
-          { value: "angles", label: "Angle Generator" },
-          { value: "scripts", label: "Script Creator" },
-          { value: "formats", label: "Format Expansion" },
-        ] as const).map((t) => (
-          <button
-            key={t.value}
-            onClick={() => { setToolType(t.value); }}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-              toolType === t.value
-                ? "bg-emerald-600 text-white"
-                : "bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700"
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
       {/* Main area */}
+      {view === "library" ? (
+        <div className="flex-1 overflow-hidden">
+          <ApprovedLibrary storeName={storeName} />
+        </div>
+      ) : (
       <div className="flex-1 flex gap-3 overflow-hidden">
         {/* Thread history sidebar */}
         {showHistory && (
@@ -402,26 +483,33 @@ export default function AiGeneratorPage() {
               </div>
             )}
 
-            {messages.map((msg, i) => (
-              <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[85%] rounded-xl px-4 py-3 ${
-                  msg.role === "user"
-                    ? "bg-emerald-600/20 border border-emerald-700/50 text-white"
-                    : "bg-gray-700/30 border border-gray-600/50 text-gray-200"
-                }`}>
-                  <div className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</div>
-                  {msg.role === "assistant" && (
-                    <button
-                      onClick={() => handleCopyMessage(msg.content)}
-                      className="mt-2 text-xs text-gray-500 hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
-                    >
-                      {copied ? <CheckCircle size={12} className="text-green-400" /> : <Copy size={12} />}
-                      Copy
-                    </button>
-                  )}
+            {messages.map((msg, i) =>
+              msg.role === "user" ? (
+                <div key={i} className="flex justify-end">
+                  <div className="max-w-[85%] rounded-xl px-4 py-3 bg-emerald-600/20 border border-emerald-700/50 text-white">
+                    <div className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ) : (
+                <div key={i} className="flex justify-start">
+                  <div
+                    className={`${
+                      toolType === "scripts" ? "w-full" : "max-w-[85%]"
+                    } rounded-xl px-4 py-3 bg-gray-700/30 border border-gray-600/50 text-gray-200`}
+                  >
+                    <AssistantMessageRenderer
+                      content={msg.content}
+                      toolType={toolType}
+                      storeName={storeName}
+                      threadId={threadId}
+                      messageIndex={i}
+                      existingApprovals={approvals}
+                      onApproved={handleScriptApproved}
+                    />
+                  </div>
+                </div>
+              )
+            )}
 
             {generating && (
               <div className="flex justify-start">
@@ -445,7 +533,15 @@ export default function AiGeneratorPage() {
           {messages.length > 0 && (
             <div className="px-4 py-2 border-t border-gray-700/50 flex items-center gap-3">
               <button onClick={handleCopyAll} className="text-xs text-gray-500 hover:text-white flex items-center gap-1 cursor-pointer">
-                <Copy size={12} /> Copy All
+                {copiedAll ? (
+                  <>
+                    <CheckCircle size={12} className="text-green-400" /> Copied!
+                  </>
+                ) : (
+                  <>
+                    <Copy size={12} /> Copy All
+                  </>
+                )}
               </button>
               <button onClick={handleNewThread} className="text-xs text-gray-500 hover:text-red-400 flex items-center gap-1 cursor-pointer ml-auto">
                 <Trash2 size={12} /> Clear
@@ -480,6 +576,7 @@ export default function AiGeneratorPage() {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

@@ -1,8 +1,12 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { Sparkles, X } from "lucide-react";
 import type { AdFormData, CTAType } from "@/lib/facebook/types";
+import type { ApprovedScript } from "@/lib/ai/approved-scripts-types";
 import { CreativeUploader } from "./creative-uploader";
 import { PageSelector } from "./page-selector";
+import { ScriptPickerModal } from "../script-picker-modal";
 
 const CTA_OPTIONS: { value: CTAType; label: string }[] = [
   { value: "SHOP_NOW", label: "Shop Now" },
@@ -17,10 +21,66 @@ const CTA_OPTIONS: { value: CTAType; label: string }[] = [
 interface StepAdProps {
   data: AdFormData;
   adAccountId: string;
+  sourceScriptId: string | null;
   onUpdate: (updates: Partial<AdFormData>) => void;
+  onSourceScriptIdChange: (id: string | null) => void;
 }
 
-export function StepAd({ data, adAccountId, onUpdate }: StepAdProps) {
+export function StepAd({
+  data,
+  adAccountId,
+  sourceScriptId,
+  onUpdate,
+  onSourceScriptIdChange,
+}: StepAdProps) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [scriptCache, setScriptCache] = useState<
+    Record<string, ApprovedScript>
+  >({});
+
+  // Derive linkedScript from cache so effects never need to clear local state
+  // when sourceScriptId becomes null.
+  const linkedScript = sourceScriptId
+    ? (scriptCache[sourceScriptId] ?? null)
+    : null;
+
+  // When the wizard restores a draft with a sourceScriptId we haven't seen yet,
+  // hydrate the cache. Lazy — only fires on cache miss.
+  useEffect(() => {
+    if (!sourceScriptId || scriptCache[sourceScriptId]) return;
+    let cancelled = false;
+    fetch(`/api/ai/approved-scripts/${sourceScriptId}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (cancelled || !json.script) return;
+        setScriptCache((prev) => ({ ...prev, [sourceScriptId]: json.script }));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [sourceScriptId, scriptCache]);
+
+  const applyScript = (script: ApprovedScript) => {
+    setScriptCache((prev) => ({ ...prev, [script.id]: script }));
+    onSourceScriptIdChange(script.id);
+
+    // Map Hook → headline, Body → primary_text. Description left alone.
+    // Ad name pre-fills with angle title if the user hasn't named it yet.
+    const updates: Partial<AdFormData> = {
+      primary_text: script.body_script,
+      headline: script.hook.slice(0, 255),
+    };
+    if (!data.name.trim()) {
+      updates.name = script.angle_title;
+    }
+    onUpdate(updates);
+  };
+
+  const clearLinkedScript = () => {
+    onSourceScriptIdChange(null);
+  };
+
   return (
     <div className="space-y-8">
       <div>
@@ -29,6 +89,61 @@ export function StepAd({ data, adAccountId, onUpdate }: StepAdProps) {
           Upload your creative, write your copy, and set your CTA.
         </p>
       </div>
+
+      {/* Source script picker */}
+      <div className="max-w-lg">
+        {linkedScript ? (
+          <div className="bg-emerald-900/20 border border-emerald-700/50 rounded-lg p-3 flex items-start gap-3">
+            <Sparkles size={16} className="text-emerald-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 mb-0.5">
+                <p className="text-xs font-semibold text-emerald-300 uppercase tracking-wide">
+                  Sourced from approved script
+                </p>
+                <span className="text-[10px] text-emerald-400/70">
+                  {linkedScript.store_name}
+                </span>
+              </div>
+              <p className="text-sm text-white font-medium truncate">
+                {linkedScript.angle_title}
+              </p>
+              <div className="flex items-center gap-2 mt-1">
+                <button
+                  type="button"
+                  onClick={() => setPickerOpen(true)}
+                  className="text-xs text-emerald-400 hover:text-emerald-300 cursor-pointer"
+                >
+                  Change script
+                </button>
+                <span className="text-gray-700">·</span>
+                <button
+                  type="button"
+                  onClick={clearLinkedScript}
+                  className="text-xs text-gray-500 hover:text-red-400 cursor-pointer flex items-center gap-1"
+                >
+                  <X size={11} />
+                  Unlink
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setPickerOpen(true)}
+            className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-emerald-700/50 text-gray-300 hover:text-white text-sm px-4 py-2 rounded-lg transition-colors cursor-pointer"
+          >
+            <Sparkles size={14} className="text-emerald-400" />
+            Pick from Approved Scripts
+          </button>
+        )}
+      </div>
+
+      <ScriptPickerModal
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onPick={applyScript}
+      />
 
       {/* Ad Name */}
       <div>

@@ -85,6 +85,7 @@ interface WizardState {
   adset: AdSetFormData;
   ad: AdFormData;
   draftId: string | null;
+  sourceScriptId: string | null;
 }
 
 type WizardAction =
@@ -92,7 +93,8 @@ type WizardAction =
   | { type: "SET_CAMPAIGN"; payload: Partial<CampaignFormData> }
   | { type: "SET_ADSET"; payload: Partial<AdSetFormData> }
   | { type: "SET_AD"; payload: Partial<AdFormData> }
-  | { type: "SET_DRAFT_ID"; payload: string };
+  | { type: "SET_DRAFT_ID"; payload: string }
+  | { type: "SET_SOURCE_SCRIPT_ID"; payload: string | null };
 
 function wizardReducer(state: WizardState, action: WizardAction): WizardState {
   switch (action.type) {
@@ -106,6 +108,8 @@ function wizardReducer(state: WizardState, action: WizardAction): WizardState {
       return { ...state, ad: { ...state.ad, ...action.payload } };
     case "SET_DRAFT_ID":
       return { ...state, draftId: action.payload };
+    case "SET_SOURCE_SCRIPT_ID":
+      return { ...state, sourceScriptId: action.payload };
     default:
       return state;
   }
@@ -124,6 +128,7 @@ export function AdCreateWizard() {
     adset: defaultAdSet,
     ad: defaultAd,
     draftId: null,
+    sourceScriptId: null,
   });
 
   const [currentStep, setCurrentStep] = useState(0);
@@ -164,6 +169,7 @@ export function AdCreateWizard() {
                 adset: draft.adset_data || defaultAdSet,
                 ad: draft.ad_data || defaultAd,
                 draftId: draft.id,
+                sourceScriptId: draft.source_script_id || null,
               },
             });
             // Reset failed status back to draft
@@ -208,6 +214,7 @@ export function AdCreateWizard() {
         adset_data:
           state.mode !== "existing_adset" ? state.adset : null,
         ad_data: state.ad,
+        source_script_id: state.sourceScriptId,
       };
 
       const method = state.draftId ? "PUT" : "POST";
@@ -313,8 +320,12 @@ export function AdCreateWizard() {
           <StepAd
             data={state.ad}
             adAccountId={state.adAccountId}
+            sourceScriptId={state.sourceScriptId}
             onUpdate={(updates) =>
               dispatch({ type: "SET_AD", payload: updates })
+            }
+            onSourceScriptIdChange={(id) =>
+              dispatch({ type: "SET_SOURCE_SCRIPT_ID", payload: id })
             }
           />
         );

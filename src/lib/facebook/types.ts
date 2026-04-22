@@ -176,6 +176,7 @@ export interface AdDraft {
   fb_campaign_id: string | null;
   fb_adset_id: string | null;
   fb_ad_id: string | null;
+  source_script_id: string | null;
   error_message: string | null;
   submitted_at: string | null;
   created_at: string;
