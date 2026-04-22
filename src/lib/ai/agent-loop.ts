@@ -28,7 +28,10 @@ import type { ToolContext, ToolDefinition } from "./tools/registry";
 // capable for tool-use + compilation chat. Opus stays reserved for the
 // Compare & Strategize panel's deep creative analysis.
 const ANTHROPIC_MODEL = "claude-sonnet-4-6";
-const MAX_TOKENS = 4096;
+// 4096 was too small for retrospective compilations with full transcripts —
+// users hit mid-sentence cutoffs at "🔑 Winner DNA (". 16k is generous
+// but still bounded; cost guard still lives in SESSION_COST_CAP_USD.
+const MAX_TOKENS = 16_384;
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 
 type Handler = (
@@ -240,91 +243,34 @@ export async function runAgentLoop(
     messages.push({ role: "assistant", content: json.content });
 
     if (json.stop_reason !== "tool_use") {
-      // Model produced final text. Extract + re-stream it for the UI.
+      // Model produced final text. Chunk it out through onTextDelta so
+      // the UI still animates — MUCH cheaper than re-calling Anthropic
+      // with stream=true (which would double output token cost for every
+      // turn). Prior implementation did the re-call and was burning
+      // ~50% of cost budget on each response.
       const textBlocks = json.content.filter(
         (b): b is { type: "text"; text: string } => b.type === "text"
       );
       finalText = textBlocks.map((b) => b.text).join("");
 
-      // Re-stream the final text via a second streaming call so the user
-      // sees natural typewriter output. We pop the assistant reply we
-      // just pushed so Anthropic will regenerate with streaming enabled.
+      // Emit the text in small chunks so the UI renders progressively.
+      const CHUNK = 40;
+      for (let pos = 0; pos < finalText.length; pos += CHUNK) {
+        args.onTextDelta?.(finalText.slice(pos, pos + CHUNK));
+      }
+
+      // Anthropic hit max_tokens mid-response — warn the user so they
+      // know the output was truncated, not complete.
+      if (json.stop_reason === "max_tokens") {
+        const truncNote =
+          "\n\n---\n⚠️ **Na-truncate yung sagot — lumampas sa output token limit.** Pwede mo ako paki-tanong mag-continue from where I stopped, or pa-narrow yung scope (fewer ads / shorter transcripts).";
+        args.onTextDelta?.(truncNote);
+        finalText += truncNote;
+      }
+
+      // Replace the raw content-block form in the transcript with the
+      // flat string — easier for follow-up turns to reference.
       messages.pop();
-
-      const streamRes = await callAnthropic({
-        apiKey: args.anthropicKey,
-        systemPrompt: args.systemPrompt,
-        tools: args.tools,
-        messages,
-        stream: true,
-      });
-
-      if (!streamRes.ok || !streamRes.body) {
-        throw new Error(
-          `Anthropic stream error (${streamRes.status}): ${await streamRes.text().catch(() => "")}`
-        );
-      }
-
-      const reader = streamRes.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let streamedText = "";
-      let streamInputTokens = 0;
-      let streamOutputTokens = 0;
-      let streamCacheReadTokens = 0;
-
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const events = buffer.split("\n\n");
-        buffer = events.pop() ?? "";
-        for (const event of events) {
-          for (const line of event.split("\n")) {
-            if (!line.startsWith("data: ")) continue;
-            const payload = line.slice(6);
-            if (!payload || payload === "[DONE]") continue;
-            try {
-              const obj = JSON.parse(payload) as {
-                type: string;
-                delta?: { type: string; text?: string };
-                message?: { usage?: AnthropicUsage };
-                usage?: AnthropicUsage;
-              };
-              if (
-                obj.type === "content_block_delta" &&
-                obj.delta?.type === "text_delta" &&
-                typeof obj.delta.text === "string"
-              ) {
-                streamedText += obj.delta.text;
-                args.onTextDelta?.(obj.delta.text);
-              }
-              // message_start carries usage.input_tokens / cache reads;
-              // message_delta carries output_tokens.
-              if (obj.type === "message_start" && obj.message?.usage) {
-                streamInputTokens = obj.message.usage.input_tokens ?? 0;
-                streamCacheReadTokens =
-                  obj.message.usage.cache_read_input_tokens ?? 0;
-              }
-              if (obj.type === "message_delta" && obj.usage) {
-                streamOutputTokens = obj.usage.output_tokens ?? 0;
-              }
-            } catch {
-              // malformed frame — ignore, Anthropic is reliable enough.
-            }
-          }
-        }
-      }
-
-      totalInputTokens += streamInputTokens;
-      totalOutputTokens += streamOutputTokens;
-      totalCacheReadTokens += streamCacheReadTokens;
-      totalCostThisRun = estimateCostUsd(
-        totalInputTokens,
-        totalOutputTokens,
-        totalCacheReadTokens
-      );
-      finalText = streamedText || finalText;
       messages.push({ role: "assistant", content: finalText });
       break;
     }
