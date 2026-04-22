@@ -38,6 +38,8 @@ interface AdRowsTableProps {
   rows: BulkAdRow[];
   adAccountId: string;
   creativeType: "image" | "video";
+  // Pre-filters the per-row Script Picker to this store. Optional.
+  storeNameFilter?: string | null;
   onUpdateRow: (id: string, updates: Partial<BulkAdRow>) => void;
   onAddRow: () => void;
   onRemoveRow: (id: string) => void;
@@ -206,6 +208,7 @@ export function AdRowsTable({
   rows,
   adAccountId,
   creativeType,
+  storeNameFilter,
   onUpdateRow,
   onAddRow,
   onRemoveRow,
@@ -586,6 +589,7 @@ export function AdRowsTable({
         open={pickerTargetRowId !== null}
         onClose={() => setPickerTargetRowId(null)}
         onPick={handlePickScript}
+        defaultStoreFilter={storeNameFilter}
       />
     </div>
   );

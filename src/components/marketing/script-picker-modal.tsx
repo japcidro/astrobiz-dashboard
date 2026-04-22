@@ -17,6 +17,10 @@ interface SingleProps {
   onClose: () => void;
   mode?: "single";
   onPick: (script: ApprovedScript) => void;
+  // If set, the store filter snaps to this store name when the modal opens.
+  // User can still switch to "All stores". Prevents accidentally attaching
+  // a script from the wrong store to an ad.
+  defaultStoreFilter?: string | null;
 }
 
 interface MultiProps {
@@ -25,6 +29,7 @@ interface MultiProps {
   mode: "multi";
   onPickMany: (scripts: ApprovedScript[]) => void;
   confirmLabel?: string;
+  defaultStoreFilter?: string | null;
 }
 
 type Props = SingleProps | MultiProps;
@@ -37,7 +42,7 @@ const ANGLE_TYPE_COLORS: Record<string, string> = {
 };
 
 export function ScriptPickerModal(props: Props) {
-  const { open, onClose } = props;
+  const { open, onClose, defaultStoreFilter } = props;
   const isMulti = props.mode === "multi";
 
   const [scripts, setScripts] = useState<ApprovedScript[]>([]);
@@ -85,9 +90,14 @@ export function ScriptPickerModal(props: Props) {
   }, [scripts, storeFilter, search]);
 
   // Clear selection when modal reopens so stale selections don't stick.
+  // Also snap the store filter to the wizard's selected store, if any —
+  // prevents cross-store mix-ups. User can still flip to "All stores".
   useEffect(() => {
-    if (open) setSelectedIds(new Set());
-  }, [open]);
+    if (open) {
+      setSelectedIds(new Set());
+      setStoreFilter(defaultStoreFilter || "all");
+    }
+  }, [open, defaultStoreFilter]);
 
   const toggleSelected = useCallback((id: string) => {
     setSelectedIds((prev) => {

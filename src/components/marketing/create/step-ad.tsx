@@ -24,6 +24,9 @@ interface StepAdProps {
   sourceScriptId: string | null;
   onUpdate: (updates: Partial<AdFormData>) => void;
   onSourceScriptIdChange: (id: string | null) => void;
+  // Pre-filters the Script Picker to this store's scripts so marketers
+  // can't accidentally attach a cross-store script to the ad.
+  storeNameFilter?: string | null;
 }
 
 export function StepAd({
@@ -32,6 +35,7 @@ export function StepAd({
   sourceScriptId,
   onUpdate,
   onSourceScriptIdChange,
+  storeNameFilter,
 }: StepAdProps) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [scriptCache, setScriptCache] = useState<
@@ -143,6 +147,7 @@ export function StepAd({
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
         onPick={applyScript}
+        defaultStoreFilter={storeNameFilter}
       />
 
       {/* Ad Name */}

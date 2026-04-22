@@ -16,6 +16,11 @@ import { StepCampaign } from "./step-campaign";
 import { StepAdset } from "./step-adset";
 import { StepAd } from "./step-ad";
 import { StepReview } from "./step-review";
+import { StoreDefaultsSelector } from "../store-defaults-selector";
+import {
+  resolveNamePattern,
+  type StoreAdDefaults,
+} from "@/lib/marketing/store-defaults";
 
 interface AccountInfo {
   id: string;
@@ -136,6 +141,8 @@ export function AdCreateWizard() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
+  const [selectedStoreName, setSelectedStoreName] = useState<string | null>(null);
 
   // Fetch accounts on mount + load draft if ?draft= param exists
   useEffect(() => {
@@ -198,6 +205,83 @@ export function AdCreateWizard() {
   // Determine which steps to show based on mode
   const steps = getSteps(state.mode);
 
+  // Click-triggered per-store autofill. Applies shared fields across
+  // campaign / adset / ad. Never silently overwrites a typed name.
+  const handleApplyStoreDefaults = useCallback(
+    (d: StoreAdDefaults, storeName: string) => {
+      if (d.ad_account_id) {
+        dispatch({ type: "SET_MODE", payload: { adAccountId: d.ad_account_id } });
+      }
+
+      const nameCtx = { store: storeName, date: new Date().toISOString().split("T")[0] };
+
+      dispatch({
+        type: "SET_CAMPAIGN",
+        payload: {
+          name:
+            state.campaign.name ||
+            resolveNamePattern(d.campaign_name_pattern, nameCtx),
+        },
+      });
+
+      dispatch({
+        type: "SET_ADSET",
+        payload: {
+          name:
+            state.adset.name ||
+            resolveNamePattern(d.adset_name_pattern, nameCtx),
+          daily_budget: d.default_daily_budget ?? state.adset.daily_budget,
+          targeting: {
+            ...state.adset.targeting,
+            geo_locations: {
+              ...state.adset.targeting.geo_locations,
+              countries:
+                d.default_countries && d.default_countries.length > 0
+                  ? d.default_countries
+                  : state.adset.targeting.geo_locations.countries,
+            },
+            age_min: d.default_age_min ?? state.adset.targeting.age_min,
+            age_max: d.default_age_max ?? state.adset.targeting.age_max,
+          },
+          promoted_object: {
+            ...state.adset.promoted_object,
+            pixel_id:
+              d.pixel_id ?? state.adset.promoted_object.pixel_id,
+          },
+        },
+      });
+
+      dispatch({
+        type: "SET_AD",
+        payload: {
+          name: state.ad.name || resolveNamePattern(d.ad_name_pattern, nameCtx),
+          page_id: d.page_id ?? state.ad.page_id,
+          page_name: d.page_name ?? state.ad.page_name,
+          website_url: d.website_url ?? state.ad.website_url,
+          url_parameters: d.url_parameters ?? state.ad.url_parameters,
+          call_to_action: d.default_cta ?? state.ad.call_to_action,
+        },
+      });
+    },
+    [state.campaign.name, state.adset, state.ad]
+  );
+
+  const buildStoreDefaultsSnapshot = useCallback(() => {
+    return {
+      ad_account_id: state.adAccountId || null,
+      page_id: state.ad.page_id || null,
+      page_name: state.ad.page_name || null,
+      pixel_id: state.adset.promoted_object?.pixel_id || null,
+      website_url: state.ad.website_url || null,
+      url_parameters: state.ad.url_parameters || null,
+      default_cta: state.ad.call_to_action,
+      default_daily_budget: state.adset.daily_budget ?? null,
+      default_countries: state.adset.targeting.geo_locations.countries,
+      default_age_min: state.adset.targeting.age_min ?? null,
+      default_age_max: state.adset.targeting.age_max ?? null,
+    };
+  }, [state]);
+
   const saveDraft = useCallback(async () => {
     if (!state.adAccountId) return;
     setSaving(true);
@@ -215,6 +299,7 @@ export function AdCreateWizard() {
           state.mode !== "existing_adset" ? state.adset : null,
         ad_data: state.ad,
         source_script_id: state.sourceScriptId,
+        shopify_store_id: selectedStoreId,
       };
 
       const method = state.draftId ? "PUT" : "POST";
@@ -230,7 +315,7 @@ export function AdCreateWizard() {
     } finally {
       setSaving(false);
     }
-  }, [state]);
+  }, [state, selectedStoreId]);
 
   const handleNext = () => {
     if (currentStep < steps.length - 1) {
@@ -321,6 +406,7 @@ export function AdCreateWizard() {
             data={state.ad}
             adAccountId={state.adAccountId}
             sourceScriptId={state.sourceScriptId}
+            storeNameFilter={selectedStoreName}
             onUpdate={(updates) =>
               dispatch({ type: "SET_AD", payload: updates })
             }
@@ -361,6 +447,20 @@ export function AdCreateWizard() {
           <ArrowLeft size={20} />
         </Link>
         <h1 className="text-2xl font-bold text-white">Create Ad</h1>
+      </div>
+
+      {/* Per-store autofill — pick a store to pre-fill account, page,
+          pixel, URL, CTA, targeting. No-op until you click Apply. */}
+      <div className="mb-4">
+        <StoreDefaultsSelector
+          selectedStoreId={selectedStoreId}
+          onStoreChange={(id, name) => {
+            setSelectedStoreId(id);
+            setSelectedStoreName(name);
+          }}
+          onApply={handleApplyStoreDefaults}
+          buildSnapshot={buildStoreDefaultsSnapshot}
+        />
       </div>
 
       {/* Clickable step progress bar */}

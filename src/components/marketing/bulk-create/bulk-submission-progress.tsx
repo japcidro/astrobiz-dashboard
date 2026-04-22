@@ -33,6 +33,7 @@ interface BulkSubmissionProgressProps {
   websiteUrl: string;
   urlParameters: string;
   callToAction: string;
+  shopifyStoreId: string | null;
   onUpdateRowStatus: (
     id: string,
     status: BulkAdRow["status"],
@@ -53,6 +54,7 @@ export function BulkSubmissionProgress({
   websiteUrl,
   urlParameters,
   callToAction,
+  shopifyStoreId,
   onUpdateRowStatus,
   onClose,
 }: BulkSubmissionProgressProps) {
@@ -103,12 +105,13 @@ export function BulkSubmissionProgress({
           );
           const rowAdData = buildAdData(row);
 
-          // If this row is linked to an approved script, create an ad_draft
-          // first so source_script_id gets persisted on the same row that the
-          // create endpoint will later stamp with fb_ad_id. This keeps the
-          // script → ad chain intact for Phase 2 performance aggregation.
+          // If this row is linked to an approved script OR a store is
+          // selected, create an ad_draft first. The draft captures
+          // source_script_id and shopify_store_id — both tracebacks we
+          // want persisted against the fb_ad_id that the create endpoint
+          // later stamps.
           let draftId: string | null = null;
-          if (row.source_script_id) {
+          if (row.source_script_id || shopifyStoreId) {
             const draftRes = await fetch("/api/facebook/drafts", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -122,6 +125,7 @@ export function BulkSubmissionProgress({
                 adset_data: rowAdsetData,
                 ad_data: rowAdData,
                 source_script_id: row.source_script_id,
+                shopify_store_id: shopifyStoreId,
               }),
             });
             const draftJson = await draftRes.json();
@@ -187,6 +191,7 @@ export function BulkSubmissionProgress({
       websiteUrl,
       urlParameters,
       callToAction,
+      shopifyStoreId,
     ]
   );
 

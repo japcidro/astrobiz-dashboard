@@ -19,6 +19,11 @@ import { StepCampaign } from "@/components/marketing/create/step-campaign";
 import { StepAdset } from "@/components/marketing/create/step-adset";
 import { PageSelector } from "@/components/marketing/create/page-selector";
 import { ScriptPickerModal } from "../script-picker-modal";
+import { StoreDefaultsSelector } from "../store-defaults-selector";
+import {
+  resolveNamePattern,
+  type StoreAdDefaults,
+} from "@/lib/marketing/store-defaults";
 import { AdRowsTable } from "./ad-rows-table";
 import { BulkSubmissionProgress } from "./bulk-submission-progress";
 
@@ -188,6 +193,10 @@ export function BulkCreateWizard() {
   const [callToAction, setCallToAction] = useState<CTAType>("SHOP_NOW");
   const [creativeType, setCreativeType] = useState<"image" | "video">("image");
 
+  // Section 0: Store (drives per-store autofill; nullable)
+  const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
+  const [selectedStoreName, setSelectedStoreName] = useState<string | null>(null);
+
   // Ad rows
   const [rows, setRows] = useState<BulkAdRow[]>(() => [
     makeEmptyRow(),
@@ -254,6 +263,98 @@ export function BulkCreateWizard() {
       .finally(() => setLoadingCampaigns(false))
     );
   }, [adAccountId, mode]);
+
+  // ─── Store defaults handlers ───
+  //
+  // Apply: click-triggered. Patches only the shared/repeatable fields
+  // (ad account, page, pixel, URL, CTA, targeting, naming prefix). Leaves
+  // already-typed campaign/adset names alone unless they're empty — never
+  // silently wipe user work.
+  const handleApplyStoreDefaults = useCallback(
+    (d: StoreAdDefaults, storeName: string) => {
+      if (d.ad_account_id) setAdAccountId(d.ad_account_id);
+      if (d.page_id) setPageId(d.page_id);
+      if (d.page_name) setPageName(d.page_name);
+      if (d.website_url) setWebsiteUrl(d.website_url);
+      if (d.url_parameters) setUrlParameters(d.url_parameters);
+      if (d.default_cta) setCallToAction(d.default_cta);
+
+      setAdset((prev) => ({
+        ...prev,
+        daily_budget: d.default_daily_budget ?? prev.daily_budget,
+        targeting: {
+          ...prev.targeting,
+          geo_locations: {
+            ...prev.targeting.geo_locations,
+            countries:
+              d.default_countries && d.default_countries.length > 0
+                ? d.default_countries
+                : prev.targeting.geo_locations.countries,
+          },
+          age_min: d.default_age_min ?? prev.targeting.age_min,
+          age_max: d.default_age_max ?? prev.targeting.age_max,
+        },
+        promoted_object: {
+          ...prev.promoted_object,
+          pixel_id: d.pixel_id ?? prev.promoted_object.pixel_id,
+        },
+      }));
+
+      // Naming patterns: only fill if currently blank, so we never stomp
+      // a half-typed name.
+      const nameCtx = { store: storeName, date: new Date().toISOString().split("T")[0] };
+      setCampaign((prev) => ({
+        ...prev,
+        name: prev.name || resolveNamePattern(d.campaign_name_pattern, nameCtx),
+      }));
+      setAdset((prev) => ({
+        ...prev,
+        name: prev.name || resolveNamePattern(d.adset_name_pattern, nameCtx),
+      }));
+      if (d.ad_name_pattern) {
+        setRows((prev) =>
+          prev.map((r, idx) => ({
+            ...r,
+            ad_name:
+              r.ad_name ||
+              resolveNamePattern(d.ad_name_pattern, {
+                ...nameCtx,
+                script_number: idx + 1,
+                creative_type: r.creative_type,
+              }),
+          }))
+        );
+      }
+    },
+    []
+  );
+
+  // Snapshot of the current wizard's shared fields, sent to the API when
+  // user clicks "Save current as default". Per-ad fields (row copy, files)
+  // are not saved — those are script/creative specific, not store defaults.
+  const buildStoreDefaultsSnapshot = useCallback(() => {
+    return {
+      ad_account_id: adAccountId || null,
+      page_id: pageId || null,
+      page_name: pageName || null,
+      pixel_id: adset.promoted_object?.pixel_id || null,
+      website_url: websiteUrl || null,
+      url_parameters: urlParameters || null,
+      default_cta: callToAction,
+      default_daily_budget: adset.daily_budget ?? null,
+      default_countries: adset.targeting.geo_locations.countries,
+      default_age_min: adset.targeting.age_min ?? null,
+      default_age_max: adset.targeting.age_max ?? null,
+    };
+  }, [
+    adAccountId,
+    pageId,
+    pageName,
+    adset,
+    websiteUrl,
+    urlParameters,
+    callToAction,
+  ]);
 
   // ─── Row handlers ───
   const handleUpdateRow = useCallback(
@@ -379,6 +480,17 @@ export function BulkCreateWizard() {
       </div>
 
       <div className="space-y-4">
+        {/* ─── Section 0: Store (per-store autofill) ─── */}
+        <StoreDefaultsSelector
+          selectedStoreId={selectedStoreId}
+          onStoreChange={(id, name) => {
+            setSelectedStoreId(id);
+            setSelectedStoreName(name);
+          }}
+          onApply={handleApplyStoreDefaults}
+          buildSnapshot={buildStoreDefaultsSnapshot}
+        />
+
         {/* ─── Section A: Setup ─── */}
         <Section title="A. Setup">
           {/* Ad Account */}
@@ -607,6 +719,7 @@ export function BulkCreateWizard() {
             onClose={() => setScriptPickerOpen(false)}
             onPickMany={handleImportScripts}
             confirmLabel="Add rows"
+            defaultStoreFilter={selectedStoreName}
           />
 
           {/* Default Copy (fill all rows) */}
@@ -663,6 +776,7 @@ export function BulkCreateWizard() {
             onRemoveRow={handleRemoveRow}
             adAccountId={adAccountId}
             creativeType={creativeType}
+            storeNameFilter={selectedStoreName}
           />
         </Section>
 
@@ -715,6 +829,7 @@ export function BulkCreateWizard() {
           websiteUrl={websiteUrl}
           urlParameters={urlParameters}
           callToAction={callToAction}
+          shopifyStoreId={selectedStoreId}
           onClose={() => setSubmitting(false)}
           onUpdateRowStatus={handleUpdateRowStatus}
         />

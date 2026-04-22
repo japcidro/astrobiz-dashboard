@@ -6,7 +6,10 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const employee = await getEmployee();
-  if (!employee || !["admin", "va", "fulfillment"].includes(employee.role)) {
+  if (
+    !employee ||
+    !["admin", "va", "fulfillment", "marketing"].includes(employee.role)
+  ) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
