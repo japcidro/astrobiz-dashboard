@@ -17,6 +17,8 @@ import {
   Bot,
   Sparkles,
   TrendingUp,
+  BookOpen,
+  CheckCircle2,
 } from "lucide-react";
 import Link from "next/link";
 import type { DatePreset } from "@/lib/facebook/types";
@@ -30,6 +32,8 @@ import {
   PromoteBulkToScalingModal,
   type BulkPromoteSubject,
 } from "@/components/marketing/promote-bulk-to-scaling-modal";
+import { ScriptPickerModal } from "@/components/marketing/script-picker-modal";
+import type { ApprovedScript } from "@/lib/ai/approved-scripts-types";
 
 const DATE_PRESETS: { label: string; value: DatePreset }[] = [
   { label: "Today", value: "today" },
@@ -354,6 +358,29 @@ export default function AdsPage() {
     useState<PromoteSubject | null>(null);
   const [promoteToast, setPromoteToast] = useState<string | null>(null);
 
+  // Approved-library link per ad_id → which approved script (if any) the
+  // live ad is tagged to. Populated from /api/ai/approved-scripts/by-ads,
+  // which UNIONs implicit (ad_drafts.source_script_id) and explicit
+  // (ad_approved_script_links) sources.
+  const [scriptLinks, setScriptLinks] = useState<
+    Map<
+      string,
+      {
+        script_id: string;
+        angle_title: string;
+        store_name: string;
+        source: "manual" | "draft";
+      }
+    >
+  >(new Map());
+  // Ad currently being linked in the ScriptPickerModal. Null = modal closed.
+  const [linkingAd, setLinkingAd] = useState<{
+    ad_id: string;
+    ad_name: string;
+    ad_account_id: string;
+  } | null>(null);
+  const [linkBusy, setLinkBusy] = useState(false);
+
   // Adset-level multi-select for bulk promote. selectedAdsetIds is the set
   // of adset entity_ids currently checked; selectionAnchor is the visible
   // sorted-index of the last-toggled row, for shift-range selection.
@@ -472,6 +499,128 @@ export default function AdsPage() {
       cancelled = true;
     };
   }, [allRows]);
+
+  // Approved-library link detection. Fetched in chunks of 500 (same cap
+  // as scaling/detect). Populates the "🔗 Link" / "✓ In Production"
+  // pill next to Promote on each ad row.
+  useEffect(() => {
+    const adIds = allRows.map((r) => r.ad_id).filter(Boolean);
+    if (adIds.length === 0) return;
+
+    let cancelled = false;
+    (async () => {
+      const CHUNK = 500;
+      const merged = new Map<
+        string,
+        {
+          script_id: string;
+          angle_title: string;
+          store_name: string;
+          source: "manual" | "draft";
+        }
+      >();
+      for (let i = 0; i < adIds.length; i += CHUNK) {
+        const slice = adIds.slice(i, i + CHUNK);
+        try {
+          const res = await fetch("/api/ai/approved-scripts/by-ads", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ad_ids: slice }),
+          });
+          if (!res.ok) continue;
+          const json = (await res.json()) as {
+            mapping?: Record<
+              string,
+              {
+                script_id: string;
+                angle_title: string;
+                store_name: string;
+                source: "manual" | "draft";
+              }
+            >;
+          };
+          for (const [id, info] of Object.entries(json.mapping ?? {})) {
+            merged.set(id, info);
+          }
+        } catch {
+          // non-fatal — pill just won't appear for this chunk
+        }
+        if (cancelled) return;
+      }
+      if (!cancelled) setScriptLinks(merged);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [allRows]);
+
+  const handleLinkScript = useCallback(
+    async (script: ApprovedScript) => {
+      if (!linkingAd) return;
+      setLinkBusy(true);
+      try {
+        const res = await fetch("/api/ai/approved-scripts/link-ad", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fb_ad_id: linkingAd.ad_id,
+            fb_ad_account_id: linkingAd.ad_account_id,
+            approved_script_id: script.id,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Failed to link");
+        setScriptLinks((prev) => {
+          const next = new Map(prev);
+          next.set(linkingAd.ad_id, {
+            script_id: script.id,
+            angle_title: script.angle_title,
+            store_name: script.store_name,
+            source: "manual",
+          });
+          return next;
+        });
+        setPromoteToast(
+          `Linked to "${script.angle_title}" — script marked in production.`
+        );
+        setTimeout(() => setPromoteToast(null), 4000);
+        setLinkingAd(null);
+      } catch (e) {
+        setPromoteToast(
+          e instanceof Error ? `Link failed: ${e.message}` : "Link failed"
+        );
+        setTimeout(() => setPromoteToast(null), 5000);
+      } finally {
+        setLinkBusy(false);
+      }
+    },
+    [linkingAd]
+  );
+
+  const handleUnlinkScript = useCallback(async (adId: string) => {
+    if (!confirm("Remove the library link for this ad?")) return;
+    try {
+      const res = await fetch("/api/ai/approved-scripts/link-ad", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fb_ad_id: adId }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to unlink");
+      setScriptLinks((prev) => {
+        const next = new Map(prev);
+        next.delete(adId);
+        return next;
+      });
+      setPromoteToast("Library link removed.");
+      setTimeout(() => setPromoteToast(null), 3000);
+    } catch (e) {
+      setPromoteToast(
+        e instanceof Error ? `Unlink failed: ${e.message}` : "Unlink failed"
+      );
+      setTimeout(() => setPromoteToast(null), 5000);
+    }
+  }, []);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -1781,6 +1930,50 @@ export default function AdsPage() {
                                 </button>
                               );
                             })()}
+                            {(() => {
+                              const link = scriptLinks.get(
+                                rowData.ad_id as string
+                              );
+                              if (link) {
+                                return (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleUnlinkScript(
+                                        rowData.ad_id as string
+                                      );
+                                    }}
+                                    title={`Linked to approved script: "${link.angle_title}" (${link.store_name}) — ${
+                                      link.source === "manual"
+                                        ? "manually tagged"
+                                        : "via bulk-create drafts"
+                                    }. Click to unlink.`}
+                                    className="inline-flex items-center gap-1 text-emerald-400 hover:text-red-400 transition-colors text-xs cursor-pointer"
+                                  >
+                                    <CheckCircle2 size={13} />
+                                    In Production
+                                  </button>
+                                );
+                              }
+                              return (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setLinkingAd({
+                                      ad_id: rowData.ad_id as string,
+                                      ad_name: rowData.ad as string,
+                                      ad_account_id:
+                                        rowData.account_id as string,
+                                    });
+                                  }}
+                                  title="Tag this live ad to an approved script in the library"
+                                  className="inline-flex items-center gap-1 text-gray-400 hover:text-emerald-300 transition-colors text-xs cursor-pointer"
+                                >
+                                  <BookOpen size={13} />
+                                  Link
+                                </button>
+                              );
+                            })()}
                           </div>
                         </td>
                       )}
@@ -1942,6 +2135,14 @@ export default function AdsPage() {
           {promoteToast}
         </div>
       )}
+
+      <ScriptPickerModal
+        open={linkingAd !== null && !linkBusy}
+        onClose={() => {
+          if (!linkBusy) setLinkingAd(null);
+        }}
+        onPick={handleLinkScript}
+      />
     </div>
   );
 }
