@@ -107,6 +107,9 @@ export async function GET(request: Request) {
   const datePreset = (searchParams.get("date_preset") || "today") as DatePreset;
   const accountFilter = searchParams.get("account") || "ALL";
   const forceRefresh = searchParams.get("refresh") === "1";
+  // Default false so AI agent / briefings keep their small payloads.
+  // Dashboard explicitly opts in by passing include_zero_spend=1.
+  const includeZeroSpend = searchParams.get("include_zero_spend") === "1";
 
   // Optional explicit date range (YYYY-MM-DD PHT). When both present, we pass
   // time_range to FB insights instead of date_preset so briefings can backfill
@@ -123,9 +126,12 @@ export async function GET(request: Request) {
   const supabase = isCron ? createServiceClient() : await createClient();
 
   // Check Supabase cache first
-  const cacheKey = buildCacheKey("ads", {
+  // v2 bumps the cache namespace — payload shape gained `name` fields and
+  // (optionally) zero-activity ad rows, so old cache entries would be stale.
+  const cacheKey = buildCacheKey("ads_v2", {
     date_preset: useTimeRange ? `range:${dateFrom}:${dateTo}` : datePreset,
     account: accountFilter,
+    zero: includeZeroSpend ? "1" : "0",
   });
 
   if (!forceRefresh) {
@@ -254,14 +260,16 @@ export async function GET(request: Request) {
         accountStatusMap[account.account_id] = account;
 
         // Check structure cache for this account (campaigns/adsets/ads don't change per date)
-        const structKey = `structure:${account.id}`;
+        // v2 key forces re-fetch since we now request `name` too — old cache
+        // entries lack names and would render blank rows for zero-activity ads.
+        const structKey = `structure_v2:${account.id}`;
         const cachedStruct = structureCache.get(structKey);
         const hasStructCache = !forceRefresh && cachedStruct && Date.now() - cachedStruct.timestamp < STRUCTURE_CACHE_TTL;
 
         // Only fetch insights fresh — structure from cache if available
-        type CampaignRaw = { id: string; effective_status: string; daily_budget?: string; lifetime_budget?: string; updated_time?: string };
-        type AdsetRaw = { id: string; effective_status: string; campaign_id: string; daily_budget?: string; lifetime_budget?: string; updated_time?: string; start_time?: string; created_time?: string };
-        type AdRaw = { id: string; effective_status: string; adset_id: string; updated_time?: string };
+        type CampaignRaw = { id: string; name?: string; effective_status: string; daily_budget?: string; lifetime_budget?: string; updated_time?: string };
+        type AdsetRaw = { id: string; name?: string; effective_status: string; campaign_id: string; daily_budget?: string; lifetime_budget?: string; updated_time?: string; start_time?: string; created_time?: string };
+        type AdRaw = { id: string; name?: string; effective_status: string; adset_id: string; updated_time?: string };
 
         const [campaignsRaw, adsetsRaw, adsRaw, insightsData] = hasStructCache
           ? [
@@ -275,7 +283,7 @@ export async function GET(request: Request) {
             fbFetchAll<CampaignRaw>(
               `/${account.id}/campaigns`,
               token,
-              { fields: "id,effective_status,daily_budget,lifetime_budget,updated_time", limit: "500" }
+              { fields: "id,name,effective_status,daily_budget,lifetime_budget,updated_time", limit: "500" }
             ).catch((e) => {
               console.error(`[FB all-ads] campaigns fetch failed for ${account.name}:`, e instanceof Error ? e.message : e);
               return [] as CampaignRaw[];
@@ -284,7 +292,7 @@ export async function GET(request: Request) {
             fbFetchAll<AdsetRaw>(
               `/${account.id}/adsets`,
               token,
-              { fields: "id,effective_status,campaign_id,daily_budget,lifetime_budget,updated_time,start_time,created_time", limit: "500" }
+              { fields: "id,name,effective_status,campaign_id,daily_budget,lifetime_budget,updated_time,start_time,created_time", limit: "500" }
             ).catch((e) => {
               console.error(`[FB all-ads] adsets fetch failed for ${account.name}:`, e instanceof Error ? e.message : e);
               return [] as AdsetRaw[];
@@ -297,7 +305,7 @@ export async function GET(request: Request) {
                 // Stripped creative{} expansion — too slow, was causing
                 // /ads to time out and leave all statuses as UNKNOWN.
                 // Creatives can be fetched lazily at ad-drill level.
-                fields: "id,effective_status,adset_id,updated_time",
+                fields: "id,name,effective_status,adset_id,updated_time",
                 limit: "500",
               }
             ).catch((e) => {
@@ -329,12 +337,14 @@ export async function GET(request: Request) {
           });
         }
 
-        // Build status maps + budget maps + time maps
+        // Build status maps + budget maps + time maps + name maps
         const campaignStatus: Record<string, string> = {};
         const campaignUpdated: Record<string, string> = {};
+        const campaignName: Record<string, string> = {};
         for (const c of campaignsRaw) {
           campaignStatus[c.id] = c.effective_status;
           if (c.updated_time) campaignUpdated[c.id] = c.updated_time;
+          if (c.name) campaignName[c.id] = c.name;
           budgets[c.id] = {
             daily_budget: c.daily_budget ? parseInt(c.daily_budget) / 100 : null,
             lifetime_budget: c.lifetime_budget ? parseInt(c.lifetime_budget) / 100 : null,
@@ -345,6 +355,7 @@ export async function GET(request: Request) {
         const adsetToCampaign: Record<string, string> = {};
         const adsetUpdated: Record<string, string> = {};
         const adsetStartTime: Record<string, string> = {};
+        const adsetName: Record<string, string> = {};
         for (const a of adsetsRaw) {
           adsetStatus[a.id] = a.effective_status;
           adsetToCampaign[a.id] = a.campaign_id;
@@ -353,6 +364,7 @@ export async function GET(request: Request) {
           // adsets without an explicit schedule still have created_time
           if (a.start_time) adsetStartTime[a.id] = a.start_time;
           else if (a.created_time) adsetStartTime[a.id] = a.created_time;
+          if (a.name) adsetName[a.id] = a.name;
           budgets[a.id] = {
             daily_budget: a.daily_budget ? parseInt(a.daily_budget) / 100 : null,
             lifetime_budget: a.lifetime_budget ? parseInt(a.lifetime_budget) / 100 : null,
@@ -362,6 +374,7 @@ export async function GET(request: Request) {
         const adEffStatus: Record<string, string> = {};
         const adToAdset: Record<string, string> = {};
         const adUpdated: Record<string, string> = {};
+        const adName: Record<string, string> = {};
         // Creative preview/thumbnail no longer fetched in main payload
         // (was causing /ads to time out). Lazy-load in ad-drill view if needed.
         const adPreview: Record<string, { url: string | null; thumbnail: string | null }> = {};
@@ -369,6 +382,7 @@ export async function GET(request: Request) {
           adEffStatus[a.id] = a.effective_status;
           adToAdset[a.id] = a.adset_id;
           if (a.updated_time) adUpdated[a.id] = a.updated_time;
+          if (a.name) adName[a.id] = a.name;
           adPreview[a.id] = { url: null, thumbnail: null };
         }
 
@@ -459,6 +473,53 @@ export async function GET(request: Request) {
             campaign_updated_time: campaignUpdated[row.campaign_id as string] || null,
             start_time: adsetStartTime[adToAdset[adId] || (row.adset_id as string)] || null,
           });
+        }
+
+        // Merge in ads with zero activity in the selected date range.
+        // FB's /insights endpoint excludes ads that had no spend/impressions
+        // in the window, so without this step the table would only show
+        // "today's spenders". Structure fetches above already have every ad.
+        if (includeZeroSpend) {
+          const seenAdIds = new Set<string>();
+          for (const row of insightsData) {
+            const id = row.ad_id as string;
+            if (id) seenAdIds.add(id);
+          }
+          for (const a of adsRaw) {
+            if (seenAdIds.has(a.id)) continue;
+            const adsetId = adToAdset[a.id];
+            const campaignId = adsetId ? adsetToCampaign[adsetId] : "";
+            allRows.push({
+              account: account.name,
+              account_id: account.id,
+              campaign: campaignName[campaignId] || "(unknown campaign)",
+              campaign_id: campaignId,
+              adset: adsetName[adsetId] || "(unknown adset)",
+              adset_id: adsetId || "",
+              ad: adName[a.id] || "(unknown ad)",
+              ad_id: a.id,
+              status: getDeliveryStatus(a.id),
+              campaign_status: campaignStatus[campaignId] || "UNKNOWN",
+              adset_status: adsetStatus[adsetId] || "UNKNOWN",
+              spend: 0,
+              link_clicks: 0,
+              cpa: 0,
+              roas: 0,
+              add_to_cart: 0,
+              purchases: 0,
+              landing_page_views: 0,
+              cost_per_lpv: 0,
+              reach: 0,
+              impressions: 0,
+              ctr: 0,
+              preview_url: null,
+              thumbnail_url: null,
+              updated_time: adUpdated[a.id] || null,
+              adset_updated_time: adsetUpdated[adsetId] || null,
+              campaign_updated_time: campaignUpdated[campaignId] || null,
+              start_time: adsetStartTime[adsetId] || null,
+            });
+          }
         }
       })
     );

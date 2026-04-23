@@ -221,6 +221,10 @@ export default function AdsPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [filterAccount, setFilterAccount] = useState<string>("ALL");
   const [filterStatus, setFilterStatus] = useState<string>("ALL");
+  // Show all ads (including zero-spend) by default. FB insights hides
+  // ads with no activity in the selected window; this flag plus the
+  // backend include_zero_spend=1 param makes the full list visible.
+  const [showZeroSpend, setShowZeroSpend] = useState(true);
   const [accounts, setAccounts] = useState<AccountInfo[]>([]);
   const [role, setRole] = useState<string>("");
   const [budgets, setBudgets] = useState<Record<string, BudgetInfo>>({});
@@ -264,7 +268,7 @@ export default function AdsPage() {
     }
     setError(null);
     try {
-      const url = `/api/facebook/all-ads?date_preset=${datePreset}&account=${filterAccount}`;
+      const url = `/api/facebook/all-ads?date_preset=${datePreset}&account=${filterAccount}&include_zero_spend=1`;
       const result = await cachedFetch<Record<string, unknown>>(url, { forceRefresh, ttl: 10 * 60 * 1000 });
       const json = result.data;
       const rows = json.data as typeof allRows;
@@ -570,13 +574,14 @@ export default function AdsPage() {
     }
   };
 
-  // Filter rows by status
+  // Filter rows by status + optional zero-spend toggle
   const filteredRows = useMemo(() => {
     return allRows.filter((r) => {
       if (filterStatus !== "ALL" && r.status !== filterStatus) return false;
+      if (!showZeroSpend && r.spend <= 0) return false;
       return true;
     });
-  }, [allRows, filterStatus]);
+  }, [allRows, filterStatus, showZeroSpend]);
 
   const statusOptions = useMemo(
     () => ["ALL", ...Array.from(new Set(allRows.map((r) => r.status)))],
@@ -1205,6 +1210,15 @@ export default function AdsPage() {
             ))}
           </select>
         </div>
+        <label className="flex items-center gap-2 text-sm text-gray-400 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={showZeroSpend}
+            onChange={(e) => setShowZeroSpend(e.target.checked)}
+            className="w-4 h-4 rounded border-gray-700 bg-gray-800 text-blue-500 focus:ring-2 focus:ring-blue-500 cursor-pointer"
+          />
+          Show zero-spend ads
+        </label>
       </div>
 
       {/* Summary Bar */}
