@@ -57,14 +57,14 @@ export default async function DashboardLayout({
   }
 
   return (
-    <div className="flex h-screen bg-gray-900">
+    <div className="flex h-dvh bg-gray-900">
       <Sidebar
         employeeName={employee.full_name}
         employeeRole={employee.role}
       />
       <main className="flex-1 overflow-auto">
         <ClockStatusBanner />
-        <div className="p-6 lg:p-8">{children}</div>
+        <div className="p-4 pt-16 lg:p-8">{children}</div>
       </main>
       <BackgroundRefresh />
     </div>

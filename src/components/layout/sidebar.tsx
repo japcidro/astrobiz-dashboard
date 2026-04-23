@@ -320,13 +320,13 @@ export function Sidebar({ employeeName, employeeRole }: SidebarProps) {
   const sidebarContent = (
     <div className="flex flex-col h-full">
       {/* Logo */}
-      <div className="p-6 border-b border-gray-800">
+      <div className="shrink-0 p-6 border-b border-gray-800">
         <h1 className="text-xl font-bold text-white">Astrobiz</h1>
         <p className="text-xs text-gray-500 mt-1">Employee Dashboard</p>
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 p-4 space-y-1">
+      <nav className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-1">
         {filteredEntries.map((entry) => {
           if (isGroup(entry)) {
             const active = isGroupActive(entry);
@@ -423,7 +423,7 @@ export function Sidebar({ employeeName, employeeRole }: SidebarProps) {
       </nav>
 
       {/* User info */}
-      <div className="p-4 border-t border-gray-800">
+      <div className="shrink-0 p-4 border-t border-gray-800">
         <div className="flex items-center gap-3 mb-3">
           <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-white text-sm font-medium">
             {employeeName.charAt(0).toUpperCase()}
