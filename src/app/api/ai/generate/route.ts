@@ -73,67 +73,97 @@ export async function POST(request: Request) {
     .map((doc) => `=== ${doc.title} ===\n${doc.content}`)
     .join("\n\n");
 
-  // 5. Build messages for Claude
-  // First user message gets the knowledge context prepended
-  const claudeMessages = messages.map((msg, i) => {
-    if (i === 0 && msg.role === "user") {
-      return {
-        role: msg.role,
-        content: knowledgeContext
-          ? `Here is all the knowledge about this product/brand:\n\n${knowledgeContext}\n\n---\n\n${msg.content}`
-          : msg.content,
-      };
-    }
-    return msg;
-  });
+  // 5. Build system blocks — instruction + knowledge, both cached.
+  // Putting knowledge in `system` (not in the first user message) keeps the
+  // cache prefix stable across turns; only the messages array varies per call.
+  const systemBlocks: Array<{
+    type: "text";
+    text: string;
+    cache_control?: { type: "ephemeral" };
+  }> = [{ type: "text", text: systemPromptContent }];
 
-  // 6. Call Claude API
-  try {
-    const claudeResponse = await fetch(
-      "https://api.anthropic.com/v1/messages",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-        },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 8192,
-          system: systemPromptContent,
-          messages: claudeMessages,
-        }),
+  if (knowledgeContext) {
+    systemBlocks.push({
+      type: "text",
+      text: `Here is all the knowledge about this product/brand:\n\n${knowledgeContext}`,
+      cache_control: { type: "ephemeral" },
+    });
+  } else {
+    systemBlocks[0].cache_control = { type: "ephemeral" };
+  }
+
+  const model = "claude-sonnet-4-6";
+
+  // 6. Call Claude API with exponential backoff on 429 / 5xx
+  const maxAttempts = 3;
+  let lastStatus = 0;
+  let lastBody = "";
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const claudeResponse = await fetch(
+        "https://api.anthropic.com/v1/messages",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model,
+            max_tokens: 8192,
+            system: systemBlocks,
+            messages,
+          }),
+        }
+      );
+
+      if (claudeResponse.ok) {
+        const result = await claudeResponse.json();
+        const generatedText = result.content[0].text;
+        return Response.json({
+          text: generatedText,
+          model,
+          tokens_used: result.usage,
+        });
       }
-    );
 
-    if (!claudeResponse.ok) {
-      const errorBody = await claudeResponse.text();
-      const status = claudeResponse.status;
+      lastStatus = claudeResponse.status;
+      lastBody = await claudeResponse.text();
 
-      if (status === 429) {
+      const retryable = lastStatus === 429 || lastStatus >= 500;
+      if (!retryable || attempt === maxAttempts - 1) break;
+
+      const retryAfterHeader = claudeResponse.headers.get("retry-after");
+      const retryAfterMs = retryAfterHeader
+        ? Number(retryAfterHeader) * 1000
+        : 0;
+      const backoffMs = Math.max(
+        retryAfterMs,
+        1000 * 2 ** attempt + Math.floor(Math.random() * 500)
+      );
+      await new Promise((r) => setTimeout(r, backoffMs));
+    } catch (err) {
+      if (attempt === maxAttempts - 1) {
+        const message = err instanceof Error ? err.message : "Unknown error";
         return Response.json(
-          { error: "Rate limited by Claude API. Please try again in a moment." },
-          { status: 429 }
+          { error: `Claude API call failed: ${message}` },
+          { status: 500 }
         );
       }
-
-      return Response.json(
-        { error: `Claude API error (${status}): ${errorBody}` },
-        { status: 502 }
-      );
+      await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
     }
-
-    const result = await claudeResponse.json();
-    const generatedText = result.content[0].text;
-
-    return Response.json({
-      text: generatedText,
-      model: "claude-sonnet-4-20250514",
-      tokens_used: result.usage,
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    return Response.json({ error: `Claude API call failed: ${message}` }, { status: 500 });
   }
+
+  if (lastStatus === 429) {
+    return Response.json(
+      { error: "Rate limited by Claude API. Please try again in a moment." },
+      { status: 429 }
+    );
+  }
+  return Response.json(
+    { error: `Claude API error (${lastStatus}): ${lastBody}` },
+    { status: 502 }
+  );
 }
