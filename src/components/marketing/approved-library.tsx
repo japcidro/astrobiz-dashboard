@@ -28,6 +28,7 @@ import {
   type ApprovedScriptAngleType,
 } from "@/lib/ai/approved-scripts-types";
 import type { ScriptPerformance, AdPerformanceSummary } from "@/lib/ai/script-performance";
+import { ScriptCreativesPanel } from "./script-creatives-panel";
 
 interface Props {
   storeName: string;
@@ -72,7 +73,11 @@ export function ApprovedLibrary({ storeName }: Props) {
   const [selected, setSelected] = useState<ApprovedScript | null>(null);
 
   const load = useCallback(async () => {
-    if (!storeName) return;
+    if (!storeName) {
+      setLoading(false);
+      setScripts([]);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -224,7 +229,9 @@ export function ApprovedLibrary({ storeName }: Props) {
           </div>
         ) : filtered.length === 0 ? (
           <div className="text-center py-20 text-gray-500 text-sm">
-            {scripts.length === 0
+            {!storeName
+              ? "No store selected. Pick a store from the dropdown above."
+              : scripts.length === 0
               ? "No approved scripts yet. Approve scripts from the Chat tab to see them here."
               : "No scripts match your filters."}
           </div>
@@ -569,6 +576,11 @@ function ScriptDetailModal({
             perf={detailPerf}
             loading={perfLoading}
             warning={perfWarning}
+          />
+
+          <ScriptCreativesPanel
+            scriptId={script.id}
+            storeName={script.store_name}
           />
 
           <DetailSection

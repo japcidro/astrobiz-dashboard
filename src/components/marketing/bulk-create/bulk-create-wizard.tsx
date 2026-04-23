@@ -14,11 +14,13 @@ import type {
   AdSetFormData,
   CTAType,
 } from "@/lib/facebook/types";
-import type { ApprovedScript } from "@/lib/ai/approved-scripts-types";
 import { StepCampaign } from "@/components/marketing/create/step-campaign";
 import { StepAdset } from "@/components/marketing/create/step-adset";
 import { PageSelector } from "@/components/marketing/create/page-selector";
-import { ScriptPickerModal } from "../script-picker-modal";
+import {
+  CreativePickerModal,
+  type PickedCreative,
+} from "../creative-picker-modal";
 import { StoreDefaultsSelector } from "../store-defaults-selector";
 import {
   resolveNamePattern,
@@ -56,12 +58,14 @@ export interface BulkAdRow {
   description: string;
   status: "pending" | "uploading" | "submitting" | "done" | "error";
   error: string | null;
-  // Link back to the approved script that sourced this ad copy. Persisted
-  // on the ad_draft row so Phase 2 performance aggregation can trace the
-  // ad → fb_ad_id → source_script_id. Nullable: rows can still be written
-  // from scratch.
+  // Link back to the approved script that sourced this ad. Persisted on the
+  // ad_draft row so performance aggregation can trace ad → fb_ad_id →
+  // source_script_id. Nullable: rows can still be written from scratch.
   source_script_id: string | null;
   source_script_title: string | null;
+  // Set when the row was populated via the Library import flow — the
+  // creative already lives in approved_script_creatives. Null otherwise.
+  library_creative_id: string | null;
 }
 
 // ─── CTA Options ───
@@ -100,6 +104,7 @@ function makeEmptyRow(): BulkAdRow {
     error: null,
     source_script_id: null,
     source_script_title: null,
+    library_creative_id: null,
   };
 }
 
@@ -374,19 +379,23 @@ export function BulkCreateWizard() {
     setRows((prev) => prev.filter((r) => r.id !== id));
   }, []);
 
-  // Turns selected approved scripts into pre-filled rows. Hook → headline,
-  // body → primary text, angle title → ad name. If the only current rows
-  // are untouched empties, replace them; otherwise append.
-  const handleImportScripts = useCallback((scripts: ApprovedScript[]) => {
-    if (scripts.length === 0) return;
-    const newRows: BulkAdRow[] = scripts.map((s) => ({
+  // Turns selected Library creatives into pre-filled rows: each picked
+  // creative becomes one row with the FB image_hash / video_id already
+  // attached, source_script_id linked for performance traceback, and ad
+  // copy fields LEFT EMPTY (the launcher picks presets instead). If the
+  // only current rows are untouched empties, replace them; otherwise append.
+  const handleImportCreatives = useCallback((picked: PickedCreative[]) => {
+    if (picked.length === 0) return;
+    const newRows: BulkAdRow[] = picked.map(({ script, creative }) => ({
       ...makeEmptyRow(),
-      ad_name: s.angle_title.slice(0, 80),
-      primary_text: s.body_script,
-      headline: s.hook.slice(0, 255),
-      description: "",
-      source_script_id: s.id,
-      source_script_title: s.angle_title,
+      creative_type: creative.creative_type,
+      image_hash: creative.fb_image_hash,
+      video_id: creative.fb_video_id,
+      file_name: creative.file_name,
+      status: "done",
+      source_script_id: script.id,
+      source_script_title: script.angle_title,
+      library_creative_id: creative.id,
     }));
     setRows((prev) => {
       const existingHasContent = prev.some(
@@ -696,30 +705,35 @@ export function BulkCreateWizard() {
             </div>
           </div>
 
-          {/* Import from Approved Scripts */}
+          {/* Import from Approved Library (creatives) */}
           <div className="mb-4">
             <button
               type="button"
               onClick={() => setScriptPickerOpen(true)}
-              className="flex items-center gap-2 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-600/50 text-emerald-300 hover:text-emerald-200 text-sm px-4 py-2 rounded-lg transition-colors cursor-pointer"
+              disabled={!adAccountId}
+              title={
+                !adAccountId
+                  ? "Select an ad account first so we know which creatives are valid"
+                  : "Pick creatives from the Approved Library"
+              }
+              className="flex items-center gap-2 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-600/50 text-emerald-300 hover:text-emerald-200 text-sm px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Sparkles size={14} />
-              Import from Approved Scripts
+              Import from Approved Library
             </button>
             <p className="mt-1.5 text-[11px] text-gray-500">
-              Pick N scripts from the Approved Library. Each becomes a row with
-              hook → headline, body → primary text. Source script is saved so
-              performance rolls up in the Library.
+              Pick creatives already uploaded to the Library. Each becomes a
+              row with the video/image attached and the source script linked.
+              Ad copy stays empty — fill it with presets per field.
             </p>
           </div>
 
-          <ScriptPickerModal
+          <CreativePickerModal
             open={scriptPickerOpen}
-            mode="multi"
             onClose={() => setScriptPickerOpen(false)}
-            onPickMany={handleImportScripts}
-            confirmLabel="Add rows"
+            onPickMany={handleImportCreatives}
             defaultStoreFilter={selectedStoreName}
+            requireAdAccountId={adAccountId || null}
           />
 
           {/* Default Copy (fill all rows) */}
@@ -777,6 +791,7 @@ export function BulkCreateWizard() {
             adAccountId={adAccountId}
             creativeType={creativeType}
             storeNameFilter={selectedStoreName}
+            shopifyStoreId={selectedStoreId}
           />
         </Section>
 

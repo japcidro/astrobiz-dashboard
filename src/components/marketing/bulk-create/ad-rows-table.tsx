@@ -9,9 +9,11 @@ import {
   Loader2,
   Plus,
   Sparkles,
+  Save,
 } from "lucide-react";
 import type { ApprovedScript } from "@/lib/ai/approved-scripts-types";
 import { ScriptPickerModal } from "../script-picker-modal";
+import { PresetPicker } from "./preset-picker";
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
 
@@ -32,6 +34,10 @@ export interface BulkAdRow {
   error: string | null;
   source_script_id: string | null;
   source_script_title: string | null;
+  // Set when the row was populated via the Library import flow — the creative
+  // already lives in approved_script_creatives. Lets us hide the
+  // "Save to Library" button in that case (avoids duplicate saves).
+  library_creative_id: string | null;
 }
 
 interface AdRowsTableProps {
@@ -40,6 +46,9 @@ interface AdRowsTableProps {
   creativeType: "image" | "video";
   // Pre-filters the per-row Script Picker to this store. Optional.
   storeNameFilter?: string | null;
+  // Enables per-field Preset picker (ad name / primary text / headline /
+  // description). Null disables the picker with a hint to select a store.
+  shopifyStoreId?: string | null;
   onUpdateRow: (id: string, updates: Partial<BulkAdRow>) => void;
   onAddRow: () => void;
   onRemoveRow: (id: string) => void;
@@ -209,6 +218,7 @@ export function AdRowsTable({
   adAccountId,
   creativeType,
   storeNameFilter,
+  shopifyStoreId,
   onUpdateRow,
   onAddRow,
   onRemoveRow,
@@ -255,6 +265,7 @@ export function AdRowsTable({
             creative_type: "video",
             status: "done",
             error: null,
+            library_creative_id: null,
           });
         } else {
           const { image_hash } = await uploadImage(file, adAccountId, token);
@@ -265,6 +276,7 @@ export function AdRowsTable({
             creative_type: "image",
             status: "done",
             error: null,
+            library_creative_id: null,
           });
         }
       } catch (err) {
@@ -405,6 +417,18 @@ export function AdRowsTable({
                 {/* Ad Name + optional script link */}
                 <td className="px-2 py-1.5 bg-gray-800/50">
                   <div className="space-y-1">
+                    <div className="flex items-center justify-end">
+                      <PresetPicker
+                        kind="ad_name"
+                        storeId={shopifyStoreId ?? null}
+                        currentValue={row.ad_name}
+                        onApply={(content) =>
+                          onUpdateRow(row.id, {
+                            ad_name: content.slice(0, 80),
+                          })
+                        }
+                      />
+                    </div>
                     <input
                       type="text"
                       value={row.ad_name}
@@ -472,90 +496,149 @@ export function AdRowsTable({
                       }
                     }}
                   />
-                  <div className="flex items-center gap-1.5">
-                    {row.status === "uploading" && (
-                      <Loader2 size={14} className="shrink-0 animate-spin text-blue-400" />
-                    )}
-                    {row.status === "done" && row.file_name && (
-                      <>
-                        <CheckCircle size={14} className="shrink-0 text-green-400" />
-                        <span className="truncate text-xs text-gray-300" title={row.file_name}>
-                          {row.file_name}
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1.5">
+                      {row.status === "uploading" && (
+                        <Loader2 size={14} className="shrink-0 animate-spin text-blue-400" />
+                      )}
+                      {row.status === "done" && row.file_name && (
+                        <>
+                          <CheckCircle size={14} className="shrink-0 text-green-400" />
+                          <span className="truncate text-xs text-gray-300" title={row.file_name}>
+                            {row.file_name}
+                          </span>
+                        </>
+                      )}
+                      {row.status === "error" && (
+                        <span className="flex items-center gap-1" title={row.error ?? "Upload error"}>
+                          <AlertCircle size={14} className="shrink-0 text-red-400" />
+                          <span className="truncate text-xs text-red-400">
+                            {row.error ?? "Error"}
+                          </span>
                         </span>
-                      </>
-                    )}
-                    {row.status === "error" && (
-                      <span className="flex items-center gap-1" title={row.error ?? "Upload error"}>
-                        <AlertCircle size={14} className="shrink-0 text-red-400" />
-                        <span className="truncate text-xs text-red-400">
-                          {row.error ?? "Error"}
-                        </span>
-                      </span>
-                    )}
-                    {row.status === "pending" && !row.file_name && (
-                      <button
-                        type="button"
-                        onClick={() => rowInputRefs.current[row.id]?.click()}
-                        className="rounded bg-red-900/30 border border-red-500/50 px-2 py-0.5 text-xs text-red-300 hover:bg-red-900/50 transition-colors"
-                      >
-                        Upload required
-                      </button>
-                    )}
-                    {row.status === "error" && (
-                      <button
-                        type="button"
-                        onClick={() => rowInputRefs.current[row.id]?.click()}
-                        className="rounded bg-gray-700 px-2 py-0.5 text-xs text-gray-300 hover:bg-gray-600 transition-colors"
-                      >
-                        Retry
-                      </button>
-                    )}
+                      )}
+                      {row.status === "pending" && !row.file_name && (
+                        <button
+                          type="button"
+                          onClick={() => rowInputRefs.current[row.id]?.click()}
+                          className="rounded bg-red-900/30 border border-red-500/50 px-2 py-0.5 text-xs text-red-300 hover:bg-red-900/50 transition-colors"
+                        >
+                          Upload required
+                        </button>
+                      )}
+                      {row.status === "error" && (
+                        <button
+                          type="button"
+                          onClick={() => rowInputRefs.current[row.id]?.click()}
+                          className="rounded bg-gray-700 px-2 py-0.5 text-xs text-gray-300 hover:bg-gray-600 transition-colors"
+                        >
+                          Retry
+                        </button>
+                      )}
+                    </div>
+                    {row.source_script_id &&
+                      !row.library_creative_id &&
+                      (row.image_hash || row.video_id) &&
+                      row.status === "done" &&
+                      adAccountId && (
+                        <SaveToLibraryButton
+                          scriptId={row.source_script_id}
+                          creativeType={row.creative_type}
+                          imageHash={row.image_hash}
+                          videoId={row.video_id}
+                          fileName={row.file_name}
+                          adAccountId={adAccountId}
+                          onSaved={(creativeId) =>
+                            onUpdateRow(row.id, {
+                              library_creative_id: creativeId,
+                            })
+                          }
+                        />
+                      )}
                   </div>
                 </td>
 
                 {/* Primary Text */}
                 <td className="px-2 py-1.5 bg-gray-800/50">
-                  <textarea
-                    rows={2}
-                    value={row.primary_text}
-                    placeholder="Primary text..."
-                    onChange={(e) =>
-                      onUpdateRow(row.id, { primary_text: e.target.value })
-                    }
-                    className={`w-full resize-none rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
-                      !row.primary_text.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
-                    }`}
-                  />
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-end">
+                      <PresetPicker
+                        kind="primary_text"
+                        storeId={shopifyStoreId ?? null}
+                        currentValue={row.primary_text}
+                        onApply={(content) =>
+                          onUpdateRow(row.id, { primary_text: content })
+                        }
+                      />
+                    </div>
+                    <textarea
+                      rows={2}
+                      value={row.primary_text}
+                      placeholder="Primary text..."
+                      onChange={(e) =>
+                        onUpdateRow(row.id, { primary_text: e.target.value })
+                      }
+                      className={`w-full resize-none rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
+                        !row.primary_text.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
+                      }`}
+                    />
+                  </div>
                 </td>
 
                 {/* Headline */}
                 <td className="px-2 py-1.5 bg-gray-800/50">
-                  <input
-                    type="text"
-                    value={row.headline}
-                    placeholder="Headline"
-                    onChange={(e) =>
-                      onUpdateRow(row.id, { headline: e.target.value })
-                    }
-                    className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
-                      !row.headline.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
-                    }`}
-                  />
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-end">
+                      <PresetPicker
+                        kind="headline"
+                        storeId={shopifyStoreId ?? null}
+                        currentValue={row.headline}
+                        onApply={(content) =>
+                          onUpdateRow(row.id, {
+                            headline: content.slice(0, 255),
+                          })
+                        }
+                      />
+                    </div>
+                    <input
+                      type="text"
+                      value={row.headline}
+                      placeholder="Headline"
+                      onChange={(e) =>
+                        onUpdateRow(row.id, { headline: e.target.value })
+                      }
+                      className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
+                        !row.headline.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
+                      }`}
+                    />
+                  </div>
                 </td>
 
                 {/* Description */}
                 <td className="px-2 py-1.5 bg-gray-800/50">
-                  <input
-                    type="text"
-                    value={row.description}
-                    placeholder="Description"
-                    onChange={(e) =>
-                      onUpdateRow(row.id, { description: e.target.value })
-                    }
-                    className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
-                      !row.description.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
-                    }`}
-                  />
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-end">
+                      <PresetPicker
+                        kind="description"
+                        storeId={shopifyStoreId ?? null}
+                        currentValue={row.description}
+                        onApply={(content) =>
+                          onUpdateRow(row.id, { description: content })
+                        }
+                      />
+                    </div>
+                    <input
+                      type="text"
+                      value={row.description}
+                      placeholder="Description"
+                      onChange={(e) =>
+                        onUpdateRow(row.id, { description: e.target.value })
+                      }
+                      className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
+                        !row.description.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
+                      }`}
+                    />
+                  </div>
                 </td>
 
                 {/* Actions */}
@@ -591,6 +674,100 @@ export function AdRowsTable({
         onPick={handlePickScript}
         defaultStoreFilter={storeNameFilter}
       />
+    </div>
+  );
+}
+
+// ── Save-to-Library button ──────────────────────────────────────────────────
+//
+// Shown when a row has (a) a linked source script, (b) an uploaded creative,
+// and (c) isn't already sourced from the Library. Saves a new row to
+// approved_script_creatives so next time the launcher can import it directly
+// without re-uploading.
+
+function SaveToLibraryButton({
+  scriptId,
+  creativeType,
+  imageHash,
+  videoId,
+  fileName,
+  adAccountId,
+  onSaved,
+}: {
+  scriptId: string;
+  creativeType: "image" | "video";
+  imageHash: string | null;
+  videoId: string | null;
+  fileName: string | null;
+  adAccountId: string;
+  onSaved: (creativeId: string) => void;
+}) {
+  const [state, setState] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const [message, setMessage] = useState<string | null>(null);
+
+  const save = async () => {
+    setState("saving");
+    setMessage(null);
+    try {
+      const res = await fetch(
+        `/api/ai/approved-scripts/${scriptId}/creatives`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fb_ad_account_id: adAccountId,
+            creative_type: creativeType,
+            fb_image_hash: creativeType === "image" ? imageHash : null,
+            fb_video_id: creativeType === "video" ? videoId : null,
+            file_name: fileName,
+          }),
+        }
+      );
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to save");
+      onSaved(json.creative?.id as string);
+      setState("saved");
+    } catch (e) {
+      setState("error");
+      setMessage(e instanceof Error ? e.message : "Failed to save");
+    }
+  };
+
+  if (state === "saved") {
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400">
+        <CheckCircle size={10} />
+        In Library
+      </span>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <button
+        type="button"
+        onClick={save}
+        disabled={state === "saving"}
+        title="Add this creative to the script's Library so next time it's one click to import"
+        className="inline-flex items-center gap-1 text-[10px] text-gray-500 hover:text-emerald-300 disabled:opacity-50 cursor-pointer"
+      >
+        {state === "saving" ? (
+          <Loader2 size={9} className="animate-spin" />
+        ) : (
+          <Save size={9} />
+        )}
+        {state === "saving" ? "Saving..." : "Save to Library"}
+      </button>
+      {state === "error" && message && (
+        <span
+          className="text-[10px] text-red-400 truncate"
+          title={message}
+        >
+          {message}
+        </span>
+      )}
     </div>
   );
 }

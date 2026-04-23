@@ -21,12 +21,20 @@ export async function GET(request: Request) {
   const store = searchParams.get("store");
   const status = searchParams.get("status");
   const angleType = searchParams.get("angle_type");
+  // include=creatives joins approved_script_creatives so the Bulk Create
+  // import picker can show per-script creative thumbnails in one round trip.
+  const include = searchParams.get("include");
 
   const supabase = await createClient();
 
+  const selectCols =
+    include === "creatives"
+      ? "*, approved_script_creatives(*)"
+      : "*";
+
   let query = supabase
     .from("approved_scripts")
-    .select("*")
+    .select(selectCols)
     .order("approved_at", { ascending: false });
 
   if (store) query = query.eq("store_name", store);
