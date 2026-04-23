@@ -17,7 +17,12 @@ interface CacheEntry {
 const cache = new Map<string, CacheEntry>();
 
 const DEFAULT_TTL = 5 * 60 * 1000; // 5 minutes
-const STORAGE_KEY = "astrobiz_cache";
+// Bump this whenever a response schema changes so every client's stale
+// sessionStorage entries are dropped on the next page load. Old storage
+// keys stay orphaned but unused — sessionStorage is tab-scoped so they're
+// cleaned up when the tab closes anyway.
+//   v2 (2026-04-23): added campaign_status + adset_status to all-ads rows
+const STORAGE_KEY = "astrobiz_cache_v2";
 
 // Restore cache from sessionStorage on load
 function restoreCache() {
