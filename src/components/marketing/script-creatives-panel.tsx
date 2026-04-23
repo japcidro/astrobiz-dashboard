@@ -38,6 +38,12 @@ interface StoreRow {
     | null;
 }
 
+interface FbAccount {
+  id: string;
+  name: string;
+  is_active: boolean;
+}
+
 // Resolve the FB ad account for a given shopify store by name.
 // Uses /api/marketing/store-defaults which joins store_ad_defaults.
 // Case/whitespace-insensitive to survive minor drift between
@@ -56,6 +62,13 @@ async function resolveAdAccountId(storeName: string): Promise<string | null> {
   return defaults?.ad_account_id ?? null;
 }
 
+async function fetchFbAdAccounts(): Promise<FbAccount[]> {
+  const res = await fetch("/api/facebook/accounts");
+  if (!res.ok) return [];
+  const json = (await res.json()) as { accounts?: FbAccount[] };
+  return json.accounts ?? [];
+}
+
 export function ScriptCreativesPanel({ scriptId, storeName }: Props) {
   const [creatives, setCreatives] = useState<ApprovedScriptCreative[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,6 +76,8 @@ export function ScriptCreativesPanel({ scriptId, storeName }: Props) {
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adAccountId, setAdAccountId] = useState<string | null>(null);
+  const [fbAccounts, setFbAccounts] = useState<FbAccount[]>([]);
+  const [autoResolved, setAutoResolved] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -87,8 +102,27 @@ export function ScriptCreativesPanel({ scriptId, storeName }: Props) {
     load();
   }, [load]);
 
+  // Try auto-resolve from store_ad_defaults. If that fails, fetch the FB
+  // ad accounts list so the user can still pick one inline — no dead-end.
   useEffect(() => {
-    resolveAdAccountId(storeName).then(setAdAccountId).catch(() => {});
+    let cancelled = false;
+    (async () => {
+      const resolved = await resolveAdAccountId(storeName).catch(() => null);
+      if (cancelled) return;
+      if (resolved) {
+        setAdAccountId(resolved);
+        setAutoResolved(true);
+        return;
+      }
+      const accounts = await fetchFbAdAccounts().catch(() => []);
+      if (cancelled) return;
+      setFbAccounts(accounts);
+      const firstActive = accounts.find((a) => a.is_active) ?? accounts[0];
+      if (firstActive) setAdAccountId(firstActive.id);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [storeName]);
 
   const handleUpload = async (file: File) => {
@@ -164,11 +198,25 @@ export function ScriptCreativesPanel({ scriptId, storeName }: Props) {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
+      <div className="flex items-center justify-between mb-2 gap-2">
+        <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide shrink-0">
           Creatives ({creatives.length})
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          {!autoResolved && fbAccounts.length > 0 && (
+            <select
+              value={adAccountId ?? ""}
+              onChange={(e) => setAdAccountId(e.target.value || null)}
+              title="Pick the FB ad account to upload into"
+              className="bg-gray-800 border border-gray-700 text-white text-[11px] rounded-lg px-2 py-1.5 max-w-[160px] truncate cursor-pointer"
+            >
+              {fbAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          )}
           <input
             ref={fileInputRef}
             type="file"
@@ -186,7 +234,7 @@ export function ScriptCreativesPanel({ scriptId, storeName }: Props) {
             disabled={uploading || !adAccountId}
             title={
               !adAccountId
-                ? "No ad account set for this store"
+                ? "Pick an ad account first"
                 : "Upload an image or video"
             }
             className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xs px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
