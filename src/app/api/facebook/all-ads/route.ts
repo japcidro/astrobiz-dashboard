@@ -220,6 +220,11 @@ export async function GET(request: Request) {
       ad: unknown;
       ad_id: string;
       status: string;
+      // Raw effective_status for the parent campaign/adset — needed so the
+      // admin can toggle those entities on/off from the table without drilling
+      // all the way to an ad. May be "UNKNOWN" if the structure fetch missed.
+      campaign_status: string;
+      adset_status: string;
       spend: number;
       link_clicks: number;
       cpa: number;
@@ -422,16 +427,20 @@ export async function GET(request: Request) {
 
           const adId = row.ad_id as string;
 
+          const campaignIdStr = row.campaign_id as string;
+          const adsetIdStr = (adToAdset[adId] || (row.adset_id as string)) as string;
           allRows.push({
             account: account.name,
             account_id: account.id,
             campaign: row.campaign_name,
-            campaign_id: row.campaign_id as string,
+            campaign_id: campaignIdStr,
             adset: row.adset_name,
             adset_id: row.adset_id as string,
             ad: row.ad_name,
             ad_id: adId,
             status: getDeliveryStatus(adId),
+            campaign_status: campaignStatus[campaignIdStr] || "UNKNOWN",
+            adset_status: adsetStatus[adsetIdStr] || "UNKNOWN",
             spend,
             link_clicks: linkClicks,
             cpa,

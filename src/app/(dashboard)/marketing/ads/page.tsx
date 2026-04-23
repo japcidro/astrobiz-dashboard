@@ -47,6 +47,10 @@ interface AdRow {
   ad: string;
   ad_id: string;
   status: string;
+  // Raw effective_status of parent campaign + adset so the Toggle at those
+  // drill levels knows whether the entity is ACTIVE or PAUSED.
+  campaign_status: string;
+  adset_status: string;
   spend: number;
   link_clicks: number;
   cpa: number;
@@ -81,6 +85,9 @@ interface BudgetInfo {
 interface AggRow {
   name: string;
   entity_id: string; // campaign or adset ID for API calls
+  // Entity's OWN effective_status (e.g. ACTIVE / PAUSED). Used by the Toggle
+  // at campaign/adset drill levels. Child-ad counts stay separate below.
+  status: string;
   count: number;
   active_count: number; // how many child ads are ACTIVE
   unknown_count: number; // how many child ads have UNKNOWN status (FB structure fetch issue)
@@ -156,9 +163,18 @@ function aggregate(
     const scheduled =
       !!earliestStart && new Date(earliestStart).getTime() > Date.now();
 
+    // All rows in this group share the same parent — pick the status off
+    // the first. Fallback to UNKNOWN if the field is missing (older cached
+    // payloads before this was added).
+    const parentStatus =
+      (groupBy === "campaign"
+        ? group[0]?.campaign_status
+        : group[0]?.adset_status) || "UNKNOWN";
+
     result.push({
       name,
       entity_id: id,
+      status: parentStatus,
       count: group.length,
       active_count,
       unknown_count,
@@ -462,17 +478,19 @@ export default function AdsPage() {
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
-      // Update local state instead of refetching everything
+      // Update local state instead of refetching everything. The field we
+      // patch depends on which level got toggled — otherwise a campaign
+      // toggle would overwrite child-ad delivery statuses incorrectly.
       setAllRows((prev) =>
         prev.map((row) => {
-          const r = row as unknown as Record<string, unknown>;
-          // Update status for matching entity at any level
-          if (
-            r.ad_id === entityId ||
-            r.adset_id === entityId ||
-            r.campaign_id === entityId
-          ) {
-            return { ...row, status: newStatus } as typeof row;
+          if (row.ad_id === entityId) {
+            return { ...row, status: newStatus };
+          }
+          if (row.adset_id === entityId) {
+            return { ...row, adset_status: newStatus };
+          }
+          if (row.campaign_id === entityId) {
+            return { ...row, campaign_status: newStatus };
           }
           return row;
         })
@@ -779,14 +797,17 @@ export default function AdsPage() {
     );
   };
 
-  // Get the entity ID and toggleable status for a row
+  // Get the entity ID and its OWN effective_status for a row.
+  // AdRow.status is the derived delivery status (e.g. "CAMPAIGN PAUSED")
+  // which is what we want to gate the toggle on at ad level too — if the
+  // parent is paused, the child ad's toggle is disabled (isToggleable).
   const getEntityInfo = (row: AggRow | AdRow) => {
     if (drillLevel === "ad") {
       const adRow = row as AdRow;
       return { id: adRow.ad_id, status: adRow.status };
     }
     const aggRow = row as AggRow;
-    return { id: aggRow.entity_id, status: null };
+    return { id: aggRow.entity_id, status: aggRow.status };
   };
 
   // Check if status is toggleable (only ACTIVE or PAUSED)
@@ -1337,11 +1358,6 @@ export default function AdsPage() {
                       ? (rowData.ad as string)
                       : (rowData.name as string);
 
-                  // For aggregated rows, we don't have a direct status — look it up
-                  // For ad rows, status is on the row
-                  const toggleStatus =
-                    drillLevel === "ad" ? (entityStatus as string) : null;
-
                   return (
                     <tr
                       key={i}
@@ -1350,15 +1366,15 @@ export default function AdsPage() {
                         isClickable ? "cursor-pointer" : ""
                       }`}
                     >
-                      {/* Toggle switch (admin only) */}
+                      {/* Toggle switch (admin only) — now shown at every
+                          drill level. Gated internally by isToggleable so
+                          UNKNOWN/DELETED entities don't get a bogus toggle. */}
                       {isAdmin && (
                         <td className="px-2 py-2.5 text-center">
-                          {toggleStatus && (
-                            <ToggleSwitch
-                              entityId={entityId}
-                              status={toggleStatus}
-                            />
-                          )}
+                          <ToggleSwitch
+                            entityId={entityId}
+                            status={entityStatus}
+                          />
                         </td>
                       )}
                       {/* Name + Status indicator + Budget badge */}
