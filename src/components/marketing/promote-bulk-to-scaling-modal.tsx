@@ -85,6 +85,13 @@ function parseDest(v: string): Destination {
   return { kind: "unset" };
 }
 
+// Matches PAUSED, CAMPAIGN_PAUSED, ADSET_PAUSED — so the label reflects
+// paused state regardless of whether the campaign, adset, or both are
+// paused. Other statuses (WITH_ISSUES etc.) render without a tag.
+function pausedTag(effective_status: string): string {
+  return effective_status.includes("PAUSED") ? " (paused)" : "";
+}
+
 function normalize(s: string): string {
   return (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -377,7 +384,7 @@ export function PromoteBulkToScalingModal({
                   {adsets.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.name}
-                      {a.effective_status === "PAUSED" ? " (paused)" : ""}
+                      {pausedTag(a.effective_status)}
                     </option>
                   ))}
                 </select>
@@ -481,9 +488,7 @@ export function PromoteBulkToScalingModal({
                                   value={`existing:${a.id}`}
                                 >
                                   → {a.name}
-                                  {a.effective_status === "PAUSED"
-                                    ? " (paused)"
-                                    : ""}
+                                  {pausedTag(a.effective_status)}
                                 </option>
                               ))}
                             </optgroup>
@@ -564,7 +569,7 @@ export function PromoteBulkToScalingModal({
                   {adsets.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.name}
-                      {a.effective_status === "PAUSED" ? " (paused)" : ""}
+                      {pausedTag(a.effective_status)}
                     </option>
                   ))}
                 </select>

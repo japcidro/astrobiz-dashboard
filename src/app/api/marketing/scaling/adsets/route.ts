@@ -61,6 +61,15 @@ export async function GET(request: Request) {
     if (!res.ok) {
       throw new Error(json?.error?.message ?? `FB error ${res.status}`);
     }
+    // Exclude only terminal states. CAMPAIGN_PAUSED / ADSET_PAUSED /
+    // WITH_ISSUES / PENDING_REVIEW etc. are still live and can be used as
+    // a clone template or a drop-in destination — filtering them out made
+    // the modal look like the scaling campaign was empty whenever it was
+    // itself paused.
+    const EXCLUDED_STATUSES = new Set([
+      "ARCHIVED",
+      "DELETED",
+    ]);
     const adsets = ((json.data ?? []) as Array<{
       id: string;
       name: string;
@@ -68,10 +77,7 @@ export async function GET(request: Request) {
       daily_budget?: string;
       lifetime_budget?: string;
     }>)
-      .filter(
-        (a) =>
-          a.effective_status === "ACTIVE" || a.effective_status === "PAUSED"
-      )
+      .filter((a) => !EXCLUDED_STATUSES.has(a.effective_status))
       .sort((a, b) => a.name.localeCompare(b.name));
 
     return Response.json({
