@@ -40,11 +40,16 @@ interface StoreRow {
 
 // Resolve the FB ad account for a given shopify store by name.
 // Uses /api/marketing/store-defaults which joins store_ad_defaults.
+// Case/whitespace-insensitive to survive minor drift between
+// approved_scripts.store_name and shopify_stores.name.
 async function resolveAdAccountId(storeName: string): Promise<string | null> {
   const res = await fetch("/api/marketing/store-defaults");
   if (!res.ok) return null;
   const json = (await res.json()) as { data: StoreRow[] | null };
-  const row = (json.data ?? []).find((s) => s.name === storeName);
+  const needle = storeName.trim().toLowerCase();
+  const row = (json.data ?? []).find(
+    (s) => s.name?.trim().toLowerCase() === needle
+  );
   const defaults = Array.isArray(row?.store_ad_defaults)
     ? row?.store_ad_defaults[0]
     : row?.store_ad_defaults;
@@ -195,14 +200,6 @@ export function ScriptCreativesPanel({ scriptId, storeName }: Props) {
           </button>
         </div>
       </div>
-
-      {!adAccountId && !loading && (
-        <p className="mb-2 text-[11px] text-yellow-300 bg-yellow-900/20 border border-yellow-700/50 rounded px-2 py-1.5 flex items-center gap-1.5">
-          <AlertCircle size={11} />
-          No FB ad account saved for &quot;{storeName}&quot;. Upload the
-          creative in Create Ad first so defaults are saved.
-        </p>
-      )}
 
       {uploadProgress && (
         <p className="mb-2 text-[11px] text-gray-400 bg-gray-800/50 border border-gray-700/50 rounded px-2 py-1.5 flex items-center gap-1.5">
