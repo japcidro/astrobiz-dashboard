@@ -45,12 +45,40 @@ interface StoreConfig {
   account_id: string;
 }
 
-type RowStatus = "idle" | "copying" | "success" | "failed";
+type RowStatus = "idle" | "copying" | "success" | "failed" | "skipped";
 
 interface RowResult {
   status: RowStatus;
   error?: string;
   copied_ad_id?: string | null;
+}
+
+// Per-ad destination choice.
+//   unset    — user hasn't picked yet (row is ineligible to submit)
+//   skip     — explicitly excluded from this bulk run
+//   new      — clone the global template adset and drop the ad inside
+//   existing — drop the ad into a specific existing scaling adset
+type Destination =
+  | { kind: "unset" }
+  | { kind: "skip" }
+  | { kind: "new" }
+  | { kind: "existing"; adsetId: string };
+
+function serializeDest(d: Destination): string {
+  if (d.kind === "unset") return "";
+  if (d.kind === "skip") return "skip";
+  if (d.kind === "new") return "new";
+  return `existing:${d.adsetId}`;
+}
+
+function parseDest(v: string): Destination {
+  if (v === "") return { kind: "unset" };
+  if (v === "skip") return { kind: "skip" };
+  if (v === "new") return { kind: "new" };
+  if (v.startsWith("existing:")) {
+    return { kind: "existing", adsetId: v.slice("existing:".length) };
+  }
+  return { kind: "unset" };
 }
 
 function normalize(s: string): string {
@@ -85,9 +113,10 @@ export function PromoteBulkToScalingModal({
   const [selectedStore, setSelectedStore] = useState<string>("");
   const [adsets, setAdsets] = useState<Adset[]>([]);
   const [loadingAdsets, setLoadingAdsets] = useState(false);
-  const [selectedAdsetId, setSelectedAdsetId] = useState<string>("");
   const [templateAdsetId, setTemplateAdsetId] = useState<string>("");
-  const [mode, setMode] = useState<"existing" | "new">("new");
+  const [destinations, setDestinations] = useState<Map<string, Destination>>(
+    new Map()
+  );
   const [statusOption, setStatusOption] = useState<"PAUSED" | "ACTIVE">(
     "PAUSED"
   );
@@ -120,8 +149,10 @@ export function PromoteBulkToScalingModal({
   const loadAdsets = useCallback(async (store: string) => {
     setLoadingAdsets(true);
     setAdsets([]);
-    setSelectedAdsetId("");
     setTemplateAdsetId("");
+    // Store change invalidates every per-row existing-adset choice, so
+    // reset the map entirely.
+    setDestinations(new Map());
     setError(null);
     try {
       const res = await fetch(
@@ -150,11 +181,47 @@ export function PromoteBulkToScalingModal({
     [configs]
   );
 
+  const getDest = (adId: string): Destination =>
+    destinations.get(adId) ?? { kind: "unset" };
+
+  const setRowDest = (adId: string, dest: Destination) => {
+    setDestinations((prev) => {
+      const next = new Map(prev);
+      next.set(adId, dest);
+      return next;
+    });
+  };
+
+  const setAllDest = (dest: Destination) => {
+    setDestinations(() => {
+      const next = new Map<string, Destination>();
+      for (const s of subjects) next.set(s.ad_id, dest);
+      return next;
+    });
+  };
+
+  // Counts of how many rows are set to each destination kind. Used for
+  // "Promote N of M" label, for quick-apply UI hints, and for validation.
+  const destCounts = useMemo(() => {
+    let existing = 0;
+    let makeNew = 0;
+    let skip = 0;
+    let unset = 0;
+    for (const s of subjects) {
+      const d = destinations.get(s.ad_id) ?? { kind: "unset" as const };
+      if (d.kind === "existing") existing++;
+      else if (d.kind === "new") makeNew++;
+      else if (d.kind === "skip") skip++;
+      else unset++;
+    }
+    return { existing, new: makeNew, skip, unset, active: existing + makeNew };
+  }, [subjects, destinations]);
+
   const canSubmit = (() => {
     if (submitting || done || loadingAdsets || !selectedStore) return false;
-    if (subjects.length === 0) return false;
-    if (mode === "existing") return !!selectedAdsetId;
-    return !!templateAdsetId;
+    if (destCounts.active === 0) return false;
+    if (destCounts.new > 0 && !templateAdsetId) return false;
+    return true;
   })();
 
   const tally = useMemo(() => {
@@ -182,6 +249,11 @@ export function PromoteBulkToScalingModal({
     setResults(new Map());
 
     for (const subject of subjects) {
+      const dest = getDest(subject.ad_id);
+      if (dest.kind === "skip" || dest.kind === "unset") {
+        updateRow(subject.ad_id, { status: "skipped" });
+        continue;
+      }
       updateRow(subject.ad_id, { status: "copying" });
       try {
         const payload: Record<string, unknown> = {
@@ -189,11 +261,11 @@ export function PromoteBulkToScalingModal({
           target_store: selectedStore,
           status_option: statusOption,
         };
-        if (mode === "existing") {
-          payload.target_adset_id = selectedAdsetId;
+        if (dest.kind === "existing") {
+          payload.target_adset_id = dest.adsetId;
         } else {
-          // Clone the selected template once per ad, naming each new
-          // adset after the source adset so scaling rows mirror testing.
+          // Clone the selected template, naming the new adset after the
+          // source adset so scaling rows mirror testing.
           payload.new_adset = {
             template_adset_id: templateAdsetId,
             name: subject.adset_name.trim() || subject.ad_name.trim(),
@@ -269,59 +341,149 @@ export function PromoteBulkToScalingModal({
 
         {/* Body */}
         <div className="p-5 space-y-4">
-          {/* Subject list */}
-          <div className="max-h-48 overflow-y-auto bg-gray-800/40 border border-gray-700/50 rounded-lg divide-y divide-gray-700/40">
-            {subjects.map((s) => {
-              const r = results.get(s.ad_id);
-              return (
-                <div
-                  key={s.ad_id}
-                  className="flex items-center gap-3 p-2"
+          {/* Quick-apply + subjects */}
+          <div className="bg-gray-800/40 border border-gray-700/50 rounded-lg overflow-hidden">
+            {selectedStore && !submitting && !done && (
+              <div className="flex items-center flex-wrap gap-2 px-2 py-1.5 border-b border-gray-700/40 bg-gray-900/30 text-[11px] text-gray-400">
+                <span className="text-gray-500">Set all to:</span>
+                <button
+                  type="button"
+                  onClick={() => setAllDest({ kind: "new" })}
+                  disabled={!templateAdsetId}
+                  title={
+                    templateAdsetId
+                      ? "Clone template per ad"
+                      : "Pick a template below first"
+                  }
+                  className="px-2 py-0.5 rounded border border-gray-700 bg-gray-800 text-gray-300 hover:border-gray-500 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  {s.thumbnail_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={s.thumbnail_url}
-                      alt=""
-                      className="w-10 aspect-video object-cover rounded border border-gray-700 flex-shrink-0"
-                    />
-                  ) : (
-                    <div className="w-10 aspect-video bg-gray-800 rounded border border-gray-700 flex-shrink-0" />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs text-white font-medium truncate">
-                      {s.ad_name}
-                    </p>
-                    <p className="text-[11px] text-gray-500 truncate">
-                      from {s.adset_name}
-                    </p>
-                  </div>
-                  <div className="flex-shrink-0 w-24 text-right">
-                    {!r || r.status === "idle" ? (
-                      <Circle size={14} className="text-gray-600 inline" />
-                    ) : r.status === "copying" ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-blue-300">
-                        <Loader2 size={12} className="animate-spin" />
-                        Copying…
-                      </span>
-                    ) : r.status === "success" ? (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400">
-                        <CheckCircle2 size={12} />
-                        Done
-                      </span>
+                  + New
+                </button>
+                <select
+                  value=""
+                  disabled={adsets.length === 0}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!v) return;
+                    setAllDest({ kind: "existing", adsetId: v });
+                  }}
+                  className="bg-gray-800 border border-gray-700 text-gray-300 text-[11px] rounded px-2 py-0.5 max-w-[180px] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <option value="">an existing adset…</option>
+                  {adsets.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                      {a.effective_status === "PAUSED" ? " (paused)" : ""}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setAllDest({ kind: "skip" })}
+                  className="px-2 py-0.5 rounded border border-gray-700 bg-gray-800 text-gray-300 hover:border-gray-500 cursor-pointer"
+                >
+                  Skip all
+                </button>
+                <span className="ml-auto text-gray-500">
+                  {destCounts.active}/{subjects.length} active
+                </span>
+              </div>
+            )}
+
+            <div className="max-h-64 overflow-y-auto divide-y divide-gray-700/40">
+              {subjects.map((s) => {
+                const r = results.get(s.ad_id);
+                const dest = getDest(s.ad_id);
+                const showStatus = submitting || done;
+                return (
+                  <div
+                    key={s.ad_id}
+                    className="flex items-center gap-3 p-2"
+                  >
+                    {s.thumbnail_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={s.thumbnail_url}
+                        alt=""
+                        className="w-10 aspect-video object-cover rounded border border-gray-700 flex-shrink-0"
+                      />
                     ) : (
-                      <span
-                        className="inline-flex items-center gap-1 text-[11px] text-red-400"
-                        title={r.error}
-                      >
-                        <XCircle size={12} />
-                        Failed
-                      </span>
+                      <div className="w-10 aspect-video bg-gray-800 rounded border border-gray-700 flex-shrink-0" />
                     )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs text-white font-medium truncate">
+                        {s.ad_name}
+                      </p>
+                      <p className="text-[11px] text-gray-500 truncate">
+                        from {s.adset_name}
+                      </p>
+                    </div>
+                    <div className="flex-shrink-0 w-56 text-right">
+                      {showStatus ? (
+                        !r || r.status === "idle" ? (
+                          <Circle
+                            size={14}
+                            className="text-gray-600 inline"
+                          />
+                        ) : r.status === "skipped" ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] text-gray-500">
+                            Skipped
+                          </span>
+                        ) : r.status === "copying" ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] text-blue-300">
+                            <Loader2 size={12} className="animate-spin" />
+                            Copying…
+                          </span>
+                        ) : r.status === "success" ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400">
+                            <CheckCircle2 size={12} />
+                            Done
+                          </span>
+                        ) : (
+                          <span
+                            className="inline-flex items-center gap-1 text-[11px] text-red-400"
+                            title={r.error}
+                          >
+                            <XCircle size={12} />
+                            Failed
+                          </span>
+                        )
+                      ) : (
+                        <select
+                          value={serializeDest(dest)}
+                          onChange={(e) =>
+                            setRowDest(s.ad_id, parseDest(e.target.value))
+                          }
+                          disabled={!selectedStore || loadingAdsets}
+                          className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-[11px] rounded px-2 py-1 focus:ring-orange-500 focus:border-orange-500 disabled:opacity-50"
+                        >
+                          <option value="">— Pick destination —</option>
+                          <option value="new" disabled={!templateAdsetId}>
+                            + New (clone template)
+                          </option>
+                          {adsets.length > 0 && (
+                            <optgroup label="Existing adsets">
+                              {adsets.map((a) => (
+                                <option
+                                  key={a.id}
+                                  value={`existing:${a.id}`}
+                                >
+                                  → {a.name}
+                                  {a.effective_status === "PAUSED"
+                                    ? " (paused)"
+                                    : ""}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          <option value="skip">Skip this ad</option>
+                        </select>
+                      )}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
 
           {/* Target store */}
@@ -359,41 +521,14 @@ export function PromoteBulkToScalingModal({
             )}
           </div>
 
-          {/* Mode */}
+          {/* Template adset — only used by rows set to "+ New" */}
           {selectedStore && (
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setMode("new")}
-                disabled={submitting || done}
-                className={`flex-1 text-xs px-3 py-2 rounded-lg border transition-colors cursor-pointer ${
-                  mode === "new"
-                    ? "bg-gray-700 border-gray-500 text-white"
-                    : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500"
-                }`}
-              >
-                Clone per ad (recommended)
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode("existing")}
-                disabled={submitting || done}
-                className={`flex-1 text-xs px-3 py-2 rounded-lg border transition-colors cursor-pointer ${
-                  mode === "existing"
-                    ? "bg-gray-700 border-gray-500 text-white"
-                    : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500"
-                }`}
-              >
-                Drop all into one adset
-              </button>
-            </div>
-          )}
-
-          {/* Clone-per-ad */}
-          {selectedStore && mode === "new" && (
             <div>
               <label className="block text-xs text-gray-400 mb-1.5">
-                Template adset (targeting + budget cloned per ad)
+                Template adset{" "}
+                <span className="text-gray-600">
+                  (cloned when a row is set to &quot;+ New&quot;)
+                </span>
               </label>
               {loadingAdsets ? (
                 <div className="flex items-center gap-2 text-xs text-gray-500 py-2">
@@ -402,58 +537,18 @@ export function PromoteBulkToScalingModal({
                 </div>
               ) : adsets.length === 0 ? (
                 <div className="text-xs text-yellow-400 p-2 bg-yellow-900/20 border border-yellow-700/40 rounded-lg">
-                  No adsets in scaling campaign yet. Create one in Ads
-                  Manager first — we clone it per ad.
-                </div>
-              ) : (
-                <>
-                  <select
-                    value={templateAdsetId}
-                    onChange={(e) => setTemplateAdsetId(e.target.value)}
-                    disabled={submitting || done}
-                    className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500"
-                  >
-                    <option value="">— Pick template adset —</option>
-                    {adsets.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name}
-                        {a.effective_status === "PAUSED" ? " (paused)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-[11px] text-gray-500 mt-1">
-                    Each new adset is named after its source adset. New adsets
-                    always start PAUSED.
-                  </p>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* Existing adset */}
-          {selectedStore && mode === "existing" && (
-            <div>
-              <label className="block text-xs text-gray-400 mb-1.5">
-                Target adset — all {subjects.length} ads land here
-              </label>
-              {loadingAdsets ? (
-                <div className="flex items-center gap-2 text-xs text-gray-500 py-2">
-                  <Loader2 size={12} className="animate-spin" />
-                  Loading adsets from scaling campaign…
-                </div>
-              ) : adsets.length === 0 ? (
-                <div className="text-xs text-yellow-400 p-2 bg-yellow-900/20 border border-yellow-700/40 rounded-lg">
-                  No adsets in scaling campaign. Switch to &quot;Clone per
-                  ad&quot; to create one from a template.
+                  No adsets in scaling campaign yet. &quot;+ New&quot; is
+                  unavailable until one exists — drop ads into existing
+                  adsets instead, or create one in Ads Manager first.
                 </div>
               ) : (
                 <select
-                  value={selectedAdsetId}
-                  onChange={(e) => setSelectedAdsetId(e.target.value)}
+                  value={templateAdsetId}
+                  onChange={(e) => setTemplateAdsetId(e.target.value)}
                   disabled={submitting || done}
                   className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500"
                 >
-                  <option value="">— Pick adset —</option>
+                  <option value="">— Pick template adset —</option>
                   {adsets.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.name}
@@ -553,8 +648,8 @@ export function PromoteBulkToScalingModal({
                 <CheckCircle2 size={14} />
               )}
               {submitting
-                ? `Copying ${tally.succeeded + tally.failed + 1}/${subjects.length}…`
-                : `Promote ${subjects.length} ${subjects.length === 1 ? "ad" : "ads"}`}
+                ? `Copying ${Math.min(tally.succeeded + tally.failed + 1, destCounts.active)}/${destCounts.active}…`
+                : `Promote ${destCounts.active} of ${subjects.length} ${subjects.length === 1 ? "ad" : "ads"}`}
             </button>
           )}
         </div>
