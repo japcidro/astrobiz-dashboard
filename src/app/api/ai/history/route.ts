@@ -42,10 +42,12 @@ export async function GET(request: Request) {
     return Response.json({ error: error.message }, { status: 500 });
   }
 
-  return Response.json({ generations: data || [] });
+  return Response.json({ history: data || [], generations: data || [] });
 }
 
-// POST — save a generation
+// POST — save or update a generation thread.
+// If `id` is passed, updates that row (so the running conversation accumulates
+// in one thread instead of a new row per response). Otherwise inserts.
 export async function POST(request: Request) {
   const employee = await getEmployee();
   if (!employee) {
@@ -53,7 +55,8 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { store_name, tool_type, input_data, output_data } = body as {
+  const { id, store_name, tool_type, input_data, output_data } = body as {
+    id?: string;
     store_name: string;
     tool_type: string;
     input_data: unknown;
@@ -68,6 +71,31 @@ export async function POST(request: Request) {
   }
 
   const supabase = await createClient();
+
+  if (id) {
+    // Update existing thread. Only allow the owner (or admin/marketing, who
+    // share threads in the GET handler) to mutate it.
+    let updateQuery = supabase
+      .from("ai_generations")
+      .update({ input_data, output_data })
+      .eq("id", id);
+
+    if (!["admin", "marketing"].includes(employee.role)) {
+      updateQuery = updateQuery.eq("employee_id", employee.id);
+    }
+
+    const { data, error } = await updateQuery.select("id").maybeSingle();
+
+    if (error) {
+      return Response.json({ error: error.message }, { status: 500 });
+    }
+    if (!data) {
+      // Row not found / not owned — fall through to insert so the thread
+      // isn't lost when the id ref gets stale.
+    } else {
+      return Response.json({ success: true, id: data.id });
+    }
+  }
 
   const { data, error } = await supabase
     .from("ai_generations")
