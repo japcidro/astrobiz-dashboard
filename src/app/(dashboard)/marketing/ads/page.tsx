@@ -26,6 +26,10 @@ import {
   PromoteToScalingModal,
   type PromoteSubject,
 } from "@/components/marketing/promote-to-scaling-modal";
+import {
+  PromoteBulkToScalingModal,
+  type BulkPromoteSubject,
+} from "@/components/marketing/promote-bulk-to-scaling-modal";
 
 const DATE_PRESETS: { label: string; value: DatePreset }[] = [
   { label: "Today", value: "today" },
@@ -314,6 +318,13 @@ export default function AdsPage() {
     setSelectedAdset(null);
   }, [datePreset, filterAccount]);
 
+  // Clear bulk selection whenever the user leaves adset drill or the
+  // scope shifts (different campaign, account, or date range).
+  useEffect(() => {
+    setSelectedAdsetIds(new Set());
+    setSelectionAnchor(null);
+  }, [drillLevel, selectedCampaign, filterAccount, datePreset]);
+
   // Lazy-load FB creative preview links when drilled to ad level.
   // /all-ads no longer returns creative{} (too slow, was causing
   // timeouts). We fetch preview/thumbnail only for the ads currently
@@ -338,6 +349,15 @@ export default function AdsPage() {
   const [promoteSubject, setPromoteSubject] =
     useState<PromoteSubject | null>(null);
   const [promoteToast, setPromoteToast] = useState<string | null>(null);
+
+  // Adset-level multi-select for bulk promote. selectedAdsetIds is the set
+  // of adset entity_ids currently checked; selectionAnchor is the visible
+  // sorted-index of the last-toggled row, for shift-range selection.
+  const [selectedAdsetIds, setSelectedAdsetIds] = useState<Set<string>>(
+    new Set()
+  );
+  const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
+  const [bulkPromoteOpen, setBulkPromoteOpen] = useState(false);
 
   useEffect(() => {
     if (drillLevel !== "ad" || !selectedCampaign || !selectedAdset) return;
@@ -641,6 +661,50 @@ export default function AdsPage() {
     return filteredRows;
   }, [filteredRows, drillLevel, selectedCampaign, selectedAdset]);
 
+  // Adset-level bulk-promote eligibility, keyed by adset_id.
+  //   ad: the sole child ad (present only when the adset has exactly 1)
+  //   reason: null if eligible; otherwise a short tooltip explaining why
+  //           the checkbox is disabled.
+  const adsetPromoteEligibility = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        ad: AdRow | null;
+        reason: string | null;
+      }
+    >();
+    if (drillLevel !== "adset" || !selectedCampaign) return map;
+    const campaignRows = filteredRows.filter(
+      (r) => r.campaign === selectedCampaign
+    );
+    const byAdsetId = new Map<string, AdRow[]>();
+    for (const row of campaignRows) {
+      const list = byAdsetId.get(row.adset_id) ?? [];
+      list.push(row);
+      byAdsetId.set(row.adset_id, list);
+    }
+    for (const [adsetId, ads] of byAdsetId) {
+      if (ads.length !== 1) {
+        map.set(adsetId, {
+          ad: null,
+          reason:
+            ads.length === 0
+              ? "No ads under this adset"
+              : "Multiple ads — drill in to pick one",
+        });
+        continue;
+      }
+      const ad = ads[0];
+      const info = scalingInfo.get(ad.ad_id);
+      if (info?.in_scaling || info?.self_is_scaling) {
+        map.set(adsetId, { ad, reason: "Already promoted" });
+        continue;
+      }
+      map.set(adsetId, { ad, reason: null });
+    }
+    return map;
+  }, [drillLevel, selectedCampaign, filteredRows, scalingInfo]);
+
   // Build display data based on drill level
   const displayData = useMemo(() => {
     if (drillLevel === "campaign") {
@@ -684,6 +748,99 @@ export default function AdsPage() {
     });
     return rows;
   }, [displayData, sortKey, sortDir]);
+
+  // Ordered list of eligible adset_ids in the currently displayed sort
+  // order — needed so shift-range selection matches what the user sees.
+  const sortedEligibleAdsetIds = useMemo(() => {
+    if (drillLevel !== "adset") return [] as string[];
+    const out: string[] = [];
+    for (const row of sortedData) {
+      const agg = row as unknown as AggRow;
+      const entry = adsetPromoteEligibility.get(agg.entity_id);
+      if (entry && !entry.reason) out.push(agg.entity_id);
+    }
+    return out;
+  }, [drillLevel, sortedData, adsetPromoteEligibility]);
+
+  // Click handler for row checkboxes. `index` is the visible sorted index.
+  // Mirrors FB Ads Manager behavior: plain click toggles one, shift-click
+  // range-selects eligibles between anchor and current, cmd/ctrl additive.
+  const handleCheckboxClick = (
+    index: number,
+    adsetId: string,
+    event: React.MouseEvent<HTMLInputElement>
+  ) => {
+    event.stopPropagation();
+    const entry = adsetPromoteEligibility.get(adsetId);
+    if (!entry || entry.reason) return;
+
+    if (event.shiftKey && selectionAnchor !== null) {
+      const [lo, hi] =
+        selectionAnchor <= index
+          ? [selectionAnchor, index]
+          : [index, selectionAnchor];
+      setSelectedAdsetIds((prev) => {
+        const next = new Set(prev);
+        for (let i = lo; i <= hi; i++) {
+          const row = sortedData[i] as unknown as AggRow | undefined;
+          if (!row) continue;
+          const ent = adsetPromoteEligibility.get(row.entity_id);
+          if (ent && !ent.reason) next.add(row.entity_id);
+        }
+        return next;
+      });
+      return;
+    }
+
+    // Plain or cmd/ctrl click — toggle just this one, update anchor.
+    setSelectedAdsetIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(adsetId)) next.delete(adsetId);
+      else next.add(adsetId);
+      return next;
+    });
+    setSelectionAnchor(index);
+  };
+
+  // Select-all header checkbox tri-state helpers.
+  const allEligibleCount = sortedEligibleAdsetIds.length;
+  const selectedEligibleCount = sortedEligibleAdsetIds.reduce(
+    (n, id) => (selectedAdsetIds.has(id) ? n + 1 : n),
+    0
+  );
+  const headerCheckboxState: "none" | "some" | "all" =
+    selectedEligibleCount === 0
+      ? "none"
+      : selectedEligibleCount === allEligibleCount && allEligibleCount > 0
+        ? "all"
+        : "some";
+
+  const toggleSelectAll = () => {
+    if (headerCheckboxState === "all") {
+      setSelectedAdsetIds(new Set());
+      setSelectionAnchor(null);
+    } else {
+      setSelectedAdsetIds(new Set(sortedEligibleAdsetIds));
+    }
+  };
+
+  // Build the subjects payload for the bulk modal from the current
+  // selection. Skips adsets that are no longer eligible (e.g. data
+  // refreshed mid-selection and ad is now in scaling).
+  const bulkSubjects = useMemo<BulkPromoteSubject[]>(() => {
+    const out: BulkPromoteSubject[] = [];
+    for (const adsetId of selectedAdsetIds) {
+      const entry = adsetPromoteEligibility.get(adsetId);
+      if (!entry || entry.reason || !entry.ad) continue;
+      out.push({
+        ad_id: entry.ad.ad_id,
+        ad_name: entry.ad.ad,
+        adset_name: entry.ad.adset,
+        thumbnail_url: entry.ad.thumbnail_url,
+      });
+    }
+    return out;
+  }, [selectedAdsetIds, adsetPromoteEligibility]);
 
   // Totals for summary bar
   const totals = useMemo(() => {
@@ -1191,6 +1348,23 @@ export default function AdsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-700/50">
+                {/* Bulk-select column (adset drill only) */}
+                {drillLevel === "adset" && (
+                  <th className="px-2 py-3 w-8 text-center">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all eligible adsets"
+                      checked={headerCheckboxState === "all"}
+                      ref={(el) => {
+                        if (el)
+                          el.indeterminate = headerCheckboxState === "some";
+                      }}
+                      disabled={allEligibleCount === 0}
+                      onChange={toggleSelectAll}
+                      className="w-3.5 h-3.5 accent-orange-500 cursor-pointer disabled:cursor-not-allowed"
+                    />
+                  </th>
+                )}
                 {/* Toggle column (admin only) */}
                 {isAdmin && (
                   <th className="px-2 py-3 w-10" />
@@ -1326,7 +1500,11 @@ export default function AdsPage() {
                   <tr key={i} className="border-b border-gray-700/20">
                     <td
                       className="px-3 py-3"
-                      colSpan={METRIC_COLS.length + (isAdmin ? 4 : 3)}
+                      colSpan={
+                      METRIC_COLS.length +
+                      (isAdmin ? 4 : 3) +
+                      (drillLevel === "adset" ? 1 : 0)
+                    }
                     >
                       <div className="h-4 bg-gray-700/40 rounded animate-pulse" />
                     </td>
@@ -1335,7 +1513,11 @@ export default function AdsPage() {
               ) : sortedData.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={METRIC_COLS.length + (isAdmin ? 4 : 3)}
+                    colSpan={
+                      METRIC_COLS.length +
+                      (isAdmin ? 4 : 3) +
+                      (drillLevel === "adset" ? 1 : 0)
+                    }
                     className="px-3 py-8 text-center text-gray-500"
                   >
                     <p>No ad data found for this period.</p>
@@ -1358,6 +1540,11 @@ export default function AdsPage() {
                       ? (rowData.ad as string)
                       : (rowData.name as string);
 
+                  const eligibility =
+                    drillLevel === "adset"
+                      ? adsetPromoteEligibility.get(entityId)
+                      : null;
+
                   return (
                     <tr
                       key={i}
@@ -1366,6 +1553,31 @@ export default function AdsPage() {
                         isClickable ? "cursor-pointer" : ""
                       }`}
                     >
+                      {/* Bulk-select checkbox (adset drill only) */}
+                      {drillLevel === "adset" && (
+                        <td
+                          className="px-2 py-2.5 text-center"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            type="checkbox"
+                            aria-label="Select adset for bulk promote"
+                            checked={selectedAdsetIds.has(entityId)}
+                            disabled={!eligibility || !!eligibility.reason}
+                            title={
+                              eligibility?.reason ??
+                              "Select to bulk-promote this ad"
+                            }
+                            onClick={(e) =>
+                              handleCheckboxClick(i, entityId, e)
+                            }
+                            onChange={() => {
+                              // handled in onClick to get modifier keys
+                            }}
+                            className="w-3.5 h-3.5 accent-orange-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+                          />
+                        </td>
+                      )}
                       {/* Toggle switch (admin only) — now shown at every
                           drill level. Gated internally by isToggleable so
                           UNKNOWN/DELETED entities don't get a bogus toggle. */}
@@ -1654,6 +1866,58 @@ export default function AdsPage() {
             setTimeout(() => setPromoteToast(null), 5000);
           }}
         />
+      )}
+
+      {bulkPromoteOpen && (
+        <PromoteBulkToScalingModal
+          subjects={bulkSubjects}
+          campaign_name={selectedCampaign}
+          onClose={() => setBulkPromoteOpen(false)}
+          onComplete={({ succeeded, failed }) => {
+            setBulkPromoteOpen(false);
+            setSelectedAdsetIds(new Set());
+            setSelectionAnchor(null);
+            const parts: string[] = [];
+            if (succeeded > 0) parts.push(`${succeeded} promoted`);
+            if (failed > 0) parts.push(`${failed} failed`);
+            setPromoteToast(
+              parts.length > 0
+                ? `Bulk promote: ${parts.join(", ")}.`
+                : "Bulk promote finished."
+            );
+            fetchData(true);
+            setTimeout(() => setPromoteToast(null), 6000);
+          }}
+        />
+      )}
+
+      {/* Floating bulk-action bar — adset drill, selection > 0 */}
+      {drillLevel === "adset" && selectedAdsetIds.size > 0 && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl px-4 py-2.5 flex items-center gap-3 text-sm">
+          <span className="text-gray-300">
+            <span className="text-white font-medium">
+              {bulkSubjects.length}
+            </span>{" "}
+            {bulkSubjects.length === 1 ? "adset" : "adsets"} selected
+          </span>
+          <button
+            onClick={() => {
+              setSelectedAdsetIds(new Set());
+              setSelectionAnchor(null);
+            }}
+            className="text-xs text-gray-400 hover:text-white px-2 py-1 cursor-pointer"
+          >
+            Clear
+          </button>
+          <button
+            onClick={() => setBulkPromoteOpen(true)}
+            disabled={bulkSubjects.length === 0}
+            className="flex items-center gap-1.5 bg-orange-600 hover:bg-orange-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium px-3 py-1.5 rounded-lg cursor-pointer"
+          >
+            <TrendingUp size={13} />
+            Promote {bulkSubjects.length} →&nbsp;Scaling
+          </button>
+        </div>
       )}
 
       {promoteToast && (
