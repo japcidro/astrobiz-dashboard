@@ -665,12 +665,16 @@ export default function AdsPage() {
   //   ad: the sole child ad (present only when the adset has exactly 1)
   //   reason: null if eligible; otherwise a short tooltip explaining why
   //           the checkbox is disabled.
+  //   already_scaled: true when the child ad already has a scaling copy.
+  //           Still eligible — user may want to promote again (e.g. into
+  //           a new adset). Surfaced as a warning in the bulk modal.
   const adsetPromoteEligibility = useMemo(() => {
     const map = new Map<
       string,
       {
         ad: AdRow | null;
         reason: string | null;
+        already_scaled: boolean;
       }
     >();
     if (drillLevel !== "adset" || !selectedCampaign) return map;
@@ -691,16 +695,14 @@ export default function AdsPage() {
             ads.length === 0
               ? "No ads under this adset"
               : "Multiple ads — drill in to pick one",
+          already_scaled: false,
         });
         continue;
       }
       const ad = ads[0];
       const info = scalingInfo.get(ad.ad_id);
-      if (info?.in_scaling || info?.self_is_scaling) {
-        map.set(adsetId, { ad, reason: "Already promoted" });
-        continue;
-      }
-      map.set(adsetId, { ad, reason: null });
+      const already_scaled = !!(info?.in_scaling || info?.self_is_scaling);
+      map.set(adsetId, { ad, reason: null, already_scaled });
     }
     return map;
   }, [drillLevel, selectedCampaign, filteredRows, scalingInfo]);
@@ -837,6 +839,7 @@ export default function AdsPage() {
         ad_name: entry.ad.ad,
         adset_name: entry.ad.adset,
         thumbnail_url: entry.ad.thumbnail_url,
+        already_scaled: entry.already_scaled,
       });
     }
     return out;

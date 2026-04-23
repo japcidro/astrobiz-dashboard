@@ -18,6 +18,10 @@ export interface BulkPromoteSubject {
   // cloning per ad, so scaling traceability mirrors the testing adset.
   adset_name: string;
   thumbnail_url?: string | null;
+  // True when this ad already has a scaling copy. Selecting it is still
+  // allowed (e.g. user wants a fresh copy in a different adset) but we
+  // surface a warning so they know a duplicate will exist.
+  already_scaled?: boolean;
 }
 
 interface Props {
@@ -411,8 +415,16 @@ export function PromoteBulkToScalingModal({
                       <div className="w-10 aspect-video bg-gray-800 rounded border border-gray-700 flex-shrink-0" />
                     )}
                     <div className="min-w-0 flex-1">
-                      <p className="text-xs text-white font-medium truncate">
-                        {s.ad_name}
+                      <p className="text-xs text-white font-medium truncate flex items-center gap-1.5">
+                        <span className="truncate">{s.ad_name}</span>
+                        {s.already_scaled && (
+                          <span
+                            className="flex-shrink-0 text-[9px] font-semibold px-1.5 py-0.5 rounded bg-orange-900/40 text-orange-300 border border-orange-700/40"
+                            title="This ad already has a scaling copy. Promoting again will create a duplicate."
+                          >
+                            SCALED
+                          </span>
+                        )}
                       </p>
                       <p className="text-[11px] text-gray-500 truncate">
                         from {s.adset_name}
