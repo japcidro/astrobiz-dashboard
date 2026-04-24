@@ -3,8 +3,10 @@ import { getEmployee } from "@/lib/supabase/get-employee";
 import { matchSenderToStore } from "@/lib/profit/store-matching";
 import { classifyJtDelivery, getProvinceCutoff } from "@/lib/profit/province-tiers";
 import type { JtClassification } from "@/lib/profit/types";
+import { buildTrackingToOrderMap, lookupOrderForWaybill } from "@/lib/shopify/tracking-to-order";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 interface JtUploadRow {
   waybill: string;
@@ -75,6 +77,19 @@ export async function POST(request: Request) {
 
   const supabase = await createClient();
 
+  // Build tracking_number → Shopify order map ONCE per upload. 30-day window
+  // covers the typical J&T file (most parcels submitted 0-7 days after order
+  // placement, plus margin for late-uploaded historical batches). If the file
+  // contains older rows, they'll be unmatched here and picked up by the
+  // /api/admin/jt-backfill-shopify-link endpoint.
+  let trackingMap: Awaited<ReturnType<typeof buildTrackingToOrderMap>>;
+  try {
+    trackingMap = await buildTrackingToOrderMap(supabase, 30);
+  } catch (err) {
+    console.error("[jt-upload] tracking map build failed:", err);
+    trackingMap = new Map();
+  }
+
   // Process each row
   const dbRows = [];
   const errors: string[] = [];
@@ -86,6 +101,7 @@ export async function POST(request: Request) {
     returned_aged: 0,
     pending: 0,
   };
+  let matchedToShopify = 0;
 
   for (const row of rows) {
     try {
@@ -119,6 +135,14 @@ export async function POST(request: Request) {
 
       const signingParsed = parseJtDate(row.signing_time);
 
+      // Try to link this parcel back to its Shopify order via the tracking
+      // number (== waybill) the VA entered when fulfilling. When matched, the
+      // shopify_order_date column lets profit/daily attribute returns to the
+      // ORDER's date instead of the J&T submission date — which is the only
+      // way to get cohort-correct per-date margins given pick-pack lag.
+      const orderMatch = lookupOrderForWaybill(trackingMap, waybill);
+      if (orderMatch) matchedToShopify++;
+
       dbRows.push({
         waybill,
         order_status: row.order_status || "",
@@ -133,13 +157,17 @@ export async function POST(request: Request) {
         item_name: row.item_name || null,
         num_items: parseInt(String(row.num_items || 0)) || 0,
         item_value: parseFloat(String(row.item_value || 0)) || 0,
-        store_name: storeName || null,
+        store_name: storeName || orderMatch?.store_name || null,
         payment_method: row.payment_method || null,
         rts_reason: row.rts_reason || null,
         days_since_submit: daysSinceSubmit,
         tier_cutoff: tierCutoff,
         is_delivered: isDelivered,
         is_returned: isReturned,
+        shopify_order_id: orderMatch?.shopify_order_id ?? null,
+        shopify_order_name: orderMatch?.shopify_order_name ?? null,
+        shopify_order_date: orderMatch?.shopify_order_date ?? null,
+        shopify_customer_email: orderMatch?.shopify_customer_email ?? null,
       });
 
       // Update summary
@@ -215,6 +243,8 @@ export async function POST(request: Request) {
     updated: 0,
     total: dbRows.length,
     protected_returns: protectedCount,
+    matched_to_shopify: matchedToShopify,
+    unmatched_to_shopify: dbRows.length - matchedToShopify,
     summary,
     errors,
   });

@@ -464,62 +464,94 @@ export async function GET(request: Request) {
   }
 
   // --- 5. Fetch J&T delivery data ---
+  // Strategy: prefer shopify_order_date for grouping when the parcel has been
+  // linked back to its Shopify order (waybill ↔ tracking_number match). That
+  // gives cohort-correct per-date margins — the row for date D shows revenue
+  // from D's orders AND returns from those same orders, regardless of when
+  // the J&T parcel was actually submitted (which lags 0-3 days behind order
+  // creation due to pick-pack).
+  //
+  // For unmatched rows (linker hasn't found a Shopify order — unfilled
+  // tracking, manual fulfillment, or pre-migration history), fall back to
+  // submission_date so the data still surfaces, just less precisely.
+  //
+  // Two queries combined: matched-by-order-date + unmatched-by-submission-date.
   const shippingByDateStore = new Map<string, number>();
   const returnsByDateStore = new Map<string, number>();
   const inTransitByDate = new Map<string, number>();
 
   try {
-    // submission_date is stored as ISO UTC (e.g. "2026-04-11T16:00:00.000Z")
-    // but startDate/endDate are PHT date strings (e.g. "2026-04-12").
-    // Convert to UTC boundaries so parcels near midnight aren't excluded.
     const jtStartUtc = `${startDate}T00:00:00+08:00`;
     const jtEndUtc = `${endDate}T23:59:59+08:00`;
+    const jtFields =
+      "submission_date, shopify_order_date, shopify_order_id, store_name, shipping_cost, item_value, cod_amount, is_delivered, is_returned, classification";
 
-    let jtQuery = supabase
+    let matchedQuery = supabase
       .from("jt_deliveries")
-      .select("submission_date, store_name, shipping_cost, item_value, cod_amount, is_delivered, is_returned, classification")
+      .select(jtFields)
+      .not("shopify_order_id", "is", null)
+      .gte("shopify_order_date", startDate)
+      .lte("shopify_order_date", endDate);
+
+    let unmatchedQuery = supabase
+      .from("jt_deliveries")
+      .select(jtFields)
+      .is("shopify_order_id", null)
       .gte("submission_date", jtStartUtc)
       .lte("submission_date", jtEndUtc);
 
     if (storeFilter !== "ALL") {
-      jtQuery = jtQuery.ilike("store_name", storeFilter);
+      matchedQuery = matchedQuery.ilike("store_name", storeFilter);
+      unmatchedQuery = unmatchedQuery.ilike("store_name", storeFilter);
     }
 
-    const { data: jtData, error: jtError } = await jtQuery;
+    const [matchedRes, unmatchedRes] = await Promise.all([
+      matchedQuery,
+      unmatchedQuery,
+    ]);
 
-    if (jtError) {
-      warnings.push(`J&T data: ${jtError.message}`);
-    } else {
-      for (const row of jtData || []) {
-        if (!row.submission_date) continue;
+    if (matchedRes.error) warnings.push(`J&T matched: ${matchedRes.error.message}`);
+    if (unmatchedRes.error) warnings.push(`J&T unmatched: ${unmatchedRes.error.message}`);
+
+    const jtData = [
+      ...(matchedRes.data ?? []),
+      ...(unmatchedRes.data ?? []),
+    ];
+
+    for (const row of jtData) {
+      // Pick the date this parcel should be attributed to.
+      let dateStr: string | null = null;
+      if (row.shopify_order_date) {
+        // Already a YYYY-MM-DD PHT calendar date.
+        dateStr = String(row.shopify_order_date);
+      } else if (row.submission_date) {
         const d = new Date(row.submission_date);
-        if (isNaN(d.getTime())) continue;
-        // Convert to PHT date to match Shopify/FB date grouping
-        const dateStr = toPhtDateStr(row.submission_date);
-        const key = `${dateStr}::${(row.store_name || "UNKNOWN").toUpperCase()}`;
+        if (!isNaN(d.getTime())) dateStr = toPhtDateStr(row.submission_date);
+      }
+      if (!dateStr) continue;
 
-        if (row.is_delivered) {
-          shippingByDateStore.set(
-            key,
-            (shippingByDateStore.get(key) || 0) + (parseFloat(row.shipping_cost) || 0)
-          );
-        }
-        if (row.is_returned) {
-          // Returns cost = lost revenue (COD amount customer didn't pay) + wasted shipping
-          // Use cod_amount (actual selling price) over item_value (declared/insured value)
-          const codAmount = parseFloat(row.cod_amount) || 0;
-          const itemValue = parseFloat(row.item_value) || 0;
-          const lostRevenue = codAmount > 0 ? codAmount : itemValue;
-          const shipCost = parseFloat(row.shipping_cost) || 0;
-          returnsByDateStore.set(
-            key,
-            (returnsByDateStore.get(key) || 0) + lostRevenue + shipCost
-          );
-        }
-        // Count in-transit parcels per submission date
-        if (row.classification === "In Transit" || row.classification === "Pending") {
-          inTransitByDate.set(dateStr, (inTransitByDate.get(dateStr) || 0) + 1);
-        }
+      const key = `${dateStr}::${(row.store_name || "UNKNOWN").toUpperCase()}`;
+
+      if (row.is_delivered) {
+        shippingByDateStore.set(
+          key,
+          (shippingByDateStore.get(key) || 0) + (parseFloat(row.shipping_cost) || 0)
+        );
+      }
+      if (row.is_returned) {
+        // Returns cost = lost revenue (COD amount customer didn't pay) + wasted shipping
+        // Use cod_amount (actual selling price) over item_value (declared/insured value)
+        const codAmount = parseFloat(row.cod_amount) || 0;
+        const itemValue = parseFloat(row.item_value) || 0;
+        const lostRevenue = codAmount > 0 ? codAmount : itemValue;
+        const shipCost = parseFloat(row.shipping_cost) || 0;
+        returnsByDateStore.set(
+          key,
+          (returnsByDateStore.get(key) || 0) + lostRevenue + shipCost
+        );
+      }
+      if (row.classification === "In Transit" || row.classification === "Pending") {
+        inTransitByDate.set(dateStr, (inTransitByDate.get(dateStr) || 0) + 1);
       }
     }
   } catch (err) {
