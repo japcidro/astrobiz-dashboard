@@ -34,11 +34,11 @@
     },
     {
       "path": "/api/cron/briefing-morning",
-      "schedule": "0 22 * * *"
+      "schedule": "5 22 * * *"
     },
     {
       "path": "/api/cron/briefing-evening",
-      "schedule": "0 14 * * *"
+      "schedule": "5 14 * * *"
     },
     {
       "path": "/api/cron/briefing-weekly",

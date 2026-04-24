@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { BriefingType, PeriodRange } from "./types";
+import type { BriefingData, BriefingType, PeriodRange } from "./types";
 import { getPeriod, phtDateString } from "./period";
 import { collectBriefingData } from "./collect";
 import { generateAISummary } from "./summarize";
@@ -36,18 +36,35 @@ export async function runBriefing(
   const periodStart = phtDateString(period.start);
   const periodEnd = phtDateString(period.end);
 
-  // Idempotency: if we already have a briefing for this (type, start, end),
-  // skip collection and reuse it.
+  // Idempotency: if a briefing for this (type, start, end) already has real
+  // numbers, reuse it. If the existing row is all zeros (cron fired during
+  // an FB rate-limit / Shopify cold-start window and saved an empty briefing)
+  // we delete it and re-collect — otherwise the dashboard stays stuck on the
+  // bad row forever and the CEO gets ₱0 morning emails until someone hits
+  // the manual Rebuild button.
   const { data: existing } = await supabase
     .from("briefings")
-    .select("id")
+    .select("id, data")
     .eq("type", type)
     .eq("period_start", periodStart)
     .eq("period_end", periodEnd)
     .maybeSingle();
 
   if (existing?.id) {
-    return { success: true, briefing_id: existing.id, email: { sent: 0, error: "already exists" } };
+    const existingData = existing.data as Partial<BriefingData> | null;
+    const hasRealData =
+      !!existingData &&
+      ((existingData.revenue ?? 0) > 0 ||
+        (existingData.orders ?? 0) > 0 ||
+        (existingData.ad_spend ?? 0) > 0);
+    if (hasRealData) {
+      return {
+        success: true,
+        briefing_id: existing.id,
+        email: { sent: 0, error: "already exists" },
+      };
+    }
+    await supabase.from("briefings").delete().eq("id", existing.id);
   }
 
   // 1. Collect data

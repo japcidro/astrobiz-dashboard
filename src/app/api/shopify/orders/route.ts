@@ -186,9 +186,14 @@ function computeDateRange(
     }
 
     case "custom":
+      // dateFrom / dateTo arrive as YYYY-MM-DD PHT calendar dates from the
+      // briefing collector and admin filters. Shopify needs full ISO 8601 —
+      // passing the bare date treats it as UTC midnight, which makes a
+      // single-day range collapse into a 0-second window and returns no
+      // orders. Anchor to PHT day boundaries to match the dashboard semantics.
       return {
-        createdAtMin: dateFrom || nowUtc.toISOString(),
-        createdAtMax: dateTo || nowUtc.toISOString(),
+        createdAtMin: dateFrom ? `${dateFrom}T00:00:00+08:00` : nowUtc.toISOString(),
+        createdAtMax: dateTo ? `${dateTo}T23:59:59+08:00` : nowUtc.toISOString(),
       };
 
     default:

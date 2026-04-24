@@ -135,7 +135,9 @@ export async function collectBriefingData(
 
   // 2. Ads — pass date_from/date_to so FB insights uses time_range instead of
   // date_preset (presets can't target arbitrary historical dates).
-  const adsPromise = safeFetch<{ ads?: AdRow[]; totals?: { spend: number; roas: number; cpa: number; purchases: number } }>(
+  // The all-ads endpoint returns rows under `data` (not `ads`); using the
+  // wrong key here silently emptied top_ads / worst_ads on every briefing.
+  const adsPromise = safeFetch<{ data?: AdRow[]; totals?: { spend: number; roas: number; cpa: number; purchases: number } }>(
     `${baseUrl}/api/facebook/all-ads?${new URLSearchParams({
       date_preset: period.datePreset,
       date_from: dateFrom,
@@ -178,7 +180,7 @@ export async function collectBriefingData(
   const cpa = fbCpa > 0 ? fbCpa : blendedCpa;
 
   // --- Top ads (by ROAS among ads with spend) ---
-  const ads = (adsData?.ads ?? []).filter((a) => a.spend >= 500);
+  const ads = (adsData?.data ?? []).filter((a) => a.spend >= 500);
   const top_ads: TopAd[] = [...ads]
     .sort((a, b) => b.roas * b.spend - a.roas * a.spend)
     .slice(0, 3)
@@ -310,15 +312,30 @@ export async function collectBriefingData(
   };
 
   // --- Stock movement (from inventory_snapshots) ---
+  // Snapshots are taken once a day (cron at 02:00 UTC = 10:00 PHT), so the
+  // snapshot dated D represents stock at start of D. To get a real "what
+  // changed" delta:
+  //   - "before" snapshot = the day BEFORE periodStart (start-of-period stock)
+  //   - "after"  snapshot = the day AFTER  periodEnd   (end-of-period stock)
+  // Previous logic used periodStart vs periodEnd, which on single-day
+  // briefings (start === end) compared a snapshot to itself → all deltas 0
+  // → stock_movement always empty.
+  const beforeSnapDate = phtDateString(
+    new Date(period.start.getTime() - 24 * 60 * 60 * 1000)
+  );
+  const afterSnapDate = phtDateString(
+    new Date(period.end.getTime() + 24 * 60 * 60 * 1000)
+  );
+
   const { data: todaySnaps } = await supabase
     .from("inventory_snapshots")
     .select("store_name, sku, product_title, stock")
-    .eq("snapshot_date", periodEndDate);
+    .eq("snapshot_date", afterSnapDate);
 
   const { data: startSnaps } = await supabase
     .from("inventory_snapshots")
     .select("store_name, sku, stock")
-    .eq("snapshot_date", periodStartDate);
+    .eq("snapshot_date", beforeSnapDate);
 
   const startMap = new Map<string, number>();
   for (const r of (startSnaps ?? []) as { store_name: string; sku: string | null; stock: number }[]) {
