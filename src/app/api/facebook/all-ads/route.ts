@@ -2,7 +2,15 @@ import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { getEmployee } from "@/lib/supabase/get-employee";
 import { buildCacheKey, getCachedResponse, setCachedResponse } from "@/lib/data-cache";
+import {
+  RateLimitedError,
+  isRateLimitError,
+  parseUsageHeader,
+  recordRateLimit,
+  getBlockedUntil,
+} from "@/lib/facebook/rate-limit";
 import type { DatePreset } from "@/lib/facebook/types";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +19,12 @@ const FB_API_BASE = "https://graph.facebook.com/v21.0";
 // Structure cache for campaigns/adsets/ads statuses — rarely changes
 const structureCache = new Map<string, { data: unknown; timestamp: number }>();
 const STRUCTURE_CACHE_TTL = 30 * 60 * 1000; // 30 minutes for structure
+
+// Manual-refresh throttle. If the last successful refresh for this
+// scope happened less than THROTTLE_MS ago, a new ?refresh=1 request
+// is silently downgraded to a cache read. Prevents the Refresh button
+// from nuking the FB rate budget when multiple users press it.
+const MANUAL_REFRESH_THROTTLE_MS = 5 * 60 * 1000;
 
 const INSIGHTS_FIELDS = [
   "account_name",
@@ -41,10 +55,11 @@ const ACCOUNT_STATUS_MAP: Record<number, string> = {
   101: "CLOSED",
 };
 
-async function fbFetchAll<T>(
+async function _fbFetchAllImpl<T>(
   url: string,
-  token?: string,
-  params?: Record<string, string>,
+  token: string | undefined,
+  params: Record<string, string> | undefined,
+  supabase: SupabaseClient,
   timeoutMs = 7000
 ): Promise<T[]> {
   const allData: T[] = [];
@@ -66,9 +81,59 @@ async function fbFetchAll<T>(
     } finally {
       clearTimeout(timer);
     }
+
+    // Best-effort usage telemetry — writes to fb_rate_limit_state.
+    const usageHeader =
+      res.headers.get("x-business-use-case-usage") ||
+      res.headers.get("x-ad-account-usage");
+    if (usageHeader) {
+      const { maxUsagePct } = parseUsageHeader(usageHeader);
+      if (maxUsagePct !== null) {
+        void recordRateLimit(supabase, { usagePct: maxUsagePct });
+      }
+    }
+
+    if (res.status === 429) {
+      const body = await res.json().catch(() => ({}));
+      const { message, waitSeconds } = isRateLimitError(body);
+      const blockedUntil = waitSeconds
+        ? new Date(Date.now() + waitSeconds * 1000)
+        : null;
+      await recordRateLimit(supabase, {
+        is429: true,
+        blockedUntil,
+        message: message ?? "Facebook rate limit (429)",
+      });
+      throw new RateLimitedError({
+        message: message ?? "Facebook rate limit",
+        status: 429,
+        blockedUntil,
+      });
+    }
+
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error?.message || `FB API error: ${res.status}`);
+      const body = await res.json().catch(() => ({}));
+      const { limited, code, message, waitSeconds } = isRateLimitError(body);
+      if (limited) {
+        const blockedUntil = waitSeconds
+          ? new Date(Date.now() + waitSeconds * 1000)
+          : null;
+        await recordRateLimit(supabase, {
+          is429: true,
+          blockedUntil,
+          message: message ?? "Facebook rate limit",
+        });
+        throw new RateLimitedError({
+          message: message ?? "Facebook rate limit",
+          status: res.status,
+          blockedUntil,
+          fbCode: code,
+        });
+      }
+      throw new Error(
+        (body as { error?: { message?: string } }).error?.message ||
+          `FB API error: ${res.status}`
+      );
     }
     const json = await res.json();
     allData.push(...(json.data || []));
@@ -125,6 +190,35 @@ export async function GET(request: Request) {
   // RLS on app_settings doesn't silently return empty FB token.
   const supabase = isCron ? createServiceClient() : await createClient();
 
+  // Local binding so we don't have to thread `supabase` through every
+  // call site — the FB rate-limit telemetry needs it.
+  const fbFetchAll = <T,>(
+    url: string,
+    token?: string,
+    params?: Record<string, string>,
+    timeoutMs?: number
+  ) => _fbFetchAllImpl<T>(url, token, params, supabase, timeoutMs ?? 7000);
+
+  // Manual-refresh throttle. If the dashboard hits this with ?refresh=1
+  // but a successful refresh ran < 5 min ago, downgrade to a normal
+  // cache read. Cron callers (isCron) bypass throttling.
+  const cacheScope = `ads:${useTimeRange ? `range:${dateFrom}:${dateTo}` : datePreset}:${accountFilter}:${includeZeroSpend ? "1" : "0"}`;
+  let throttledRefresh = false;
+  if (forceRefresh && !isCron) {
+    const { data: refreshState } = await supabase
+      .from("fb_refresh_state")
+      .select("refreshed_at")
+      .eq("scope", cacheScope)
+      .maybeSingle();
+    if (refreshState?.refreshed_at) {
+      const age = Date.now() - new Date(refreshState.refreshed_at).getTime();
+      if (age < MANUAL_REFRESH_THROTTLE_MS) {
+        throttledRefresh = true;
+      }
+    }
+  }
+  const effectiveForceRefresh = forceRefresh && !throttledRefresh;
+
   // Check Supabase cache first
   // v2 bumps the cache namespace — payload shape gained `name` fields and
   // (optionally) zero-activity ad rows, so old cache entries would be stale.
@@ -134,7 +228,7 @@ export async function GET(request: Request) {
     zero: includeZeroSpend ? "1" : "0",
   });
 
-  if (!forceRefresh) {
+  if (!effectiveForceRefresh) {
     const cached = await getCachedResponse(supabase, cacheKey);
     if (cached) {
       return Response.json({
@@ -142,8 +236,39 @@ export async function GET(request: Request) {
         role: employeeRole,
         refreshed_at: cached.refreshed_at,
         from_cache: true,
+        throttled_refresh: throttledRefresh,
       });
     }
+  }
+
+  // Preflight: if FB told us we're blocked, refuse new calls and serve
+  // any stale cache instead. Keeps the dashboard alive during a 429.
+  const blockedUntil = await getBlockedUntil(supabase);
+  if (blockedUntil) {
+    const { data: staleRow } = await supabase
+      .from("cached_api_data")
+      .select("response_data, refreshed_at")
+      .eq("cache_key", cacheKey)
+      .maybeSingle();
+    if (staleRow) {
+      return Response.json({
+        ...(staleRow.response_data as Record<string, unknown>),
+        role: employeeRole,
+        refreshed_at: staleRow.refreshed_at,
+        from_cache: true,
+        stale: true,
+        rate_limited: true,
+        blocked_until: blockedUntil.toISOString(),
+      });
+    }
+    return Response.json(
+      {
+        error: "Facebook is rate-limiting us — try again shortly.",
+        rate_limited: true,
+        blocked_until: blockedUntil.toISOString(),
+      },
+      { status: 503 }
+    );
   }
 
   const { data: tokenSetting } = await supabase
@@ -264,12 +389,24 @@ export async function GET(request: Request) {
         // entries lack names and would render blank rows for zero-activity ads.
         const structKey = `structure_v2:${account.id}`;
         const cachedStruct = structureCache.get(structKey);
-        const hasStructCache = !forceRefresh && cachedStruct && Date.now() - cachedStruct.timestamp < STRUCTURE_CACHE_TTL;
+        const hasStructCache = !effectiveForceRefresh && cachedStruct && Date.now() - cachedStruct.timestamp < STRUCTURE_CACHE_TTL;
 
         // Only fetch insights fresh — structure from cache if available
         type CampaignRaw = { id: string; name?: string; effective_status: string; daily_budget?: string; lifetime_budget?: string; updated_time?: string };
         type AdsetRaw = { id: string; name?: string; effective_status: string; campaign_id: string; daily_budget?: string; lifetime_budget?: string; updated_time?: string; start_time?: string; created_time?: string };
         type AdRaw = { id: string; name?: string; effective_status: string; adset_id: string; updated_time?: string };
+
+        // Helper: log + swallow per-account errors EXCEPT RateLimitedError,
+        // which must bubble so the outer handler serves stale cache instead
+        // of returning blank rows that get committed to the cache.
+        const swallow = <T,>(label: string, empty: T) => (e: unknown): T => {
+          if (e instanceof RateLimitedError) throw e;
+          console.error(
+            `[FB all-ads] ${label} fetch failed for ${account.name}:`,
+            e instanceof Error ? e.message : e
+          );
+          return empty;
+        };
 
         const [campaignsRaw, adsetsRaw, adsRaw, insightsData] = hasStructCache
           ? [
@@ -277,26 +414,20 @@ export async function GET(request: Request) {
               await fbFetchAll<Record<string, unknown>>(
                 `/${account.id}/insights`, token,
                 { fields: INSIGHTS_FIELDS, ...insightsDateParam, level: "ad", limit: "500" }
-              ).catch(() => [] as Array<Record<string, unknown>>),
+              ).catch(swallow("insights", [] as Array<Record<string, unknown>>)),
             ]
           : await Promise.all([
             fbFetchAll<CampaignRaw>(
               `/${account.id}/campaigns`,
               token,
               { fields: "id,name,effective_status,daily_budget,lifetime_budget,updated_time", limit: "500" }
-            ).catch((e) => {
-              console.error(`[FB all-ads] campaigns fetch failed for ${account.name}:`, e instanceof Error ? e.message : e);
-              return [] as CampaignRaw[];
-            }),
+            ).catch(swallow("campaigns", [] as CampaignRaw[])),
 
             fbFetchAll<AdsetRaw>(
               `/${account.id}/adsets`,
               token,
               { fields: "id,name,effective_status,campaign_id,daily_budget,lifetime_budget,updated_time,start_time,created_time", limit: "500" }
-            ).catch((e) => {
-              console.error(`[FB all-ads] adsets fetch failed for ${account.name}:`, e instanceof Error ? e.message : e);
-              return [] as AdsetRaw[];
-            }),
+            ).catch(swallow("adsets", [] as AdsetRaw[])),
 
             fbFetchAll<AdRaw>(
               `/${account.id}/ads`,
@@ -308,10 +439,7 @@ export async function GET(request: Request) {
                 fields: "id,name,effective_status,adset_id,updated_time",
                 limit: "500",
               }
-            ).catch((e) => {
-              console.error(`[FB all-ads] ads fetch failed for ${account.name}:`, e instanceof Error ? e.message : e);
-              return [] as AdRaw[];
-            }),
+            ).catch(swallow("ads", [] as AdRaw[])),
 
             fbFetchAll<Record<string, unknown>>(
               `/${account.id}/insights`,
@@ -322,10 +450,7 @@ export async function GET(request: Request) {
                 level: "ad",
                 limit: "500",
               }
-            ).catch((e) => {
-              console.error(`[FB all-ads] insights fetch failed for ${account.name}:`, e instanceof Error ? e.message : e);
-              return [] as Array<Record<string, unknown>>;
-            }),
+            ).catch(swallow("insights", [] as Array<Record<string, unknown>>)),
           ]);
 
         // Save structure to cache (campaigns/adsets/ads — not insights)
@@ -572,10 +697,50 @@ export async function GET(request: Request) {
     const refreshedAt = new Date().toISOString();
     if (!allUnknown) {
       setCachedResponse(supabase, "ads", cacheKey, responseData).catch(() => {});
+      // Track last successful refresh so the 5-min manual throttle works.
+      void supabase
+        .from("fb_refresh_state")
+        .upsert(
+          {
+            scope: cacheScope,
+            refreshed_at: refreshedAt,
+            triggered_by: isCron ? "cron" : `manual:${employeeRole}`,
+            status: "ok",
+          },
+          { onConflict: "scope" }
+        );
     }
 
     return Response.json({ ...responseData, role: employeeRole, refreshed_at: refreshedAt });
   } catch (e) {
+    if (e instanceof RateLimitedError) {
+      // Serve any stale cache rather than letting the dashboard go blank.
+      const { data: staleRow } = await supabase
+        .from("cached_api_data")
+        .select("response_data, refreshed_at")
+        .eq("cache_key", cacheKey)
+        .maybeSingle();
+      if (staleRow) {
+        return Response.json({
+          ...(staleRow.response_data as Record<string, unknown>),
+          role: employeeRole,
+          refreshed_at: staleRow.refreshed_at,
+          from_cache: true,
+          stale: true,
+          rate_limited: true,
+          blocked_until: e.blockedUntil?.toISOString() ?? null,
+          message: e.message,
+        });
+      }
+      return Response.json(
+        {
+          error: e.message,
+          rate_limited: true,
+          blocked_until: e.blockedUntil?.toISOString() ?? null,
+        },
+        { status: 503 }
+      );
+    }
     const message = e instanceof Error ? e.message : "Facebook API error";
     return Response.json({ error: message }, { status: 500 });
   }

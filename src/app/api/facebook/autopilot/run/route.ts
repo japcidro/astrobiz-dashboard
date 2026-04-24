@@ -206,8 +206,12 @@ async function handleRun(request: Request) {
 
   let rows: AdRow[] = [];
   try {
+    // No ?refresh=1 — reuse the standard 30-min Supabase cache so the
+    // hourly autopilot run doesn't burn extra FB calls when fresh data
+    // already exists. The ads refresh cron populates the cache on its
+    // own schedule.
     const adsRes = await fetch(
-      `${baseUrl}/api/facebook/all-ads?date_preset=today&account=ALL&refresh=1`,
+      `${baseUrl}/api/facebook/all-ads?date_preset=today&account=ALL`,
       {
         headers: forwardHeaders,
         cache: "no-store",

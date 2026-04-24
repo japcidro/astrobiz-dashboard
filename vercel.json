@@ -2,11 +2,15 @@
   "crons": [
     {
       "path": "/api/cron/refresh-data",
-      "schedule": "0 1 * * *"
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/refresh-scaling-detection",
+      "schedule": "10,40 * * * *"
     },
     {
       "path": "/api/facebook/autopilot/run",
-      "schedule": "0 * * * *"
+      "schedule": "0 */3 * * *"
     },
     {
       "path": "/api/cron/deconstruct-top-ads",

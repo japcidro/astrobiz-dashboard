@@ -263,6 +263,16 @@ export default function AdsPage() {
   const [lastRefreshed, setLastRefreshed] = useState<string>("");
   const [updating, setUpdating] = useState(false); // soft loading (has stale data)
 
+  // Rate-limit awareness so we can show a banner when FB pushes back.
+  // Set when the server returns rate_limited:true (either a 503 or a
+  // stale-cache response). Cleared on the next clean fetch.
+  const [rateLimitInfo, setRateLimitInfo] = useState<{
+    blockedUntil: string | null;
+    message: string | null;
+    stale: boolean;
+    throttledRefresh: boolean;
+  } | null>(null);
+
   const fetchData = useCallback(async (forceRefresh = false) => {
     // If we already have data, show "updating" instead of full loading
     if (allRows.length > 0) {
@@ -289,6 +299,27 @@ export default function AdsPage() {
         if (json.budgets) setBudgets(json.budgets as typeof budgets);
         const serverTime = json.refreshed_at ? new Date(json.refreshed_at as string).getTime() : result.timestamp;
         setLastRefreshed(formatLastRefreshed(serverTime) + (json.from_cache ? " (cached)" : ""));
+      }
+
+      if (json.rate_limited) {
+        setRateLimitInfo({
+          blockedUntil: (json.blocked_until as string | null) ?? null,
+          message:
+            (json.message as string | null) ??
+            "Facebook is rate-limiting us — showing cached data.",
+          stale: !!json.stale,
+          throttledRefresh: !!json.throttled_refresh,
+        });
+      } else if (json.throttled_refresh) {
+        setRateLimitInfo({
+          blockedUntil: null,
+          message:
+            "Refresh skipped — last refresh was less than 5 minutes ago. Cached data shown.",
+          stale: false,
+          throttledRefresh: true,
+        });
+      } else {
+        setRateLimitInfo(null);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
@@ -1369,6 +1400,43 @@ export default function AdsPage() {
           Show zero-spend ads
         </label>
       </div>
+
+      {/* Rate-limit / throttle banner */}
+      {rateLimitInfo && (
+        <div
+          className={`mb-4 rounded-lg border px-4 py-3 text-sm flex items-start gap-3 ${
+            rateLimitInfo.blockedUntil || rateLimitInfo.stale
+              ? "bg-amber-900/20 border-amber-700/50 text-amber-200"
+              : "bg-blue-900/20 border-blue-700/50 text-blue-200"
+          }`}
+        >
+          <span className="text-base">
+            {rateLimitInfo.blockedUntil || rateLimitInfo.stale ? "⚠️" : "ℹ️"}
+          </span>
+          <div className="flex-1">
+            <p className="font-medium">
+              {rateLimitInfo.message ?? "Showing cached data."}
+            </p>
+            {rateLimitInfo.blockedUntil && (
+              <p className="text-xs opacity-80 mt-0.5">
+                Auto-resumes after{" "}
+                {new Date(rateLimitInfo.blockedUntil).toLocaleTimeString(
+                  "en-PH",
+                  { hour: "2-digit", minute: "2-digit" }
+                )}
+                . Background workers continue refreshing in the meantime.
+              </p>
+            )}
+          </div>
+          <button
+            onClick={() => setRateLimitInfo(null)}
+            className="text-xs opacity-60 hover:opacity-100 cursor-pointer"
+            title="Dismiss"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* Summary Bar */}
       {!loading && (
