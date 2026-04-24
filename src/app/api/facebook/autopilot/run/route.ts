@@ -1,6 +1,12 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { getEmployee } from "@/lib/supabase/get-employee";
+import {
+  fbFetchWithLimits,
+  RateLimitedError,
+  getBlockedUntil,
+} from "@/lib/facebook/rate-limit";
 import { randomUUID } from "crypto";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -71,21 +77,137 @@ function evaluateKillRule(
 async function fbToggleStatus(
   entityId: string,
   newStatus: "ACTIVE" | "PAUSED",
-  token: string
+  token: string,
+  supabase: SupabaseClient
 ): Promise<void> {
-  const res = await fetch(
+  const res = await fbFetchWithLimits(
     `${FB_API_BASE}/${entityId}?${new URLSearchParams({
       access_token: token,
       status: newStatus,
     })}`,
-    { method: "POST" }
+    { method: "POST" },
+    supabase
   );
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(
-      err.error?.message || `FB API error: ${res.status}`
+    throw new Error(err.error?.message || `FB API error: ${res.status}`);
+  }
+}
+
+// Narrow per-campaign data fetch — replaces the old /all-ads call that
+// pulled 5,966 ads just to filter to the 1–3 watched campaigns. This way
+// autopilot can run every 10 min without burning the FB rate budget.
+//
+// Per watched campaign: 2 FB calls (ads list + insights). With 3 watched
+// campaigns at every 10 min = 864 read calls/day, well within FB limits.
+async function fetchWatchedAdData(
+  watched: Array<{ campaign_id: string; account_id: string }>,
+  token: string,
+  supabase: SupabaseClient
+): Promise<AdRow[]> {
+  const accountByCampaign = new Map<string, string>();
+  for (const w of watched) {
+    accountByCampaign.set(w.campaign_id, w.account_id);
+  }
+
+  type RawAd = {
+    id: string;
+    name?: string;
+    effective_status?: string;
+    adset?: { id?: string; name?: string };
+    campaign?: { id?: string; name?: string };
+  };
+  type RawInsightsRow = {
+    ad_id?: string;
+    ad_name?: string;
+    adset_id?: string;
+    adset_name?: string;
+    campaign_id?: string;
+    campaign_name?: string;
+    spend?: string;
+    actions?: Array<{ action_type: string; value: string }>;
+    cost_per_action_type?: Array<{ action_type: string; value: string }>;
+  };
+
+  const allAds: AdRow[] = [];
+
+  // Limit parallelism so we don't fire 20+ requests at once if the user
+  // ever scales up the watchlist.
+  const PARALLEL = 5;
+  for (let i = 0; i < watched.length; i += PARALLEL) {
+    const slice = watched.slice(i, i + PARALLEL);
+    await Promise.all(
+      slice.map(async ({ campaign_id }) => {
+        const accountId = accountByCampaign.get(campaign_id) ?? "";
+
+        // 1. Ads + statuses + names
+        const adsRes = await fbFetchWithLimits(
+          `${FB_API_BASE}/${campaign_id}/ads?fields=id,name,effective_status,adset{id,name},campaign{id,name}&limit=500&access_token=${encodeURIComponent(token)}`,
+          { cache: "no-store" },
+          supabase
+        );
+        if (!adsRes.ok) return;
+        const adsJson = (await adsRes.json()) as { data?: RawAd[] };
+        const adsMap = new Map<string, AdRow>();
+        for (const ad of adsJson.data || []) {
+          adsMap.set(ad.id, {
+            account: "",
+            account_id: accountId,
+            campaign: ad.campaign?.name ?? "",
+            campaign_id: ad.campaign?.id ?? campaign_id,
+            adset: ad.adset?.name ?? "",
+            adset_id: ad.adset?.id ?? "",
+            ad: ad.name ?? "",
+            ad_id: ad.id,
+            // effective_status reflects parent state — if campaign or
+            // adset is paused, this is "CAMPAIGN_PAUSED" / "ADSET_PAUSED",
+            // not "ACTIVE". So checking === "ACTIVE" is sufficient.
+            status: ad.effective_status ?? "UNKNOWN",
+            spend: 0,
+            purchases: 0,
+            cpa: 0,
+            start_time: null,
+          });
+        }
+
+        // 2. Today's insights for this campaign
+        const insightsRes = await fbFetchWithLimits(
+          `${FB_API_BASE}/${campaign_id}/insights?level=ad&date_preset=today&fields=ad_id,ad_name,adset_id,adset_name,campaign_id,campaign_name,spend,actions,cost_per_action_type&limit=500&access_token=${encodeURIComponent(token)}`,
+          { cache: "no-store" },
+          supabase
+        );
+        if (insightsRes.ok) {
+          const insightsJson = (await insightsRes.json()) as {
+            data?: RawInsightsRow[];
+          };
+          for (const row of insightsJson.data || []) {
+            if (!row.ad_id) continue;
+            const ad = adsMap.get(row.ad_id);
+            if (!ad) continue;
+
+            const actions = row.actions ?? [];
+            const costPer = row.cost_per_action_type ?? [];
+            const getAct = (
+              arr: Array<{ action_type: string; value: string }>,
+              type: string
+            ) => parseFloat(arr.find((a) => a.action_type === type)?.value || "0");
+
+            ad.spend = parseFloat(row.spend || "0");
+            ad.purchases =
+              getAct(actions, "purchase") ||
+              getAct(actions, "offsite_conversion.fb_pixel_purchase");
+            ad.cpa =
+              getAct(costPer, "purchase") ||
+              getAct(costPer, "offsite_conversion.fb_pixel_purchase");
+          }
+        }
+
+        for (const ad of adsMap.values()) allAds.push(ad);
+      })
     );
   }
+
+  return allAds;
 }
 
 export async function POST(request: Request) {
@@ -179,9 +301,8 @@ async function handleRun(request: Request) {
     campaign_id: string;
     account_id: string;
   }>;
-  const watchedSet = new Set(watched.map((w) => w.campaign_id));
 
-  if (watchedSet.size === 0) {
+  if (watched.length === 0) {
     return Response.json({
       run_id: runId,
       triggered_by: triggeredBy,
@@ -190,65 +311,46 @@ async function handleRun(request: Request) {
     });
   }
 
-  // 4. Fetch current ad data via our own /all-ads endpoint.
-  //    This reuses the same FB fetching + status/insights pipeline.
-  //    Cron triggers pass CRON_SECRET bearer; manual UI triggers need
-  //    the user's session cookie forwarded, otherwise /all-ads 401s.
-  const url = new URL(request.url);
-  const baseUrl = `${url.protocol}//${url.host}`;
-  const forwardHeaders: Record<string, string> = {};
-  if (isCron && process.env.CRON_SECRET) {
-    forwardHeaders.Authorization = `Bearer ${process.env.CRON_SECRET}`;
-  } else {
-    const cookieHeader = request.headers.get("cookie");
-    if (cookieHeader) forwardHeaders.Cookie = cookieHeader;
+  // 4. Preflight rate-limit check — skip the run if FB is blocking us.
+  //    Pause latency takes a hit (next run = +10 min) but we don't make
+  //    things worse by piling on more failed calls.
+  const blockedUntil = await getBlockedUntil(supabase);
+  if (blockedUntil) {
+    return Response.json({
+      run_id: runId,
+      triggered_by: triggeredBy,
+      skipped: true,
+      reason: "FB rate-limited",
+      blocked_until: blockedUntil.toISOString(),
+    });
   }
 
-  let rows: AdRow[] = [];
+  // 5. Narrow fetch — only the watched campaigns, not all 5,966 ads.
+  let watchedRows: AdRow[];
   try {
-    // No ?refresh=1 — reuse the standard 30-min Supabase cache so the
-    // hourly autopilot run doesn't burn extra FB calls when fresh data
-    // already exists. The ads refresh cron populates the cache on its
-    // own schedule.
-    const adsRes = await fetch(
-      `${baseUrl}/api/facebook/all-ads?date_preset=today&account=ALL`,
-      {
-        headers: forwardHeaders,
-        cache: "no-store",
-      }
-    );
-    // Content-type check — if we got HTML (Vercel error page, redirect),
-    // surface that explicitly instead of letting res.json() blow up.
-    const ct = adsRes.headers.get("content-type") || "";
-    if (!ct.includes("application/json")) {
-      throw new Error(
-        `all-ads returned non-JSON (${adsRes.status}) — likely auth redirect. Set CRON_SECRET env var.`
+    watchedRows = await fetchWatchedAdData(watched, token, supabase);
+  } catch (e) {
+    if (e instanceof RateLimitedError) {
+      return Response.json(
+        {
+          run_id: runId,
+          triggered_by: triggeredBy,
+          skipped: true,
+          reason: "FB rate-limited mid-fetch",
+          blocked_until: e.blockedUntil?.toISOString() ?? null,
+        },
+        { status: 503 }
       );
     }
-    if (!adsRes.ok) {
-      const err = await adsRes.json().catch(() => ({}));
-      throw new Error(err.error || `all-ads failed: ${adsRes.status}`);
-    }
-    const payload = await adsRes.json();
-    rows = (payload.data || []) as AdRow[];
-  } catch (e) {
     return Response.json(
-      {
-        error: e instanceof Error ? e.message : "Failed to fetch ads",
-      },
+      { error: e instanceof Error ? e.message : "Failed to fetch ads" },
       { status: 500 }
     );
   }
 
-  const watchedRows = rows.filter((r) => watchedSet.has(r.campaign_id));
-
-  // 5. Determine kill candidates — every ACTIVE ad on the watchlist that
-  //    trips a kill rule gets paused, no age gate, no per-run cap.
+  // 6. Determine kill candidates
   const actionLog: ActionInsert[] = [];
-  const killCandidates: Array<{
-    row: AdRow;
-    rule: KillRule;
-  }> = [];
+  const killCandidates: Array<{ row: AdRow; rule: KillRule }> = [];
 
   for (const row of watchedRows) {
     const rule = evaluateKillRule(row, cfg);
@@ -256,14 +358,15 @@ async function handleRun(request: Request) {
     killCandidates.push({ row, rule });
   }
 
-  // 6. Execute pauses (batched)
+  // 7. Execute pauses (batched). On rate-limit mid-batch, log + continue
+  //    so we don't lose audit trail for what was paused.
   const batchSize = 5;
   for (let i = 0; i < killCandidates.length; i += batchSize) {
     const batch = killCandidates.slice(i, i + batchSize);
     await Promise.all(
       batch.map(async ({ row, rule }) => {
         try {
-          await fbToggleStatus(row.ad_id, "PAUSED", token);
+          await fbToggleStatus(row.ad_id, "PAUSED", token, supabase);
           actionLog.push({
             run_id: runId,
             action: "paused",
@@ -303,7 +406,7 @@ async function handleRun(request: Request) {
     );
   }
 
-  // 7. Persist audit log
+  // 8. Persist audit log
   if (actionLog.length > 0) {
     await supabase.from("autopilot_actions").insert(actionLog);
   }
@@ -316,7 +419,7 @@ async function handleRun(request: Request) {
   return Response.json({
     run_id: runId,
     triggered_by: triggeredBy,
-    watched_campaigns: watchedSet.size,
+    watched_campaigns: watched.length,
     scanned_ads: watchedRows.length,
     paused: pausedCount,
     errors: errorCount,
