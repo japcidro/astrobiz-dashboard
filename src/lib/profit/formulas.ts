@@ -6,6 +6,13 @@
 export const SHIPPING_RATE = 0.12; // 12% of revenue
 export const RTS_WORST_CASE_RATE = 0.25; // 25% worst case
 export const RTS_MIN_DELIVERED = 200; // threshold to use actual rate
+// Number of days a parcel needs before its J&T outcome is "settled enough"
+// to trust without projection. Past this, actual delivered/returned counts
+// in the J&T file are treated as truth and no further projection is added.
+// Within this window, many Shopify orders haven't been picked-packed-shipped
+// yet — they're invisible to the J&T data and need projection from the
+// store's all-time RTS rate against the day's order count.
+export const SETTLEMENT_WINDOW_DAYS = 6;
 
 /**
  * Net profit = Revenue - COGS - Ad Spend - Shipping - Returns
@@ -150,6 +157,43 @@ export function calculateInTransitProjectedReturns(
   const projectedReturns = estimatedReturns * (avgCodPerReturn + avgShipCostPerReturn);
 
   return { projectedReturns, projectedRtsRate: rtsRate };
+}
+
+/**
+ * Per-date returns projection from Shopify order count.
+ *
+ * Replaces the old in-transit-pool model for established stores. Reasoning:
+ * a recent date's J&T data is incomplete because pick-pack hasn't caught up,
+ * so the date shows artificially low returns and the dashboard reports
+ * inflated net profit. Using the date's Shopify order count as the
+ * "expected total parcels" closes that gap — every paid order eventually
+ * becomes a J&T parcel (or a cancellation, which is excluded upstream).
+ *
+ * Only applies inside the settlement window. Past it, actual J&T data is
+ * trusted as-is and no projection is added.
+ *
+ * Returns the ADDITIONAL returns to add on top of what's already counted.
+ * If actual returns for the date already exceed the expected projection,
+ * returns 0 — we don't override real data with a lower estimate.
+ */
+export function calculateUnsettledOrderProjection(
+  orderCount: number,
+  rtsRate: number,
+  avgReturnCost: number,
+  actualReturnsForDate: number,
+  ageDays: number
+): { projectedReturns: number; isProjected: boolean } {
+  if (
+    ageDays >= SETTLEMENT_WINDOW_DAYS ||
+    orderCount <= 0 ||
+    rtsRate <= 0 ||
+    avgReturnCost <= 0
+  ) {
+    return { projectedReturns: 0, isProjected: false };
+  }
+  const expectedTotalReturns = orderCount * rtsRate * avgReturnCost;
+  const additional = Math.max(0, expectedTotalReturns - actualReturnsForDate);
+  return { projectedReturns: additional, isProjected: additional > 0 };
 }
 
 /**

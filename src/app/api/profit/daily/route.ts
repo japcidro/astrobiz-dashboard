@@ -5,11 +5,12 @@ import { matchAdToStore } from "@/lib/profit/store-matching";
 import {
   calculateNetProfit,
   calculateMarginPct,
-  calculateInTransitProjectedReturns,
+  calculateUnsettledOrderProjection,
   roundCurrency,
   SHIPPING_RATE,
   RTS_WORST_CASE_RATE,
   RTS_MIN_DELIVERED,
+  SETTLEMENT_WINDOW_DAYS,
 } from "@/lib/profit/formulas";
 import { buildCacheKey, getCachedResponse, setCachedResponse } from "@/lib/data-cache";
 import type { DailyPnlRow, ProfitSummary, ProfitDateFilter } from "@/lib/profit/types";
@@ -526,23 +527,43 @@ export async function GET(request: Request) {
     warnings.push(`J&T: ${message}`);
   }
 
-  // --- 5b. RTS projection: two strategies depending on data maturity ---
-  //   < 200 delivered: 25% worst-case of revenue (conservative)
-  //   >= 200 delivered: project returns from in-transit parcels using actual RTS rate
+  // --- 5b. RTS projection: per-date order-count model ----------------------
+  //
+  // Old model: project from the all-time in-transit pool, distribute by
+  // revenue across dates. Problem: in-transit only contains parcels that
+  // already reached J&T. For the most recent ~5 days, many Shopify orders
+  // haven't been picked-packed-shipped yet, so they're invisible and the
+  // dashboard overstated net profit on young dates.
+  //
+  // New model: per (date, store) within SETTLEMENT_WINDOW_DAYS, project
+  // expected returns from the date's Shopify order count using the store's
+  // all-time RTS rate. Older dates are left to actual J&T data (parcels
+  // settled by then). Stores with < 200 settled parcels still use the 25%
+  // worst-case rule at the store level — the rate isn't trustworthy yet.
   const returnsProjectedDates = new Set<string>();
 
+  // Today in PHT, used for per-date age calc. Computed independently from
+  // computeDateRange so backfills (custom date_from/date_to in the past)
+  // still measure age relative to NOW, not the requested period's end.
+  const phNowForAge = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const todayPhtStr = `${phNowForAge.getUTCFullYear()}-${String(
+    phNowForAge.getUTCMonth() + 1
+  ).padStart(2, "0")}-${String(phNowForAge.getUTCDate()).padStart(2, "0")}`;
+  const todayPhtMs = new Date(`${todayPhtStr}T00:00:00+08:00`).getTime();
+  function ageDaysForDate(dateStr: string): number {
+    const d = new Date(`${dateStr}T00:00:00+08:00`).getTime();
+    return Math.floor((todayPhtMs - d) / (1000 * 60 * 60 * 24));
+  }
+
   try {
-    // Fetch ALL-TIME delivery stats per store (delivered, returned, in-transit)
     const { data: allJtRows } = await supabase
       .from("jt_deliveries")
-      .select("store_name, is_delivered, is_returned, classification, cod_amount, shipping_cost");
+      .select("store_name, is_delivered, is_returned, cod_amount, shipping_cost");
 
     if (allJtRows && allJtRows.length > 0) {
-      // Aggregate per store
       const storeStats = new Map<string, {
         delivered: number;
         returned: number;
-        inTransit: number;
         totalReturnCod: number;
         totalReturnShip: number;
       }>();
@@ -550,22 +571,17 @@ export async function GET(request: Request) {
       for (const row of allJtRows) {
         const store = (row.store_name || "UNKNOWN").toUpperCase();
         if (!storeStats.has(store)) {
-          storeStats.set(store, { delivered: 0, returned: 0, inTransit: 0, totalReturnCod: 0, totalReturnShip: 0 });
+          storeStats.set(store, { delivered: 0, returned: 0, totalReturnCod: 0, totalReturnShip: 0 });
         }
         const stats = storeStats.get(store)!;
-
         if (row.is_delivered) stats.delivered++;
         if (row.is_returned) {
           stats.returned++;
           stats.totalReturnCod += parseFloat(row.cod_amount) || 0;
           stats.totalReturnShip += parseFloat(row.shipping_cost) || 0;
         }
-        if (row.classification === "In Transit" || row.classification === "Pending") {
-          stats.inTransit++;
-        }
       }
 
-      // Get all stores present in revenue data
       const allStoresInData = new Set<string>();
       for (const key of revenueByDateStore.keys()) {
         allStoresInData.add(key.split("::")[1]);
@@ -577,57 +593,67 @@ export async function GET(request: Request) {
         const returned = stats?.returned || 0;
         const settled = delivered + returned;
 
-        // Sum actual returns already counted for this store in date range
-        let actualReturns = 0;
-        for (const [key, value] of returnsByDateStore) {
-          if (key.endsWith(`::${store}`)) actualReturns += value;
-        }
-
-        // Sum revenue for this store in date range
-        let storeRevenue = 0;
-        for (const [key, value] of revenueByDateStore) {
-          if (key.endsWith(`::${store}`)) storeRevenue += value;
-        }
-
-        let additionalReturns = 0;
-
+        // Strategy A — small store: keep 25% worst-case at store level.
+        // Distributed by revenue because we have no reliable rate yet.
         if (settled < RTS_MIN_DELIVERED) {
-          // Strategy A: not enough data — use 25% worst-case of revenue
+          let actualReturns = 0;
+          let storeRevenue = 0;
+          for (const [key, value] of returnsByDateStore) {
+            if (key.endsWith(`::${store}`)) actualReturns += value;
+          }
+          for (const [key, value] of revenueByDateStore) {
+            if (key.endsWith(`::${store}`)) storeRevenue += value;
+          }
+          if (storeRevenue <= 0) continue;
+
           const worstCase = storeRevenue * RTS_WORST_CASE_RATE;
           if (worstCase > actualReturns) {
-            additionalReturns = worstCase - actualReturns;
-            warnings.push(`${store}: Using 25% worst-case RTS (${settled}/${RTS_MIN_DELIVERED} settled)`);
-          }
-        } else {
-          // Strategy B: enough data — project returns from in-transit using actual RTS rate
-          const inTransit = stats?.inTransit || 0;
-          if (inTransit > 0) {
-            const avgCod = returned > 0 ? (stats!.totalReturnCod / returned) : 0;
-            const avgShip = returned > 0 ? (stats!.totalReturnShip / returned) : 0;
-            const { projectedReturns, projectedRtsRate } = calculateInTransitProjectedReturns(
-              delivered, returned, inTransit, avgCod, avgShip
-            );
-            if (projectedReturns > 0) {
-              additionalReturns = projectedReturns;
-              const rtsPct = Math.round(projectedRtsRate * 1000) / 10;
-              warnings.push(`${store}: +₱${Math.round(projectedReturns).toLocaleString()} projected returns from ${inTransit} in-transit parcels (${rtsPct}% RTS rate)`);
+            const additional = worstCase - actualReturns;
+            for (const [key, dateRevenue] of revenueByDateStore) {
+              if (!key.endsWith(`::${store}`)) continue;
+              const proportion = dateRevenue / storeRevenue;
+              returnsByDateStore.set(
+                key,
+                (returnsByDateStore.get(key) || 0) + additional * proportion
+              );
+              returnsProjectedDates.add(key.split("::")[0]);
             }
+            warnings.push(
+              `${store}: Using 25% worst-case RTS (${settled}/${RTS_MIN_DELIVERED} settled)`
+            );
+          }
+          continue;
+        }
+
+        // Strategy B — established store: per-date order-count projection.
+        const rtsRate = settled > 0 ? returned / settled : 0;
+        const avgCod = returned > 0 ? stats!.totalReturnCod / returned : 0;
+        const avgShip = returned > 0 ? stats!.totalReturnShip / returned : 0;
+        const avgReturnCost = avgCod + avgShip;
+        if (rtsRate <= 0 || avgReturnCost <= 0) continue;
+
+        let storeProjected = 0;
+        for (const [key, orderCount] of orderCountByDateStore) {
+          if (!key.endsWith(`::${store}`)) continue;
+          const date = key.split("::")[0];
+          const age = ageDaysForDate(date);
+          const actualForDate = returnsByDateStore.get(key) || 0;
+
+          const { projectedReturns } = calculateUnsettledOrderProjection(
+            orderCount, rtsRate, avgReturnCost, actualForDate, age
+          );
+          if (projectedReturns > 0) {
+            returnsByDateStore.set(key, actualForDate + projectedReturns);
+            returnsProjectedDates.add(date);
+            storeProjected += projectedReturns;
           }
         }
 
-        // Distribute additional returns proportionally by revenue across dates
-        if (additionalReturns > 0 && storeRevenue > 0) {
-          const storeDates: string[] = [];
-          for (const key of revenueByDateStore.keys()) {
-            if (key.endsWith(`::${store}`)) storeDates.push(key);
-          }
-          for (const key of storeDates) {
-            const dateRevenue = revenueByDateStore.get(key) || 0;
-            const proportion = dateRevenue / storeRevenue;
-            const added = additionalReturns * proportion;
-            returnsByDateStore.set(key, (returnsByDateStore.get(key) || 0) + added);
-            returnsProjectedDates.add(key.split("::")[0]);
-          }
+        if (storeProjected > 0) {
+          const rtsPct = Math.round(rtsRate * 1000) / 10;
+          warnings.push(
+            `${store}: +₱${Math.round(storeProjected).toLocaleString()} projected returns from unsettled orders (last ${SETTLEMENT_WINDOW_DAYS} days, ${rtsPct}% RTS rate)`
+          );
         }
       }
     }

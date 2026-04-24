@@ -6,11 +6,13 @@ import {
   calculateLineItemCogs,
   calculateOrderCogs,
   calculateWorstCaseReturns,
+  calculateUnsettledOrderProjection,
   distributeReturnsByRevenue,
   roundCurrency,
   SHIPPING_RATE,
   RTS_WORST_CASE_RATE,
   RTS_MIN_DELIVERED,
+  SETTLEMENT_WINDOW_DAYS,
 } from "../formulas";
 import { getProvinceCutoff, classifyJtDelivery } from "../province-tiers";
 import { matchAdToStore, matchSenderToStore } from "../store-matching";
@@ -326,6 +328,111 @@ describe("Worst-Case RTS (25% of Revenue)", () => {
     const hypotheticalCogsBasedRts = cogs * 0.25;
     expect(hypotheticalCogsBasedRts).toBe(2500);
     expect(rts.returnsValue).not.toBe(hypotheticalCogsBasedRts);
+  });
+});
+
+// ============================================================
+// UNSETTLED ORDER PROJECTION (per-date, fix for inflated young-date net profit)
+// ============================================================
+describe("Unsettled Order Projection", () => {
+  // Real example pulled from the dashboard: ₱52,619 revenue, 40 Shopify
+  // orders, but only 11 parcels reached J&T. Prior model added almost
+  // nothing for this date and shipped a 49% margin. With a 20% RTS rate
+  // and ₱600 average return cost (COD + shipping), expected total returns
+  // are 40 × 0.20 × 600 = ₱4,800 — much higher than the ₱153 the J&T file
+  // alone reported.
+  it("young date with many ungshipped orders: projection fills the gap", () => {
+    const result = calculateUnsettledOrderProjection(
+      40,    // 40 Shopify orders that day
+      0.20,  // store all-time RTS rate
+      600,   // avg return cost (cod + ship)
+      153,   // actual returns counted from J&T
+      1      // date is 1 day old → still inside window
+    );
+    expect(result.isProjected).toBe(true);
+    // Expected total = 40 × 0.20 × 600 = 4800. Additional = 4800 - 153 = 4647.
+    expect(result.projectedReturns).toBe(4647);
+  });
+
+  it("date older than settlement window: no projection added", () => {
+    // Apr 19 in user's screenshot: 6+ days old, J&T data already settled.
+    // We trust the actual ₱173 even if it looks low — the parcels are done.
+    const result = calculateUnsettledOrderProjection(
+      56,
+      0.20,
+      600,
+      173,
+      SETTLEMENT_WINDOW_DAYS
+    );
+    expect(result.projectedReturns).toBe(0);
+    expect(result.isProjected).toBe(false);
+  });
+
+  it("today (age 0): projection still applies", () => {
+    const result = calculateUnsettledOrderProjection(10, 0.15, 500, 0, 0);
+    // 10 × 0.15 × 500 = 750
+    expect(result.projectedReturns).toBe(750);
+    expect(result.isProjected).toBe(true);
+  });
+
+  it("actual returns already exceed expected: do not subtract or add", () => {
+    // Bad day for the store — actual RTS came in higher than the all-time
+    // average predicted. Trust the real number, don't reduce it.
+    const result = calculateUnsettledOrderProjection(20, 0.15, 500, 5000, 1);
+    // expected = 20 × 0.15 × 500 = 1500. actual 5000 > 1500 → 0 additional.
+    expect(result.projectedReturns).toBe(0);
+    expect(result.isProjected).toBe(false);
+  });
+
+  it("zero orders for the date: no projection (date had no sales)", () => {
+    const result = calculateUnsettledOrderProjection(0, 0.20, 600, 0, 1);
+    expect(result.projectedReturns).toBe(0);
+  });
+
+  it("zero RTS rate (perfect store, never had a return): no projection", () => {
+    const result = calculateUnsettledOrderProjection(50, 0, 600, 0, 1);
+    expect(result.projectedReturns).toBe(0);
+  });
+
+  it("zero avg return cost: no projection", () => {
+    const result = calculateUnsettledOrderProjection(50, 0.20, 0, 0, 1);
+    expect(result.projectedReturns).toBe(0);
+  });
+
+  it("settlement window constant is 6 days", () => {
+    expect(SETTLEMENT_WINDOW_DAYS).toBe(6);
+  });
+
+  it("boundary: age = SETTLEMENT_WINDOW_DAYS - 1 still projects", () => {
+    const result = calculateUnsettledOrderProjection(
+      40, 0.20, 600, 0, SETTLEMENT_WINDOW_DAYS - 1
+    );
+    expect(result.projectedReturns).toBeGreaterThan(0);
+  });
+
+  it("boundary: age = SETTLEMENT_WINDOW_DAYS does NOT project", () => {
+    const result = calculateUnsettledOrderProjection(
+      40, 0.20, 600, 0, SETTLEMENT_WINDOW_DAYS
+    );
+    expect(result.projectedReturns).toBe(0);
+  });
+
+  it("compounds with actual: net profit moves in the right direction", () => {
+    // Without projection: net = 52619 - 4900 - 15466 - 6314 - 153 = ₱25,786
+    // With projection (+₱4,647): net = ₱25,786 - ₱4,647 = ₱21,139
+    const revenue = 52619;
+    const cogs = 4900;
+    const adSpend = 15466;
+    const shipping = revenue * SHIPPING_RATE; // 6314.28
+
+    const projection = calculateUnsettledOrderProjection(40, 0.20, 600, 153, 1);
+    const totalReturns = 153 + projection.projectedReturns;
+
+    const netBefore = calculateNetProfit(revenue, cogs, adSpend, shipping, 153);
+    const netAfter = calculateNetProfit(revenue, cogs, adSpend, shipping, totalReturns);
+
+    expect(netAfter).toBeLessThan(netBefore);
+    expect(netBefore - netAfter).toBe(projection.projectedReturns);
   });
 });
 

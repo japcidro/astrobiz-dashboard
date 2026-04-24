@@ -284,13 +284,16 @@ export async function collectBriefingData(
   }
 
   // --- RTS ---
+  // submission_date is an ISO timestamp; comparing to bare YYYY-MM-DD via
+  // lte drops every row submitted on the end date (lex-compare quirk).
+  // Anchor to PHT day boundaries — same fix as /api/profit/jt-data.
   const periodStartDate = phtDateString(period.start);
   const periodEndDate = phtDateString(period.end);
   const { data: jtRows } = await supabase
     .from("jt_deliveries")
     .select("amount, classification, province")
-    .gte("submission_date", periodStartDate)
-    .lte("submission_date", periodEndDate);
+    .gte("submission_date", `${periodStartDate}T00:00:00+08:00`)
+    .lte("submission_date", `${periodEndDate}T23:59:59+08:00`);
 
   const rtsOnly = (jtRows ?? []).filter((r: { classification: string | null }) => {
     const c = (r.classification || "").toLowerCase();

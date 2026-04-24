@@ -26,12 +26,17 @@ export async function GET(request: Request) {
     query = query.eq("store_name", store);
   }
 
+  // submission_date is stored as ISO timestamp ("2026-04-19T16:00:00.000Z")
+  // but date_from / date_to come in as bare PHT calendar dates ("2026-04-19").
+  // A naked lte against a longer ISO string returns FALSE for same-day rows
+  // because lexicographically "2026-04-19T..." > "2026-04-19", which silently
+  // dropped every row submitted on the end date. Anchor to PHT day boundaries.
   if (dateFrom) {
-    query = query.gte("submission_date", dateFrom);
+    query = query.gte("submission_date", `${dateFrom}T00:00:00+08:00`);
   }
 
   if (dateTo) {
-    query = query.lte("submission_date", dateTo);
+    query = query.lte("submission_date", `${dateTo}T23:59:59+08:00`);
   }
 
   if (classification !== "all") {
