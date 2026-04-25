@@ -667,7 +667,13 @@ export default function AdsPage() {
     entityId: string,
     currentStatus: string
   ) => {
-    const newStatus = currentStatus === "ACTIVE" ? "PAUSED" : "ACTIVE";
+    // Anything not paused/disapproved is treated as live → click pauses it.
+    // PAUSED/DISAPPROVED → click reactivates. Mirrors the ToggleSwitch's
+    // isActive logic so transient states (IN_PROCESS, WITH_ISSUES, etc.) work.
+    const newStatus =
+      currentStatus === "PAUSED" || currentStatus === "DISAPPROVED"
+        ? "ACTIVE"
+        : "PAUSED";
     setTogglingId(entityId);
     setActionError(null);
     try {
@@ -1155,9 +1161,23 @@ export default function AdsPage() {
     return { id: aggRow.entity_id, status: aggRow.status };
   };
 
-  // Check if status is toggleable (only ACTIVE or PAUSED)
-  const isToggleable = (status: string) =>
-    status === "ACTIVE" || status === "PAUSED";
+  // Toggle gate. We allow every FB ad-entity effective_status that the user
+  // can actually flip — ACTIVE/PAUSED plus the transient/issue states FB
+  // returns right after a status change (IN_PROCESS especially shows up for
+  // a few minutes after Quick Actions pauses an ad). Excluded: parent-paused
+  // ("CAMPAIGN PAUSED"/"ADSET PAUSED"), DELETED, ARCHIVED, UNKNOWN, and the
+  // synthetic "ACCOUNT *" string from getDeliveryStatus.
+  const TOGGLEABLE_STATUSES = new Set([
+    "ACTIVE",
+    "PAUSED",
+    "IN_PROCESS",
+    "WITH_ISSUES",
+    "PENDING_REVIEW",
+    "PREAPPROVED",
+    "PENDING_BILLING_INFO",
+    "DISAPPROVED",
+  ]);
+  const isToggleable = (status: string) => TOGGLEABLE_STATUSES.has(status);
 
   const renderBudgetBadge = (entityId: string, name: string) => {
     const budget = budgets[entityId];
@@ -1198,7 +1218,9 @@ export default function AdsPage() {
     status: string;
   }) => {
     if (!isAdmin || !isToggleable(status)) return null;
-    const isActive = status === "ACTIVE";
+    // Treat anything that isn't PAUSED/DISAPPROVED as currently running so
+    // the switch shows green and the click pauses (matches FB Ads Manager).
+    const isActive = status !== "PAUSED" && status !== "DISAPPROVED";
     const isToggling = togglingId === entityId;
 
     return (
