@@ -1,5 +1,6 @@
 import {
   Package,
+  PackagePlus,
   TrendingDown,
   Trophy,
   Pause,
@@ -16,6 +17,7 @@ import type { AlertType, AlertSeverity } from "@/lib/alerts/types";
 const ICON_BY_TYPE: Record<AlertType, React.ReactNode> = {
   stock_restocked_winner: <Package size={16} />,
   stock_depleting_winner: <TrendingDown size={16} />,
+  stock_added_by_team: <PackagePlus size={16} />,
   new_winner: <Trophy size={16} />,
   script_winner_deconstructed: <Sparkles size={16} />,
   autopilot_big_action: <Pause size={16} />,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { RefreshCw, Search } from "lucide-react";
+import { RefreshCw, Search, PackagePlus } from "lucide-react";
 import type {
   InventoryRow,
   InventoryProduct,
@@ -11,6 +11,7 @@ import type {
 import { InventorySummaryCards } from "@/components/inventory/inventory-summary-cards";
 import { InventoryTable } from "@/components/inventory/inventory-table";
 import { ProductDetailPanel } from "@/components/inventory/product-detail-panel";
+import { RtsBatchModal } from "@/components/inventory/rts-batch-modal";
 
 const STOCK_OPTIONS: { label: string; value: InventoryStockFilter }[] = [
   { label: "All", value: "all" },
@@ -43,6 +44,7 @@ export default function InventoryPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [selectedProductId, setSelectedProductId] = useState<number | null>(null);
   const [role, setRole] = useState<string>("");
+  const [rtsOpen, setRtsOpen] = useState(false);
 
   const fetchData = useCallback(async (forceRefresh = false) => {
     setLoading(true);
@@ -154,14 +156,25 @@ export default function InventoryPage() {
             {stores.length !== 1 ? "s" : ""}
           </p>
         </div>
-        <button
-          onClick={() => fetchData(true)}
-          disabled={loading}
-          className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm px-3 py-2 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
-        >
-          <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          {(role === "admin" || role === "fulfillment") && (
+            <button
+              onClick={() => setRtsOpen(true)}
+              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-3 py-2 rounded-lg transition-colors cursor-pointer"
+            >
+              <PackagePlus size={14} />
+              RTS Return
+            </button>
+          )}
+          <button
+            onClick={() => fetchData(true)}
+            disabled={loading}
+            className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm px-3 py-2 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Error */}
@@ -264,6 +277,13 @@ export default function InventoryPage() {
           onClose={() => setSelectedProductId(null)}
         />
       )}
+
+      {/* RTS Return modal */}
+      <RtsBatchModal
+        open={rtsOpen}
+        onClose={() => setRtsOpen(false)}
+        onCompleted={() => fetchData(true)}
+      />
     </div>
   );
 }

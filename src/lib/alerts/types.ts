@@ -3,6 +3,7 @@ export type AlertSeverity = "urgent" | "action" | "info";
 export type AlertType =
   | "stock_restocked_winner"
   | "stock_depleting_winner"
+  | "stock_added_by_team"
   | "new_winner"
   | "script_winner_deconstructed"
   | "autopilot_big_action"
@@ -57,6 +58,7 @@ export interface AlertInsertParams {
 export const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   stock_restocked_winner: "Winner restocked",
   stock_depleting_winner: "Winner running out",
+  stock_added_by_team: "Stock added by team",
   new_winner: "New winner detected",
   script_winner_deconstructed: "Script winner deconstructed",
   autopilot_big_action: "Autopilot action",
