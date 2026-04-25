@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Mail, Clock } from "lucide-react";
+import { ArrowLeft, Mail, Clock, AlertTriangle } from "lucide-react";
 import type { Briefing, BriefingData } from "@/lib/briefings/types";
+
+const MAX_RETRIES = 5;
 
 function formatPHP(n: number): string {
   return `₱${n.toLocaleString("en-PH", { maximumFractionDigits: 0 })}`;
@@ -110,7 +112,7 @@ export function BriefingDetail({ id }: Props) {
         <p className="text-xs text-gray-500 capitalize">{briefing.type} briefing</p>
         <h1 className="text-2xl font-bold text-white mt-1">{briefing.period_label}</h1>
         <p className="text-sm text-gray-400 mt-2">{briefing.headline}</p>
-        <div className="flex items-center gap-4 mt-3 text-[11px] text-gray-600">
+        <div className="flex items-center gap-4 mt-3 text-[11px] text-gray-600 flex-wrap">
           <span className="flex items-center gap-1">
             <Clock size={12} />
             {new Date(briefing.created_at).toLocaleString("en-PH", { timeZone: "Asia/Manila" })}
@@ -124,8 +126,44 @@ export function BriefingDetail({ id }: Props) {
           {briefing.email_error && (
             <span className="text-red-400">Email failed: {briefing.email_error}</span>
           )}
+          {(briefing.retry_count ?? 0) > 0 && (
+            <span className="text-gray-500">
+              Retries: {briefing.retry_count}
+              {briefing.last_retry_at &&
+                ` · last ${new Date(briefing.last_retry_at).toLocaleString("en-PH", { timeZone: "Asia/Manila" })}`}
+            </span>
+          )}
         </div>
       </div>
+
+      {Array.isArray(briefing.fetch_errors) && briefing.fetch_errors.length > 0 && (
+        <div className="mb-6 bg-orange-950/30 border border-orange-900/60 rounded-xl p-4">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={16} className="text-orange-400 mt-0.5 flex-shrink-0" />
+            <div className="flex-1">
+              <p className="text-sm font-semibold text-orange-300">
+                {(briefing.retry_count ?? 0) >= MAX_RETRIES
+                  ? "Fetch failed — auto-retry exhausted"
+                  : "Some upstream fetches failed"}
+              </p>
+              <p className="text-xs text-orange-400/80 mt-1">
+                {(briefing.retry_count ?? 0) >= MAX_RETRIES
+                  ? "The retry cron tried 5 times and gave up. Click Rebuild to retry manually once upstream is healthy."
+                  : "Auto-retrying every 30 min. Numbers below may be partial or stale until the next clean fetch."}
+              </p>
+              <ul className="mt-3 space-y-1">
+                {briefing.fetch_errors.map((err, i) => (
+                  <li key={i} className="text-xs text-orange-200/90 font-mono">
+                    <span className="text-orange-400 font-semibold">{err.source}</span>
+                    {": "}
+                    {err.message}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
 
       {briefing.ai_summary && (
         <div className="mb-6 bg-gray-900/60 border-l-4 border-white/80 rounded-r-xl p-5">

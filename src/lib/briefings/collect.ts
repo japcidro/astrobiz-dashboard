@@ -10,6 +10,8 @@ import type {
   RtsSummary,
   StockMovement,
   TeamHours,
+  FetchError,
+  FetchSource,
 } from "./types";
 import { phtDateString } from "./period";
 
@@ -57,16 +59,25 @@ interface OrdersPayload {
   };
 }
 
-// 60s was too tight: morning cron fires 3 data-heavy endpoints
-// simultaneously on cold functions, and profit/daily alone can
-// cascade through 3 stores' Shopify orders + FB insights. Bump
-// to 180s and retry once so a single slow cold start doesn't
-// silently zero out the briefing.
+type FetchResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: string };
+
+// Why a Result<T> instead of T | null: a null return collapsed two distinct
+// states ("upstream genuinely returned 0/empty" vs "fetch failed and we
+// substituted defaults") and the briefing silently saved zeros for both.
+// Now the caller can see exactly which sub-call dropped and surface that to
+// the retry cron + the admin UI.
+//
+// 60s was too tight: morning cron fires 3 data-heavy endpoints simultaneously
+// on cold functions, and profit/daily alone can cascade through 3 stores'
+// Shopify orders + FB insights. 180s + one retry on timeout/5xx covers
+// realistic cold starts without stalling the whole cron.
 async function safeFetch<T>(
   url: string,
   cronSecret: string,
   attempt = 1
-): Promise<T | null> {
+): Promise<FetchResult<T>> {
   try {
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${cronSecret}` },
@@ -74,25 +85,37 @@ async function safeFetch<T>(
       signal: AbortSignal.timeout(180_000),
     });
     if (!res.ok) {
-      console.error(
-        `[briefings] ${url} returned ${res.status} (attempt ${attempt})`
-      );
+      const reason = `HTTP ${res.status}`;
+      console.error(`[briefings] ${url} returned ${res.status} (attempt ${attempt})`);
       if (attempt === 1 && (res.status >= 500 || res.status === 408)) {
         return safeFetch<T>(url, cronSecret, 2);
       }
-      return null;
+      return { ok: false, error: reason };
     }
-    return (await res.json()) as T;
+    return { ok: true, data: (await res.json()) as T };
   } catch (err) {
     const message = err instanceof Error ? err.message : "unknown";
     console.error(`[briefings] ${url} error (attempt ${attempt}):`, message);
-    // Retry once on timeout / network blip. Second failure = give up
-    // so we don't stall the whole cron.
     if (attempt === 1) {
       return safeFetch<T>(url, cronSecret, 2);
     }
-    return null;
+    return { ok: false, error: `network: ${message}` };
   }
+}
+
+function unwrap<T>(
+  source: FetchSource,
+  result: FetchResult<T>,
+  errors: FetchError[]
+): T | null {
+  if (result.ok) return result.data;
+  errors.push({ source, message: result.error });
+  return null;
+}
+
+export interface CollectResult {
+  data: BriefingData;
+  fetchErrors: FetchError[];
 }
 
 export async function collectBriefingData(
@@ -101,7 +124,9 @@ export async function collectBriefingData(
   cronSecret: string,
   type: BriefingType,
   period: PeriodRange
-): Promise<BriefingData> {
+): Promise<CollectResult> {
+  const fetchErrors: FetchError[] = [];
+
   // Always pass explicit PHT date range (date_from / date_to) derived from
   // the period so historical backfills work. Preset strings like "yesterday"
   // only make sense at the moment the cron fires — they're useless when we
@@ -137,7 +162,10 @@ export async function collectBriefingData(
   // date_preset (presets can't target arbitrary historical dates).
   // The all-ads endpoint returns rows under `data` (not `ads`); using the
   // wrong key here silently emptied top_ads / worst_ads on every briefing.
-  const adsPromise = safeFetch<{ data?: AdRow[]; totals?: { spend: number; roas: number; cpa: number; purchases: number } }>(
+  const adsPromise = safeFetch<{
+    data?: AdRow[];
+    totals?: { spend: number; roas: number; cpa: number; purchases: number };
+  }>(
     `${baseUrl}/api/facebook/all-ads?${new URLSearchParams({
       date_preset: period.datePreset,
       date_from: dateFrom,
@@ -160,7 +188,15 @@ export async function collectBriefingData(
     cronSecret
   );
 
-  const [pnl, adsData, ordersData] = await Promise.all([pnlPromise, adsPromise, ordersPromise]);
+  const [pnlRes, adsRes, ordersRes] = await Promise.all([
+    pnlPromise,
+    adsPromise,
+    ordersPromise,
+  ]);
+
+  const pnl = unwrap("pnl", pnlRes, fetchErrors);
+  const adsData = unwrap("ads", adsRes, fetchErrors);
+  const ordersData = unwrap("orders", ordersRes, fetchErrors);
 
   // --- Assemble basic P&L numbers ---
   const revenue = pnl?.summary.revenue ?? 0;
@@ -207,7 +243,10 @@ export async function collectBriefingData(
     }));
 
   // --- Top products from order line_items ---
-  const productAgg = new Map<string, { units: number; revenue: number; store: string; title: string; sku: string | null }>();
+  const productAgg = new Map<
+    string,
+    { units: number; revenue: number; store: string; title: string; sku: string | null }
+  >();
   for (const order of ordersData?.orders ?? []) {
     if (order.cancelled_at) continue;
     for (const li of order.line_items ?? []) {
@@ -389,7 +428,7 @@ export async function collectBriefingData(
   const periodLenMs = period.end.getTime() - period.start.getTime() + 24 * 60 * 60 * 1000;
   const prevEnd = new Date(period.start.getTime() - 24 * 60 * 60 * 1000);
   const prevStart = new Date(prevEnd.getTime() - periodLenMs + 24 * 60 * 60 * 1000);
-  const prevPnl = await safeFetch<{ summary: { revenue: number; net_profit: number } }>(
+  const prevPnlRes = await safeFetch<{ summary: { revenue: number; net_profit: number } }>(
     `${baseUrl}/api/profit/daily?${new URLSearchParams({
       store: "ALL",
       date_filter: "custom",
@@ -399,6 +438,7 @@ export async function collectBriefingData(
     })}`,
     cronSecret
   );
+  const prevPnl = unwrap("prev_pnl", prevPnlRes, fetchErrors);
   const revenue_delta_pct =
     prevPnl?.summary && prevPnl.summary.revenue > 0
       ? ((revenue - prevPnl.summary.revenue) / prevPnl.summary.revenue) * 100
@@ -409,24 +449,27 @@ export async function collectBriefingData(
       : null;
 
   return {
-    revenue,
-    orders,
-    ad_spend: adSpend,
-    net_profit_est: netProfitEst,
-    roas,
-    cpa,
-    revenue_delta_pct,
-    profit_delta_pct,
-    unfulfilled_count,
-    aging_count,
-    fulfilled_count,
-    top_products,
-    top_ads,
-    worst_ads,
-    store_breakdown,
-    autopilot,
-    rts,
-    stock_movement: topStockMovement,
-    team_hours,
+    data: {
+      revenue,
+      orders,
+      ad_spend: adSpend,
+      net_profit_est: netProfitEst,
+      roas,
+      cpa,
+      revenue_delta_pct,
+      profit_delta_pct,
+      unfulfilled_count,
+      aging_count,
+      fulfilled_count,
+      top_products,
+      top_ads,
+      worst_ads,
+      store_breakdown,
+      autopilot,
+      rts,
+      stock_movement: topStockMovement,
+      team_hours,
+    },
+    fetchErrors,
   };
 }

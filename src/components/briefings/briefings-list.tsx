@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Sunrise, Moon, CalendarDays, CalendarRange, ArrowRight, RefreshCw, Play, Hammer } from "lucide-react";
-import type { BriefingType } from "@/lib/briefings/types";
+import { Sunrise, Moon, CalendarDays, CalendarRange, ArrowRight, RefreshCw, Play, Hammer, AlertTriangle, Loader } from "lucide-react";
+import type { BriefingType, FetchError } from "@/lib/briefings/types";
 
 interface BriefingRow {
   id: string;
@@ -13,7 +13,11 @@ interface BriefingRow {
   ai_summary: string | null;
   created_at: string;
   email_sent_at: string | null;
+  fetch_errors: FetchError[] | null;
+  retry_count: number | null;
 }
+
+const MAX_RETRIES = 5;
 
 const TYPE_META: Record<BriefingType, { label: string; icon: React.ReactNode; color: string }> = {
   morning: {
@@ -215,10 +219,20 @@ export function BriefingsList() {
             : null;
           const rebuildLabel = `${meta.label} · ${b.period_label}`;
           const isRebuilding = rebuildingId === b.id;
+          const errors = Array.isArray(b.fetch_errors) ? b.fetch_errors : [];
+          const retries = b.retry_count ?? 0;
+          const isRetryExhausted = errors.length > 0 && retries >= MAX_RETRIES;
+          const isRetrying = errors.length > 0 && retries < MAX_RETRIES;
           return (
             <div
               key={b.id}
-              className="group relative bg-gray-900/40 hover:bg-gray-900 border border-gray-800 hover:border-gray-700 rounded-xl transition-colors"
+              className={`group relative border rounded-xl transition-colors ${
+                isRetryExhausted
+                  ? "bg-red-950/30 border-red-900/60 hover:border-red-800"
+                  : isRetrying
+                  ? "bg-orange-950/20 border-orange-900/50 hover:border-orange-800"
+                  : "bg-gray-900/40 hover:bg-gray-900 border-gray-800 hover:border-gray-700"
+              }`}
             >
               <Link
                 href={`/admin/briefings/${b.id}`}
@@ -231,13 +245,31 @@ export function BriefingsList() {
                     {meta.icon}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span
                         className={`text-[10px] font-semibold uppercase tracking-wider ${meta.color.split(" ")[1]}`}
                       >
                         {meta.label}
                       </span>
                       <span className="text-xs text-gray-500">{b.period_label}</span>
+                      {isRetrying && (
+                        <span
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded border border-orange-700/60 bg-orange-900/30 text-orange-300"
+                          title={`Fetch failed: ${errors.map((e) => e.source).join(", ")}. Retry ${retries}/${MAX_RETRIES} — auto-rerun every 30 min until clean.`}
+                        >
+                          <Loader size={9} className="animate-spin" />
+                          Retrying {retries}/{MAX_RETRIES}
+                        </span>
+                      )}
+                      {isRetryExhausted && (
+                        <span
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded border border-red-700/60 bg-red-900/30 text-red-300"
+                          title={`Fetch failed after ${retries} retries: ${errors.map((e) => e.source).join(", ")}. Click Rebuild to try manually.`}
+                        >
+                          <AlertTriangle size={9} />
+                          Failed · {errors.map((e) => e.source).join(",")}
+                        </span>
+                      )}
                     </div>
                     <p className="text-sm font-medium text-white leading-snug">
                       {b.headline}

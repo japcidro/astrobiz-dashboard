@@ -17,7 +17,9 @@ export async function GET(request: Request) {
   const supabase = await createClient();
   let query = supabase
     .from("briefings")
-    .select("id, type, period_label, period_start, period_end, headline, ai_summary, created_at, email_sent_at")
+    .select(
+      "id, type, period_label, period_start, period_end, headline, ai_summary, created_at, email_sent_at, fetch_errors, retry_count"
+    )
     .order("created_at", { ascending: false })
     .limit(limit);
 

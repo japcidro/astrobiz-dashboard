@@ -85,6 +85,15 @@ export interface BriefingData {
   team_hours: TeamHours[];
 }
 
+// Which upstream a safeFetch call was hitting when it returned null.
+// Used to decide if a briefing's zeros are real or a fetch failure.
+export type FetchSource = "pnl" | "ads" | "orders" | "prev_pnl";
+
+export interface FetchError {
+  source: FetchSource;
+  message: string;
+}
+
 export interface Briefing {
   id: string;
   type: BriefingType;
@@ -98,5 +107,8 @@ export interface Briefing {
   email_recipients: number | null;
   email_id: string | null;
   email_error: string | null;
+  fetch_errors: FetchError[];
+  retry_count: number;
+  last_retry_at: string | null;
   created_at: string;
 }
