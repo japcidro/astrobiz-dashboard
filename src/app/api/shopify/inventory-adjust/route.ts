@@ -96,12 +96,10 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-    if (employee.role !== "admin" && batch.opened_by !== employee.id) {
-      return Response.json(
-        { error: "Cannot scan into another user's batch" },
-        { status: 403 }
-      );
-    }
+    // Hand-off allowed: any fulfillment user can scan into an open batch
+    // started by someone else (CEO decision 2026-04-26 — lunch handovers
+    // are common). Per-scan performed_by still records who scanned what,
+    // so the audit trail stays accurate.
     resolvedReason = "RTS Return";
   }
 

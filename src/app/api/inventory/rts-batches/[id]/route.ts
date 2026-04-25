@@ -36,11 +36,8 @@ export async function GET(
     return Response.json({ error: "Batch not found" }, { status: 404 });
   }
 
-  // Non-admins can only view their own batches.
-  const batchTyped = batch as { opened_by: string };
-  if (employee.role !== "admin" && batchTyped.opened_by !== employee.id) {
-    return Response.json({ error: "Forbidden" }, { status: 403 });
-  }
+  // Hand-off allowed: any fulfillment user can view + resume an open batch
+  // started by someone else (CEO decision 2026-04-26).
 
   const { data: adjustments, error: adjErr } = await supabase
     .from("inventory_adjustments")
