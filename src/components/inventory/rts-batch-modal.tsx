@@ -291,8 +291,8 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
         isManual: false,
       });
       setItems(json.items as BatchItem[]);
-      // Need locations for the per-item scan endpoint (location_id arg).
-      await loadRefs();
+      // Waybill flow: scan endpoint resolves location_id server-side, so we
+      // don't preload /locations here.
       setStep("scanning");
     } catch (e) {
       setResolveError(
@@ -351,7 +351,7 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
         isManual: false,
       });
       setItems((itemsJson.items as BatchItem[]) ?? []);
-      await loadRefs();
+      // Waybill flow: scan endpoint resolves location_id server-side.
       setStep("scanning");
     } catch (e) {
       setCreateError(e instanceof Error ? e.message : "Failed to open batch");
@@ -539,16 +539,6 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
       });
       return;
     }
-    const loc = getLocationForStore(batch.store_name);
-    if (!loc) {
-      playError();
-      setFeedback({
-        type: "error",
-        message: "NO LOCATION",
-        subMessage: "No fulfillment location for this store",
-      });
-      return;
-    }
     setScanning(true);
     try {
       const res = await fetch(
@@ -556,7 +546,10 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ location_id: String(loc.id) }),
+          // Server resolves location_id from the batch's store. No client-side
+          // lookup needed — that path was timing-fragile and surfaced as a
+          // misleading "NO LOCATION" error.
+          body: JSON.stringify({}),
         }
       );
       const json = await res.json();
