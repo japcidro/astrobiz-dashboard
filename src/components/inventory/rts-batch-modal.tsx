@@ -18,13 +18,6 @@ import { playSuccess, playError } from "@/lib/fulfillment/audio";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-interface Location {
-  id: number;
-  name: string;
-  store_name: string;
-  active: boolean;
-}
-
 interface ResolvedItem {
   shopify_line_item_id: string;
   sku: string | null;
@@ -137,9 +130,10 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
   const [batch, setBatch] = useState<ActiveBatch | null>(null);
   const [items, setItems] = useState<BatchItem[]>([]);
 
-  // Reference data — only used in manual-fallback flow
+  // Reference data — only used in manual-fallback flow. Locations are now
+  // resolved server-side by /api/shopify/inventory-adjust, so the modal
+  // only needs the store + inventory list.
   const [stores, setStores] = useState<{ id: string; name: string }[]>([]);
-  const [locations, setLocations] = useState<Location[]>([]);
   const [inventory, setInventory] = useState<InventoryRow[]>([]);
   const [refsLoaded, setRefsLoaded] = useState(false);
   const [refsError, setRefsError] = useState<string | null>(null);
@@ -189,16 +183,13 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
   }, [open]);
 
   // ── Lazy-load reference data only when manual fallback is needed. The
-  //    waybill flow doesn't need the full inventory snapshot.
+  //    waybill flow doesn't need the inventory snapshot — it scans against
+  //    the seeded items list.
   const loadRefs = useCallback(async () => {
     if (refsLoaded) return;
     try {
-      const [invRes, locRes] = await Promise.all([
-        fetch("/api/shopify/inventory?store=ALL"),
-        fetch("/api/shopify/fulfillment/locations"),
-      ]);
+      const invRes = await fetch("/api/shopify/inventory?store=ALL");
       const invJson = await invRes.json();
-      const locJson = await locRes.json();
       if (!invRes.ok) throw new Error(invJson.error || "Failed to load inventory");
       const rows: InventoryRow[] = (invJson.rows || []).map(
         (r: Record<string, unknown>) => ({
@@ -214,7 +205,6 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
       );
       setInventory(rows);
       if (invJson.stores) setStores(invJson.stores);
-      if (locRes.ok) setLocations(locJson.locations || []);
       setRefsLoaded(true);
     } catch (e) {
       setRefsError(e instanceof Error ? e.message : "Failed to load");
@@ -414,16 +404,6 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
   }
 
   // ── Scan handlers ──
-  const getLocationForStore = useCallback(
-    (storeName: string): Location | null => {
-      const match = locations.find(
-        (l) => l.store_name === storeName && l.active
-      );
-      return match || (locations.length > 0 ? locations[0] : null);
-    },
-    [locations]
-  );
-
   function findItemByScan(value: string): BatchItem | null {
     const trimmed = value.trim().toLowerCase();
     return (
@@ -452,7 +432,10 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
     if (!batch || scanning) return;
 
     if (batch.isManual) {
-      // Free-scan flow — same as old modal.
+      // Free-scan flow — same as old modal, minus the client-side location
+      // lookup. inventory-adjust now resolves location_id server-side when
+      // omitted, so the modal doesn't get stuck on a "NO LOCATION" error
+      // when /api/shopify/fulfillment/locations is slow or empty-cached.
       const product = findInventoryByScan(value);
       if (!product) {
         playError();
@@ -463,16 +446,6 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
         });
         return;
       }
-      const loc = getLocationForStore(product.store_name);
-      if (!loc) {
-        playError();
-        setFeedback({
-          type: "error",
-          message: "NO LOCATION",
-          subMessage: "No fulfillment location for this store",
-        });
-        return;
-      }
       setScanning(true);
       try {
         const res = await fetch("/api/shopify/inventory-adjust", {
@@ -480,7 +453,6 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             store_name: product.store_name,
-            location_id: String(loc.id),
             inventory_item_id: product.inventory_item_id,
             mode: "adjust",
             quantity: 1,

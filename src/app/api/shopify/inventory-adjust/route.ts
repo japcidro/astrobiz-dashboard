@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
 import { insertAlert } from "@/lib/alerts/insert";
+import { resolveDefaultLocationId } from "@/lib/shopify/locations";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +9,10 @@ const SHOPIFY_API_VERSION = "2024-01";
 
 interface AdjustRequestBody {
   store_name: string;
-  location_id: string;
+  // Optional. When omitted, the server auto-resolves the store's default
+  // active location (cached 30 min). Lets clients drop their dependency on
+  // the /api/shopify/fulfillment/locations preload.
+  location_id?: string;
   inventory_item_id: number;
   mode: "adjust" | "set";
   quantity: number;
@@ -34,7 +38,6 @@ export async function POST(request: Request) {
   const body = (await request.json()) as AdjustRequestBody;
   const {
     store_name,
-    location_id,
     inventory_item_id,
     mode,
     quantity,
@@ -43,10 +46,11 @@ export async function POST(request: Request) {
     product_title,
     rts_batch_id,
   } = body;
+  let location_id = body.location_id;
 
-  if (!store_name || !location_id || !inventory_item_id || !mode) {
+  if (!store_name || !inventory_item_id || !mode) {
     return Response.json(
-      { error: "store_name, location_id, inventory_item_id, and mode are required" },
+      { error: "store_name, inventory_item_id, and mode are required" },
       { status: 400 }
     );
   }
@@ -131,6 +135,23 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
+  }
+
+  // Auto-resolve location_id when the client didn't pass one. This is the
+  // path RTS manual fallback now uses — the modal stops preloading
+  // /locations and just lets the server figure it out.
+  if (!location_id) {
+    const resolved = await resolveDefaultLocationId(
+      store.store_url,
+      store.api_token
+    );
+    if (!resolved) {
+      return Response.json(
+        { error: `No active fulfillment location for ${store_name}` },
+        { status: 404 }
+      );
+    }
+    location_id = resolved;
   }
 
   try {

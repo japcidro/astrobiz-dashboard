@@ -1,53 +1,13 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
+import { resolveDefaultLocationId } from "@/lib/shopify/locations";
 
 export const dynamic = "force-dynamic";
 
 const SHOPIFY_API_VERSION = "2024-01";
 
-// Cache active fulfillment location per store URL for 30 minutes. Locations
-// rarely change, and resolving server-side means the modal doesn't have to
-// load the full /api/shopify/fulfillment/locations payload before scanning
-// (which was a real failure mode — VAs got "NO LOCATION" errors when the
-// locations call was slow or when state-priming raced the scan).
-const LOCATION_CACHE_TTL_MS = 30 * 60 * 1000;
-const locationCache = new Map<
-  string,
-  { locationId: string; cachedAt: number }
->();
-
 interface ScanBody {
   location_id?: string;
-}
-
-async function resolveLocationId(
-  storeUrl: string,
-  apiToken: string
-): Promise<string | null> {
-  const cached = locationCache.get(storeUrl);
-  if (cached && Date.now() - cached.cachedAt < LOCATION_CACHE_TTL_MS) {
-    return cached.locationId;
-  }
-  const res = await fetch(
-    `https://${storeUrl}/admin/api/${SHOPIFY_API_VERSION}/locations.json`,
-    {
-      headers: { "X-Shopify-Access-Token": apiToken },
-      cache: "no-store",
-    }
-  );
-  if (!res.ok) return null;
-  const json = (await res.json()) as {
-    locations?: Array<{ id: number; active: boolean }>;
-  };
-  const locations = json.locations ?? [];
-  // Prefer the first active location; fall back to the first one if none
-  // are flagged active (small Shopify accounts sometimes have just one,
-  // which doesn't always carry active=true).
-  const active = locations.find((l) => l.active) ?? locations[0];
-  if (!active) return null;
-  const locationId = String(active.id);
-  locationCache.set(storeUrl, { locationId, cachedAt: Date.now() });
-  return locationId;
 }
 
 // POST /api/inventory/rts-batches/[id]/items/[itemId]/scan
@@ -123,7 +83,7 @@ export async function POST(
   // overrides), otherwise look up the store's active location automatically.
   const locationId =
     explicitLocationId ??
-    (await resolveLocationId(
+    (await resolveDefaultLocationId(
       store.store_url as string,
       store.api_token as string
     ));
