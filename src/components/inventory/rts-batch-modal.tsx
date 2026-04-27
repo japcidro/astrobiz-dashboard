@@ -525,7 +525,10 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
         }
       );
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Scan failed");
+      // Prefer json.message (human-readable) over json.error (machine code).
+      // Surfacing "no_location" instead of "No active fulfillment location for X"
+      // sent VAs chasing the wrong fix.
+      if (!res.ok) throw new Error(json.message || json.error || "Scan failed");
 
       setItems((prev) =>
         prev.map((it) =>

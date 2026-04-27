@@ -32,18 +32,36 @@ export async function resolveDefaultLocationId(
         cache: "no-store",
       }
     );
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // Most common cause: token missing read_locations scope (401/403).
+      // Without this log the surfaced "no_location" error gave no signal as
+      // to why — every failure looked identical to an empty location list.
+      const body = await res.text().catch(() => "");
+      console.error(
+        `[locations] ${storeUrl} returned ${res.status}: ${body.slice(0, 300)}`
+      );
+      return null;
+    }
     const json = (await res.json()) as { locations?: ShopifyLocation[] };
     const locations = json.locations ?? [];
     // Prefer the first active location; fall back to the first one if none
     // are flagged active (small Shopify stores sometimes have a single
     // location that isn't marked active).
     const picked = locations.find((l) => l.active) ?? locations[0];
-    if (!picked) return null;
+    if (!picked) {
+      console.error(
+        `[locations] ${storeUrl} returned 200 but no locations (count=${locations.length})`
+      );
+      return null;
+    }
     const locationId = String(picked.id);
     cache.set(storeUrl, { locationId, cachedAt: Date.now() });
     return locationId;
-  } catch {
+  } catch (err) {
+    console.error(
+      `[locations] ${storeUrl} fetch threw:`,
+      err instanceof Error ? err.message : err
+    );
     return null;
   }
 }
