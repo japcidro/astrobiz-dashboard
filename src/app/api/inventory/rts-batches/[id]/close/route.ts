@@ -98,9 +98,10 @@ export async function POST(
     return Response.json({ error: updateErr.message }, { status: 500 });
   }
 
-  // Fire ONE summary alert for the whole batch (per-scan alerts were
-  // suppressed by inventory-adjust when rts_batch_id was set).
-  if (employee.role !== "admin") {
+  // Only fire an alert for exceptions (damaged/missing items). Normal
+  // closures are aggregated into the morning/evening briefings to avoid
+  // notification spam.
+  if (employee.role !== "admin" && (damagedTotal > 0 || missingTotal > 0)) {
     const orderTag = batchTyped.shopify_order_name
       ? ` for ${batchTyped.shopify_order_name}`
       : "";
@@ -108,8 +109,8 @@ export async function POST(
     const missingText = missingTotal > 0 ? `, ${missingTotal} missing` : "";
     await insertAlert(supabase, {
       type: "stock_added_by_team",
-      severity: damagedTotal > 0 || missingTotal > 0 ? "action" : "info",
-      title: `RTS batch closed: ${batchTyped.waybill || batchTyped.batch_ref} (+${unitCount} units${damagedText}${missingText})`,
+      severity: "action",
+      title: `RTS exception: ${batchTyped.waybill || batchTyped.batch_ref} (+${unitCount} units${damagedText}${missingText})`,
       body:
         `${employee.full_name} closed RTS batch "${batchTyped.waybill || batchTyped.batch_ref}"${orderTag} ` +
         `for ${batchTyped.shopify_stores.name}. ` +
