@@ -13,6 +13,7 @@ import {
   CheckCircle,
   PauseCircle,
   TrendingUp,
+  Search,
 } from "lucide-react";
 
 interface AutopilotConfig {
@@ -107,6 +108,10 @@ export function AutopilotModal({
 
   const [error, setError] = useState<string | null>(null);
 
+  // Campaigns tab filter
+  const [campaignSearch, setCampaignSearch] = useState("");
+  const [nurseryOnly, setNurseryOnly] = useState(false);
+
   // Form state mirrors config
   const [form, setForm] = useState<Partial<AutopilotConfig>>({});
 
@@ -185,6 +190,16 @@ export function AutopilotModal({
     () => new Set(watched.map((w) => w.campaign_id)),
     [watched]
   );
+
+  const filteredCampaigns = useMemo(() => {
+    const q = campaignSearch.trim().toLowerCase();
+    return campaignOptions.filter((c) => {
+      const name = (c.campaign_name ?? "").toLowerCase();
+      if (nurseryOnly && !name.includes("nursery")) return false;
+      if (q && !name.includes(q)) return false;
+      return true;
+    });
+  }, [campaignOptions, campaignSearch, nurseryOnly]);
 
   const saveConfig = async () => {
     setSavingConfig(true);
@@ -280,28 +295,30 @@ export function AutopilotModal({
 
   return (
     <div
-      className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+      className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
       onClick={onClose}
     >
       <div
-        className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col"
+        className="bg-gray-900 border border-gray-800 rounded-t-2xl sm:rounded-2xl w-full max-w-4xl h-[95dvh] sm:h-auto sm:max-h-[90vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-5 border-b border-gray-800">
-          <div className="flex items-center gap-2">
-            <Bot size={20} className="text-blue-400" />
-            <h2 className="text-lg font-semibold text-white">Autopilot</h2>
+        <div className="flex items-center justify-between p-4 sm:p-5 border-b border-gray-800 gap-2">
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <Bot size={20} className="text-blue-400 shrink-0" />
+            <h2 className="text-base sm:text-lg font-semibold text-white shrink-0">
+              Autopilot
+            </h2>
             {enabledBadge}
-            <span className="text-xs text-gray-500 ml-2">
+            <span className="text-xs text-gray-500 ml-2 truncate hidden md:inline">
               Auto-pause losers · Runs hourly · No safety rails
             </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={runNow}
               disabled={runningNow || !config?.enabled}
-              className="flex items-center gap-1.5 text-xs bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+              className="flex items-center gap-1.5 text-xs bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
               title={
                 config?.enabled
                   ? "Run Autopilot now (ignoring cron schedule)"
@@ -313,11 +330,12 @@ export function AutopilotModal({
               ) : (
                 <Play size={12} />
               )}
-              Run now
+              <span className="hidden xs:inline sm:inline">Run now</span>
             </button>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-white cursor-pointer"
+              className="text-gray-400 hover:text-white cursor-pointer p-1 -m-1"
+              aria-label="Close"
             >
               <X size={20} />
             </button>
@@ -364,7 +382,7 @@ export function AutopilotModal({
         </div>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-5">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 sm:p-5">
           {tab === "rules" &&
             (loadingConfig || !config ? (
               <SkeletonBlock />
@@ -445,69 +463,98 @@ export function AutopilotModal({
                 Toggle ON the campaigns you want Autopilot to watch. Only
                 active ads inside ON campaigns get evaluated.
               </p>
+
+              {/* Filter bar */}
+              <div className="flex flex-col sm:flex-row gap-2 mb-3">
+                <div className="relative flex-1">
+                  <Search
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 pointer-events-none"
+                  />
+                  <input
+                    type="text"
+                    inputMode="search"
+                    value={campaignSearch}
+                    onChange={(e) => setCampaignSearch(e.target.value)}
+                    placeholder="Search campaign name..."
+                    className="w-full bg-gray-900 border border-gray-700 rounded-lg pl-9 pr-8 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  {campaignSearch && (
+                    <button
+                      onClick={() => setCampaignSearch("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 cursor-pointer p-0.5"
+                      aria-label="Clear search"
+                    >
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+                <button
+                  onClick={() => setNurseryOnly((v) => !v)}
+                  className={`text-xs px-3 py-2 rounded-lg border transition-colors cursor-pointer whitespace-nowrap ${
+                    nurseryOnly
+                      ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
+                      : "bg-gray-800/60 border-gray-700 text-gray-300 hover:bg-gray-800"
+                  }`}
+                >
+                  NURSERY only
+                </button>
+              </div>
+
               {loadingWatched ? (
                 <SkeletonBlock />
               ) : campaignOptions.length === 0 ? (
                 <div className="text-center text-gray-500 py-8 text-sm">
                   No campaigns loaded. Refresh the Ad Performance page first.
                 </div>
+              ) : filteredCampaigns.length === 0 ? (
+                <div className="text-center text-gray-500 py-8 text-sm">
+                  No campaigns match your filter.
+                </div>
               ) : (
-                <div className="border border-gray-800 rounded-lg overflow-hidden">
-                  <table className="w-full text-sm">
-                    <thead className="bg-gray-800/50">
-                      <tr className="text-gray-400 text-xs">
-                        <th className="text-left px-3 py-2 font-medium">
-                          Campaign
-                        </th>
-                        <th className="text-right px-3 py-2 font-medium">
-                          Ads
-                        </th>
-                        <th className="text-right px-3 py-2 font-medium w-24">
-                          Autopilot
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {campaignOptions.map((opt) => {
-                        const on = watchedIds.has(opt.campaign_id);
-                        const toggling =
-                          togglingCampaign === opt.campaign_id;
-                        return (
-                          <tr
-                            key={opt.campaign_id}
-                            className={`border-t border-gray-800 ${
-                              on ? "bg-blue-900/10" : ""
-                            }`}
-                          >
-                            <td className="px-3 py-2.5 text-gray-200">
-                              <div className="truncate max-w-[400px]">
-                                {opt.campaign_name}
-                              </div>
-                            </td>
-                            <td className="px-3 py-2.5 text-right text-gray-400">
-                              {opt.ad_count}
-                            </td>
-                            <td className="px-3 py-2.5 text-right">
-                              <div className="inline-flex items-center justify-end gap-2">
-                                {toggling && (
-                                  <Loader2
-                                    size={14}
-                                    className="animate-spin text-gray-400"
-                                  />
-                                )}
-                                <Switch
-                                  value={on}
-                                  onChange={() =>
-                                    !toggling && toggleWatched(opt)
-                                  }
-                                />
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+                <div className="border border-gray-800 rounded-lg divide-y divide-gray-800 overflow-hidden">
+                  <div className="hidden sm:grid grid-cols-[1fr_60px_96px] bg-gray-800/50 text-gray-400 text-xs font-medium px-3 py-2">
+                    <div className="text-left">Campaign</div>
+                    <div className="text-right">Ads</div>
+                    <div className="text-right">Autopilot</div>
+                  </div>
+                  {filteredCampaigns.map((opt) => {
+                    const on = watchedIds.has(opt.campaign_id);
+                    const toggling =
+                      togglingCampaign === opt.campaign_id;
+                    return (
+                      <div
+                        key={opt.campaign_id}
+                        className={`grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_60px_96px] items-center gap-2 px-3 py-2.5 ${
+                          on ? "bg-blue-900/10" : ""
+                        }`}
+                      >
+                        <div className="min-w-0 text-sm text-gray-200">
+                          <div className="truncate">{opt.campaign_name}</div>
+                          <div className="sm:hidden text-[11px] text-gray-500 mt-0.5">
+                            {opt.ad_count} ads
+                          </div>
+                        </div>
+                        <div className="hidden sm:block text-right text-sm text-gray-400">
+                          {opt.ad_count}
+                        </div>
+                        <div className="flex items-center justify-end gap-2">
+                          {toggling && (
+                            <Loader2
+                              size={14}
+                              className="animate-spin text-gray-400"
+                            />
+                          )}
+                          <Switch
+                            value={on}
+                            onChange={() =>
+                              !toggling && toggleWatched(opt)
+                            }
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
