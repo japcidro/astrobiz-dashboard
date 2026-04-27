@@ -65,20 +65,12 @@ export function StepAd({
     };
   }, [sourceScriptId, scriptCache]);
 
+  // Linking is metadata-only: we attach source_script_id so the feedback loop
+  // can join launched ads → script → Meta metrics. Copy fields are left to the
+  // marketer so the AI can later compare copy variants under the same script.
   const applyScript = (script: ApprovedScript) => {
     setScriptCache((prev) => ({ ...prev, [script.id]: script }));
     onSourceScriptIdChange(script.id);
-
-    // Map Hook → headline, Body → primary_text. Description left alone.
-    // Ad name pre-fills with angle title if the user hasn't named it yet.
-    const updates: Partial<AdFormData> = {
-      primary_text: script.body_script,
-      headline: script.hook.slice(0, 255),
-    };
-    if (!data.name.trim()) {
-      updates.name = script.angle_title;
-    }
-    onUpdate(updates);
   };
 
   const clearLinkedScript = () => {

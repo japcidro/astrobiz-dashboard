@@ -232,22 +232,20 @@ export function AdRowsTable({
     null
   );
 
+  // Linking is metadata-only: we attach source_script_id so the feedback loop
+  // (script-performance.ts) can roll up Meta metrics per script. We do NOT
+  // populate copy fields — marketers write their own headline/primary_text/
+  // description so the AI can later compare copy variants under the same script.
   const handlePickScript = useCallback(
     (script: ApprovedScript) => {
       if (!pickerTargetRowId) return;
-      const row = rows.find((r) => r.id === pickerTargetRowId);
       onUpdateRow(pickerTargetRowId, {
-        ad_name: row?.ad_name?.trim()
-          ? row.ad_name
-          : script.angle_title.slice(0, 80),
-        primary_text: script.body_script,
-        headline: script.hook.slice(0, 255),
         source_script_id: script.id,
         source_script_title: script.angle_title,
       });
       setPickerTargetRowId(null);
     },
-    [pickerTargetRowId, rows, onUpdateRow]
+    [pickerTargetRowId, onUpdateRow]
   );
 
   // Upload a single file for a given row — detect type from file MIME
