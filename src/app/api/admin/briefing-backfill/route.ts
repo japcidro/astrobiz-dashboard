@@ -1,6 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { getEmployee } from "@/lib/supabase/get-employee";
 import { runBriefing } from "@/lib/briefings/run";
+import { resolveBriefingBaseUrl } from "@/lib/briefings/base-url";
 import type { BriefingType, PeriodRange } from "@/lib/briefings/types";
 
 export const dynamic = "force-dynamic";
@@ -96,8 +97,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const url = new URL(request.url);
-  const baseUrl = `${url.protocol}//${url.host}`;
+  const baseUrl = resolveBriefingBaseUrl(request);
 
   const result = await runBriefing(supabase, baseUrl, cronSecret, type, {
     period,

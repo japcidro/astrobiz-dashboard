@@ -1,5 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { runBriefing } from "@/lib/briefings/run";
+import { resolveBriefingBaseUrl } from "@/lib/briefings/base-url";
 import type {
   BriefingType,
   BriefingData,
@@ -61,8 +62,7 @@ export async function GET(request: Request) {
   }
 
   const supabase = createServiceClient();
-  const url = new URL(request.url);
-  const baseUrl = `${url.protocol}//${url.host}`;
+  const baseUrl = resolveBriefingBaseUrl(request);
   const cronSecret = process.env.CRON_SECRET!;
 
   const cutoff = new Date(Date.now() - LOOKBACK_HOURS * 60 * 60 * 1000).toISOString();

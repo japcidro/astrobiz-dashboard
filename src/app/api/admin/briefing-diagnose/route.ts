@@ -1,5 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { getEmployee } from "@/lib/supabase/get-employee";
+import { resolveBriefingBaseUrl } from "@/lib/briefings/base-url";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -99,8 +100,7 @@ export async function GET(request: Request) {
   const cronSecret = process.env.CRON_SECRET ?? "";
   const cronAuth = { Authorization: `Bearer ${cronSecret}` };
 
-  const url = new URL(request.url);
-  const baseUrl = `${url.protocol}//${url.host}`;
+  const baseUrl = resolveBriefingBaseUrl(request);
 
   // -----------------------------
   // 1. Environment + DB state

@@ -1,5 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { runBriefing } from "@/lib/briefings/run";
+import { resolveBriefingBaseUrl } from "@/lib/briefings/base-url";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -10,8 +11,7 @@ export async function GET(request: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
   const supabase = createServiceClient();
-  const url = new URL(request.url);
-  const baseUrl = `${url.protocol}//${url.host}`;
+  const baseUrl = resolveBriefingBaseUrl(request);
   const result = await runBriefing(supabase, baseUrl, process.env.CRON_SECRET!, "morning");
   return Response.json(result);
 }
