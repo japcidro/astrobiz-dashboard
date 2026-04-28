@@ -24,7 +24,10 @@ import {
 } from "@/components/marketing/promote-to-scaling-modal";
 import { deriveStore } from "@/lib/shopify/derive-store";
 import { ComparativeReportView } from "@/components/marketing/comparative-report";
-import type { ComparativeReport } from "@/lib/ai/compare-types";
+import type {
+  ComparativeReport,
+  AdDeconstruction,
+} from "@/lib/ai/compare-types";
 import type { DatePreset } from "@/lib/facebook/types";
 
 interface AdBrief {
@@ -54,16 +57,10 @@ export interface DeconstructionRow {
   analyzed_by_name: string | null;
 }
 
-interface Analysis {
-  transcript: string;
-  hook: { description: string; timestamp: string };
-  scenes: Array<{ t: string; description: string }>;
-  visual_style: string;
-  tone: string;
-  cta: string;
-  language: string;
-  duration_seconds: number;
-}
+// Aliases the shared AdDeconstruction (legacy fields required, v2.0 Winning
+// DNA fields optional). Rows analyzed before the v2.0 prompt rollout will
+// have only the legacy keys, so the modal must degrade gracefully.
+type Analysis = AdDeconstruction;
 
 interface Props {
   ads: AdBrief[];
@@ -1607,13 +1604,9 @@ function DeconstructionDetailModal({
 
         {/* Body */}
         <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">
-          <Section title="Hook (first 3 seconds)">
-            <p className="text-xs text-gray-500 mb-1 font-mono">
-              {a.hook.timestamp}
-            </p>
-            <p className="text-sm text-gray-200">{a.hook.description}</p>
-          </Section>
+          <WinningDnaSections a={a} />
 
+          {/* — Legacy descriptive layer — */}
           <Section title="Visual style">
             <p className="text-sm text-gray-200">{a.visual_style}</p>
           </Section>
@@ -1622,9 +1615,18 @@ function DeconstructionDetailModal({
             <p className="text-sm text-gray-200">{a.tone}</p>
           </Section>
 
-          <Section title="CTA">
+          <Section title="CTA delivery">
             <p className="text-sm text-gray-200">{a.cta}</p>
           </Section>
+
+          {!a.beat_map && (
+            <Section title="Hook (first 3 seconds)">
+              <p className="text-xs text-gray-500 mb-1 font-mono">
+                {a.hook.timestamp}
+              </p>
+              <p className="text-sm text-gray-200">{a.hook.description}</p>
+            </Section>
+          )}
 
           <Section title="Scene / b-roll changes">
             {a.scenes.length === 0 ? (
@@ -1696,6 +1698,254 @@ function Section({
         {title}
       </h4>
       {children}
+    </div>
+  );
+}
+
+// Renders the v2.0 Winning DNA Report sections. If the analysis row was
+// produced before the v2.0 prompt rollout (no `fingerprint`), emits a
+// legacy-row notice instead so the user knows why the new sections are
+// missing — and still falls through to the legacy descriptive layer below.
+function WinningDnaSections({ a }: { a: Analysis }) {
+  if (!a.fingerprint) {
+    return (
+      <div className="bg-yellow-900/20 border border-yellow-700/40 rounded-lg p-3 text-xs text-yellow-200">
+        This row was analyzed before the Winning DNA v2.0 prompt rolled out
+        (2026-04-28). Click <strong>Re-run</strong> to regenerate with the new
+        structural extraction (Fingerprint, Classification, Viral Mechanism,
+        Format Compatibility, Angle Variations).
+      </div>
+    );
+  }
+
+  const { classification, hook_anatomy, beat_map, uvp, open_loop } = a;
+
+  return (
+    <div className="space-y-5 pb-2 border-b border-gray-700/50">
+      <Section title="Fingerprint">
+        <p className="text-sm text-gray-200 leading-relaxed">{a.fingerprint}</p>
+      </Section>
+
+      {classification && (
+        <Section title="Classification">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 bg-gray-800/40 border border-gray-700/40 rounded-lg p-3">
+            <KvRow k="Avatar" v={classification.avatar} />
+            <KvRow k="Angle" v={classification.angle} />
+            <KvRow k="Awareness" v={classification.awareness_level} mono />
+            <KvRow k="Funnel Stage" v={classification.funnel_stage} mono />
+            <KvRow k="Hook Framework" v={classification.hook_framework} />
+            <KvRow k="Strategic Format" v={classification.strategic_format} />
+            <KvRow
+              k="Video Format"
+              v={classification.video_format}
+              colSpan2
+            />
+          </div>
+        </Section>
+      )}
+
+      {a.viral_mechanism && (
+        <Section title="Viral Mechanism">
+          <p className="text-sm text-emerald-200 leading-relaxed bg-emerald-900/20 border border-emerald-700/40 rounded-lg p-3">
+            {a.viral_mechanism}
+          </p>
+        </Section>
+      )}
+
+      {hook_anatomy && (
+        <Section title="Hook Anatomy">
+          <div className="space-y-1.5 text-sm">
+            <KvRow k="Attention Trigger" v={hook_anatomy.attention_trigger} />
+            <KvRow k="Information Gap" v={hook_anatomy.information_gap} />
+            <KvRow k="Implied Promise" v={hook_anatomy.implied_promise} />
+          </div>
+        </Section>
+      )}
+
+      {beat_map && (
+        <Section title="Beat Map">
+          <div className="space-y-2">
+            <BeatRow label="Hook" range={beat_map.hook.range} content={beat_map.hook.content} />
+            <BeatRow
+              label="Body Open"
+              range={beat_map.body_open.range}
+              content={beat_map.body_open.content}
+            />
+            <BeatRow
+              label="Body Core"
+              range={beat_map.body_core.range}
+              content={beat_map.body_core.content}
+            />
+            <BeatRow
+              label="Close / CTA"
+              range={beat_map.close.range}
+              content={beat_map.close.content}
+            />
+            <div className="text-[11px] text-gray-500 pt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+              <span>Cut frequency: <span className="text-gray-300">{beat_map.cut_frequency}</span></span>
+              {beat_map.text_overlay_timestamps.length > 0 && (
+                <span>
+                  Text overlays at:{" "}
+                  <span className="text-gray-300 font-mono">
+                    {beat_map.text_overlay_timestamps.join(", ")}
+                  </span>
+                </span>
+              )}
+            </div>
+          </div>
+        </Section>
+      )}
+
+      {uvp && (
+        <Section title="UVP Extraction">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 bg-gray-800/40 border border-gray-700/40 rounded-lg p-3">
+            <KvRow k="Core Promise" v={uvp.core_promise} colSpan2 />
+            <KvRow k="Mechanism" v={uvp.mechanism} />
+            <KvRow k="Differentiator" v={uvp.differentiator} />
+            <KvRow k="Proof Element" v={uvp.proof_element} />
+            <KvRow k="Cost / Effort" v={uvp.cost_effort_frame} />
+          </div>
+        </Section>
+      )}
+
+      {open_loop && (
+        <Section title="Open Loop Trace">
+          <div className="space-y-1.5 text-sm">
+            <div className="flex gap-2">
+              <span className="text-blue-400 font-mono text-xs pt-0.5 w-16 flex-shrink-0">
+                {open_loop.opened_at}
+              </span>
+              <span className="text-gray-200">
+                <span className="text-gray-500">Opens: </span>
+                {open_loop.opened_content}
+              </span>
+            </div>
+            <div className="flex gap-2">
+              <span className="text-blue-400 font-mono text-xs pt-0.5 w-16 flex-shrink-0">
+                {open_loop.closed_at}
+              </span>
+              <span className="text-gray-200">
+                <span className="text-gray-500">Closes: </span>
+                {open_loop.closed_content}
+              </span>
+            </div>
+            <div className="text-[11px] text-gray-500">
+              Closure quality:{" "}
+              <span
+                className={
+                  open_loop.closure_quality === "earned"
+                    ? "text-emerald-300"
+                    : open_loop.closure_quality === "partial"
+                      ? "text-yellow-300"
+                      : "text-red-300"
+                }
+              >
+                {open_loop.closure_quality}
+              </span>
+            </div>
+          </div>
+        </Section>
+      )}
+
+      {a.format_compatibility && a.format_compatibility.length > 0 && (
+        <Section title="Format Compatibility (expansion candidates)">
+          <ol className="space-y-2 list-decimal list-inside">
+            {a.format_compatibility.map((fc, i) => (
+              <li key={i} className="text-sm text-gray-200">
+                <span className="font-mono text-xs text-blue-400">
+                  {fc.format_number}
+                </span>{" "}
+                <span className="font-medium">{fc.format_name}</span>
+                <div className="ml-5 mt-1 text-xs text-gray-400 space-y-0.5">
+                  <p>
+                    <span className="text-gray-500">Fit: </span>
+                    {fc.fit_reason}
+                  </p>
+                  <p>
+                    <span className="text-gray-500">Script shift: </span>
+                    {fc.script_shift}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </Section>
+      )}
+
+      {a.angle_variations && a.angle_variations.length > 0 && (
+        <Section title="Angle Variations">
+          <ol className="space-y-2 list-decimal list-inside">
+            {a.angle_variations.map((av, i) => (
+              <li key={i} className="text-sm text-gray-200">
+                <p>{av.angle}</p>
+                <div className="ml-5 mt-1 text-xs text-gray-400 space-y-0.5">
+                  <p>
+                    <span className="text-gray-500">Hook: </span>
+                    {av.hook_framework}
+                  </p>
+                  <p>
+                    <span className="text-gray-500">Formats: </span>
+                    <span className="font-mono">{av.formats}</span>
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </Section>
+      )}
+
+      {a.cross_check_findings && a.cross_check_findings.length > 0 && (
+        <Section title="Cross-check findings">
+          <ul className="space-y-1 list-disc list-inside">
+            {a.cross_check_findings.map((f, i) => (
+              <li key={i} className="text-sm text-yellow-200">
+                {f}
+              </li>
+            ))}
+          </ul>
+        </Section>
+      )}
+    </div>
+  );
+}
+
+function KvRow({
+  k,
+  v,
+  mono = false,
+  colSpan2 = false,
+}: {
+  k: string;
+  v: string;
+  mono?: boolean;
+  colSpan2?: boolean;
+}) {
+  return (
+    <div className={colSpan2 ? "sm:col-span-2" : ""}>
+      <p className="text-[10px] uppercase tracking-wide text-gray-500">{k}</p>
+      <p className={`text-sm text-gray-200 ${mono ? "font-mono" : ""}`}>{v}</p>
+    </div>
+  );
+}
+
+function BeatRow({
+  label,
+  range,
+  content,
+}: {
+  label: string;
+  range: string;
+  content: string;
+}) {
+  return (
+    <div className="flex gap-3">
+      <div className="flex-shrink-0 w-24">
+        <p className="text-[10px] uppercase tracking-wide text-gray-500">
+          {label}
+        </p>
+        <p className="text-blue-400 font-mono text-xs">{range}</p>
+      </div>
+      <p className="text-sm text-gray-200 flex-1">{content}</p>
     </div>
   );
 }
