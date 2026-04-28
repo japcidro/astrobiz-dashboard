@@ -1,5 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
+import { DEFAULT_PROMPTS } from "@/lib/ai/default-prompts";
+import { loadWinnersContext } from "@/lib/ai/winners-context";
 
 export const dynamic = "force-dynamic";
 
@@ -62,18 +64,41 @@ export async function POST(request: Request) {
     return Response.json({ error: docsError.message }, { status: 500 });
   }
 
-  // 3. Separate system instruction from knowledge docs
+  // 3. Separate system instruction from knowledge docs.
+  //    Auto-managed docs (validated_winners_dna) are excluded from the
+  //    static knowledge block — those are injected separately as a
+  //    dynamic checkpoint so the static prefix stays cached.
   const systemDoc = docs?.find((d) => d.doc_type === systemDocType);
-  const knowledgeDocs = (docs || []).filter((d) => !d.doc_type.startsWith("system_"));
+  const knowledgeDocs = (docs || []).filter(
+    (d) =>
+      !d.doc_type.startsWith("system_") &&
+      d.doc_type !== "validated_winners_dna"
+  );
 
-  const systemPromptContent = systemDoc?.content || "You are a creative ad strategist and copywriter.";
+  // System prompt resolution order:
+  //   1. Per-store custom override in ai_store_docs (legacy hand-written)
+  //   2. v2.0 default for this tool, baked into code
+  //   3. Generic fallback (defensive — should never fire if DEFAULT_PROMPTS is intact)
+  const systemPromptContent =
+    systemDoc?.content ||
+    DEFAULT_PROMPTS[systemDocType] ||
+    "You are a creative ad strategist and copywriter.";
 
   // 4. Build knowledge context
   const knowledgeContext = knowledgeDocs
     .map((doc) => `=== ${doc.title} ===\n${doc.content}`)
     .join("\n\n");
 
-  // 5. Build system blocks — instruction + knowledge, both cached.
+  // 5. Load validated-winners context — separate cache checkpoint so changes
+  //    to the winners list don't bust the static system+knowledge prefix.
+  //    Returns null on cold start (no winners yet) — generator falls back to
+  //    the manual winning_ad_template doc per the system prompt.
+  const winners = await loadWinnersContext(supabase, store_name);
+
+  // 6. Build system blocks. Cache hierarchy:
+  //   [0] system instruction          — static, cached at end of static prefix
+  //   [1] static knowledge docs       — static, cached at end of static prefix
+  //   [2] validated winners (dynamic) — separate cache_control checkpoint
   // Putting knowledge in `system` (not in the first user message) keeps the
   // cache prefix stable across turns; only the messages array varies per call.
   const systemBlocks: Array<{
@@ -89,7 +114,17 @@ export async function POST(request: Request) {
       cache_control: { type: "ephemeral" },
     });
   } else {
+    // No knowledge docs → cache at end of system prompt instead so we still
+    // get a cache hit on multi-turn conversations.
     systemBlocks[0].cache_control = { type: "ephemeral" };
+  }
+
+  if (winners) {
+    systemBlocks.push({
+      type: "text",
+      text: winners.text,
+      cache_control: { type: "ephemeral" },
+    });
   }
 
   const model = "claude-sonnet-4-6";
@@ -112,7 +147,10 @@ export async function POST(request: Request) {
           },
           body: JSON.stringify({
             model,
-            max_tokens: 8192,
+            // 16384 leaves headroom for 7 detailed scripts (each with hook +
+            // body + 3 variant hooks + classification block) plus the
+            // batch_intent line. 8192 was tight once v2 outputs landed.
+            max_tokens: 16384,
             system: systemBlocks,
             messages,
           }),
@@ -126,6 +164,11 @@ export async function POST(request: Request) {
           text: generatedText,
           model,
           tokens_used: result.usage,
+          context: {
+            used_default_prompt: !systemDoc,
+            winner_count: winners?.winner_count ?? 0,
+            winner_ids: winners?.winner_ids ?? [],
+          },
         });
       }
 
