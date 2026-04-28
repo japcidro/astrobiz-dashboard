@@ -55,12 +55,22 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { id, store_name, tool_type, input_data, output_data } = body as {
+  const {
+    id,
+    store_name,
+    tool_type,
+    input_data,
+    output_data,
+    structured_output,
+    source_winner_analysis_id,
+  } = body as {
     id?: string;
     store_name: string;
     tool_type: string;
     input_data: unknown;
     output_data: unknown;
+    structured_output?: unknown;
+    source_winner_analysis_id?: string | null;
   };
 
   if (!store_name || !tool_type) {
@@ -72,12 +82,23 @@ export async function POST(request: Request) {
 
   const supabase = await createClient();
 
+  // Build the update/insert payload. structured_output and
+  // source_winner_analysis_id are only included if the client sent them,
+  // so existing thread saves (which don't yet pass these) keep working.
+  const persistedFields: Record<string, unknown> = { input_data, output_data };
+  if (structured_output !== undefined) {
+    persistedFields.structured_output = structured_output;
+  }
+  if (source_winner_analysis_id !== undefined) {
+    persistedFields.source_winner_analysis_id = source_winner_analysis_id;
+  }
+
   if (id) {
     // Update existing thread. Only allow the owner (or admin/marketing, who
     // share threads in the GET handler) to mutate it.
     let updateQuery = supabase
       .from("ai_generations")
-      .update({ input_data, output_data })
+      .update(persistedFields)
       .eq("id", id);
 
     if (!["admin", "marketing"].includes(employee.role)) {
@@ -103,8 +124,7 @@ export async function POST(request: Request) {
       employee_id: employee.id,
       store_name,
       tool_type,
-      input_data,
-      output_data,
+      ...persistedFields,
     })
     .select("id")
     .single();

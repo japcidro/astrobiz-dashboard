@@ -2,8 +2,61 @@ import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
 import { DEFAULT_PROMPTS } from "@/lib/ai/default-prompts";
 import { loadWinnersContext } from "@/lib/ai/winners-context";
+import { TOOL_BY_TYPE } from "@/lib/ai/tools/generators";
+import type {
+  EmittedAnglesBatch,
+  EmittedFormatsBatch,
+  EmittedScriptsBatch,
+} from "@/lib/ai/tools/generators";
+import {
+  validateAngleBatch,
+  validateScriptBatch,
+} from "@/lib/ai/validators/variation-gate";
+import {
+  renderAnglesMarkdown,
+  renderFormatsMarkdown,
+  renderScriptsMarkdown,
+} from "@/lib/ai/structured-render";
 
 export const dynamic = "force-dynamic";
+
+type ToolType = "angles" | "scripts" | "formats";
+
+interface ClientMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+interface ClaudeContentBlock {
+  type: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+}
+
+interface ClaudeResponse {
+  content: ClaudeContentBlock[];
+  usage?: Record<string, number>;
+  stop_reason?: string;
+}
+
+interface ClaudeApiResult {
+  ok: boolean;
+  status: number;
+  body: ClaudeResponse | null;
+  errorText: string;
+}
+
+const MODEL = "claude-sonnet-4-6";
+const MAX_TOKENS = 16384;
+const TRANSPORT_RETRIES = 3;
+
+const TOOL_TO_SYSTEM_DOC: Record<ToolType, string> = {
+  angles: "system_angle_generator",
+  scripts: "system_script_creator",
+  formats: "system_format_expansion",
+};
 
 export async function POST(request: Request) {
   const employee = await getEmployee();
@@ -17,8 +70,8 @@ export async function POST(request: Request) {
   const body = await request.json();
   const { store_name, tool_type, messages } = body as {
     store_name: string;
-    tool_type?: string; // "angles" | "scripts" | "formats"
-    messages: Array<{ role: "user" | "assistant"; content: string }>;
+    tool_type?: string;
+    messages: ClientMessage[];
   };
 
   if (!store_name || !messages || messages.length === 0) {
@@ -28,17 +81,12 @@ export async function POST(request: Request) {
     );
   }
 
-  // Determine which system instruction to use
-  const TOOL_TO_SYSTEM: Record<string, string> = {
-    angles: "system_angle_generator",
-    scripts: "system_script_creator",
-    formats: "system_format_expansion",
-  };
-  const systemDocType = tool_type ? TOOL_TO_SYSTEM[tool_type] || "system_angle_generator" : "system_angle_generator";
+  const resolvedTool: ToolType =
+    tool_type === "scripts" || tool_type === "formats" ? tool_type : "angles";
+  const systemDocType = TOOL_TO_SYSTEM_DOC[resolvedTool];
 
   const supabase = await createClient();
 
-  // 1. Fetch API key
   const { data: settingRow } = await supabase
     .from("app_settings")
     .select("value")
@@ -51,56 +99,34 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+  const apiKey = settingRow.value as string;
 
-  const apiKey = settingRow.value;
-
-  // 2. Fetch all docs for this store
   const { data: docs, error: docsError } = await supabase
     .from("ai_store_docs")
     .select("*")
     .eq("store_name", store_name);
-
   if (docsError) {
     return Response.json({ error: docsError.message }, { status: 500 });
   }
 
-  // 3. Separate system instruction from knowledge docs.
-  //    Auto-managed docs (validated_winners_dna) are excluded from the
-  //    static knowledge block — those are injected separately as a
-  //    dynamic checkpoint so the static prefix stays cached.
+  // System prompt resolution: per-store custom override → v2 default → fallback.
   const systemDoc = docs?.find((d) => d.doc_type === systemDocType);
   const knowledgeDocs = (docs || []).filter(
     (d) =>
       !d.doc_type.startsWith("system_") &&
       d.doc_type !== "validated_winners_dna"
   );
-
-  // System prompt resolution order:
-  //   1. Per-store custom override in ai_store_docs (legacy hand-written)
-  //   2. v2.0 default for this tool, baked into code
-  //   3. Generic fallback (defensive — should never fire if DEFAULT_PROMPTS is intact)
   const systemPromptContent =
     systemDoc?.content ||
     DEFAULT_PROMPTS[systemDocType] ||
     "You are a creative ad strategist and copywriter.";
 
-  // 4. Build knowledge context
   const knowledgeContext = knowledgeDocs
     .map((doc) => `=== ${doc.title} ===\n${doc.content}`)
     .join("\n\n");
 
-  // 5. Load validated-winners context — separate cache checkpoint so changes
-  //    to the winners list don't bust the static system+knowledge prefix.
-  //    Returns null on cold start (no winners yet) — generator falls back to
-  //    the manual winning_ad_template doc per the system prompt.
   const winners = await loadWinnersContext(supabase, store_name);
 
-  // 6. Build system blocks. Cache hierarchy:
-  //   [0] system instruction          — static, cached at end of static prefix
-  //   [1] static knowledge docs       — static, cached at end of static prefix
-  //   [2] validated winners (dynamic) — separate cache_control checkpoint
-  // Putting knowledge in `system` (not in the first user message) keeps the
-  // cache prefix stable across turns; only the messages array varies per call.
   const systemBlocks: Array<{
     type: "text";
     text: string;
@@ -114,8 +140,6 @@ export async function POST(request: Request) {
       cache_control: { type: "ephemeral" },
     });
   } else {
-    // No knowledge docs → cache at end of system prompt instead so we still
-    // get a cache hit on multi-turn conversations.
     systemBlocks[0].cache_control = { type: "ephemeral" };
   }
 
@@ -127,58 +151,171 @@ export async function POST(request: Request) {
     });
   }
 
-  const model = "claude-sonnet-4-6";
+  const tool = TOOL_BY_TYPE[resolvedTool];
 
-  // 6. Call Claude API with exponential backoff on 429 / 5xx
-  const maxAttempts = 3;
+  // Initial call — string-content messages from the client. Anthropic
+  // accepts these; tool_choice forces the model to emit via the tool.
+  const initialMessages = messages.map((m) => ({
+    role: m.role,
+    content: m.content,
+  }));
+
+  const initial = await callClaude(
+    apiKey,
+    systemBlocks,
+    initialMessages,
+    tool
+  );
+  if (!initial.ok || !initial.body) {
+    return errorResponse(initial);
+  }
+
+  const initialToolUse = findToolUse(initial.body, tool.name);
+  if (!initialToolUse) {
+    // Model returned prose instead of a tool call. Surface a graceful error
+    // so the UI can ask the user to retry — this should never happen with
+    // tool_choice forcing the tool, but we never trust a remote API.
+    const fallbackText = findText(initial.body);
+    return Response.json({
+      text: fallbackText || "(model returned no tool output)",
+      structured: null,
+      validation: null,
+      model: MODEL,
+      tokens_used: initial.body.usage,
+      context: {
+        used_default_prompt: !systemDoc,
+        winner_count: winners?.winner_count ?? 0,
+        winner_ids: winners?.winner_ids ?? [],
+        tool_type: resolvedTool,
+        forced_fallback: true,
+      },
+    });
+  }
+
+  let structured = initialToolUse.input as Record<string, unknown>;
+  let activeToolUse = initialToolUse;
+  let validation = runValidation(resolvedTool, structured);
+  let retried = false;
+
+  // Auto-retry once if the variation gate fails. Subsequent failures are
+  // returned to the client with a warning but still surfaced — user gets to
+  // see the un-validated batch rather than a hard error.
+  if (!validation.ok && validation.feedback) {
+    retried = true;
+    const retryMessages = [
+      ...initialMessages,
+      {
+        role: "assistant" as const,
+        content: [
+          {
+            type: "tool_use",
+            id: activeToolUse.id,
+            name: activeToolUse.name,
+            input: activeToolUse.input,
+          },
+        ],
+      },
+      {
+        role: "user" as const,
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: activeToolUse.id ?? "tu_0",
+            is_error: true,
+            content: validation.feedback,
+          },
+        ],
+      },
+    ];
+
+    const retry = await callClaude(apiKey, systemBlocks, retryMessages, tool);
+    if (retry.ok && retry.body) {
+      const retryToolUse = findToolUse(retry.body, tool.name);
+      if (retryToolUse) {
+        activeToolUse = retryToolUse;
+        structured = retryToolUse.input as Record<string, unknown>;
+        validation = runValidation(resolvedTool, structured);
+      }
+    }
+  }
+
+  // Render markdown for the existing chat UI + script-parser. Defensive on
+  // shape — if the structured payload is malformed, we still surface what
+  // we have rather than 500.
+  let markdown = "";
+  try {
+    markdown = renderMarkdown(resolvedTool, structured);
+  } catch {
+    markdown = "(structured output could not be rendered)";
+  }
+
+  return Response.json({
+    text: markdown,
+    structured,
+    validation: {
+      ok: validation.ok,
+      enforced: validation.enforced,
+      reasons: validation.reasons,
+      retried,
+    },
+    model: MODEL,
+    tokens_used: initial.body.usage,
+    context: {
+      used_default_prompt: !systemDoc,
+      winner_count: winners?.winner_count ?? 0,
+      winner_ids: winners?.winner_ids ?? [],
+      tool_type: resolvedTool,
+      forced_fallback: false,
+    },
+  });
+}
+
+// ─── Helpers ───
+
+async function callClaude(
+  apiKey: string,
+  systemBlocks: Array<{
+    type: "text";
+    text: string;
+    cache_control?: { type: "ephemeral" };
+  }>,
+  messages: unknown[],
+  tool: { name: string }
+): Promise<ClaudeApiResult> {
   let lastStatus = 0;
   let lastBody = "";
 
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  for (let attempt = 0; attempt < TRANSPORT_RETRIES; attempt++) {
     try {
-      const claudeResponse = await fetch(
-        "https://api.anthropic.com/v1/messages",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": apiKey,
-            "anthropic-version": "2023-06-01",
-          },
-          body: JSON.stringify({
-            model,
-            // 16384 leaves headroom for 7 detailed scripts (each with hook +
-            // body + 3 variant hooks + classification block) plus the
-            // batch_intent line. 8192 was tight once v2 outputs landed.
-            max_tokens: 16384,
-            system: systemBlocks,
-            messages,
-          }),
-        }
-      );
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          max_tokens: MAX_TOKENS,
+          system: systemBlocks,
+          messages,
+          tools: [tool],
+          tool_choice: { type: "tool", name: tool.name },
+        }),
+      });
 
-      if (claudeResponse.ok) {
-        const result = await claudeResponse.json();
-        const generatedText = result.content[0].text;
-        return Response.json({
-          text: generatedText,
-          model,
-          tokens_used: result.usage,
-          context: {
-            used_default_prompt: !systemDoc,
-            winner_count: winners?.winner_count ?? 0,
-            winner_ids: winners?.winner_ids ?? [],
-          },
-        });
+      if (res.ok) {
+        const json = (await res.json()) as ClaudeResponse;
+        return { ok: true, status: res.status, body: json, errorText: "" };
       }
 
-      lastStatus = claudeResponse.status;
-      lastBody = await claudeResponse.text();
+      lastStatus = res.status;
+      lastBody = await res.text();
 
       const retryable = lastStatus === 429 || lastStatus >= 500;
-      if (!retryable || attempt === maxAttempts - 1) break;
+      if (!retryable || attempt === TRANSPORT_RETRIES - 1) break;
 
-      const retryAfterHeader = claudeResponse.headers.get("retry-after");
+      const retryAfterHeader = res.headers.get("retry-after");
       const retryAfterMs = retryAfterHeader
         ? Number(retryAfterHeader) * 1000
         : 0;
@@ -188,25 +325,86 @@ export async function POST(request: Request) {
       );
       await new Promise((r) => setTimeout(r, backoffMs));
     } catch (err) {
-      if (attempt === maxAttempts - 1) {
+      if (attempt === TRANSPORT_RETRIES - 1) {
         const message = err instanceof Error ? err.message : "Unknown error";
-        return Response.json(
-          { error: `Claude API call failed: ${message}` },
-          { status: 500 }
-        );
+        return {
+          ok: false,
+          status: 0,
+          body: null,
+          errorText: `Claude API call failed: ${message}`,
+        };
       }
       await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
     }
   }
 
-  if (lastStatus === 429) {
+  return {
+    ok: false,
+    status: lastStatus,
+    body: null,
+    errorText: lastBody,
+  };
+}
+
+function findToolUse(
+  body: ClaudeResponse,
+  expectedName: string
+): ClaudeContentBlock | null {
+  for (const block of body.content || []) {
+    if (block.type === "tool_use" && block.name === expectedName) {
+      return block;
+    }
+  }
+  return null;
+}
+
+function findText(body: ClaudeResponse): string | null {
+  for (const block of body.content || []) {
+    if (block.type === "text" && typeof block.text === "string") {
+      return block.text;
+    }
+  }
+  return null;
+}
+
+function runValidation(toolType: ToolType, structured: Record<string, unknown>) {
+  if (toolType === "angles") {
+    const batch = structured as unknown as EmittedAnglesBatch;
+    return validateAngleBatch(batch.angles ?? []);
+  }
+  if (toolType === "scripts") {
+    const batch = structured as unknown as EmittedScriptsBatch;
+    return validateScriptBatch(batch.scripts ?? []);
+  }
+  // formats — no variation gate (it's an expansion, not a divergent batch)
+  return { ok: true, enforced: false, reasons: [], feedback: null, duplicate_indices: [] };
+}
+
+function renderMarkdown(
+  toolType: ToolType,
+  structured: Record<string, unknown>
+): string {
+  if (toolType === "angles") {
+    return renderAnglesMarkdown(structured as unknown as EmittedAnglesBatch);
+  }
+  if (toolType === "scripts") {
+    return renderScriptsMarkdown(structured as unknown as EmittedScriptsBatch);
+  }
+  return renderFormatsMarkdown(structured as unknown as EmittedFormatsBatch);
+}
+
+function errorResponse(result: ClaudeApiResult): Response {
+  if (result.status === 429) {
     return Response.json(
       { error: "Rate limited by Claude API. Please try again in a moment." },
       { status: 429 }
     );
   }
+  if (result.status === 0) {
+    return Response.json({ error: result.errorText }, { status: 500 });
+  }
   return Response.json(
-    { error: `Claude API error (${lastStatus}): ${lastBody}` },
+    { error: `Claude API error (${result.status}): ${result.errorText}` },
     { status: 502 }
   );
 }

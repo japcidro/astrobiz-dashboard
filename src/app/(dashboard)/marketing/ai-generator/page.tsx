@@ -27,6 +27,16 @@ import type { ApprovedScript } from "@/lib/ai/approved-scripts-types";
 interface Message {
   role: "user" | "assistant";
   content: string;
+  // Structured tool_use payload from the generator. Present on assistant
+  // turns produced by /api/ai/generate after the v2 tool-use rollout.
+  // null on user turns and on legacy/fallback assistant turns.
+  structured?: Record<string, unknown> | null;
+  validation?: {
+    ok: boolean;
+    enforced: boolean;
+    reasons: string[];
+    retried: boolean;
+  } | null;
 }
 
 interface Thread {
@@ -188,15 +198,22 @@ export default function AiGeneratorPage() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, generating]);
 
-  // Auto-save thread after each AI response
+  // Auto-save thread after each AI response. We persist the most recent
+  // structured payload separately so the renderer can re-hydrate typed
+  // cards on thread reload — the legacy `messages` array keeps the
+  // markdown text for backward compat with old threads.
   const autoSave = useCallback(async (msgs: Message[]) => {
     try {
+      const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant");
       const body: Record<string, unknown> = {
         store_name: storeName,
         tool_type: toolType,
         input_data: { messages: msgs },
         output_data: { messages: msgs },
       };
+      if (lastAssistant?.structured) {
+        body.structured_output = lastAssistant.structured;
+      }
       if (threadId) body.id = threadId;
 
       const res = await fetch("/api/ai/history", {
@@ -222,13 +239,19 @@ export default function AiGeneratorPage() {
     setGenerating(true);
 
     try {
+      // Strip client-only fields (structured, validation) before sending to
+      // the API — Anthropic only accepts {role, content} strings here.
+      const wireMessages = newMessages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
       const res = await fetch("/api/ai/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           store_name: storeName,
           tool_type: toolType,
-          messages: newMessages,
+          messages: wireMessages,
         }),
       });
 
@@ -240,7 +263,15 @@ export default function AiGeneratorPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Generation failed");
 
-      const fullMessages = [...newMessages, { role: "assistant" as const, content: json.text }];
+      const fullMessages: Message[] = [
+        ...newMessages,
+        {
+          role: "assistant",
+          content: json.text,
+          structured: json.structured ?? null,
+          validation: json.validation ?? null,
+        },
+      ];
       setMessages(fullMessages);
 
       // Auto-save
@@ -491,7 +522,21 @@ export default function AiGeneratorPage() {
                   </div>
                 </div>
               ) : (
-                <div key={i} className="flex justify-start">
+                <div key={i} className="flex justify-start flex-col items-start gap-2">
+                  {msg.validation && msg.validation.enforced && !msg.validation.ok && (
+                    <div className="max-w-[85%] p-2 bg-yellow-900/20 border border-yellow-700/50 rounded-lg text-yellow-300 text-xs flex items-start gap-2">
+                      <AlertTriangle size={12} className="mt-0.5 flex-shrink-0" />
+                      <div>
+                        <strong>Variation gate flagged this batch{msg.validation.retried ? " (after one auto-retry)" : ""}.</strong>
+                        <ul className="list-disc list-inside mt-1 space-y-0.5">
+                          {msg.validation.reasons.map((r, ri) => (
+                            <li key={ri}>{r}</li>
+                          ))}
+                        </ul>
+                        <p className="mt-1 text-yellow-400/80">Review before approving — outputs may be too similar.</p>
+                      </div>
+                    </div>
+                  )}
                   <div
                     className={`${
                       toolType === "scripts" ? "w-full" : "max-w-[85%]"
