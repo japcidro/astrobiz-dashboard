@@ -17,6 +17,19 @@ import {
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import type { DatePreset } from "@/lib/facebook/types";
+
+const DATE_PRESET_LABELS: Record<DatePreset, string> = {
+  today: "Today",
+  yesterday: "Yesterday",
+  last_7d: "Last 7 Days",
+  last_14d: "Last 14 Days",
+  last_30d: "Last 30 Days",
+  last_90d: "Last 90 Days",
+  this_month: "This Month",
+  last_month: "Last Month",
+  lifetime: "All-time",
+};
 
 // Kept exported for any legacy importer; no longer consumed by ChatPanel
 // since the agent pulls live data via tools instead of receiving snapshots.
@@ -91,7 +104,7 @@ function formatRelative(iso: string): string {
   return d.toLocaleDateString("en-PH", { month: "short", day: "numeric" });
 }
 
-export function ChatPanel() {
+export function ChatPanel({ datePreset }: { datePreset: DatePreset }) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -242,6 +255,7 @@ export function ChatPanel() {
         body: JSON.stringify({
           messages: nextMessages,
           session_id: sessionId,
+          date_preset: datePreset,
         }),
       });
 
@@ -546,6 +560,10 @@ export function ChatPanel() {
 
       {/* Input */}
       <div className="border-t border-gray-700/50 p-3">
+        <p className="text-[10px] text-gray-500 mb-1.5">
+          Default scope: <span className="text-gray-300">{DATE_PRESET_LABELS[datePreset]}</span>{" "}
+          · override anytime in your message (e.g. "last 30 days").
+        </p>
         <form
           onSubmit={(e) => {
             e.preventDefault();

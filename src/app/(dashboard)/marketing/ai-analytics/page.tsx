@@ -256,9 +256,14 @@ export default function AiAnalyticsPage() {
         </button>
       </div>
 
-      {tab === "chat" && <ChatPanel />}
-
-      {tab === "deconstruct" && (
+      {/* Both panels stay mounted — visibility is toggled with `hidden` so
+          picker state, scroll position, and in-flight chat sessions persist
+          across tab switches. The inactive panel pays a render cost but no
+          fresh API calls beyond what it already triggers on prop changes. */}
+      <div className={tab === "chat" ? "block" : "hidden"}>
+        <ChatPanel datePreset={datePreset} />
+      </div>
+      <div className={tab === "deconstruct" ? "block" : "hidden"}>
         <DeconstructionPanel
           ads={deconstructAds}
           datePreset={datePreset}
@@ -267,7 +272,7 @@ export default function AiAnalyticsPage() {
             router.replace("/marketing/ai-analytics");
           }}
         />
-      )}
+      </div>
     </div>
   );
 }

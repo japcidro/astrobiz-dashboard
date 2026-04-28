@@ -8,6 +8,31 @@ import {
   type AgentMessage,
   type ToolCallTrace,
 } from "@/lib/ai/agent-loop";
+import type { DatePreset } from "@/lib/facebook/types";
+
+const VALID_DATE_PRESETS: DatePreset[] = [
+  "today",
+  "yesterday",
+  "last_7d",
+  "last_14d",
+  "last_30d",
+  "last_90d",
+  "this_month",
+  "last_month",
+  "lifetime",
+];
+
+const DATE_PRESET_LABELS: Record<DatePreset, string> = {
+  today: "Today",
+  yesterday: "Yesterday",
+  last_7d: "Last 7 Days",
+  last_14d: "Last 14 Days",
+  last_30d: "Last 30 Days",
+  last_90d: "Last 90 Days",
+  this_month: "This Month",
+  last_month: "Last Month",
+  lifetime: "All-time",
+};
 
 export const dynamic = "force-dynamic";
 // Long retrospective compilations with multiple deconstructions + a huge
@@ -45,7 +70,7 @@ You have TOOLS that pull live data across marketing, Shopify orders/inventory, c
 8. **For "compile all winners" / "every ad with X purchases" / "lahat ng ads na may..."** — use **compile_winners** (specialist one-shot tool). DO NOT chain get_ad_performance + get_ad_deconstruction manually — that wastes tokens and round-trips. compile_winners returns the full table in one call and flags which ads need deconstruction.
 9. **When compile_winners reports missing_deconstructions**: confirm with the user first ("may N missing — gusto mo ba i-deconstruct ko agad?"), then call \`request_deconstruction(ad_id, account_id)\` for each. It takes 30-90s per call, max 10 per session. Afterwards, call get_deconstructions_batch to fetch the fresh rows.
 10. **For multiple deconstructions in bulk** — use get_deconstructions_batch(ad_ids[]) instead of calling get_ad_deconstruction N times.
-11. **Use get_winners (not get_ad_performance) when the user asks "anong winners?"** — get_winners applies the consistency criteria (CPP<₱200, ≥3 purchases/day, ≥2 consecutive days) which raw ranking can't.
+11. **Use get_winners (not get_ad_performance) when the user asks "anong winners?"** — get_winners applies the operator's consistency criteria (ROAS ≥ 5.0x for ≥3 consecutive days, with ≥1 purchase/day floor) which raw ranking can't.
 12. **Use get_ad_timeline for "is this consistent?"** about a specific ad — it shows day-by-day metrics + tier classification.
 13. **Use compare_ads_quick for quick "anong pagkakaiba?"** between 2-10 ads. For deep strategic multi-ad analysis prefer get_comparative_report (existing reports).
 14. **Use search_store_knowledge** before recommending creative angles — reference the store's Avatar / Winning Template / Market Sophistication docs so your suggestions match the brand strategy.
@@ -62,7 +87,7 @@ You have TOOLS that pull live data across marketing, Shopify orders/inventory, c
 21. **Net profit, COGS, margin, shipping cost, P&L** — these are ADMIN ONLY. If the caller is marketing and asks about profit, decline gently: "Sorry, yung net profit tab is admin-only — tanong mo sa CEO or switch ka into admin." Never leak admin tool output in a marketing session.
 22. **Employee names in pickpack/timetrack**: include them only for admin callers; never attach emails/phones.
 
-Glossary: roas = purchase value ÷ spend; cpa / CPP = cost per purchase (peso); ctr = link CTR %; lpv = landing page views; atc = add-to-cart; stable_winner = CPP < ₱200, ≥3 purchases/day for ≥2 consecutive days; RTS = return-to-sender.`;
+Glossary: roas = purchase value ÷ spend; cpa / CPP = cost per purchase (peso); ctr = link CTR %; lpv = landing page views; atc = add-to-cart; stable_winner = ROAS ≥ 5.0x for ≥3 consecutive days (with ≥1 purchase/day floor); RTS = return-to-sender.`;
 
 interface IncomingMessage {
   role: "user" | "assistant";
@@ -95,7 +120,14 @@ export async function POST(request: Request) {
   const body = (await request.json()) as {
     messages?: IncomingMessage[];
     session_id?: string | null;
+    date_preset?: string;
   };
+
+  const uiDatePreset: DatePreset | null =
+    typeof body.date_preset === "string" &&
+    (VALID_DATE_PRESETS as string[]).includes(body.date_preset)
+      ? (body.date_preset as DatePreset)
+      : null;
 
   const incoming = Array.isArray(body.messages) ? body.messages : [];
   if (incoming.length === 0) {
@@ -208,10 +240,18 @@ export async function POST(request: Request) {
         }
       }, 5000);
 
+      // The user picks a date preset (Today / Yesterday / Last 30 Days / …)
+      // from the AI Analytics page header. Surface that to the agent as the
+      // DEFAULT scope for tool calls. Rule #6 in SYSTEM_PROMPT still applies
+      // — explicit user phrasing ("yesterday", "all-time") wins.
+      const scopeOverride = uiDatePreset
+        ? `\n\n## UI Scope Override\nThe operator currently has the AI Analytics date filter set to **${DATE_PRESET_LABELS[uiDatePreset]}** (\`date_preset="${uiDatePreset}"\`). When their message does NOT specify a date range, USE THIS as the default \`date_preset\` for any tool call that takes one — overriding rule #6's "last_7d / last_90d" defaults. If the operator's message includes an explicit timeframe ("yesterday", "last 30 days", "all-time", "this month"), follow that literally instead.`
+        : "";
+
       try {
         const result = await runAgentLoop({
           messages,
-          systemPrompt: SYSTEM_PROMPT,
+          systemPrompt: SYSTEM_PROMPT + scopeOverride,
           tools: definitions,
           handlers,
           toolContext: {
