@@ -1,8 +1,7 @@
 export type ApprovedScriptStatus =
   | "approved"
-  | "in_production"
-  | "shot"
-  | "live"
+  | "in_progress"
+  | "submitted"
   | "archived";
 
 export type ApprovedScriptAngleType = "D" | "E" | "M" | "B";
@@ -57,17 +56,15 @@ export interface UpdateApprovedScriptInput {
 
 export const APPROVED_SCRIPT_STATUSES: ApprovedScriptStatus[] = [
   "approved",
-  "in_production",
-  "shot",
-  "live",
+  "in_progress",
+  "submitted",
   "archived",
 ];
 
 export const STATUS_LABELS: Record<ApprovedScriptStatus, string> = {
   approved: "Approved",
-  in_production: "In Production",
-  shot: "Shot",
-  live: "Live",
+  in_progress: "In Progress",
+  submitted: "Submitted",
   archived: "Archived",
 };
 

@@ -53,7 +53,7 @@ export function ScriptPickerModal(props: Props) {
   const [error, setError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // Library shows approved + in_production + shot + live (everything except
+  // Library shows approved + in_progress + submitted (everything except
   // archived). Marketer picks whatever they're about to shoot / is running.
   const load = useCallback(async () => {
     setLoading(true);

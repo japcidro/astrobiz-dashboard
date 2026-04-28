@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 // Body: { fb_ad_id, fb_ad_account_id, approved_script_id }
 // Links a live Facebook ad to an approved script. Upserts on fb_ad_id
 // so re-linking replaces the existing row. Insert-trigger on the table
-// auto-flips the script's status 'approved' → 'in_production'.
+// auto-flips the script's status 'approved'/'in_progress' → 'submitted'.
 export async function POST(request: Request) {
   const employee = await getEmployee();
   if (!employee) {
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
 // DELETE /api/ai/approved-scripts/link-ad
 // Body: { fb_ad_id }
 // Removes the link. Doesn't touch the script's status — once marked
-// 'in_production' it stays that way until the marketer changes it.
+// 'submitted' it stays that way until the marketer changes it.
 export async function DELETE(request: Request) {
   const employee = await getEmployee();
   if (!employee) {

@@ -1,6 +1,12 @@
-// Aggregates Meta Ads performance across all ads linked to an approved script
-// via ad_drafts.source_script_id. Reuses the existing daily-insights fetcher
-// and winner classifier so the "winner" definition stays identical across the
+// Aggregates Meta Ads performance across all ads linked to an approved script.
+// Pulls from two sources so retroactively-linked ads count toward winner
+// detection just like ads created via the bulk-create flow:
+//   1. ad_drafts.source_script_id  — implicit link from the bulk-create flow
+//   2. ad_approved_script_links    — explicit "Link to Live Ad" tag from
+//      the Approved Library, for ads that already existed on Meta
+// Same fb_ad_id from both sources is deduped (drafts win, since they carry
+// the richer name/status). Reuses the existing daily-insights fetcher and
+// winner classifier so the "winner" definition stays identical across the
 // platform (CPP<₱200, ≥3 purchases/day, ≥2 consecutive days).
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -109,9 +115,32 @@ interface DraftLink {
   status: string;
   fb_ad_id: string | null;
   source_script_id: string;
+  fb_ad_account_id: string | null;
+  // "draft" rows come from ad_drafts (implicit link via source_script_id).
+  // "manual" rows come from ad_approved_script_links (explicit retroactive tag).
+  // Same fb_ad_id present in both sources is deduped — draft wins.
+  source: "draft" | "manual";
 }
 
-// Pull every draft linked to any of the given script IDs (one DB round-trip).
+interface AdDraftRow {
+  id: string;
+  name: string;
+  status: string;
+  fb_ad_id: string | null;
+  ad_account_id: string | null;
+  source_script_id: string | null;
+}
+
+interface ScriptLinkRow {
+  id: string;
+  fb_ad_id: string;
+  fb_ad_account_id: string;
+  approved_script_id: string;
+}
+
+// Pull every ad linked to any of the given script IDs (two DB round-trips —
+// drafts and manual links — UNIONed). Manual links short-circuit if the same
+// fb_ad_id already exists as a draft, so winner-detection counts each ad once.
 export async function loadDraftLinks(
   supabase: SupabaseClient,
   scriptIds: string[]
@@ -119,19 +148,66 @@ export async function loadDraftLinks(
   const byScript = new Map<string, DraftLink[]>();
   if (scriptIds.length === 0) return byScript;
 
-  const { data, error } = await supabase
+  // --- Source 1: drafts ---
+  const { data: drafts, error: draftsErr } = await supabase
     .from("ad_drafts")
-    .select("id, name, status, fb_ad_id, source_script_id")
+    .select("id, name, status, fb_ad_id, ad_account_id, source_script_id")
     .in("source_script_id", scriptIds);
 
-  if (error) throw new Error(`Failed to load ad drafts: ${error.message}`);
+  if (draftsErr) {
+    throw new Error(`Failed to load ad drafts: ${draftsErr.message}`);
+  }
 
-  for (const row of (data || []) as DraftLink[]) {
+  const seenAdIds = new Set<string>();
+  for (const row of (drafts || []) as AdDraftRow[]) {
     if (!row.source_script_id) continue;
+    const link: DraftLink = {
+      id: row.id,
+      name: row.name,
+      status: row.status,
+      fb_ad_id: row.fb_ad_id,
+      source_script_id: row.source_script_id,
+      fb_ad_account_id: row.ad_account_id,
+      source: "draft",
+    };
+    if (link.fb_ad_id) seenAdIds.add(link.fb_ad_id);
     const existing = byScript.get(row.source_script_id) ?? [];
-    existing.push(row);
+    existing.push(link);
     byScript.set(row.source_script_id, existing);
   }
+
+  // --- Source 2: manual links (retroactive "Link to Live Ad") ---
+  const { data: links, error: linksErr } = await supabase
+    .from("ad_approved_script_links")
+    .select("id, fb_ad_id, fb_ad_account_id, approved_script_id")
+    .in("approved_script_id", scriptIds);
+
+  if (linksErr) {
+    throw new Error(`Failed to load script links: ${linksErr.message}`);
+  }
+
+  for (const row of (links || []) as ScriptLinkRow[]) {
+    if (!row.fb_ad_id || !row.approved_script_id) continue;
+    // Dedup: same ad already counted via a draft — skip the manual entry.
+    if (seenAdIds.has(row.fb_ad_id)) continue;
+    seenAdIds.add(row.fb_ad_id);
+    const synthetic: DraftLink = {
+      id: `manual:${row.id}`,
+      // No draft-side metadata for retroactively-tagged ads — fall back to a
+      // short fb_ad_id suffix. The Library detail modal renders the full id
+      // alongside this name, so the marketer can still identify the ad.
+      name: `FB Ad ${row.fb_ad_id.slice(-6)}`,
+      status: "submitted",
+      fb_ad_id: row.fb_ad_id,
+      source_script_id: row.approved_script_id,
+      fb_ad_account_id: row.fb_ad_account_id,
+      source: "manual",
+    };
+    const existing = byScript.get(row.approved_script_id) ?? [];
+    existing.push(synthetic);
+    byScript.set(row.approved_script_id, existing);
+  }
+
   return byScript;
 }
 
@@ -226,12 +302,28 @@ export async function computeScriptPerformance(
   }
 
   const adIds = submitted.map((d) => d.fb_ad_id as string);
+
+  // Each draft (or manual link) carries its own ad_account_id now that
+  // loadDraftLinks unions both sources. Build the lookup from the drafts
+  // themselves; explicit opts.accountIdByAdId overrides per ad if passed.
+  const accountIdByAdId = new Map<string, string>();
+  for (const draft of submitted) {
+    if (draft.fb_ad_id && draft.fb_ad_account_id) {
+      accountIdByAdId.set(draft.fb_ad_id, draft.fb_ad_account_id);
+    }
+  }
+  if (opts.accountIdByAdId) {
+    for (const [adId, accountId] of opts.accountIdByAdId.entries()) {
+      accountIdByAdId.set(adId, accountId);
+    }
+  }
+
   const [insights, deconstructions] = await Promise.all([
     fetchInsightsForAds(
       adIds,
       opts.fbToken,
       opts.datePreset,
-      opts.accountIdByAdId
+      accountIdByAdId
     ),
     opts.supabaseForDeconstructions
       ? loadDeconstructions(opts.supabaseForDeconstructions, adIds)
@@ -245,7 +337,7 @@ export async function computeScriptPerformance(
     if (!metrics) {
       return {
         fb_ad_id: adId,
-        account_id: opts.accountIdByAdId?.get(adId) ?? null,
+        account_id: accountIdByAdId.get(adId) ?? null,
         draft_id: draft.id,
         draft_name: draft.name,
         draft_status: draft.status,
@@ -264,7 +356,7 @@ export async function computeScriptPerformance(
     const c = classifyConsistency(metrics, DEFAULT_WINNER_THRESHOLDS);
     return {
       fb_ad_id: adId,
-      account_id: metrics.account_id || (opts.accountIdByAdId?.get(adId) ?? null),
+      account_id: metrics.account_id || (accountIdByAdId.get(adId) ?? null),
       draft_id: draft.id,
       draft_name: draft.name,
       draft_status: draft.status,

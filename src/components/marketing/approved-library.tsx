@@ -9,8 +9,7 @@ import {
   X,
   Search,
   Archive,
-  Film,
-  Play,
+  Send,
   Wrench,
   AlertCircle,
   StickyNote,
@@ -18,6 +17,7 @@ import {
   Zap,
   TrendingDown,
   Minus,
+  Link2,
 } from "lucide-react";
 import {
   APPROVED_SCRIPT_STATUSES,
@@ -29,6 +29,7 @@ import {
 } from "@/lib/ai/approved-scripts-types";
 import type { ScriptPerformance, AdPerformanceSummary } from "@/lib/ai/script-performance";
 import { ScriptCreativesPanel } from "./script-creatives-panel";
+import { LinkLiveAdModal } from "./link-live-ad-modal";
 
 interface Props {
   storeName: string;
@@ -43,22 +44,27 @@ const ANGLE_TYPE_COLORS: Record<string, string> = {
 
 const STATUS_ICONS: Record<ApprovedScriptStatus, typeof CheckCircle> = {
   approved: CheckCircle,
-  in_production: Wrench,
-  shot: Film,
-  live: Play,
+  in_progress: Wrench,
+  submitted: Send,
   archived: Archive,
 };
 
 const STATUS_COLORS: Record<ApprovedScriptStatus, string> = {
   approved: "bg-emerald-900/30 text-emerald-300 border-emerald-700/50",
-  in_production: "bg-yellow-900/30 text-yellow-300 border-yellow-700/50",
-  shot: "bg-sky-900/30 text-sky-300 border-sky-700/50",
-  live: "bg-green-900/30 text-green-300 border-green-700/50",
+  in_progress: "bg-yellow-900/30 text-yellow-300 border-yellow-700/50",
+  submitted: "bg-green-900/30 text-green-300 border-green-700/50",
   archived: "bg-gray-800 text-gray-500 border-gray-700",
 };
 
 type StatusFilter = ApprovedScriptStatus | "all" | "active";
 type TypeFilter = ApprovedScriptAngleType | "all";
+
+interface LinkedAdRow {
+  id: string;
+  fb_ad_id: string;
+  fb_ad_account_id: string;
+  linked_at: string;
+}
 
 export function ApprovedLibrary({ storeName }: Props) {
   const [scripts, setScripts] = useState<ApprovedScript[]>([]);
@@ -442,6 +448,10 @@ function ScriptDetailModal({
   const [perfLoading, setPerfLoading] = useState(true);
   const [perfWarning, setPerfWarning] = useState<string | null>(null);
 
+  const [links, setLinks] = useState<LinkedAdRow[]>([]);
+  const [linksLoading, setLinksLoading] = useState(true);
+  const [linkModalOpen, setLinkModalOpen] = useState(false);
+
   const loadDetailPerf = useCallback(async () => {
     setPerfLoading(true);
     setPerfWarning(null);
@@ -461,9 +471,58 @@ function ScriptDetailModal({
     }
   }, [script.id]);
 
+  const loadLinks = useCallback(async () => {
+    setLinksLoading(true);
+    try {
+      const res = await fetch(`/api/ai/approved-scripts/${script.id}/links`);
+      const json = await res.json();
+      if (res.ok) {
+        setLinks((json.links || []) as LinkedAdRow[]);
+      }
+    } catch {
+      // Non-blocking
+    } finally {
+      setLinksLoading(false);
+    }
+  }, [script.id]);
+
+  // After a link/unlink, the script's status may have flipped (auto-trigger on
+  // first link → 'submitted'). Re-fetch so the parent list and badges update.
+  const refreshScript = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/ai/approved-scripts/${script.id}`);
+      const json = await res.json();
+      if (res.ok && json.script) onUpdated(json.script);
+    } catch {
+      // Non-blocking — perf badges still refresh below.
+    }
+  }, [script.id, onUpdated]);
+
+  const handleLinkChanged = useCallback(async () => {
+    await Promise.all([loadLinks(), loadDetailPerf(), refreshScript()]);
+  }, [loadLinks, loadDetailPerf, refreshScript]);
+
+  const handleUnlink = async (fbAdId: string) => {
+    try {
+      const res = await fetch(`/api/ai/approved-scripts/link-ad`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fb_ad_id: fbAdId }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error((json.error as string) || "Failed to unlink");
+      }
+      await handleLinkChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to unlink");
+    }
+  };
+
   useEffect(() => {
     loadDetailPerf();
-  }, [loadDetailPerf]);
+    loadLinks();
+  }, [loadDetailPerf, loadLinks]);
 
   const updateStatus = async (status: ApprovedScriptStatus) => {
     setSaving(true);
@@ -572,6 +631,13 @@ function ScriptDetailModal({
 
         {/* Content */}
         <div className="px-6 py-4 space-y-5">
+          <LinkedLiveAdsSection
+            links={links}
+            loading={linksLoading}
+            onLinkClick={() => setLinkModalOpen(true)}
+            onUnlink={handleUnlink}
+          />
+
           <PerformanceSection
             perf={detailPerf}
             loading={perfLoading}
@@ -720,6 +786,103 @@ function ScriptDetailModal({
           </p>
         </div>
       </div>
+
+      <LinkLiveAdModal
+        open={linkModalOpen}
+        scriptId={script.id}
+        scriptTitle={script.angle_title}
+        alreadyLinkedAdIds={new Set(links.map((l) => l.fb_ad_id))}
+        onClose={() => setLinkModalOpen(false)}
+        onLinked={handleLinkChanged}
+      />
+    </div>
+  );
+}
+
+function LinkedLiveAdsSection({
+  links,
+  loading,
+  onLinkClick,
+  onUnlink,
+}: {
+  links: LinkedAdRow[];
+  loading: boolean;
+  onLinkClick: () => void;
+  onUnlink: (fbAdId: string) => void;
+}) {
+  return (
+    <div className="bg-gray-800/30 border border-gray-700/50 rounded-lg p-4 space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Link2 size={12} className="text-gray-500" />
+          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
+            Linked Live Ads
+          </p>
+          <span className="text-[10px] text-gray-600">
+            ({links.length})
+          </span>
+        </div>
+        <button
+          onClick={onLinkClick}
+          className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1 rounded-md transition-colors cursor-pointer flex items-center gap-1"
+        >
+          <Link2 size={11} />
+          Link Live Ad
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="text-xs text-gray-500 flex items-center gap-2 py-1">
+          <RefreshCw size={11} className="animate-spin" />
+          Loading links...
+        </div>
+      ) : links.length === 0 ? (
+        <p className="text-[11px] text-gray-500">
+          No live ads linked yet. Use the button above to tag an existing
+          Facebook ad — winner detection will then track its performance
+          against this script.
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          {links.map((link) => (
+            <div
+              key={link.id}
+              className="flex items-center gap-2 bg-gray-900/50 border border-gray-800 rounded-md px-3 py-2"
+            >
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-mono text-gray-300 truncate">
+                  {link.fb_ad_id}
+                </p>
+                <p className="text-[10px] text-gray-500">
+                  Account {link.fb_ad_account_id} · linked{" "}
+                  {new Date(link.linked_at).toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </p>
+              </div>
+              <a
+                href={`https://www.facebook.com/ads/manager/account/ads/?act=${link.fb_ad_account_id.replace(
+                  /^act_/,
+                  ""
+                )}&selected_ad_ids=${link.fb_ad_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-shrink-0 text-[10px] text-gray-500 hover:text-emerald-300 transition-colors flex items-center gap-1"
+              >
+                <ExternalLink size={10} />
+                Open
+              </a>
+              <button
+                onClick={() => onUnlink(link.fb_ad_id)}
+                className="flex-shrink-0 text-[10px] text-gray-500 hover:text-red-300 transition-colors cursor-pointer"
+              >
+                Unlink
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
