@@ -2,9 +2,9 @@
 //
 // Every 6 hours this cron scans all ad_drafts with a source_script_id AND an
 // fb_ad_id, fetches their per-day insights from Meta, classifies each ad's
-// consistency tier, and for any ad that has become a stable_winner (CPP<₱200,
-// ≥3 purchases/day, ≥2 consecutive days) it triggers Gemini video analysis and
-// fires an admin_alert to notify the CEO.
+// consistency tier, and for any ad that has become a stable_winner (ROAS ≥ 5.0
+// for ≥3 consecutive days) it triggers Gemini video analysis and fires an
+// admin_alert to notify the CEO.
 //
 // Design notes:
 // - Uses CRON_SECRET Bearer auth + service-role client, matching the existing
@@ -190,6 +190,7 @@ export async function GET(request: Request) {
     ctx: AdContext;
     tier: string;
     cpp: number;
+    roas: number;
     purchases: number;
     max_consecutive: number;
   }
@@ -211,6 +212,7 @@ export async function GET(request: Request) {
             ctx,
             tier: tier.tier,
             cpp: metrics.total.cpp,
+            roas: metrics.total.roas,
             purchases: metrics.total.purchases,
             max_consecutive: tier.max_consecutive,
           } as Classified;
@@ -292,7 +294,7 @@ export async function GET(request: Request) {
         type: "script_winner_deconstructed",
         severity: "action",
         title: `Winner deconstructed: ${ctx.script.angle_title}`,
-        body: `${ctx.draft.name} hit stable winner (CPP ₱${w.cpp.toFixed(0)}, ${w.purchases} purchases, ${w.max_consecutive}-day streak). Video analysis ready.`,
+        body: `${ctx.draft.name} hit stable winner (${w.roas.toFixed(2)}x ROAS, ${w.max_consecutive}-day streak, ${w.purchases} purchases). Video analysis ready.`,
         resource_type: "ad",
         resource_id: ctx.draft.fb_ad_id,
         action_url: `/marketing/ai-generator?view=library&script=${ctx.script.id}`,
@@ -302,6 +304,7 @@ export async function GET(request: Request) {
           script_title: ctx.script.angle_title,
           store: ctx.script.store_name,
           cpp: w.cpp,
+          roas: w.roas,
           purchases: w.purchases,
           max_consecutive: w.max_consecutive,
         },

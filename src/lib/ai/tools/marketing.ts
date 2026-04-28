@@ -505,6 +505,7 @@ export async function getWinners(
       max_cpp: DEFAULT_WINNER_THRESHOLDS.max_cpp,
       min_purchases_per_day: DEFAULT_WINNER_THRESHOLDS.min_purchases_per_day,
       min_consecutive_days: DEFAULT_WINNER_THRESHOLDS.min_consecutive_days,
+      min_roas: DEFAULT_WINNER_THRESHOLDS.min_roas,
     },
     checked: candidates.length,
     winners: classified.filter((c) => c.tier === "stable_winner"),

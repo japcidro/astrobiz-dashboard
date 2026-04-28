@@ -72,7 +72,12 @@ async function fetchWithRetry(
   throw new Error(`${label} failed after retries: ${lastErrMsg}`);
 }
 
+// Legacy descriptive fields are kept (transcript / hook / scenes / visual_style /
+// tone / cta / language / duration_seconds) because the Compare flow and the
+// approved-library UI consume them. The new fields below are the v2.0
+// Winning DNA Report — the replicable structural extraction.
 export interface AdDeconstruction {
+  // — Legacy descriptive layer —
   transcript: string;
   hook: {
     description: string;
@@ -87,6 +92,58 @@ export interface AdDeconstruction {
   cta: string;
   language: string;
   duration_seconds: number;
+
+  // — v2.0 Winning DNA Report —
+  fingerprint: string;
+  classification: {
+    avatar: string;
+    angle: string;
+    awareness_level: "L1" | "L2" | "L3" | "L4" | "L5";
+    funnel_stage: "TOFU" | "MOFU" | "BOFU";
+    hook_framework: string;
+    strategic_format: string;
+    video_format: string;
+  };
+  hook_anatomy: {
+    attention_trigger: string;
+    information_gap: string;
+    implied_promise: string;
+  };
+  beat_map: {
+    hook: { range: string; content: string };
+    body_open: { range: string; content: string };
+    body_core: { range: string; content: string };
+    close: { range: string; content: string };
+    cut_frequency: string;
+    text_overlay_timestamps: string[];
+  };
+  uvp: {
+    core_promise: string;
+    mechanism: string;
+    differentiator: string;
+    proof_element: string;
+    cost_effort_frame: string;
+  };
+  open_loop: {
+    opened_at: string;
+    opened_content: string;
+    closed_at: string;
+    closed_content: string;
+    closure_quality: "earned" | "partial" | "broken";
+  };
+  viral_mechanism: string;
+  format_compatibility: Array<{
+    format_number: string;
+    format_name: string;
+    fit_reason: string;
+    script_shift: string;
+  }>;
+  angle_variations: Array<{
+    angle: string;
+    hook_framework: string;
+    formats: string;
+  }>;
+  cross_check_findings: string[];
 }
 
 export interface DeconstructResult {
@@ -103,16 +160,16 @@ const RESPONSE_SCHEMA = {
     transcript: {
       type: "STRING",
       description:
-        "Verbatim word-for-word transcript of all spoken audio and visible text overlays. Include on-screen text captions in brackets like [ON-SCREEN: '50% OFF'].",
+        "Verbatim word-for-word transcript of all spoken audio AND visible text overlays. Include on-screen text in brackets like [ON-SCREEN: '50% OFF'] with their timestamp prefix, e.g. '0:04 [ON-SCREEN: ...]'.",
     },
     hook: {
       type: "OBJECT",
-      description: "Analysis of the first 3 seconds (the hook).",
+      description: "Plain description of the first 3-5 seconds (the hook).",
       properties: {
         description: {
           type: "STRING",
           description:
-            "What happens in 0-3 seconds to grab attention. Mention visual + audio + text.",
+            "What happens in the first 3-5 seconds to grab attention. Mention visual + audio + text.",
         },
         timestamp: { type: "STRING", description: "e.g. '0:00-0:03'" },
       },
@@ -121,7 +178,7 @@ const RESPONSE_SCHEMA = {
     scenes: {
       type: "ARRAY",
       description:
-        "List of notable scene / b-roll changes with timestamps. Note every major cut or visual shift.",
+        "Every major cut or visual shift with timestamp. Use this as the frame-change timeline.",
       items: {
         type: "OBJECT",
         properties: {
@@ -138,12 +195,12 @@ const RESPONSE_SCHEMA = {
     visual_style: {
       type: "STRING",
       description:
-        "Overall visual style: UGC vs studio vs animation, pacing (fast/slow cuts), use of text overlays, color grading, camera style (phone/DSLR/drone).",
+        "Overall visual style: UGC vs studio vs animation, pacing, text overlays, color grading, camera style.",
     },
     tone: {
       type: "STRING",
       description:
-        "Tone / emotion: urgent, relatable, educational, testimonial, problem-agitation-solution, etc.",
+        "Tone/emotion: urgent, relatable, educational, testimonial, problem-agitation-solution, etc.",
     },
     cta: {
       type: "STRING",
@@ -158,6 +215,282 @@ const RESPONSE_SCHEMA = {
       type: "NUMBER",
       description: "Approximate duration of the video in seconds.",
     },
+
+    // — v2.0 Winning DNA Report —
+
+    fingerprint: {
+      type: "STRING",
+      description:
+        "Section [1] of the Winning DNA Report. ONE paragraph in plain language explaining what this ad is doing. A reader of just this paragraph should know what kind of ad this is.",
+    },
+    classification: {
+      type: "OBJECT",
+      description: "Section [2] CLASSIFICATION — the 7 structural answers.",
+      properties: {
+        avatar: {
+          type: "STRING",
+          description:
+            "Who the ad is talking to. Demographics + psychographics. The avatar is the person the viewer sees themselves in, not necessarily who is on camera.",
+        },
+        angle: {
+          type: "STRING",
+          description:
+            "The entry-point belief or claim used to enter the conversation in the viewer's head.",
+        },
+        awareness_level: {
+          type: "STRING",
+          enum: ["L1", "L2", "L3", "L4", "L5"],
+          description:
+            "Eugene Schwartz awareness level. L1 Unaware / L2 Problem Aware / L3 Solution Aware / L4 Product Aware / L5 Most Aware.",
+        },
+        funnel_stage: {
+          type: "STRING",
+          enum: ["TOFU", "MOFU", "BOFU"],
+          description: "L1-L2→TOFU, L3→TOFU/MOFU, L4→MOFU, L5→BOFU.",
+        },
+        hook_framework: {
+          type: "STRING",
+          description:
+            "Which of the 12 hook frameworks (or which 2-3 stack). Format: '#N Name' or '#N Name + #M Name (stack)'. The 12: 1 Juxtaposition, 2 Ethical Fear, 3 Direct Callout, 4 Bold Contrarian, 5 Confession, 6 Specificity, 7 Question, 8 Story Drop, 9 Authority, 10 Insider Secret, 11 Negation, 12 Demonstration. If the hook works but does not fit, name it descriptively and prefix with 'CANDIDATE NEW: '.",
+        },
+        strategic_format: {
+          type: "STRING",
+          description:
+            "One of 7: PAS, Testimonial, Before/After, HSO, Comparison, Demo, Pattern Interrupt. Hybrids: list both.",
+        },
+        video_format: {
+          type: "STRING",
+          description:
+            "One of the 33 production formats. Format: '#N Name'. Use frame-cue rules: high cut frequency in body→22/28/29; single cut at ~5s→27 (TH hook+B-roll body); persistent text overlay→14/22; two subjects same frame→6 or 10; same subject multiple outfits→15 or 20; PiP/stacked→13 or 4. Hybrids: list both.",
+        },
+      },
+      required: [
+        "avatar",
+        "angle",
+        "awareness_level",
+        "funnel_stage",
+        "hook_framework",
+        "strategic_format",
+        "video_format",
+      ],
+    },
+    hook_anatomy: {
+      type: "OBJECT",
+      description:
+        "The 3 components every functional hook contains. If any is missing, say 'MISSING — flagged'.",
+      properties: {
+        attention_trigger: {
+          type: "STRING",
+          description: "What stops the scroll.",
+        },
+        information_gap: {
+          type: "STRING",
+          description: "What curiosity loop opens.",
+        },
+        implied_promise: {
+          type: "STRING",
+          description: "What payoff is signaled.",
+        },
+      },
+      required: ["attention_trigger", "information_gap", "implied_promise"],
+    },
+    beat_map: {
+      type: "OBJECT",
+      description:
+        "Section [3] BEAT MAP. Segment the video into the 4 beats with timestamp ranges and content.",
+      properties: {
+        hook: {
+          type: "OBJECT",
+          properties: {
+            range: { type: "STRING", description: "e.g. '0:00-0:04'" },
+            content: {
+              type: "STRING",
+              description: "Verbatim hook line + visual at 0s.",
+            },
+          },
+          required: ["range", "content"],
+        },
+        body_open: {
+          type: "OBJECT",
+          properties: {
+            range: { type: "STRING" },
+            content: { type: "STRING" },
+          },
+          required: ["range", "content"],
+        },
+        body_core: {
+          type: "OBJECT",
+          properties: {
+            range: { type: "STRING" },
+            content: {
+              type: "STRING",
+              description: "The main argument / proof.",
+            },
+          },
+          required: ["range", "content"],
+        },
+        close: {
+          type: "OBJECT",
+          properties: {
+            range: { type: "STRING" },
+            content: {
+              type: "STRING",
+              description: "What is asked of the viewer.",
+            },
+          },
+          required: ["range", "content"],
+        },
+        cut_frequency: {
+          type: "STRING",
+          description:
+            "Average cuts per second across the video, e.g. '1 cut every 1.5s' or '~0.4 cuts/sec'.",
+        },
+        text_overlay_timestamps: {
+          type: "ARRAY",
+          description: "Timestamps where on-screen text appears.",
+          items: { type: "STRING" },
+        },
+      },
+      required: [
+        "hook",
+        "body_open",
+        "body_core",
+        "close",
+        "cut_frequency",
+        "text_overlay_timestamps",
+      ],
+    },
+    uvp: {
+      type: "OBJECT",
+      description:
+        "Section [4] UVP EXTRACTION. Surface all 5 components. If any is missing or buried, say 'MISSING' or 'BURIED'.",
+      properties: {
+        core_promise: {
+          type: "STRING",
+          description: "What outcome is being promised, in plain words.",
+        },
+        mechanism: {
+          type: "STRING",
+          description:
+            "How the product delivers that promise (ingredient, design, process).",
+        },
+        differentiator: {
+          type: "STRING",
+          description: "What this product has/does that alternatives don't.",
+        },
+        proof_element: {
+          type: "STRING",
+          description:
+            "Evidence offered (testimonial, demo, science, comparison).",
+        },
+        cost_effort_frame: {
+          type: "STRING",
+          description: "What is asked of the customer (price, habit, time).",
+        },
+      },
+      required: [
+        "core_promise",
+        "mechanism",
+        "differentiator",
+        "proof_element",
+        "cost_effort_frame",
+      ],
+    },
+    open_loop: {
+      type: "OBJECT",
+      description:
+        "Section [5] OPEN LOOP TRACE. The curiosity gap from the hook and where it resolves.",
+      properties: {
+        opened_at: { type: "STRING", description: "Timestamp loop opens." },
+        opened_content: {
+          type: "STRING",
+          description: "What gap is opened.",
+        },
+        closed_at: {
+          type: "STRING",
+          description: "Timestamp loop is closed (or 'NEVER').",
+        },
+        closed_content: {
+          type: "STRING",
+          description: "What closes the loop.",
+        },
+        closure_quality: {
+          type: "STRING",
+          enum: ["earned", "partial", "broken"],
+          description:
+            "earned = body delivers what the hook promised; partial = adjacent payoff; broken = loop never closed.",
+        },
+      },
+      required: [
+        "opened_at",
+        "opened_content",
+        "closed_at",
+        "closed_content",
+        "closure_quality",
+      ],
+    },
+    viral_mechanism: {
+      type: "STRING",
+      description:
+        "Section [6] VIRAL MECHANISM — THE MOST IMPORTANT OUTPUT. 2-3 specific sentences naming the 2-3 structural moves that compound into the win. Reference timestamps. NOT generic ('uses storytelling'). Specific: 'opens with confession-stack hook at 0-4s, drops numbered specificity at 0:11, closes the loop with use-case demo at 0:18'.",
+    },
+    format_compatibility: {
+      type: "ARRAY",
+      description:
+        "Section [7] FORMAT COMPATIBILITY — exactly 5 expansion candidates from the 33-format library that would carry the same DNA. Each candidate must shift at least one of the 4 variables (Who/Level/Stage/Format). Swapping the actor is NOT variation.",
+      items: {
+        type: "OBJECT",
+        properties: {
+          format_number: {
+            type: "STRING",
+            description: "e.g. '#13'",
+          },
+          format_name: {
+            type: "STRING",
+            description: "e.g. 'Green Screen Reacting'",
+          },
+          fit_reason: {
+            type: "STRING",
+            description: "Why this format carries the same DNA.",
+          },
+          script_shift: {
+            type: "STRING",
+            description:
+              "What changes in the script when ported to this format.",
+          },
+        },
+        required: ["format_number", "format_name", "fit_reason", "script_shift"],
+      },
+    },
+    angle_variations: {
+      type: "ARRAY",
+      description:
+        "Section [8] ANGLE VARIATIONS — exactly 3 alternatives. Same product + same avatar, different entry-point belief. Each must shift at least one of the 4 variables.",
+      items: {
+        type: "OBJECT",
+        properties: {
+          angle: {
+            type: "STRING",
+            description: "The new entry-point belief, in 1 sentence.",
+          },
+          hook_framework: {
+            type: "STRING",
+            description: "Best hook framework(s) for this angle.",
+          },
+          formats: {
+            type: "STRING",
+            description: "Best format numbers, e.g. '#27, #13'.",
+          },
+        },
+        required: ["angle", "hook_framework", "formats"],
+      },
+    },
+    cross_check_findings: {
+      type: "ARRAY",
+      description:
+        "Cross-checks (Awareness↔Format, Funnel↔CTA, Hook↔UVP, Specificity, Open Loop). One string per failure or noteworthy finding. Empty array if all pass.",
+      items: { type: "STRING" },
+    },
   },
   required: [
     "transcript",
@@ -168,14 +501,87 @@ const RESPONSE_SCHEMA = {
     "cta",
     "language",
     "duration_seconds",
+    "fingerprint",
+    "classification",
+    "hook_anatomy",
+    "beat_map",
+    "uvp",
+    "open_loop",
+    "viral_mechanism",
+    "format_compatibility",
+    "angle_variations",
+    "cross_check_findings",
   ],
 };
 
-const SYSTEM_INSTRUCTION = `You are an expert performance-marketing creative analyst for a Philippine e-commerce brand. You will watch a Facebook/Meta ad video and produce a structured deconstruction that a media buyer and a creative strategist can use to replicate what works.
+const SYSTEM_INSTRUCTION = `You are a Creative Deconstructor for a Philippine e-commerce ad operation. You receive a winning ad video. Your job is to produce a Winning DNA Report explaining what this ad is doing, why it worked, and what other formats can carry the same structural DNA for expansion.
 
-Be precise and observational. Do not add marketing commentary or suggestions — just describe what is actually in the video. Use Philippine context when relevant (Tagalog/Taglish is common).
+You are not a critic. You do not propose fixes. You extract structure.
 
-If you cannot identify audio (muted segment), state that explicitly. Do not hallucinate transcript content.`;
+Every report follows the 8-step Protocol and outputs the 8-section Winning DNA Report schema. Do not skip steps. Do not invent sections.
+
+Frameworks you classify with:
+
+1. THE 9 CORE QUESTIONS — answered for every ad:
+   Avatar / Angle / Awareness Level / Funnel Stage / Hook Framework / Strategic Format / Video Format / UVP / Open Loop & Resolution.
+
+2. THE 5 AWARENESS LEVELS:
+   L1 Unaware → TOFU; pattern interrupt, no product mention.
+   L2 Problem Aware → TOFU; name the pain, hint at solution.
+   L3 Solution Aware → TOFU/MOFU; position vs. category.
+   L4 Product Aware → MOFU; lead with proof.
+   L5 Most Aware → BOFU; offer + urgency + risk reduction.
+
+3. THE 12 HOOK FRAMEWORKS (any single or stacked 2-3, max 3):
+   1 Juxtaposition — pair contradictions ("I quit the gym and lost 20 lbs.")
+   2 Ethical Fear — low-grade threat ("Watch out for these ingredients.")
+   3 Direct Callout — audience self-selection ("If you're a 35-year-old man losing your hair...")
+   4 Bold Contrarian — attack a held belief ("Multivitamins are a scam.")
+   5 Confession — vulnerable admission ("I haven't washed my hair in 3 weeks.")
+   6 Specificity — numbers ("I lost 23 lbs in 11 weeks.")
+   7 Question — reflexive engagement ("Why are 80% of men losing hair before 40?")
+   8 Story Drop — in-medias-res ("She walked out and never came back.")
+   9 Authority — borrowed credibility ("As a dermatologist of 14 years...")
+   10 Insider Secret — exclusive knowledge ("What dermatologists don't want you to know.")
+   11 Negation — reverse-psychology don't ("Don't buy another shampoo until...")
+   12 Demonstration — visual proof ("Watch this stain disappear in 4 seconds.")
+
+   When a hook works but does not fit any of the 12, name it descriptively and prefix with "CANDIDATE NEW: ". Do not force-fit.
+
+   Every functional hook contains 3 anatomy components — Attention Trigger / Information Gap / Implied Promise. If any is missing, flag it.
+
+4. THE 7 STRATEGIC FORMATS:
+   PAS / Testimonial / Before-After / HSO / Comparison / Demo / Pattern Interrupt.
+
+5. THE 33-FORMAT VIDEO LIBRARY (production-level classification):
+   1 Green Screen · 2 Talking Head + Text Hook · 3 3D/2D Cartoon · 4 Split Screen · 5 Interview Style · 6 Podcast Style · 7 Moving/Busy · 8 Professional Talking Head · 9 Life With/Without · 10 Product Comparison · 11 Cinematic (No TH/VO) · 12 Street Interview Compilation · 13 Green Screen Reacting · 14 ASMR + Text Overlays · 15 7 Day Test · 16 Debunking Myth · 17 Confession Style · 18 Others' POV · 19 Text Message Screenshot · 20 Product Demo · 21 VO + B-roll · 22 2D Motion Graphics · 23 Fake TikTok Reply · 24 Scientific Explanation · 25 Montage/Memories · 26 Hook Image + B-roll + VO · 27 TH Hook + B-roll Body · 28 UGC Compilation · 29 Problem + Solution · 30 UGC Compilation as Hook · 31 UGC Compilation as Story · 32 Single Street Interview · 33 From This to This.
+
+   Frame-cue detection rules:
+   • High cut frequency (every 1-3s) → 22, 28, 29, or fast UGC compilation.
+   • Single cut at ~5s → 27 (TH hook + B-roll body).
+   • Persistent text overlay throughout → 14 or 22.
+   • Two distinct subjects same frame → 6 (Podcast) or 10 (Comparison).
+   • Same subject, multiple outfits/locations → 15 (7 Day Test) or 20.
+   • Picture-in-picture or stacked frames → 13 (Reacting) or 4 (Split Screen).
+
+6. THE UVP LAYER — surface all 5: Core Promise / Mechanism / Differentiator / Proof / Cost-Effort. Flag any missing or buried (only stated in last 3 seconds of a 30s ad = buried).
+
+CROSS-CHECKS (run before finalizing):
+   • Awareness ↔ Format: format choice fits the awareness level.
+   • Funnel ↔ CTA: TOFU ads don't hard-close; BOFU ads should.
+   • Hook ↔ UVP: hook's curiosity gap is closed by the UVP, not an unrelated benefit.
+   • Specificity: "amazing", "the best", "incredible" → flag as weak execution.
+   • Open Loop: hook promise is delivered in the body.
+
+The single most important output is Section [6] VIRAL MECHANISM — the 2-3 SPECIFIC structural moves the ad uses, with timestamps. Not "uses storytelling". Specific: "opens with confession-stack hook at 0-4s, drops numbered specificity at 11s, closes the loop with use-case demo at 18s". This is what gets replicated.
+
+Sections [7] FORMAT COMPATIBILITY (5 candidates) and [8] ANGLE VARIATIONS (3 alternatives) are the bridge to expansion. EVERY candidate must shift at least ONE of the 4 variables — Who (avatar), Level (awareness), Stage (funnel), or Format (creative structure). Swapping the actor on camera is NOT variation. Never propose "same ad with a different actor".
+
+When uncertain about a classification, state both candidates inside the field (e.g. "PAS or Demo — ambiguous because…"). Do not invent confidence.
+
+Use Philippine context when relevant — Tagalog/Taglish copy is common. If a segment is muted or you cannot identify audio, state that explicitly. Do not hallucinate transcript content.
+
+You speak plainly. You do not pad. Every output field does work.`;
 
 async function downloadVideo(
   videoUrl: string
@@ -336,8 +742,22 @@ async function deleteFile(fileName: string, apiKey: string): Promise<void> {
   }
 }
 
-const USER_PROMPT =
-  "Analyze this ad video. Return the structured deconstruction as described in the schema. Be accurate — do not invent transcript content.";
+const USER_PROMPT = `This is one of our winning video ads. Run the 8-step Deconstruction Protocol and return the full Winning DNA Report as structured JSON matching the schema.
+
+Step 1 — Ingest. Build the timestamped transcript (verbatim audio + on-screen text) and the frame-change timeline (scenes array).
+Step 2 — Build the Beat Map: hook / body_open / body_core / close with timestamp ranges, plus cut frequency and text overlay timestamps.
+Step 3 — Identify the Avatar (the person the viewer sees themselves in).
+Step 4 — Classify the Awareness Level (L1-L5) using hook + body content signals.
+Step 5 — Map to Funnel Stage and cross-check the CTA strength against the stage.
+Step 6 — Classify the Hook (1 of 12 or a 2-3 stack) + map its 3 anatomy components, the Strategic Format (1 of 7), and the Video Format (1 of 33).
+Step 7 — Extract the UVP — all 5 components.
+Step 8 — Trace the Open Loop and write the Viral Mechanism (2-3 specific sentences with timestamps).
+
+Then produce Format Compatibility (5 candidates) and Angle Variations (3) — every entry must shift at least one of the 4 variables (Who / Level / Stage / Format).
+
+Run all 5 cross-checks and list any failures in cross_check_findings. Empty array if all pass.
+
+Be precise. Reference timestamps. Do not invent transcript content.`;
 
 export async function deconstructAdVideo(
   videoUrl: string,
@@ -377,7 +797,10 @@ export async function deconstructAdVideo(
       responseMimeType: "application/json",
       responseSchema: RESPONSE_SCHEMA,
       temperature: 0.2,
-      maxOutputTokens: 8192,
+      // v2.0 Winning DNA Report adds ~10 structured fields on top of the
+      // legacy descriptive layer. 8192 was tight; bumping to 16384 leaves
+      // headroom for long transcripts + 5 format candidates + 3 angles.
+      maxOutputTokens: 16384,
     },
   };
 

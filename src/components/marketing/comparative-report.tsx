@@ -42,6 +42,7 @@ interface InputsSnapshot {
     max_cpp: number;
     min_purchases_per_day: number;
     min_consecutive_days: number;
+    min_roas: number;
   };
   store_docs: Array<{ doc_type: string; title: string }>;
 }
@@ -187,10 +188,9 @@ export function ComparativeReportView({
             {inputsSnapshot && (
               <p className="text-xs text-gray-500 mt-2">
                 Range: {inputsSnapshot.date_preset} · {inputsSnapshot.ads.length}{" "}
-                ads · Winner threshold: CPP ≤ ₱
-                {inputsSnapshot.thresholds.max_cpp} +{" "}
-                {inputsSnapshot.thresholds.min_purchases_per_day}+ purchases/day
-                × {inputsSnapshot.thresholds.min_consecutive_days} days
+                ads · Winner threshold: ROAS ≥{" "}
+                {inputsSnapshot.thresholds.min_roas.toFixed(1)}x ×{" "}
+                {inputsSnapshot.thresholds.min_consecutive_days} consecutive days
                 {inputsSnapshot.store_docs.length > 0 && (
                   <span>
                     {" "}

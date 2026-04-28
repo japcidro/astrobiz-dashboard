@@ -171,10 +171,14 @@ export async function fetchAdDailyInsights(
 
 // Classify an ad's consistency using per-day breakdown against user-
 // defined winner thresholds.
-// - stable-winner: ≥2 consecutive days meeting thresholds
+// - stable-winner: ≥3 consecutive days meeting thresholds
 // - spike: exactly 1 day meeting thresholds
 // - stable-loser: consistent spend but never meets thresholds, has purchases
 // - dead: no purchases at all
+//
+// Operator definition (2026-04-28): clear winner = ROAS ≥ 5.0 sustained
+// for 3 consecutive days. The CPP gate is intentionally relaxed because
+// ROAS already captures spend-vs-return efficiency at any AOV.
 export type ConsistencyTier =
   | "stable_winner"
   | "spike"
@@ -182,15 +186,17 @@ export type ConsistencyTier =
   | "dead";
 
 export interface WinnerThresholds {
-  max_cpp: number; // e.g., 200
-  min_purchases_per_day: number; // e.g., 3
-  min_consecutive_days: number; // e.g., 2
+  max_cpp: number;
+  min_purchases_per_day: number;
+  min_consecutive_days: number;
+  min_roas: number;
 }
 
 export const DEFAULT_WINNER_THRESHOLDS: WinnerThresholds = {
-  max_cpp: 200,
-  min_purchases_per_day: 3,
-  min_consecutive_days: 2,
+  max_cpp: 9999, // effectively disabled — ROAS gate handles efficiency
+  min_purchases_per_day: 1, // sanity floor: at least one purchase that day
+  min_consecutive_days: 3,
+  min_roas: 5.0,
 };
 
 export function classifyConsistency(
@@ -199,6 +205,7 @@ export function classifyConsistency(
 ): { tier: ConsistencyTier; winning_days: number; max_consecutive: number } {
   const meetsThreshold = (d: DailyMetricPoint): boolean =>
     d.purchases >= thresholds.min_purchases_per_day &&
+    d.roas >= thresholds.min_roas &&
     d.cpp > 0 &&
     d.cpp <= thresholds.max_cpp;
 

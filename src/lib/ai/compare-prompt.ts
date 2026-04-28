@@ -136,7 +136,7 @@ ${scenesLines || "    (no scenes)"}
 **Store:** ${storeName ?? "Unknown / Mixed"}
 **Date range analyzed:** ${datePreset}
 **Ads analyzed:** ${ads.length}
-**Operator's winner definition:** CPP ≤ ₱${thresholds.max_cpp} AND ≥${thresholds.min_purchases_per_day} purchases/day for ≥${thresholds.min_consecutive_days} consecutive days.
+**Operator's winner definition:** ROAS ≥ ${thresholds.min_roas.toFixed(1)}x for ≥${thresholds.min_consecutive_days} consecutive days (≥${thresholds.min_purchases_per_day} purchase/day floor).
 
 ---
 

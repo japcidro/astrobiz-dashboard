@@ -12,12 +12,15 @@ interface AdRow {
 }
 
 const NEW_WINNER_MIN_SPEND = 5000;
-const NEW_WINNER_MIN_ROAS = 3.0;
+const NEW_WINNER_MIN_ROAS = 5.0;
 
 // ===================================================================
 // Rule: new_winner
-// Trigger: Ad with 7-day spend >= ₱5k and ROAS >= 3.0 that hasn't
+// Trigger: Ad with 7-day spend >= ₱5k and ROAS >= 5.0 that hasn't
 // been flagged before as a new_winner. Dedup per ad_id for 14d.
+// This is the rollup early-warning. The strict "clear winner"
+// classification (3 consecutive days at 5+ ROAS) lives in
+// classifyConsistency / auto-deconstruct-winners.
 // ===================================================================
 export async function detectNewWinners(
   supabase: SupabaseClient,

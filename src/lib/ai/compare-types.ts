@@ -1,5 +1,10 @@
 import type { ConsistencyTier, DailyAdMetrics } from "@/lib/facebook/insights-daily";
 
+// Mirrors the AdDeconstruction shape in lib/gemini/deconstruct.ts. Legacy
+// fields are required (consumed by compare flow + approved-library UI).
+// v2.0 Winning DNA Report fields are optional here so older rows in
+// ad_creative_analyses (analyzed before the v2.0 prompt rollout) still type-
+// check when read back.
 export interface AdDeconstruction {
   transcript: string;
   hook: {
@@ -15,6 +20,58 @@ export interface AdDeconstruction {
   cta: string;
   language: string;
   duration_seconds: number;
+
+  // — v2.0 Winning DNA Report (optional for backward compat) —
+  fingerprint?: string;
+  classification?: {
+    avatar: string;
+    angle: string;
+    awareness_level: "L1" | "L2" | "L3" | "L4" | "L5";
+    funnel_stage: "TOFU" | "MOFU" | "BOFU";
+    hook_framework: string;
+    strategic_format: string;
+    video_format: string;
+  };
+  hook_anatomy?: {
+    attention_trigger: string;
+    information_gap: string;
+    implied_promise: string;
+  };
+  beat_map?: {
+    hook: { range: string; content: string };
+    body_open: { range: string; content: string };
+    body_core: { range: string; content: string };
+    close: { range: string; content: string };
+    cut_frequency: string;
+    text_overlay_timestamps: string[];
+  };
+  uvp?: {
+    core_promise: string;
+    mechanism: string;
+    differentiator: string;
+    proof_element: string;
+    cost_effort_frame: string;
+  };
+  open_loop?: {
+    opened_at: string;
+    opened_content: string;
+    closed_at: string;
+    closed_content: string;
+    closure_quality: "earned" | "partial" | "broken";
+  };
+  viral_mechanism?: string;
+  format_compatibility?: Array<{
+    format_number: string;
+    format_name: string;
+    fit_reason: string;
+    script_shift: string;
+  }>;
+  angle_variations?: Array<{
+    angle: string;
+    hook_framework: string;
+    formats: string;
+  }>;
+  cross_check_findings?: string[];
 }
 
 export interface ComparativeAdInput {
