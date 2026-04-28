@@ -1,3 +1,14 @@
+import type { AwarenessLevel, FunnelStage } from "@/lib/ai/v2-frameworks";
+import {
+  HOOK_FRAMEWORKS,
+  VIDEO_FORMATS,
+  renderAwarenessLadderForPrompt,
+  renderFrameCueRulesForPrompt,
+  renderHookFrameworksForPrompt,
+  renderStrategicFormatsForPrompt,
+  renderVideoFormatsForPrompt,
+} from "@/lib/ai/v2-frameworks";
+
 // Gemini 2.5 Flash — native video understanding, strong for this task,
 // and crucially has a free tier (Pro requires billing). Swap to
 // "gemini-2.5-pro" once Google AI Studio billing is enabled for the key.
@@ -98,8 +109,8 @@ export interface AdDeconstruction {
   classification: {
     avatar: string;
     angle: string;
-    awareness_level: "L1" | "L2" | "L3" | "L4" | "L5";
-    funnel_stage: "TOFU" | "MOFU" | "BOFU";
+    awareness_level: AwarenessLevel;
+    funnel_stage: FunnelStage;
     hook_framework: string;
     strategic_format: string;
     video_format: string;
@@ -526,43 +537,23 @@ Frameworks you classify with:
    Avatar / Angle / Awareness Level / Funnel Stage / Hook Framework / Strategic Format / Video Format / UVP / Open Loop & Resolution.
 
 2. THE 5 AWARENESS LEVELS:
-   L1 Unaware → TOFU; pattern interrupt, no product mention.
-   L2 Problem Aware → TOFU; name the pain, hint at solution.
-   L3 Solution Aware → TOFU/MOFU; position vs. category.
-   L4 Product Aware → MOFU; lead with proof.
-   L5 Most Aware → BOFU; offer + urgency + risk reduction.
+   ${renderAwarenessLadderForPrompt()}
 
-3. THE 12 HOOK FRAMEWORKS (any single or stacked 2-3, max 3):
-   1 Juxtaposition — pair contradictions ("I quit the gym and lost 20 lbs.")
-   2 Ethical Fear — low-grade threat ("Watch out for these ingredients.")
-   3 Direct Callout — audience self-selection ("If you're a 35-year-old man losing your hair...")
-   4 Bold Contrarian — attack a held belief ("Multivitamins are a scam.")
-   5 Confession — vulnerable admission ("I haven't washed my hair in 3 weeks.")
-   6 Specificity — numbers ("I lost 23 lbs in 11 weeks.")
-   7 Question — reflexive engagement ("Why are 80% of men losing hair before 40?")
-   8 Story Drop — in-medias-res ("She walked out and never came back.")
-   9 Authority — borrowed credibility ("As a dermatologist of 14 years...")
-   10 Insider Secret — exclusive knowledge ("What dermatologists don't want you to know.")
-   11 Negation — reverse-psychology don't ("Don't buy another shampoo until...")
-   12 Demonstration — visual proof ("Watch this stain disappear in 4 seconds.")
+3. THE ${HOOK_FRAMEWORKS.length} HOOK FRAMEWORKS (any single or stacked 2-3, max 3):
+${renderHookFrameworksForPrompt()}
 
-   When a hook works but does not fit any of the 12, name it descriptively and prefix with "CANDIDATE NEW: ". Do not force-fit.
+   When a hook works but does not fit any of the ${HOOK_FRAMEWORKS.length}, name it descriptively and prefix with "CANDIDATE NEW: ". Do not force-fit.
 
    Every functional hook contains 3 anatomy components — Attention Trigger / Information Gap / Implied Promise. If any is missing, flag it.
 
 4. THE 7 STRATEGIC FORMATS:
-   PAS / Testimonial / Before-After / HSO / Comparison / Demo / Pattern Interrupt.
+   ${renderStrategicFormatsForPrompt()}.
 
-5. THE 33-FORMAT VIDEO LIBRARY (production-level classification):
-   1 Green Screen · 2 Talking Head + Text Hook · 3 3D/2D Cartoon · 4 Split Screen · 5 Interview Style · 6 Podcast Style · 7 Moving/Busy · 8 Professional Talking Head · 9 Life With/Without · 10 Product Comparison · 11 Cinematic (No TH/VO) · 12 Street Interview Compilation · 13 Green Screen Reacting · 14 ASMR + Text Overlays · 15 7 Day Test · 16 Debunking Myth · 17 Confession Style · 18 Others' POV · 19 Text Message Screenshot · 20 Product Demo · 21 VO + B-roll · 22 2D Motion Graphics · 23 Fake TikTok Reply · 24 Scientific Explanation · 25 Montage/Memories · 26 Hook Image + B-roll + VO · 27 TH Hook + B-roll Body · 28 UGC Compilation · 29 Problem + Solution · 30 UGC Compilation as Hook · 31 UGC Compilation as Story · 32 Single Street Interview · 33 From This to This.
+5. THE ${VIDEO_FORMATS.length}-FORMAT VIDEO LIBRARY (production-level classification):
+   ${renderVideoFormatsForPrompt()}.
 
    Frame-cue detection rules:
-   • High cut frequency (every 1-3s) → 22, 28, 29, or fast UGC compilation.
-   • Single cut at ~5s → 27 (TH hook + B-roll body).
-   • Persistent text overlay throughout → 14 or 22.
-   • Two distinct subjects same frame → 6 (Podcast) or 10 (Comparison).
-   • Same subject, multiple outfits/locations → 15 (7 Day Test) or 20.
-   • Picture-in-picture or stacked frames → 13 (Reacting) or 4 (Split Screen).
+${renderFrameCueRulesForPrompt()}
 
 6. THE UVP LAYER — surface all 5: Core Promise / Mechanism / Differentiator / Proof / Cost-Effort. Flag any missing or buried (only stated in last 3 seconds of a 30s ad = buried).
 

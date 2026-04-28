@@ -1,3 +1,9 @@
+import type {
+  AwarenessLevel,
+  FunnelStage,
+  VariationVariable,
+} from "@/lib/ai/v2-frameworks";
+
 export type ApprovedScriptStatus =
   | "approved"
   | "in_progress"
@@ -5,6 +11,22 @@ export type ApprovedScriptStatus =
   | "archived";
 
 export type ApprovedScriptAngleType = "D" | "E" | "M" | "B";
+
+// Performance-feedback states. Set automatically by the cron when an ad
+// linked to this script reaches stable_winner / stable_loser tiers, OR
+// manually by an admin from the library UI.
+export type ApprovedScriptPerformanceStatus =
+  | "pending"
+  | "testing"
+  | "validated_winner"
+  | "validated_loser";
+
+export interface ApprovedScriptPerformanceMetrics {
+  roas: number;
+  cpp: number;
+  purchases: number;
+  max_consecutive: number;
+}
 
 export interface ApprovedScript {
   id: string;
@@ -27,6 +49,24 @@ export interface ApprovedScript {
   approved_at: string;
   updated_by: string | null;
   updated_at: string;
+
+  // — v2.0 classification (nullable: legacy rows pre-v2 won't have these) —
+  awareness_level: AwarenessLevel | null;
+  funnel_stage: FunnelStage | null;
+  hook_framework: string | null;
+  strategic_format: string | null;
+  video_format: string | null;
+  big_idea: string | null;
+  variable_shifts: VariationVariable[];
+
+  // — Provenance: was this script seeded from a deconstructed winner? —
+  source_winner_ad_id: string | null;
+  source_winner_analysis_id: string | null;
+
+  // — Performance feedback loop —
+  performance_status: ApprovedScriptPerformanceStatus;
+  performance_validated_at: string | null;
+  performance_metrics: ApprovedScriptPerformanceMetrics | null;
 }
 
 export interface CreateApprovedScriptInput {
@@ -42,6 +82,19 @@ export interface CreateApprovedScriptInput {
   hook: string;
   body_script: string;
   variant_hooks?: string[];
+
+  // — v2.0 classification (optional on create — backfilled by feedback loop) —
+  awareness_level?: AwarenessLevel | null;
+  funnel_stage?: FunnelStage | null;
+  hook_framework?: string | null;
+  strategic_format?: string | null;
+  video_format?: string | null;
+  big_idea?: string | null;
+  variable_shifts?: VariationVariable[];
+
+  // — Optional winner provenance —
+  source_winner_ad_id?: string | null;
+  source_winner_analysis_id?: string | null;
 }
 
 export interface UpdateApprovedScriptInput {
