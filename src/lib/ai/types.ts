@@ -50,6 +50,8 @@ export interface AiStoreDocMetadata {
   auto_managed?: boolean;
   generated_at?: string;
   source_winner_ids?: string[];
+  winner_count?: number;
+  edited_at?: string;
   default_template_version?: string;
 }
 

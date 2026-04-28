@@ -92,6 +92,18 @@ export async function POST(request: Request) {
       body_script: body.body_script,
       variant_hooks: body.variant_hooks ?? [],
       approved_by: employee.id,
+      // v2 classification — only persisted when the structured tool_use
+      // payload was present (new threads). Old threads using markdown
+      // parsing will have these as null until the script is re-approved.
+      awareness_level: body.awareness_level ?? null,
+      funnel_stage: body.funnel_stage ?? null,
+      hook_framework: body.hook_framework ?? null,
+      strategic_format: body.strategic_format ?? null,
+      video_format: body.video_format ?? null,
+      big_idea: body.big_idea ?? null,
+      variable_shifts: body.variable_shifts ?? [],
+      source_winner_ad_id: body.source_winner_ad_id ?? null,
+      source_winner_analysis_id: body.source_winner_analysis_id ?? null,
     })
     .select()
     .single();

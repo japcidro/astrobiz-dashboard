@@ -389,9 +389,13 @@ export function KnowledgeManager() {
                     <div>
                       <p className="text-sm font-medium text-white">{dt.label}</p>
                       {existing ? (
-                        <p className="text-xs text-green-400">{existing.content.length.toLocaleString()} chars</p>
+                        <p className="text-xs text-green-400">
+                          Custom override · {existing.content.length.toLocaleString()} chars
+                        </p>
                       ) : (
-                        <p className="text-xs text-red-400">Not set</p>
+                        <p className="text-xs text-emerald-300">
+                          Using v2 default
+                        </p>
                       )}
                     </div>
                     <div className="flex items-center gap-2">
@@ -430,9 +434,212 @@ export function KnowledgeManager() {
                 </div>
               );
             })}
+
+            {/* Auto-managed: validated_winners_dna */}
+            <p className="text-xs uppercase tracking-wider text-gray-500 font-medium pt-6 pb-1">
+              Auto-managed (Feedback Loop)
+            </p>
+            <ValidatedWinnersDnaSection
+              storeName={selectedStore}
+              doc={docs.find((d) => d.doc_type === "validated_winners_dna") ?? null}
+              onChanged={() => fetchDocs(selectedStore)}
+              setSuccess={setSuccess}
+              setError={setError}
+            />
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function ValidatedWinnersDnaSection({
+  storeName,
+  doc,
+  onChanged,
+  setSuccess,
+  setError,
+}: {
+  storeName: string;
+  doc: AiStoreDoc | null;
+  onChanged: () => void;
+  setSuccess: (s: string | null) => void;
+  setError: (s: string | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [editContent, setEditContent] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const isOverride = doc?.metadata?.auto_managed === false;
+  const winnerCount =
+    typeof doc?.metadata?.winner_count === "number"
+      ? doc.metadata.winner_count
+      : null;
+  const generatedAt = doc?.metadata?.generated_at ?? null;
+
+  const startEdit = () => {
+    setEditContent(doc?.content ?? "");
+    setEditing(true);
+    setError(null);
+  };
+
+  const saveOverride = async () => {
+    if (!storeName) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/ai/docs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          store_name: storeName,
+          doc_type: "validated_winners_dna",
+          title: "Validated Winners DNA (admin override)",
+          content: editContent,
+          metadata: { auto_managed: false, edited_at: new Date().toISOString() },
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Save failed");
+      setSuccess("Override saved — cron will skip this store going forward.");
+      setEditing(false);
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handBackToCron = async () => {
+    if (!storeName) return;
+    if (
+      !confirm(
+        "Hand control back to the cron? Your override will be replaced on the next refresh."
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/ai/docs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          store_name: storeName,
+          doc_type: "validated_winners_dna",
+          title: doc?.title ?? "Validated Winners DNA (auto-managed)",
+          content: doc?.content ?? "",
+          metadata: { auto_managed: true },
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Update failed");
+      setSuccess("Cron control restored.");
+      onChanged();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Update failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!doc) {
+    return (
+      <div className="bg-gray-700/20 border border-gray-700/50 rounded-lg p-3">
+        <p className="text-sm font-medium text-white">
+          Validated Winners DNA
+        </p>
+        <p className="text-xs text-gray-500 mt-0.5">
+          Auto-populated by the daily cron once this store has at least one
+          validated_winner approved_script with a v2.0 deconstruction.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`border rounded-lg p-3 ${
+        isOverride
+          ? "bg-yellow-900/10 border-yellow-700/50"
+          : "bg-gray-700/20 border-gray-700/50"
+      }`}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <p className="text-sm font-medium text-white">
+            Validated Winners DNA{" "}
+            {isOverride ? (
+              <span className="text-yellow-300 text-xs ml-1">
+                (admin override)
+              </span>
+            ) : (
+              <span className="text-emerald-300 text-xs ml-1">
+                (auto-managed)
+              </span>
+            )}
+          </p>
+          <p className="text-xs text-gray-500">
+            {winnerCount !== null && <>{winnerCount} winners · </>}
+            {generatedAt && (
+              <>refreshed {new Date(generatedAt).toLocaleString()}</>
+            )}
+            {!generatedAt && "—"}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {isOverride ? (
+            <button
+              onClick={handBackToCron}
+              disabled={busy}
+              className="text-xs text-gray-400 hover:text-white cursor-pointer disabled:opacity-50"
+            >
+              Hand back to cron
+            </button>
+          ) : (
+            <button
+              onClick={startEdit}
+              disabled={busy}
+              className="text-xs text-gray-400 hover:text-white flex items-center gap-1 cursor-pointer disabled:opacity-50"
+            >
+              <Pencil size={12} /> Edit override
+            </button>
+          )}
+        </div>
+      </div>
+
+      {editing ? (
+        <div className="space-y-2">
+          <textarea
+            value={editContent}
+            onChange={(e) => setEditContent(e.target.value)}
+            rows={12}
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-y font-mono"
+          />
+          <div className="flex gap-2">
+            <button
+              onClick={() => setEditing(false)}
+              className="px-3 py-1.5 text-gray-400 text-sm cursor-pointer"
+              disabled={busy}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={saveOverride}
+              disabled={busy || !editContent.trim()}
+              className="bg-yellow-600 hover:bg-yellow-500 text-white text-sm px-4 py-1.5 rounded-lg disabled:opacity-50 cursor-pointer"
+            >
+              {busy ? "Saving..." : "Save override"}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <details>
+          <summary className="text-xs text-gray-400 cursor-pointer hover:text-white">
+            Preview content ({doc.content.length.toLocaleString()} chars)
+          </summary>
+          <pre className="mt-2 whitespace-pre-wrap text-xs text-gray-300 bg-gray-900/50 border border-gray-800 rounded p-2 max-h-60 overflow-y-auto">
+            {doc.content}
+          </pre>
+        </details>
+      )}
     </div>
   );
 }

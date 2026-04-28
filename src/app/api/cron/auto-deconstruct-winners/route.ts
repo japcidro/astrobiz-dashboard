@@ -267,7 +267,7 @@ export async function GET(request: Request) {
       }
 
       const out = await deconstructAdVideo(video.video_url, geminiKey);
-      const { error: upsertErr } = await supabase
+      const { data: upsertedRow, error: upsertErr } = await supabase
         .from("ad_creative_analyses")
         .upsert(
           {
@@ -285,9 +285,38 @@ export async function GET(request: Request) {
             cost_usd: null,
           },
           { onConflict: "ad_id" }
-        );
+        )
+        .select("id")
+        .single();
       if (upsertErr) throw new Error(upsertErr.message);
       analyzedCount += 1;
+
+      // Promote the source approved_script to validated_winner and backfill
+      // the v2.0 classification fields from the freshly-deconstructed live
+      // ad. The performance_status='pending' filter prevents overwriting a
+      // status an admin set manually.
+      const cls = out.analysis.classification;
+      await supabase
+        .from("approved_scripts")
+        .update({
+          performance_status: "validated_winner",
+          performance_validated_at: new Date().toISOString(),
+          performance_metrics: {
+            roas: w.roas,
+            cpp: w.cpp,
+            purchases: w.purchases,
+            max_consecutive: w.max_consecutive,
+          },
+          source_winner_ad_id: ctx.draft.fb_ad_id,
+          source_winner_analysis_id: upsertedRow?.id ?? null,
+          awareness_level: cls?.awareness_level ?? null,
+          funnel_stage: cls?.funnel_stage ?? null,
+          hook_framework: cls?.hook_framework ?? null,
+          strategic_format: cls?.strategic_format ?? null,
+          video_format: cls?.video_format ?? null,
+        })
+        .eq("id", ctx.script.id)
+        .eq("performance_status", "pending");
 
       // Fire notification for the CEO
       const alertId = await insertAlert(supabase, {

@@ -340,6 +340,55 @@ function ScriptCard({
         </div>
       )}
 
+      {/* v2 classification chips — only shown when the script was approved
+          from a structured tool_use payload, OR backfilled by the feedback
+          loop after winner promotion. Old scripts have these as null. */}
+      {(script.awareness_level ||
+        script.hook_framework ||
+        script.video_format) && (
+        <div className="flex flex-wrap gap-1 text-[9px] font-mono">
+          {script.awareness_level && (
+            <span className="px-1 py-0.5 rounded bg-indigo-900/30 text-indigo-300 border border-indigo-700/50">
+              {script.awareness_level}
+            </span>
+          )}
+          {script.funnel_stage && (
+            <span className="px-1 py-0.5 rounded bg-cyan-900/30 text-cyan-300 border border-cyan-700/50">
+              {script.funnel_stage}
+            </span>
+          )}
+          {script.hook_framework && (
+            <span
+              className="px-1 py-0.5 rounded bg-rose-900/30 text-rose-300 border border-rose-700/50 truncate max-w-[12em]"
+              title={script.hook_framework}
+            >
+              {script.hook_framework}
+            </span>
+          )}
+          {script.video_format && (
+            <span
+              className="px-1 py-0.5 rounded bg-emerald-900/30 text-emerald-300 border border-emerald-700/50 truncate max-w-[12em]"
+              title={script.video_format}
+            >
+              {script.video_format}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Validated-winner pill — surfaces auto_deconstruct_winners cron promotion */}
+      {script.performance_status === "validated_winner" &&
+        script.performance_metrics && (
+          <div className="flex items-center gap-1 text-[10px] bg-yellow-500/10 border border-yellow-500/40 text-yellow-200 rounded-md px-2 py-1">
+            <Trophy size={10} className="text-yellow-300" />
+            <span>
+              Validated winner — ROAS{" "}
+              {script.performance_metrics.roas?.toFixed(2) ?? "—"}x ·{" "}
+              {script.performance_metrics.max_consecutive ?? 0}-day streak
+            </span>
+          </div>
+        )}
+
       <div className="flex items-center gap-1.5 text-[10px] text-gray-500 mt-auto pt-2 border-t border-gray-700/50">
         {script.angle_type && (
           <span

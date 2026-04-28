@@ -125,7 +125,21 @@ export async function POST(request: Request) {
     .map((doc) => `=== ${doc.title} ===\n${doc.content}`)
     .join("\n\n");
 
-  const winners = await loadWinnersContext(supabase, store_name);
+  // Admin override: if validated_winners_dna doc has auto_managed=false,
+  // use the admin-edited content directly. Otherwise fall back to the
+  // live winners query (the cron-managed default path).
+  const overrideDoc = (docs || []).find(
+    (d) =>
+      d.doc_type === "validated_winners_dna" &&
+      (d as { metadata?: { auto_managed?: boolean } }).metadata?.auto_managed === false
+  );
+  const winners = overrideDoc
+    ? {
+        text: overrideDoc.content,
+        winner_count: 0, // unknown — admin override
+        winner_ids: [] as string[],
+      }
+    : await loadWinnersContext(supabase, store_name);
 
   const systemBlocks: Array<{
     type: "text";

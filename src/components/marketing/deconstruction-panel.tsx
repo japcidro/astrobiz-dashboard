@@ -1659,7 +1659,44 @@ function DeconstructionDetailModal({
           <span className="text-xs text-gray-500">
             Model: {row.model ?? "unknown"}
           </span>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2 items-center">
+            {/* Expand-from-Winner — only meaningful when the analysis has v2
+                fields (viral_mechanism). Legacy rows would dilute the
+                generator's context, so they're disabled and prompt re-run. */}
+            <a
+              href={`/marketing/ai-generator?tool=scripts&winner_analysis_id=${row.id}`}
+              aria-disabled={!a.viral_mechanism}
+              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors ${
+                a.viral_mechanism
+                  ? "bg-emerald-600 hover:bg-emerald-500 text-white"
+                  : "bg-gray-800 text-gray-500 pointer-events-none cursor-not-allowed"
+              }`}
+              title={
+                a.viral_mechanism
+                  ? "Open Script Creator pre-loaded with this winner's DNA"
+                  : "Re-run with v2.0 prompt to enable expansion"
+              }
+            >
+              <Sparkles size={12} />
+              Expand → Scripts
+            </a>
+            <a
+              href={`/marketing/ai-generator?tool=angles&winner_analysis_id=${row.id}`}
+              aria-disabled={!a.viral_mechanism}
+              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors ${
+                a.viral_mechanism
+                  ? "bg-emerald-600/30 hover:bg-emerald-500/40 text-emerald-200 border border-emerald-700/50"
+                  : "bg-gray-800 text-gray-500 pointer-events-none cursor-not-allowed border border-gray-700"
+              }`}
+              title={
+                a.viral_mechanism
+                  ? "Open Angle Generator pre-loaded with this winner's DNA"
+                  : "Re-run with v2.0 prompt to enable expansion"
+              }
+            >
+              <Sparkles size={12} />
+              Expand → Angles
+            </a>
             <button
               onClick={onRerun}
               disabled={rerunning}

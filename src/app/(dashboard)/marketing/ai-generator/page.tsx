@@ -139,20 +139,45 @@ export default function AiGeneratorPage() {
 
   // Handoff from Comparative Report (or anywhere): consume URL params
   // ?store=...&tool=angles|scripts|formats&prompt=...
-  // Pre-fills the store, tool, and chat input. Does NOT auto-send so the
-  // user can review the prompt first. Strips params from the URL after
-  // consuming so refresh doesn't re-trigger.
+  // ?winner_analysis_id=<uuid> for Expand-from-Winner — pre-loads the
+  // winner's DNA report as a hidden seed message, switches store + tool,
+  // and starts a new thread.
+  // Strips params from the URL after consuming so refresh doesn't re-trigger.
   useEffect(() => {
     const storeParam = searchParams.get("store");
     const toolParam = searchParams.get("tool");
     const promptParam = searchParams.get("prompt");
-    if (!storeParam && !toolParam && !promptParam) return;
+    const winnerIdParam = searchParams.get("winner_analysis_id");
+    if (!storeParam && !toolParam && !promptParam && !winnerIdParam) return;
 
-    if (storeParam) setStoreName(storeParam);
     if (toolParam === "angles" || toolParam === "scripts" || toolParam === "formats") {
       setToolType(toolParam);
     }
+    if (storeParam) setStoreName(storeParam);
     if (promptParam) setInput(promptParam);
+
+    if (winnerIdParam) {
+      // Fetch the winner's DNA report and pre-load it as message[0] so the
+      // generator has the full structural context before the user types.
+      fetch(`/api/ai/winner-context?id=${encodeURIComponent(winnerIdParam)}`)
+        .then((r) => r.json())
+        .then((json) => {
+          if (!json.seed_user_message) return;
+          if (json.store_name) setStoreName(json.store_name);
+          setMessages([
+            { role: "user", content: json.seed_user_message },
+          ]);
+          setThreadId(null);
+          if (!json.has_v2) {
+            setError(
+              "This winner was deconstructed before v2.0 — re-run the deconstruction from the Compare flow to enable full expansion."
+            );
+          }
+        })
+        .catch(() => {
+          setError("Failed to load winner context.");
+        });
+    }
 
     router.replace("/marketing/ai-generator");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -550,6 +575,7 @@ export default function AiGeneratorPage() {
                       messageIndex={i}
                       existingApprovals={approvals}
                       onApproved={handleScriptApproved}
+                      structured={msg.structured ?? null}
                     />
                   </div>
                 </div>

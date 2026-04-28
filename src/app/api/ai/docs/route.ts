@@ -57,11 +57,12 @@ export async function POST(request: Request) {
     return Response.json({ success: true });
   }
 
-  const { store_name, doc_type, title, content } = body as {
+  const { store_name, doc_type, title, content, metadata } = body as {
     store_name: string;
     doc_type: string;
     title: string;
     content: string;
+    metadata?: Record<string, unknown>;
   };
 
   if (!store_name || !doc_type || !title || !content) {
@@ -73,12 +74,19 @@ export async function POST(request: Request) {
 
   const supabase = await createClient();
 
+  const upsertPayload: Record<string, unknown> = {
+    store_name,
+    doc_type,
+    title,
+    content,
+  };
+  if (metadata !== undefined) {
+    upsertPayload.metadata = metadata;
+  }
+
   const { error } = await supabase
     .from("ai_store_docs")
-    .upsert(
-      { store_name, doc_type, title, content },
-      { onConflict: "store_name,doc_type" }
-    );
+    .upsert(upsertPayload, { onConflict: "store_name,doc_type" });
 
   if (error) {
     return Response.json({ error: error.message }, { status: 500 });
