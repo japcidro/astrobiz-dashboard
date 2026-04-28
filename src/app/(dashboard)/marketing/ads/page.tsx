@@ -65,6 +65,8 @@ interface AdRow {
   roas: number;
   add_to_cart: number;
   purchases: number;
+  landing_page_views: number;
+  cost_per_lpv: number;
   reach: number;
   impressions: number;
   ctr: number;
@@ -108,6 +110,8 @@ interface AggRow {
   roas: number;
   add_to_cart: number;
   purchases: number;
+  landing_page_views: number;
+  cost_per_lpv: number;
   reach: number;
   impressions: number;
   ctr: number;
@@ -134,6 +138,7 @@ function aggregate(
     const purchases = group.reduce((s, r) => s + r.purchases, 0);
     const link_clicks = group.reduce((s, r) => s + (r.link_clicks ?? 0), 0);
     const add_to_cart = group.reduce((s, r) => s + r.add_to_cart, 0);
+    const landing_page_views = group.reduce((s, r) => s + (r.landing_page_views ?? 0), 0);
     const reach = group.reduce((s, r) => s + r.reach, 0);
     const impressions = group.reduce((s, r) => s + r.impressions, 0);
     const purchaseValue =
@@ -195,6 +200,8 @@ function aggregate(
       roas: purchaseValue,
       add_to_cart,
       purchases,
+      landing_page_views,
+      cost_per_lpv: landing_page_views > 0 ? Math.round((spend / landing_page_views) * 100) / 100 : 0,
       reach,
       impressions,
       ctr: impressions > 0 ? (link_clicks / impressions) * 100 : 0,
