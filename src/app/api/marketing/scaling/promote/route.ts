@@ -99,6 +99,55 @@ export async function POST(request: Request) {
     );
   }
 
+  // Meta's /copies endpoint cannot cross ad account boundaries. Verify
+  // the source ad lives in the same ad account as the configured scaling
+  // campaign before we even try — otherwise FB returns a confusing
+  // "(#3) Application does not have the capability" error with no
+  // subcode that looks like a permission problem but is actually a
+  // hard API restriction.
+  let sourceAccountId: string | null = null;
+  try {
+    const adAcctRes = await fetch(
+      `${FB_API_BASE}/${adId}?fields=account_id&access_token=${encodeURIComponent(token)}`,
+      { cache: "no-store" }
+    );
+    const adAcctJson = await adAcctRes.json();
+    if (!adAcctRes.ok) {
+      throw new Error(adAcctJson?.error?.message ?? "ad lookup failed");
+    }
+    sourceAccountId = (adAcctJson.account_id as string | undefined) ?? null;
+  } catch (err) {
+    return Response.json(
+      {
+        error: `Could not verify source ad's ad account: ${err instanceof Error ? err.message : "unknown"}`,
+      },
+      { status: 502 }
+    );
+  }
+
+  // scalingRow.account_id is stored without the "act_" prefix; FB's
+  // ad.account_id field returns it raw too. Normalize defensively.
+  const normalizeAcct = (v: string | null | undefined) =>
+    (v ?? "").toString().replace(/^act_/, "").trim();
+  if (
+    sourceAccountId &&
+    normalizeAcct(sourceAccountId) !== normalizeAcct(scalingRow.account_id)
+  ) {
+    return Response.json(
+      {
+        error:
+          `Cross-account copy not supported. Source ad is in ad account ${sourceAccountId}, ` +
+          `but the "${targetStore}" scaling campaign lives in ${scalingRow.account_id}. ` +
+          `Meta's /copies API only works within a single ad account. ` +
+          `Either move the scaling campaign into the same ad account, or recreate the ad manually in the scaling account.`,
+        cross_account: true,
+        source_account_id: sourceAccountId,
+        target_account_id: scalingRow.account_id,
+      },
+      { status: 400 }
+    );
+  }
+
   // If creating a new adset: clone a template (inside the same scaling
   // campaign), rename it, and use its id as the target. Template must
   // belong to the configured scaling campaign for safety.
