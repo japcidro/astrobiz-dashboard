@@ -328,6 +328,89 @@ export async function POST(request: Request) {
         fb_error: copyJson?.error,
       });
 
+      // Fallback path: when /copies returns code 3 ("Application does
+      // not have the capability"), Meta is blocking that endpoint
+      // specifically even though the token has ads_management. Bypass
+      // /copies by reading the source ad's creative_id and creating a
+      // fresh ad in the target adset with POST /act_{}/ads. Same end
+      // result, different — and more permissive — endpoint.
+      if (copyJson?.error?.code === 3 && sourceAccountId) {
+        try {
+          const adReadRes = await fetch(
+            `${FB_API_BASE}/${adId}?fields=name,creative{id},tracking_specs&access_token=${encodeURIComponent(token)}`,
+            { cache: "no-store" }
+          );
+          const adRead = await adReadRes.json();
+          if (!adReadRes.ok) {
+            throw new Error(adRead?.error?.message ?? "ad read failed");
+          }
+          const sourceName = (adRead?.name as string) ?? `Copy of ${adId}`;
+          const creativeId = adRead?.creative?.id as string | undefined;
+          if (!creativeId) {
+            throw new Error("source ad has no creative id");
+          }
+          const finalName = body.name_suffix?.trim()
+            ? `${sourceName} ${body.name_suffix.trim()}`
+            : sourceName;
+          const acctNoPrefix = sourceAccountId.replace(/^act_/, "");
+          const createParams = new URLSearchParams({
+            name: finalName,
+            adset_id: targetAdsetId,
+            creative: JSON.stringify({ creative_id: creativeId }),
+            status: statusOption,
+          });
+          if (Array.isArray(adRead?.tracking_specs)) {
+            createParams.set(
+              "tracking_specs",
+              JSON.stringify(adRead.tracking_specs)
+            );
+          }
+          const createRes = await fetch(
+            `${FB_API_BASE}/act_${acctNoPrefix}/ads?access_token=${encodeURIComponent(token)}`,
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+              },
+              body: createParams.toString(),
+            }
+          );
+          const createJson = await createRes.json();
+          if (!createRes.ok) {
+            console.error(
+              "[scaling/promote] recreate fallback also failed",
+              {
+                copy_error: copyJson?.error,
+                create_error: createJson?.error,
+              }
+            );
+            // Fall through to the diagnostic + error response below.
+          } else {
+            copiedAdId = (createJson?.id as string | null) ?? null;
+            console.info(
+              `[scaling/promote] recreate fallback succeeded: source=${adId} new_ad=${copiedAdId}`
+            );
+            // Skip the diagnostic+error path below by returning early.
+            return Response.json({
+              success: true,
+              copied_ad_id: copiedAdId,
+              status: statusOption,
+              target_adset_id: targetAdsetId,
+              created_adset_id: createdAdsetId,
+              target_campaign_id: scalingRow.campaign_id,
+              target_campaign_name: scalingRow.campaign_name,
+              used_fallback: true,
+            });
+          }
+        } catch (fallbackErr) {
+          console.error(
+            "[scaling/promote] recreate fallback exception",
+            fallbackErr
+          );
+          // Fall through to the diagnostic + error response below.
+        }
+      }
+
       // When /copies fails with the opaque "(#3) capability" error, run a
       // bunch of read probes against Meta to capture the *actual* state of
       // everything involved. This lets us tell from the response alone
