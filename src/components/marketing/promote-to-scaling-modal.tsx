@@ -93,6 +93,8 @@ export function PromoteToScalingModal({
   const [fbSubcode, setFbSubcode] = useState<number | null>(null);
   const [fbUserMsg, setFbUserMsg] = useState<string | null>(null);
   const [fbTrace, setFbTrace] = useState<string | null>(null);
+  const [diag, setDiag] = useState<unknown>(null);
+  const [showDiag, setShowDiag] = useState(false);
 
   const loadConfigs = useCallback(async () => {
     setLoadingConfig(true);
@@ -170,6 +172,8 @@ export function PromoteToScalingModal({
     setFbSubcode(null);
     setFbUserMsg(null);
     setFbTrace(null);
+    setDiag(null);
+    setShowDiag(false);
     try {
       const payload: Record<string, unknown> = {
         ad_id: subject.ad_id,
@@ -195,6 +199,7 @@ export function PromoteToScalingModal({
         if (typeof json.fb_subcode === "number") setFbSubcode(json.fb_subcode);
         if (typeof json.fb_user_msg === "string") setFbUserMsg(json.fb_user_msg);
         if (typeof json.fb_trace === "string") setFbTrace(json.fb_trace);
+        if (json.diag) setDiag(json.diag);
         throw new Error(json.error || `Promote failed (${res.status})`);
       }
       onSuccess({
@@ -481,6 +486,35 @@ export function PromoteToScalingModal({
                         <span> · subcode: {fbSubcode}</span>
                       )}
                       {fbTrace && <span> · trace: {fbTrace}</span>}
+                    </div>
+                  )}
+                  {diag != null && (
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowDiag((v) => !v)}
+                        className="text-[11px] text-red-200 underline cursor-pointer hover:text-white"
+                      >
+                        {showDiag ? "Hide" : "Show"} diagnostic
+                      </button>
+                      {showDiag && (
+                        <div className="mt-2 space-y-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              navigator.clipboard?.writeText(
+                                JSON.stringify(diag, null, 2)
+                              );
+                            }}
+                            className="text-[11px] px-2 py-0.5 bg-red-900/40 border border-red-700/50 rounded hover:bg-red-900/60 cursor-pointer"
+                          >
+                            Copy JSON
+                          </button>
+                          <pre className="text-[10px] text-red-200/80 bg-black/40 border border-red-900/40 rounded p-2 max-h-64 overflow-auto whitespace-pre-wrap break-all">
+                            {JSON.stringify(diag, null, 2)}
+                          </pre>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

@@ -327,6 +327,77 @@ export async function POST(request: Request) {
         http_status: copyRes.status,
         fb_error: copyJson?.error,
       });
+
+      // When /copies fails with the opaque "(#3) capability" error, run a
+      // bunch of read probes against Meta to capture the *actual* state of
+      // everything involved. This lets us tell from the response alone
+      // whether the cause is a special-ad-category mismatch, a
+      // disapproved/issued ad, an ad-account restriction, a token scope
+      // gap, or something else — instead of trial-and-error guessing.
+      const probe = async (
+        path: string,
+        fields?: string
+      ): Promise<unknown> => {
+        try {
+          const url =
+            `${FB_API_BASE}/${path}` +
+            (fields ? `?fields=${encodeURIComponent(fields)}&` : "?") +
+            `access_token=${encodeURIComponent(token)}`;
+          const r = await fetch(url, { cache: "no-store" });
+          const j = await r.json();
+          return r.ok ? j : { __error: j?.error ?? `${r.status}` };
+        } catch (e) {
+          return { __error: e instanceof Error ? e.message : "fetch failed" };
+        }
+      };
+
+      const acctPrefix = (id: string) =>
+        id.startsWith("act_") ? id : `act_${id}`;
+
+      const [
+        permissions,
+        sourceAd,
+        sourceAccount,
+        targetCampaign,
+        targetAdset,
+        targetAccount,
+      ] = await Promise.all([
+        probe("me/permissions"),
+        probe(
+          adId,
+          "id,name,status,effective_status,configured_status,issues_info,account_id,adset{id,name,status,effective_status,campaign{id,name,objective,special_ad_categories,special_ad_category,buying_type,status,effective_status}}"
+        ),
+        sourceAccountId
+          ? probe(
+              acctPrefix(sourceAccountId),
+              "id,name,account_status,disable_reason,capabilities,business{id,name}"
+            )
+          : Promise.resolve(null),
+        probe(
+          scalingRow.campaign_id as string,
+          "id,name,objective,special_ad_categories,special_ad_category,buying_type,status,effective_status"
+        ),
+        probe(
+          targetAdsetId,
+          "id,name,status,effective_status,optimization_goal,billing_event,promoted_object,campaign_id"
+        ),
+        probe(
+          acctPrefix(scalingRow.account_id as string),
+          "id,name,account_status,disable_reason,capabilities,business{id,name}"
+        ),
+      ]);
+
+      const diag = {
+        permissions,
+        source_ad: sourceAd,
+        source_account: sourceAccount,
+        target_campaign: targetCampaign,
+        target_adset: targetAdset,
+        target_account: targetAccount,
+      };
+
+      console.error("[scaling/promote] diagnostic probe", diag);
+
       return Response.json(
         {
           error: userTitle ? `${userTitle}: ${msg}` : msg,
@@ -334,6 +405,7 @@ export async function POST(request: Request) {
           fb_subcode: copyJson?.error?.error_subcode,
           fb_user_msg: copyJson?.error?.error_user_msg,
           fb_trace: copyJson?.error?.fbtrace_id,
+          diag,
         },
         { status: 502 }
       );
