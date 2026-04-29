@@ -36,11 +36,12 @@ interface AutopilotConfig {
   enabled: boolean;
   kill_no_purchase_spend_min: number;
   kill_high_cpa_max: number;
+  auto_resume: boolean;
 }
 
 interface ActionInsert {
   run_id: string;
-  action: "paused" | "error";
+  action: "paused" | "resumed" | "error";
   ad_id: string;
   ad_name?: string | null;
   adset_id?: string | null;
@@ -54,6 +55,7 @@ interface ActionInsert {
   cpa?: number | null;
   status: "ok" | "error";
   error_message?: string | null;
+  paused_action_id?: string | null;
 }
 
 function evaluateKillRule(
@@ -406,13 +408,144 @@ async function handleRun(request: Request) {
     );
   }
 
-  // 8. Persist audit log
+  // 8. Auto-resume scan — flip back ON ads that recovered.
+  //    Resume threshold reuses kill_high_cpa_max: an ad is "recovered"
+  //    when current stats show purchases >= 1 AND cpa <= kill_high_cpa_max.
+  //    Both kill rules collapse to this single resume condition (a no_purchase
+  //    pause needs at least one purchase; a high_cpa pause needs CPA back
+  //    under threshold).
+  //
+  //    Cooldown of 30 min prevents pause→resume→pause flapping when stats
+  //    bounce around the threshold. Lookback of 24h keeps the scan bounded.
+  if (cfg.auto_resume) {
+    const RESUME_COOLDOWN_MIN = 30;
+    const RESUME_LOOKBACK_HOURS = 24;
+    const now = Date.now();
+    const cooldownCutoff = new Date(
+      now - RESUME_COOLDOWN_MIN * 60_000
+    ).toISOString();
+    const lookbackCutoff = new Date(
+      now - RESUME_LOOKBACK_HOURS * 3600_000
+    ).toISOString();
+
+    const { data: pausedRowsRaw } = await supabase
+      .from("autopilot_actions")
+      .select("id, ad_id, rule_matched, created_at")
+      .eq("action", "paused")
+      .eq("status", "ok")
+      .gte("created_at", lookbackCutoff)
+      .lte("created_at", cooldownCutoff)
+      .is("undone_at", null);
+
+    const pausedRows = (pausedRowsRaw ?? []) as Array<{
+      id: string;
+      ad_id: string;
+      rule_matched: string | null;
+      created_at: string;
+    }>;
+
+    let alreadyResumed = new Set<string>();
+    if (pausedRows.length > 0) {
+      const { data: resumedRowsRaw } = await supabase
+        .from("autopilot_actions")
+        .select("paused_action_id")
+        .eq("action", "resumed")
+        .in(
+          "paused_action_id",
+          pausedRows.map((r) => r.id)
+        );
+      alreadyResumed = new Set(
+        (resumedRowsRaw ?? [])
+          .map((r) => (r as { paused_action_id: string | null }).paused_action_id)
+          .filter((v): v is string => !!v)
+      );
+    }
+
+    // Latest un-resumed paused row per ad_id (an ad can be paused→resumed
+    // multiple times; we only act on the most recent unresolved pause).
+    const latestPausedByAd = new Map<
+      string,
+      { id: string; ad_id: string; rule_matched: string | null; created_at: string }
+    >();
+    for (const r of pausedRows) {
+      if (alreadyResumed.has(r.id)) continue;
+      const prev = latestPausedByAd.get(r.ad_id);
+      if (!prev || new Date(r.created_at) > new Date(prev.created_at)) {
+        latestPausedByAd.set(r.ad_id, r);
+      }
+    }
+
+    const adRowById = new Map(watchedRows.map((row) => [row.ad_id, row]));
+
+    const resumeCandidates: Array<{ row: AdRow; pausedActionId: string }> = [];
+    for (const [adId, paused] of latestPausedByAd) {
+      const row = adRowById.get(adId);
+      // Skip if ad isn't in this run's fetch (campaign was unwatched, or ad
+      // deleted), or if it's no longer PAUSED (someone re-enabled it manually).
+      if (!row || row.status !== "PAUSED") continue;
+      if (row.purchases < 1) continue;
+      if (row.cpa > cfg.kill_high_cpa_max) continue;
+      resumeCandidates.push({ row, pausedActionId: paused.id });
+    }
+
+    for (let i = 0; i < resumeCandidates.length; i += batchSize) {
+      const batch = resumeCandidates.slice(i, i + batchSize);
+      await Promise.all(
+        batch.map(async ({ row, pausedActionId }) => {
+          try {
+            await fbToggleStatus(row.ad_id, "ACTIVE", token, supabase);
+            actionLog.push({
+              run_id: runId,
+              action: "resumed",
+              ad_id: row.ad_id,
+              ad_name: row.ad,
+              adset_id: row.adset_id,
+              adset_name: row.adset,
+              campaign_id: row.campaign_id,
+              campaign_name: row.campaign,
+              account_id: row.account_id,
+              rule_matched: "recovered",
+              spend: row.spend,
+              purchases: row.purchases,
+              cpa: row.cpa,
+              status: "ok",
+              paused_action_id: pausedActionId,
+            });
+          } catch (e) {
+            actionLog.push({
+              run_id: runId,
+              action: "error",
+              ad_id: row.ad_id,
+              ad_name: row.ad,
+              adset_id: row.adset_id,
+              adset_name: row.adset,
+              campaign_id: row.campaign_id,
+              campaign_name: row.campaign,
+              account_id: row.account_id,
+              rule_matched: "recovered",
+              spend: row.spend,
+              purchases: row.purchases,
+              cpa: row.cpa,
+              status: "error",
+              error_message: e instanceof Error ? e.message : "unknown",
+              paused_action_id: pausedActionId,
+            });
+          }
+        })
+      );
+    }
+  }
+
+  // 9. Persist audit log
   if (actionLog.length > 0) {
     await supabase.from("autopilot_actions").insert(actionLog);
   }
 
   const pausedCount = actionLog.filter(
     (a) => a.action === "paused" && a.status === "ok"
+  ).length;
+  const resumedCount = actionLog.filter(
+    (a) => a.action === "resumed" && a.status === "ok"
   ).length;
   const errorCount = actionLog.filter((a) => a.status === "error").length;
 
@@ -422,6 +555,7 @@ async function handleRun(request: Request) {
     watched_campaigns: watched.length,
     scanned_ads: watchedRows.length,
     paused: pausedCount,
+    resumed: resumedCount,
     errors: errorCount,
   });
 }

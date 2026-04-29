@@ -18,11 +18,16 @@ create table if not exists autopilot_config (
   updated_at timestamptz not null default now()
 );
 
--- Drop legacy safety-rail / auto-resume columns on existing installations.
+-- Drop legacy safety-rail columns on existing installations.
 alter table autopilot_config drop column if exists min_age_hours;
 alter table autopilot_config drop column if exists max_pauses_per_run;
-alter table autopilot_config drop column if exists auto_resume;
 alter table autopilot_config drop column if exists resume_lookback_hours;
+
+-- Auto-resume toggle. When ON (default), ads that were paused by autopilot
+-- and whose stats have since recovered (late purchases dropped CPA below
+-- kill_high_cpa_max) get flipped back to ACTIVE. Resume thresholds piggyback
+-- on the existing kill thresholds — no separate config needed.
+alter table autopilot_config add column if not exists auto_resume boolean not null default true;
 
 -- Only one row allowed (singleton)
 create unique index if not exists autopilot_config_singleton

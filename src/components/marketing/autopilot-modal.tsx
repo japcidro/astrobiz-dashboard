@@ -21,6 +21,7 @@ interface AutopilotConfig {
   enabled: boolean;
   kill_no_purchase_spend_min: number;
   kill_high_cpa_max: number;
+  auto_resume: boolean;
   updated_at: string;
 }
 
@@ -269,7 +270,7 @@ export function AutopilotModal({
         setRunResult((json.reason as string) ?? "Skipped");
       } else {
         setRunResult(
-          `Scanned ${json.scanned_ads} ads · paused ${json.paused} · errors ${json.errors}`
+          `Scanned ${json.scanned_ads} ads · paused ${json.paused} · resumed ${json.resumed ?? 0} · errors ${json.errors}`
         );
       }
       await loadActions();
@@ -311,7 +312,7 @@ export function AutopilotModal({
             </h2>
             {enabledBadge}
             <span className="text-xs text-gray-500 ml-2 truncate hidden md:inline">
-              Auto-pause losers · Runs hourly · No safety rails
+              Auto-pause losers · Auto-resume recoveries · Runs hourly
             </span>
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -432,6 +433,28 @@ export function AutopilotModal({
                     suffix="₱ (with at least 1 purchase)"
                     onChange={(v) =>
                       setForm((f) => ({ ...f, kill_high_cpa_max: v }))
+                    }
+                  />
+                </div>
+
+                {/* Auto-resume toggle */}
+                <div className="flex items-center justify-between p-4 bg-gray-800/40 border border-gray-700/50 rounded-xl">
+                  <div className="pr-3">
+                    <p className="text-sm text-white font-medium flex items-center gap-2">
+                      <TrendingUp size={14} className="text-green-400" />
+                      Auto-resume when stats recover
+                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Late purchases na nag-bawas ng CPA below ₱
+                      {(form.kill_high_cpa_max ?? 380).toLocaleString()} ay
+                      iba-back ON ang ad. 30-min cooldown after pause to avoid
+                      flapping.
+                    </p>
+                  </div>
+                  <Switch
+                    value={form.auto_resume ?? true}
+                    onChange={(v) =>
+                      setForm((f) => ({ ...f, auto_resume: v }))
                     }
                   />
                 </div>

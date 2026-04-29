@@ -39,6 +39,7 @@ export async function PUT(request: Request) {
     enabled: boolean;
     kill_no_purchase_spend_min: number;
     kill_high_cpa_max: number;
+    auto_resume: boolean;
   }>;
 
   const supabase = await createClient();
@@ -65,6 +66,8 @@ export async function PUT(request: Request) {
     update.kill_no_purchase_spend_min = body.kill_no_purchase_spend_min;
   if (typeof body.kill_high_cpa_max === "number")
     update.kill_high_cpa_max = body.kill_high_cpa_max;
+  if (typeof body.auto_resume === "boolean")
+    update.auto_resume = body.auto_resume;
 
   const { data, error } = await supabase
     .from("autopilot_config")
