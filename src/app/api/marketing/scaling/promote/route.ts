@@ -268,11 +268,23 @@ export async function POST(request: Request) {
         copyJson?.error_user_msg ??
         `FB /copies ${copyRes.status}`;
       const userTitle = copyJson?.error?.error_user_title;
+      // Surface the full FB error blob to the server log so we can debug
+      // capability/permission issues without guessing. fbtrace_id is the
+      // identifier Meta support asks for if you escalate to them.
+      console.error("[scaling/promote] FB /copies failed", {
+        ad_id: adId,
+        target_adset_id: targetAdsetId,
+        target_store: targetStore,
+        http_status: copyRes.status,
+        fb_error: copyJson?.error,
+      });
       return Response.json(
         {
           error: userTitle ? `${userTitle}: ${msg}` : msg,
           fb_code: copyJson?.error?.code,
           fb_subcode: copyJson?.error?.error_subcode,
+          fb_user_msg: copyJson?.error?.error_user_msg,
+          fb_trace: copyJson?.error?.fbtrace_id,
         },
         { status: 502 }
       );

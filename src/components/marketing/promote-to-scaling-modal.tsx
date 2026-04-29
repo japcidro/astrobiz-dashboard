@@ -90,6 +90,9 @@ export function PromoteToScalingModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fbCode, setFbCode] = useState<number | null>(null);
+  const [fbSubcode, setFbSubcode] = useState<number | null>(null);
+  const [fbUserMsg, setFbUserMsg] = useState<string | null>(null);
+  const [fbTrace, setFbTrace] = useState<string | null>(null);
 
   const loadConfigs = useCallback(async () => {
     setLoadingConfig(true);
@@ -164,6 +167,9 @@ export function PromoteToScalingModal({
     setSubmitting(true);
     setError(null);
     setFbCode(null);
+    setFbSubcode(null);
+    setFbUserMsg(null);
+    setFbTrace(null);
     try {
       const payload: Record<string, unknown> = {
         ad_id: subject.ad_id,
@@ -186,6 +192,9 @@ export function PromoteToScalingModal({
       const json = await res.json();
       if (!res.ok) {
         if (typeof json.fb_code === "number") setFbCode(json.fb_code);
+        if (typeof json.fb_subcode === "number") setFbSubcode(json.fb_subcode);
+        if (typeof json.fb_user_msg === "string") setFbUserMsg(json.fb_user_msg);
+        if (typeof json.fb_trace === "string") setFbTrace(json.fb_trace);
         throw new Error(json.error || `Promote failed (${res.status})`);
       }
       onSuccess({
@@ -458,11 +467,20 @@ export function PromoteToScalingModal({
             <div className="p-2.5 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-xs">
               <div className="flex items-start gap-2">
                 <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
-                <div>
+                <div className="min-w-0">
                   {error}
-                  {fbCode !== null && (
-                    <div className="text-[11px] text-red-400 mt-1">
-                      FB error code: {fbCode}
+                  {fbUserMsg && fbUserMsg !== error && (
+                    <div className="text-[11px] text-red-200 mt-1">
+                      {fbUserMsg}
+                    </div>
+                  )}
+                  {(fbCode !== null || fbSubcode !== null || fbTrace) && (
+                    <div className="text-[11px] text-red-400 mt-1 break-all">
+                      {fbCode !== null && <span>FB code: {fbCode}</span>}
+                      {fbSubcode !== null && (
+                        <span> · subcode: {fbSubcode}</span>
+                      )}
+                      {fbTrace && <span> · trace: {fbTrace}</span>}
                     </div>
                   )}
                 </div>
