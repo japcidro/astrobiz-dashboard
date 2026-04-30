@@ -1066,8 +1066,12 @@ export default function AdsPage() {
     switch (key) {
       case "cpa": {
         // Color-code CPA: green <200, yellow 200-350, red >350
-        // Skip color when 0 (no purchases) since CPA is meaningless
-        if (v <= 0) return <span className="text-gray-500">{fmt(v)}</span>;
+        // Red when spending but 0 purchases (wasted spend signal)
+        const spend = (row.spend as number) ?? 0;
+        if (v <= 0) {
+          if (spend > 0) return <span className="text-red-400">{fmt(v)}</span>;
+          return <span className="text-gray-500">{fmt(v)}</span>;
+        }
         const color =
           v < 200
             ? "text-green-400"
