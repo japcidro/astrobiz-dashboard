@@ -226,11 +226,23 @@ export async function GET(request: Request) {
   // "what's been packed". Cheap (~10ms) and ensures manual-clear / scan-verify
   // writes show up on the very next GET regardless of which Vercel instance
   // serves the request or whether the Shopify cache is warm.
-  const { data: verifiedOrders } = await supabase
-    .from("pack_verifications")
-    .select("order_id");
-
-  const verifiedIds = new Set((verifiedOrders || []).map((v) => v.order_id));
+  //
+  // Scope the lookup to only the order_ids in the current Shopify pull. A
+  // bare .select() on this table is silently capped at PostgREST's 1000-row
+  // default — once the table grew past 1000 rows, the most recent
+  // verifications stopped landing in the Set, and packed orders kept
+  // re-appearing on the list. .in(...) keeps the result bounded by the
+  // number of orders actually in the window (usually dozens), so the cap is
+  // never reachable. Empty array short-circuits the query entirely.
+  const shopifyOrderIds = allOrders.map((o) => String(o.id));
+  const verifiedIds = new Set<string>();
+  if (shopifyOrderIds.length > 0) {
+    const { data: verifiedOrders } = await supabase
+      .from("pack_verifications")
+      .select("order_id")
+      .in("order_id", shopifyOrderIds);
+    for (const v of verifiedOrders || []) verifiedIds.add(v.order_id);
+  }
   const needsPacking = allOrders.filter((o) => !verifiedIds.has(String(o.id)));
 
   // Sort by created_at descending (newest first — most recent waybills on top)
