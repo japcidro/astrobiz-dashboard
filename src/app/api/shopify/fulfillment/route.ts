@@ -6,8 +6,24 @@ export const dynamic = "force-dynamic";
 
 const SHOPIFY_API_VERSION = "2024-01";
 
-// In-memory cache — 30 seconds for unfulfilled orders (change frequently)
-const cache = new Map<string, { data: unknown; timestamp: number }>();
+// In-memory cache — 30 seconds for the SLOW Shopify fetch only (the per-store
+// orders.json calls take 1-3s and are subject to Shopify rate limits, so we
+// don't want to hit them on every refresh).
+//
+// We deliberately do NOT cache the final filtered "needs packing" list:
+// pack_verifications is the source of truth for "what's been packed", and
+// must be re-queried on every GET so writes from manual-clear and scan-verify
+// are reflected immediately. Caching the filtered result was the bug — orders
+// that had just been cleared kept reappearing because the old cache held the
+// pre-clear filter result for up to 30 seconds across all warm instances.
+const SHOPIFY_ORDERS_CACHE_KEY = "fulfillment-shopify-orders";
+const cache = new Map<
+  string,
+  {
+    data: { allOrders: UnfulfilledOrder[]; storeNames: string[] };
+    timestamp: number;
+  }
+>();
 const CACHE_TTL = 30 * 1000;
 
 interface RawShopifyLineItem {
@@ -79,7 +95,7 @@ async function fetchFulfilledOrders(
   return allOrders;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const employee = await getEmployee();
   if (!employee) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -88,40 +104,51 @@ export async function GET() {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Check cache
-  const cacheKey = "fulfillment-needs-packing";
-  const cached = cache.get(cacheKey);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    return Response.json(cached.data);
-  }
+  const { searchParams } = new URL(request.url);
+  const forceRefresh = searchParams.get("refresh") === "1";
 
   const supabase = await createClient();
 
-  const { data: storesData, error: storesError } = await supabase
-    .from("shopify_stores")
-    .select("id, name, store_url, api_token")
-    .eq("is_active", true);
+  // Try to serve the slow Shopify fetch from cache. If forceRefresh, skip it
+  // and re-pull from Shopify. The verifiedIds filter below ALWAYS runs fresh
+  // regardless of cache hit/miss, so manual-clear and scan-verify writes show
+  // up on the very next GET.
+  let allOrders: UnfulfilledOrder[];
+  let storeNames: string[];
 
-  if (storesError || !storesData || storesData.length === 0) {
-    return Response.json(
-      {
-        error: storesError
-          ? "Failed to load stores"
-          : "No active Shopify stores configured.",
-      },
-      { status: 400 }
-    );
-  }
+  const cached = cache.get(SHOPIFY_ORDERS_CACHE_KEY);
+  if (
+    !forceRefresh &&
+    cached &&
+    Date.now() - cached.timestamp < CACHE_TTL
+  ) {
+    allOrders = cached.data.allOrders;
+    storeNames = cached.data.storeNames;
+  } else {
+    const { data: storesData, error: storesError } = await supabase
+      .from("shopify_stores")
+      .select("id, name, store_url, api_token")
+      .eq("is_active", true);
 
-  const now = new Date();
-  const allOrders: UnfulfilledOrder[] = [];
-  const storeNames: string[] = [];
+    if (storesError || !storesData || storesData.length === 0) {
+      return Response.json(
+        {
+          error: storesError
+            ? "Failed to load stores"
+            : "No active Shopify stores configured.",
+        },
+        { status: 400 }
+      );
+    }
 
-  // Fetch from all stores in parallel
-  await Promise.all(
+    const now = new Date();
+    const fetchedOrders: UnfulfilledOrder[] = [];
+    const fetchedNames: string[] = [];
+
+    await Promise.all(
     storesData.map(async (store) => {
       try {
-        storeNames.push(store.name);
+        fetchedNames.push(store.name);
         const rawOrders = await fetchFulfilledOrders(
           store.store_url,
           store.api_token
@@ -165,7 +192,7 @@ export async function GET() {
             }
           }
 
-          allOrders.push({
+          fetchedOrders.push({
             id: raw.id,
             name: raw.name,
             store_name: store.name,
@@ -185,9 +212,20 @@ export async function GET() {
         );
       }
     })
-  );
+    );
 
-  // Exclude orders already verified (in pack_verifications table)
+    cache.set(SHOPIFY_ORDERS_CACHE_KEY, {
+      data: { allOrders: fetchedOrders, storeNames: fetchedNames },
+      timestamp: Date.now(),
+    });
+    allOrders = fetchedOrders;
+    storeNames = fetchedNames;
+  }
+
+  // ALWAYS query pack_verifications fresh — it's the source of truth for
+  // "what's been packed". Cheap (~10ms) and ensures manual-clear / scan-verify
+  // writes show up on the very next GET regardless of which Vercel instance
+  // serves the request or whether the Shopify cache is warm.
   const { data: verifiedOrders } = await supabase
     .from("pack_verifications")
     .select("order_id");
@@ -201,10 +239,7 @@ export async function GET() {
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
 
-  const responseData = { orders: needsPacking, stores: storeNames };
-  cache.set(cacheKey, { data: responseData, timestamp: Date.now() });
-
-  return Response.json(responseData);
+  return Response.json({ orders: needsPacking, stores: storeNames });
 }
 
 export async function POST(request: Request) {
@@ -341,8 +376,12 @@ export async function POST(request: Request) {
 
     const fulfillJson = await fulfillRes.json();
 
-    // Invalidate cache after fulfilling
-    cache.delete("fulfillment-unfulfilled");
+    // Invalidate the Shopify-orders cache — this endpoint actually flips the
+    // order to "shipped" in Shopify, so the next GET should re-pull from
+    // Shopify rather than serve a 30-second-old snapshot. (The verifiedIds
+    // filter is fresh on every GET regardless, so this only affects the
+    // raw-orders-from-Shopify portion.)
+    cache.delete(SHOPIFY_ORDERS_CACHE_KEY);
 
     return Response.json({
       success: true,
