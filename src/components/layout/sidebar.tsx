@@ -29,6 +29,7 @@ import {
   Newspaper,
   ScanLine,
   ClipboardList,
+  Trophy,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -220,11 +221,17 @@ const navEntries: NavEntry[] = [
         roles: ["admin", "marketing"],
       },
       {
+        label: "Creatives",
+        href: "/marketing/creatives",
+        icon: <Trophy size={18} />,
+        roles: ["admin", "marketing"],
+        section: "Analytics",
+      },
+      {
         label: "AI Analytics",
         href: "/marketing/ai-analytics",
         icon: <BarChart3 size={18} />,
         roles: ["admin", "marketing"],
-        section: "Analytics",
       },
       {
         label: "AI Generator",
