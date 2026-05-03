@@ -223,25 +223,49 @@ export async function GET(request: Request) {
   }
 
   // ALWAYS query pack_verifications fresh — it's the source of truth for
-  // "what's been packed". Cheap (~10ms) and ensures manual-clear / scan-verify
+  // "what's been packed". Cheap (~30ms) and ensures manual-clear / scan-verify
   // writes show up on the very next GET regardless of which Vercel instance
   // serves the request or whether the Shopify cache is warm.
   //
-  // Scope the lookup to only the order_ids in the current Shopify pull. A
-  // bare .select() on this table is silently capped at PostgREST's 1000-row
-  // default — once the table grew past 1000 rows, the most recent
-  // verifications stopped landing in the Set, and packed orders kept
-  // re-appearing on the list. .in(...) keeps the result bounded by the
-  // number of orders actually in the window (usually dozens), so the cap is
-  // never reachable. Empty array short-circuits the query entirely.
-  const shopifyOrderIds = allOrders.map((o) => String(o.id));
+  // Scope by completed_at over the last 30 days, NOT by .in(order_id,...).
+  // Two prior fixes used .in() against the Shopify pull; once weekly volume
+  // crossed ~1000 orders, the resulting `?order_id=in.(id1,id2,...)` URL
+  // exceeded 16KB and was silently rejected upstream — `verifiedOrders` came
+  // back null, the `|| []` fallback emptied the Set, and every packed order
+  // re-appeared on the list. Time-bounded scoping is robust: the Shopify
+  // pull is capped at 7 days old, so any verification covering a current
+  // order must fall within that window. 30 days adds buffer for clock skew
+  // and late writes. .limit(50000) overrides PostgREST's default 1000-row
+  // cap; current volume is ~1200 verifications/week so this is well above
+  // headroom. The error is surfaced loudly — silently swallowing it is what
+  // hid both prior failures from the team.
   const verifiedIds = new Set<string>();
-  if (shopifyOrderIds.length > 0) {
-    const { data: verifiedOrders } = await supabase
+  if (allOrders.length > 0) {
+    const since = new Date(
+      Date.now() - 30 * 24 * 60 * 60 * 1000
+    ).toISOString();
+    const { data: verifiedOrders, error: verifyError } = await supabase
       .from("pack_verifications")
       .select("order_id")
-      .in("order_id", shopifyOrderIds);
-    for (const v of verifiedOrders || []) verifiedIds.add(v.order_id);
+      .gte("completed_at", since)
+      .limit(50000);
+
+    if (verifyError) {
+      console.error(
+        "[fulfillment] verifiedIds query failed — refusing to serve a list that would mark every packed order as unpacked:",
+        verifyError
+      );
+      return Response.json(
+        {
+          error: `Failed to load pack verifications: ${verifyError.message}`,
+          code: verifyError.code,
+          hint: verifyError.hint,
+        },
+        { status: 500 }
+      );
+    }
+
+    for (const v of verifiedOrders) verifiedIds.add(v.order_id);
   }
   const needsPacking = allOrders.filter((o) => !verifiedIds.has(String(o.id)));
 
