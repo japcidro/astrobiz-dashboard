@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { insertAlert } from "../insert";
+import { fetchAllRows } from "@/lib/supabase/paginate";
 
 // ===================================================================
 // Rule: autopilot_big_action
@@ -72,12 +73,19 @@ export async function detectRtsSpike(
   const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
   const weekAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-  const { data } = await supabase
-    .from("jt_deliveries")
-    .select("submission_date, classification")
-    .gte("submission_date", weekAgo);
-
-  const rows = (data ?? []) as { submission_date: string; classification: string }[];
+  // 7 days of parcels can exceed 1000 rows; PostgREST silently truncates
+  // a bare select(), which would hide real spikes. Drain via paginate.
+  const { data: rows } = await fetchAllRows<{
+    submission_date: string;
+    classification: string;
+  }>(
+    () =>
+      supabase
+        .from("jt_deliveries")
+        .select("submission_date, classification")
+        .gte("submission_date", weekAgo),
+    { orderColumn: "submission_date", ascending: true }
+  );
   if (rows.length === 0) return 0;
 
   const rtsByDate = new Map<string, number>();
@@ -132,17 +140,21 @@ export async function detectCashAtRisk(
   // Parcels submitted >= cutoff-days ago that are still not delivered
   const cutoffDate = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
-  const { data } = await supabase
-    .from("jt_deliveries")
-    .select("amount, classification, order_status, submission_date")
-    .lte("submission_date", cutoffDate);
-
-  const rows = (data ?? []) as {
+  // lte(cutoffDate) matches almost the entire table — easily past the
+  // 1000-row PostgREST cap. Drain so the at-risk total reflects reality.
+  const { data: rows } = await fetchAllRows<{
     amount: number | null;
     classification: string | null;
     order_status: string | null;
     submission_date: string;
-  }[];
+  }>(
+    () =>
+      supabase
+        .from("jt_deliveries")
+        .select("amount, classification, order_status, submission_date")
+        .lte("submission_date", cutoffDate),
+    { orderColumn: "submission_date", ascending: true }
+  );
 
   const atRisk = rows.filter((r) => {
     const cls = (r.classification || "").toLowerCase();

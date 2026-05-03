@@ -3,10 +3,24 @@
 // (a quality check for the pack team).
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { fetchAllRows } from "@/lib/supabase/paginate";
 
 function isoDaysAgo(days: number): string {
   return new Date(Date.now() - days * 86400_000).toISOString();
 }
+
+type JtStatsRow = {
+  waybill: string | null;
+  classification: string | null;
+  store_name: string | null;
+  cod_amount: number | string | null;
+  shipping_cost: number | string | null;
+  item_value: number | string | null;
+  submission_date: string | null;
+  signing_time: string | null;
+  province: string | null;
+  rts_reason: string | null;
+};
 
 // ─── get_jt_delivery_stats ────────────────────────────────────────────
 // Rollup over jt_deliveries by classification (Delivered / Returned /
@@ -25,20 +39,24 @@ export async function getJtDeliveryStats(
     input.date_from ?? isoDaysAgo(input.since_days ?? 30);
   const until = input.date_to ?? new Date().toISOString();
 
-  let query = ctx.supabase
-    .from("jt_deliveries")
-    .select(
-      "waybill, classification, store_name, cod_amount, shipping_cost, item_value, submission_date, signing_time, province, rts_reason"
-    )
-    .gte("submission_date", since)
-    .lte("submission_date", until);
-
-  if (input.store_name) query = query.eq("store_name", input.store_name);
-
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-
-  const rows = data ?? [];
+  // Date-scoped queries can still exceed 1000 rows (a 30-day window with
+  // ~50 parcels/day clears it easily), and PostgREST silently truncates.
+  // Drain via the paginate helper so RTS-rate answers stay accurate.
+  const { data: rows, error } = await fetchAllRows<JtStatsRow>(
+    () => {
+      let q = ctx.supabase
+        .from("jt_deliveries")
+        .select(
+          "waybill, classification, store_name, cod_amount, shipping_cost, item_value, submission_date, signing_time, province, rts_reason"
+        )
+        .gte("submission_date", since)
+        .lte("submission_date", until);
+      if (input.store_name) q = q.eq("store_name", input.store_name);
+      return q;
+    },
+    { orderColumn: "submission_date", ascending: false }
+  );
+  if (error) throw error;
   const byClass = new Map<string, number>();
   const byStore = new Map<
     string,
@@ -55,7 +73,8 @@ export async function getJtDeliveryStats(
   const rtsReasons = new Map<string, number>();
 
   for (const r of rows) {
-    byClass.set(r.classification, (byClass.get(r.classification) ?? 0) + 1);
+    const cls = r.classification ?? "(unknown)";
+    byClass.set(cls, (byClass.get(cls) ?? 0) + 1);
     const store = r.store_name || "(unknown)";
     const existing =
       byStore.get(store) ?? {

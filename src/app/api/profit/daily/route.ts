@@ -13,6 +13,28 @@ import {
   SETTLEMENT_WINDOW_DAYS,
 } from "@/lib/profit/formulas";
 import { buildCacheKey, getCachedResponse, setCachedResponse } from "@/lib/data-cache";
+import { fetchAllRows } from "@/lib/supabase/paginate";
+
+type JtDailyRow = {
+  submission_date: string | null;
+  shopify_order_date: string | null;
+  shopify_order_id: string | null;
+  store_name: string | null;
+  shipping_cost: number | string | null;
+  item_value: number | string | null;
+  cod_amount: number | string | null;
+  is_delivered: boolean | null;
+  is_returned: boolean | null;
+  classification: string | null;
+};
+
+type JtStoreRtsRow = {
+  store_name: string | null;
+  is_delivered: boolean | null;
+  is_returned: boolean | null;
+  cod_amount: number | string | null;
+  shipping_cost: number | string | null;
+};
 import type { DailyPnlRow, ProfitSummary, ProfitDateFilter } from "@/lib/profit/types";
 
 export const dynamic = "force-dynamic";
@@ -486,37 +508,42 @@ export async function GET(request: Request) {
     const jtFields =
       "submission_date, shopify_order_date, shopify_order_id, store_name, shipping_cost, item_value, cod_amount, is_delivered, is_returned, classification";
 
-    let matchedQuery = supabase
-      .from("jt_deliveries")
-      .select(jtFields)
-      .not("shopify_order_id", "is", null)
-      .gte("shopify_order_date", startDate)
-      .lte("shopify_order_date", endDate);
-
-    let unmatchedQuery = supabase
-      .from("jt_deliveries")
-      .select(jtFields)
-      .is("shopify_order_id", null)
-      .gte("submission_date", jtStartUtc)
-      .lte("submission_date", jtEndUtc);
-
-    if (storeFilter !== "ALL") {
-      matchedQuery = matchedQuery.ilike("store_name", storeFilter);
-      unmatchedQuery = unmatchedQuery.ilike("store_name", storeFilter);
-    }
-
+    // Date-windowed queries can blow past PostgREST's 1000-row cap once
+    // we're shipping >30 parcels/day across stores. Drain via paginate
+    // so daily shipping/returns/in-transit aggregates aren't truncated.
     const [matchedRes, unmatchedRes] = await Promise.all([
-      matchedQuery,
-      unmatchedQuery,
+      fetchAllRows<JtDailyRow>(
+        () => {
+          let q = supabase
+            .from("jt_deliveries")
+            .select(jtFields)
+            .not("shopify_order_id", "is", null)
+            .gte("shopify_order_date", startDate)
+            .lte("shopify_order_date", endDate);
+          if (storeFilter !== "ALL") q = q.ilike("store_name", storeFilter);
+          return q;
+        },
+        { orderColumn: "shopify_order_date", ascending: true }
+      ),
+      fetchAllRows<JtDailyRow>(
+        () => {
+          let q = supabase
+            .from("jt_deliveries")
+            .select(jtFields)
+            .is("shopify_order_id", null)
+            .gte("submission_date", jtStartUtc)
+            .lte("submission_date", jtEndUtc);
+          if (storeFilter !== "ALL") q = q.ilike("store_name", storeFilter);
+          return q;
+        },
+        { orderColumn: "submission_date", ascending: true }
+      ),
     ]);
 
     if (matchedRes.error) warnings.push(`J&T matched: ${matchedRes.error.message}`);
     if (unmatchedRes.error) warnings.push(`J&T unmatched: ${unmatchedRes.error.message}`);
 
-    const jtData = [
-      ...(matchedRes.data ?? []),
-      ...(unmatchedRes.data ?? []),
-    ];
+    const jtData = [...matchedRes.data, ...unmatchedRes.data];
 
     for (const row of jtData) {
       // Pick the date this parcel should be attributed to.
@@ -535,16 +562,17 @@ export async function GET(request: Request) {
       if (row.is_delivered) {
         shippingByDateStore.set(
           key,
-          (shippingByDateStore.get(key) || 0) + (parseFloat(row.shipping_cost) || 0)
+          (shippingByDateStore.get(key) || 0) +
+            (parseFloat(String(row.shipping_cost ?? 0)) || 0)
         );
       }
       if (row.is_returned) {
         // Returns cost = lost revenue (COD amount customer didn't pay) + wasted shipping
         // Use cod_amount (actual selling price) over item_value (declared/insured value)
-        const codAmount = parseFloat(row.cod_amount) || 0;
-        const itemValue = parseFloat(row.item_value) || 0;
+        const codAmount = parseFloat(String(row.cod_amount ?? 0)) || 0;
+        const itemValue = parseFloat(String(row.item_value ?? 0)) || 0;
         const lostRevenue = codAmount > 0 ? codAmount : itemValue;
-        const shipCost = parseFloat(row.shipping_cost) || 0;
+        const shipCost = parseFloat(String(row.shipping_cost ?? 0)) || 0;
         returnsByDateStore.set(
           key,
           (returnsByDateStore.get(key) || 0) + lostRevenue + shipCost
@@ -588,11 +616,21 @@ export async function GET(request: Request) {
   }
 
   try {
-    const { data: allJtRows } = await supabase
-      .from("jt_deliveries")
-      .select("store_name, is_delivered, is_returned, cod_amount, shipping_cost");
+    // No filter here at all — was always silently capped to 1000 rows by
+    // PostgREST. That broke the all-time per-store RTS rates that drive
+    // the unsettled-order projection, so net profit was off whenever the
+    // table grew past 1k. Drain everything.
+    const { data: allJtRows } = await fetchAllRows<JtStoreRtsRow>(
+      () =>
+        supabase
+          .from("jt_deliveries")
+          .select(
+            "store_name, is_delivered, is_returned, cod_amount, shipping_cost"
+          ),
+      { orderColumn: "id", ascending: true }
+    );
 
-    if (allJtRows && allJtRows.length > 0) {
+    if (allJtRows.length > 0) {
       const storeStats = new Map<string, {
         delivered: number;
         returned: number;
@@ -609,8 +647,8 @@ export async function GET(request: Request) {
         if (row.is_delivered) stats.delivered++;
         if (row.is_returned) {
           stats.returned++;
-          stats.totalReturnCod += parseFloat(row.cod_amount) || 0;
-          stats.totalReturnShip += parseFloat(row.shipping_cost) || 0;
+          stats.totalReturnCod += parseFloat(String(row.cod_amount ?? 0)) || 0;
+          stats.totalReturnShip += parseFloat(String(row.shipping_cost ?? 0)) || 0;
         }
       }
 
