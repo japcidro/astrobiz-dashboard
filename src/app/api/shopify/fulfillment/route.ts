@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
+import { fetchAllRows } from "@/lib/supabase/paginate";
 import type { UnfulfilledOrder, OrderLineItem } from "@/lib/fulfillment/types";
 
 export const dynamic = "force-dynamic";
@@ -223,32 +224,41 @@ export async function GET(request: Request) {
   }
 
   // ALWAYS query pack_verifications fresh — it's the source of truth for
-  // "what's been packed". Cheap (~30ms) and ensures manual-clear / scan-verify
-  // writes show up on the very next GET regardless of which Vercel instance
-  // serves the request or whether the Shopify cache is warm.
+  // "what's been packed". Drained via fetchAllRows() so we never lose recent
+  // writes to PostgREST's silent row cap.
   //
-  // Scope by completed_at over the last 30 days, NOT by .in(order_id,...).
-  // Two prior fixes used .in() against the Shopify pull; once weekly volume
-  // crossed ~1000 orders, the resulting `?order_id=in.(id1,id2,...)` URL
-  // exceeded 16KB and was silently rejected upstream — `verifiedOrders` came
-  // back null, the `|| []` fallback emptied the Set, and every packed order
-  // re-appeared on the list. Time-bounded scoping is robust: the Shopify
-  // pull is capped at 7 days old, so any verification covering a current
-  // order must fall within that window. 30 days adds buffer for clock skew
-  // and late writes. .limit(50000) overrides PostgREST's default 1000-row
-  // cap; current volume is ~1200 verifications/week so this is well above
-  // headroom. The error is surfaced loudly — silently swallowing it is what
-  // hid both prior failures from the team.
+  // Three prior fixes failed at this exact spot:
+  //   1. e77d049: cached the filtered result → stale snapshot.
+  //   2. 50e75e6: switched to .in("order_id", shopifyOrderIds) — once the
+  //      Shopify pull crossed ~1000 orders, the resulting in-clause URL hit
+  //      ~16KB and was silently rejected, `data || []` emptied the Set.
+  //   3. The first attempt at this commit: .gte + .limit(50000) — but the
+  //      project's PostgREST config has `max_rows: 1000` set as a hard
+  //      server-side ceiling, so .limit(N>1000) is silently truncated.
+  //      Recent verifications (the rows the user JUST wrote) were the ones
+  //      dropped, so packed orders kept reappearing on the list.
+  //
+  // Drain via .range() pagination instead. Same fix shipped for
+  // jt_deliveries in bc0a52a. Bounded by completed_at >= 30 days ago, which
+  // safely covers the 7-day Shopify pull window with buffer. Current volume
+  // is ~1700 rows/30 days, so this is 2 pages, ~50ms. The error is
+  // surfaced loudly — silently swallowing it is what hid every prior
+  // failure from the team.
   const verifiedIds = new Set<string>();
   if (allOrders.length > 0) {
     const since = new Date(
       Date.now() - 30 * 24 * 60 * 60 * 1000
     ).toISOString();
-    const { data: verifiedOrders, error: verifyError } = await supabase
-      .from("pack_verifications")
-      .select("order_id")
-      .gte("completed_at", since)
-      .limit(50000);
+    const { data: verifiedOrders, error: verifyError } = await fetchAllRows<{
+      order_id: string;
+    }>(
+      () =>
+        supabase
+          .from("pack_verifications")
+          .select("order_id")
+          .gte("completed_at", since),
+      { orderColumn: "completed_at", ascending: true }
+    );
 
     if (verifyError) {
       console.error(
@@ -258,8 +268,6 @@ export async function GET(request: Request) {
       return Response.json(
         {
           error: `Failed to load pack verifications: ${verifyError.message}`,
-          code: verifyError.code,
-          hint: verifyError.hint,
         },
         { status: 500 }
       );
