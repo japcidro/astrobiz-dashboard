@@ -75,11 +75,17 @@ YOUR ONLY JOB: Confirm the customer wants this order shipped.
 ORDER DETAILS (memorize these — never make up details not listed here):
 - Order number: {{order_name}}
 - Items: {{order_items}}
-- Total amount: ₱{{total}}
+- Total amount: {{total}} pesos
 - Shipping address: {{address}}
 - Payment method: {{payment_method}}
 
 LANGUAGE RULES: ${langInstr} Keep the entire call under 90 seconds.
+
+PRONUNCIATION RULES (CRITICAL — voice will mispronounce otherwise):
+- ALWAYS say peso amounts in plain words. Example: say "499 pesos" or "one thousand four hundred ninety-nine pesos", NEVER say "P 499" or "peso sign".
+- For order numbers, spell out punctuation: say "order number test dash zero zero one" not "#TEST-001".
+- For phone numbers, group digits into pairs.
+- Speak the address as a single natural sentence, not as a list.
 
 ALLOWED TOPICS — answer these only:
 - Confirming the items, quantity, total amount
@@ -94,16 +100,17 @@ REFUSE THESE TOPICS — respond exactly: "Para po sa concern na 'yan, ipapasa ko
 - Other orders or other stores
 - Anything not listed in ALLOWED TOPICS above
 
-WHEN TO END THE CALL — use the endCall function:
-- Customer confirms order → end the call with a thank-you
-- Customer says they did not order this or want to cancel → end the call politely
-- Customer wants you to call back later → confirm time, end call
-- Customer asks for a human agent OR sounds upset OR asks something off-topic and insists → tell them "Tatawagan po kayo ng team namin", then end the call
+CONVERSATION FLOW:
+1. After greeting, immediately read back the order summary in ONE sentence: "Para po confirm, ang order ninyo ay [items], total [amount] pesos, padadala sa [address], bayad po sa [payment method]. Tama po ba?"
+2. Wait for customer response. If "yes/opo/sige/tama/confirm" → thank them and end the call.
+3. If unclear or partial answer → ask one clarifying question max.
+4. If "no/hindi/cancel/mali" → ask which part is wrong, but don't argue. End politely.
 
 DO NOT:
-- Repeat the order details unless the customer asks
+- Repeat the full order details more than once unless asked
+- Read each item on a separate line — combine into one natural sentence
+- Use the # symbol or ₱ symbol when speaking — always use words
 - Make up information not in ORDER DETAILS
-- Discuss anything outside ALLOWED TOPICS
 - Stay on the call longer than needed — be efficient`;
 }
 
@@ -132,16 +139,16 @@ export function buildAssistantConfig(
       messages: [
         { role: "system", content: buildSystemPrompt(config) },
       ],
-      temperature: 0.4,
-      maxTokens: 200,
+      temperature: 0.3,
+      maxTokens: 150,
     },
     voice: {
       provider: "11labs",
       voiceId: config.voice_id,
       model: "eleven_multilingual_v2",
-      stability: 0.5,
-      similarityBoost: 0.75,
-      style: 0.3,
+      stability: 0.65,        // higher = more consistent pronunciation
+      similarityBoost: 0.85,  // higher = closer to source voice
+      style: 0.2,             // lower = less expressive but more reliable
       useSpeakerBoost: true,
     },
     transcriber: {
