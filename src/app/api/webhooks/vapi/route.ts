@@ -218,6 +218,14 @@ export async function POST(req: Request) {
     const status = mapStatus(undefined, endedReason) ?? "completed";
     const { outcome, needsVa, reason } = deriveOutcome(endedReason, summary ?? undefined);
 
+    // Always capture endedReason in handoff_reason if no other reason set,
+    // so failed pipeline errors (e.g. voice-not-found) surface in the UI.
+    const finalReason =
+      reason ??
+      (status === "failed" && endedReason
+        ? `Vapi: ${endedReason}`
+        : null);
+
     await supabase
       .from("call_attempts")
       .update({
@@ -229,7 +237,7 @@ export async function POST(req: Request) {
         duration_seconds: duration,
         cost_usd: cost,
         needs_va_followup: needsVa,
-        handoff_reason: reason,
+        handoff_reason: finalReason,
         ended_at: new Date().toISOString(),
       })
       .eq("id", attempt.id);
