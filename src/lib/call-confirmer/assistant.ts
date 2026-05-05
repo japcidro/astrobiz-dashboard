@@ -23,11 +23,42 @@ const LANGUAGE_INSTRUCTIONS: Record<CallConfirmerLanguage, string> = {
     "Speak in clear English. Be warm and professional like a CSR. Short sentences.",
 };
 
+// Deepgram language codes per language mode.
+// "multi" = code-switching mode (handles Taglish English+Tagalog naturally).
+// Falls back to single-language codes for pure modes.
 const TRANSCRIBER_LANG: Record<CallConfirmerLanguage, string> = {
-  taglish: "en",   // Deepgram nova-2 handles Taglish best as 'en'
+  taglish: "multi",
   tagalog: "tl",
   english: "en",
 };
+
+// Common Tagalog/Filipino keywords + brand vocab that boost transcription accuracy.
+// Deepgram "keywords" with intensity > 1 increases the model's prior on these terms.
+const FILIPINO_KEYWORDS = [
+  "po:2",
+  "opo:2",
+  "salamat:2",
+  "kuya:2",
+  "ate:2",
+  "sige:2",
+  "yes:2",
+  "confirm:2",
+  "order:2",
+  "Maria:2",
+  "totoo:1.5",
+  "hindi:2",
+  "tama:1.5",
+  "Pilipinas:1.5",
+  "address:1.5",
+  "bahay:1.5",
+  "delivery:1.5",
+  "COD:2",
+  "Philippines:1.5",
+  "kayo:1.5",
+  "ninyo:1.5",
+  "ito:1.5",
+  "yan:1.5",
+];
 
 export function buildSystemPrompt(
   config: CallConfirmerConfig
@@ -117,6 +148,9 @@ export function buildAssistantConfig(
       provider: "deepgram",
       model: "nova-2",
       language: TRANSCRIBER_LANG[lang],
+      ...(lang === "taglish" || lang === "tagalog"
+        ? { keywords: FILIPINO_KEYWORDS, smartFormat: true }
+        : { smartFormat: true }),
     },
     firstMessage: buildFirstMessage(config),
     maxDurationSeconds: config.per_call_max_seconds,

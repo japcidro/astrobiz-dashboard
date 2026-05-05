@@ -32,6 +32,8 @@ export interface VapiAssistantConfig {
     provider: "deepgram";
     model: "nova-2" | "nova-3";
     language: string;
+    keywords?: string[];
+    smartFormat?: boolean;
   };
   firstMessage: string;
   maxDurationSeconds: number;
