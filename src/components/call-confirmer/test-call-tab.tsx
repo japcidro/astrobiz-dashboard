@@ -126,6 +126,9 @@ export function TestCallTab({
 
   const startPolling = (id: string) => {
     if (pollRef.current) clearInterval(pollRef.current);
+    let extraPostTerminalPolls = 0;
+    const MAX_POST_TERMINAL_POLLS = 8; // ~24s grace for late webhook delivery
+
     pollRef.current = setInterval(async () => {
       try {
         const res = await fetch(
@@ -135,16 +138,43 @@ export function TestCallTab({
         const data = await res.json();
         if (!res.ok) throw new Error(data.error ?? "Poll failed");
         setAttempt(data.attempt);
+
+        // After hitting terminal status, keep polling a few more times so the
+        // end-of-call-report webhook (which delivers transcript + recording +
+        // summary) has time to land. Stop early if we already have transcript.
         if (TERMINAL_STATUSES.has(data.attempt.status)) {
-          if (pollRef.current) {
-            clearInterval(pollRef.current);
-            pollRef.current = null;
+          const hasFullData =
+            data.attempt.transcript !== null &&
+            data.attempt.recording_url &&
+            data.attempt.cost_usd !== null;
+
+          if (hasFullData || extraPostTerminalPolls >= MAX_POST_TERMINAL_POLLS) {
+            if (pollRef.current) {
+              clearInterval(pollRef.current);
+              pollRef.current = null;
+            }
+          } else {
+            extraPostTerminalPolls += 1;
           }
         }
       } catch {
         // Don't kill polling on transient errors
       }
-    }, 2500);
+    }, 3000);
+  };
+
+  const refreshAttempt = async () => {
+    if (!attemptId) return;
+    try {
+      const res = await fetch(
+        `/api/admin/call-confirmer/attempts/${attemptId}`,
+        { cache: "no-store" }
+      );
+      const data = await res.json();
+      if (res.ok) setAttempt(data.attempt);
+    } catch {
+      /* swallow */
+    }
   };
 
   const handleCall = async () => {
@@ -357,13 +387,24 @@ export function TestCallTab({
                 />
               )}
             </h3>
-            <span
-              className={`text-xs uppercase tracking-wide px-2 py-1 rounded ${
-                STATUS_COLOR[attempt.status] ?? "bg-gray-700 text-gray-200"
-              }`}
-            >
-              {STATUS_LABEL[attempt.status] ?? attempt.status}
-            </span>
+            <div className="flex items-center gap-3">
+              {isTerminal && (
+                <button
+                  onClick={refreshAttempt}
+                  className="text-xs text-gray-400 hover:text-white flex items-center gap-1 cursor-pointer"
+                  title="Sync latest from Vapi"
+                >
+                  <RefreshCw size={12} /> Refresh
+                </button>
+              )}
+              <span
+                className={`text-xs uppercase tracking-wide px-2 py-1 rounded ${
+                  STATUS_COLOR[attempt.status] ?? "bg-gray-700 text-gray-200"
+                }`}
+              >
+                {STATUS_LABEL[attempt.status] ?? attempt.status}
+              </span>
+            </div>
           </div>
 
           {!isTerminal && (
@@ -413,8 +454,8 @@ export function TestCallTab({
                 </Section>
               )}
 
-              {attempt.transcript && attempt.transcript.length > 0 && (
-                <Section title="Transcript">
+              <Section title="Transcript">
+                {attempt.transcript && attempt.transcript.length > 0 ? (
                   <div className="bg-gray-900/40 border border-gray-700/40 rounded-lg p-3 max-h-64 overflow-y-auto space-y-2">
                     {attempt.transcript.map((turn, i) => (
                       <div key={i} className="text-sm">
@@ -431,18 +472,30 @@ export function TestCallTab({
                       </div>
                     ))}
                   </div>
-                </Section>
-              )}
+                ) : (
+                  <div className="bg-gray-900/40 border border-gray-700/40 rounded-lg p-3 text-sm text-gray-500 italic">
+                    No transcript captured for this call. May still be syncing
+                    — click Refresh ↑ above. If the call failed before any
+                    speech, transcript will stay empty (listen to recording
+                    below to verify).
+                  </div>
+                )}
+              </Section>
 
-              {attempt.recording_url && (
-                <Section title="Recording">
+              <Section title="Recording">
+                {attempt.recording_url ? (
                   <audio
                     src={attempt.recording_url}
                     controls
                     className="w-full"
                   />
-                </Section>
-              )}
+                ) : (
+                  <div className="bg-gray-900/40 border border-gray-700/40 rounded-lg p-3 text-sm text-gray-500 italic">
+                    No recording available. May still be syncing — click
+                    Refresh ↑ above.
+                  </div>
+                )}
+              </Section>
 
               {attempt.handoff_reason && (
                 <div className="bg-orange-900/20 border border-orange-700/40 rounded-lg p-3 text-sm text-orange-200">
