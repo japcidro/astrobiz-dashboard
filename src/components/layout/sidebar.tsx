@@ -30,6 +30,7 @@ import {
   ScanLine,
   ClipboardList,
   Trophy,
+  PhoneCall,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -264,6 +265,12 @@ const navEntries: NavEntry[] = [
     label: "Briefings",
     href: "/admin/briefings",
     icon: <Newspaper size={20} />,
+    roles: ["admin"],
+  },
+  {
+    label: "Call Confirmer",
+    href: "/admin/call-confirmer",
+    icon: <PhoneCall size={20} />,
     roles: ["admin"],
   },
   {
