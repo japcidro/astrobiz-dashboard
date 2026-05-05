@@ -36,13 +36,20 @@ export async function GET(
   if (error) return Response.json({ error: error.message }, { status: 500 });
   if (!data) return Response.json({ error: "Not found" }, { status: 404 });
 
-  // Defensive auto-sync: if call has terminal status but is missing
-  // transcript/cost, pull fresh from Vapi. Covers the case where the
-  // end-of-call-report webhook is delayed or dropped.
+  // Defensive auto-sync: if call has terminal status but is missing key
+  // diagnostic info (transcript OR cost OR handoff_reason for failures),
+  // pull fresh from Vapi. Covers webhook delivery gaps.
+  const isFailureMissingReason =
+    (data.status === "failed" ||
+      data.status === "no_answer" ||
+      data.status === "voicemail" ||
+      data.status === "busy") &&
+    !data.handoff_reason;
+
   if (
     data.provider_call_id &&
     TERMINAL_STATUSES.has(data.status) &&
-    (!data.transcript || data.cost_usd == null)
+    (!data.transcript || data.cost_usd == null || isFailureMissingReason)
   ) {
     await syncAttemptFromVapi(data.id, data.provider_call_id).catch(() => {});
     const { data: refreshed } = await supabase

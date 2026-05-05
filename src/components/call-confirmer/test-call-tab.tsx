@@ -375,6 +375,18 @@ export function TestCallTab({
 
           {isTerminal && (
             <div className="space-y-4">
+              {/* Surface failures prominently with troubleshooting hints */}
+              {(attempt.status === "failed" ||
+                attempt.status === "no_answer" ||
+                attempt.status === "voicemail" ||
+                attempt.status === "busy") &&
+                !attempt.outcome && (
+                  <FailureBanner
+                    status={attempt.status}
+                    reason={attempt.handoff_reason}
+                  />
+                )}
+
               {attempt.outcome && (
                 <OutcomeBanner outcome={attempt.outcome} />
               )}
@@ -452,6 +464,109 @@ function Stat({ label, value }: { label: string; value: string }) {
         {label}
       </div>
       <div className="text-sm text-white font-medium mt-0.5">{value}</div>
+    </div>
+  );
+}
+
+function explainFailure(
+  status: string,
+  reason: string | null
+): { title: string; hint: string } {
+  if (status === "no_answer") {
+    return {
+      title: "Customer did not answer",
+      hint: "Phone rang but no one picked up within 20 seconds. Will retry per Settings.",
+    };
+  }
+  if (status === "voicemail") {
+    return {
+      title: "Hit voicemail",
+      hint: "Detected an answering machine. Vapi hung up immediately to save cost.",
+    };
+  }
+  if (status === "busy") {
+    return {
+      title: "Line busy",
+      hint: "Customer's line was busy. Will retry later per Settings.",
+    };
+  }
+  if (!reason) {
+    return {
+      title: "Call failed",
+      hint: "No additional details. Refresh in 10s — the sync may catch up with Vapi.",
+    };
+  }
+  // Map common Vapi error reasons to actionable hints
+  const r = reason.toLowerCase();
+  if (r.includes("did-not-receive-customer-audio")) {
+    return {
+      title: "Audio path broken (Vapi could not hear you)",
+      hint: "Common with international Telnyx routes. Switch VAPI_PHONE_NUMBER_ID back to the Twilio number, or contact Vapi support if using Telnyx for PH outbound.",
+    };
+  }
+  if (r.includes("error-get-transport")) {
+    return {
+      title: "Could not establish carrier connection",
+      hint: "The phone number isn't properly linked to a carrier. Check Telnyx connection assignment + outbound voice profile.",
+    };
+  }
+  if (r.includes("eleven-labs-voice-not-found")) {
+    return {
+      title: "Voice not accessible",
+      hint: "The configured ElevenLabs voice ID isn't in your account. Pick a different voice in Settings tab or connect ElevenLabs in Vapi Integrations.",
+    };
+  }
+  if (r.includes("max-duration")) {
+    return {
+      title: "Call hit max duration",
+      hint: "Cut off at the per-call cap (Settings → Cost Guardrails). Increase the cap if needed.",
+    };
+  }
+  if (r.includes("twilio-failed") || r.includes("telnyx-failed")) {
+    return {
+      title: "Carrier rejected the call",
+      hint: "Trial accounts can only call verified numbers. Add credit to your Twilio/Telnyx account or verify this destination number.",
+    };
+  }
+  if (r.includes("invalid-phone-number") || r.includes("invalid")) {
+    return {
+      title: "Invalid phone number",
+      hint: "Make sure the number is in E.164 format (+639XXXXXXXXX) and is reachable.",
+    };
+  }
+  return {
+    title: "Call failed",
+    hint: reason,
+  };
+}
+
+function FailureBanner({
+  status,
+  reason,
+}: {
+  status: string;
+  reason: string | null;
+}) {
+  const { title, hint } = explainFailure(status, reason);
+  return (
+    <div className="bg-red-900/20 border border-red-700/50 rounded-lg p-4 space-y-2">
+      <div className="flex items-start gap-2">
+        <XCircle size={16} className="text-red-400 mt-0.5 flex-shrink-0" />
+        <div className="flex-1">
+          <p className="text-sm font-medium text-red-200">{title}</p>
+          <p className="text-xs text-red-300/80 mt-1">{hint}</p>
+          {reason && (
+            <details className="mt-2">
+              <summary className="text-xs text-red-300/60 cursor-pointer hover:text-red-300">
+                Raw error
+              </summary>
+              <code className="block mt-1 text-[10px] text-red-300/70 bg-red-950/50 p-2 rounded font-mono break-all">
+                {reason}
+              </code>
+            </details>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
