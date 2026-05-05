@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Phone,
   PhoneCall,
@@ -8,12 +8,15 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
+  RefreshCw,
+  ShoppingBag,
 } from "lucide-react";
 import type {
   CallConfirmerConfig,
   CallAttempt,
   ShopifyStoreLite,
 } from "@/lib/call-confirmer/types";
+import type { OrderContext } from "@/lib/call-confirmer/assistant";
 import { StoreSelector } from "./store-selector";
 
 interface Props {
@@ -72,6 +75,12 @@ export function TestCallTab({
   const [error, setError] = useState<string | null>(null);
   const [attemptId, setAttemptId] = useState<string | null>(null);
   const [attempt, setAttempt] = useState<CallAttempt | null>(null);
+  const [sampleOrder, setSampleOrder] = useState<OrderContext | null>(null);
+  const [sampleSource, setSampleSource] = useState<"shopify" | "synthetic" | null>(
+    null
+  );
+  const [sampleNote, setSampleNote] = useState<string | null>(null);
+  const [loadingSample, setLoadingSample] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -80,7 +89,30 @@ export function TestCallTab({
     };
   }, []);
 
-  // Reset state when changing store
+  const loadSampleOrder = useCallback(async () => {
+    if (!selectedStoreId) return;
+    setLoadingSample(true);
+    setSampleNote(null);
+    try {
+      const res = await fetch(
+        `/api/admin/call-confirmer/sample-order?store_id=${selectedStoreId}`,
+        { cache: "no-store" }
+      );
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to load sample");
+      setSampleOrder(data.order);
+      setSampleSource(data.source);
+      setSampleNote(data.reason ?? null);
+    } catch (e: unknown) {
+      setSampleOrder(null);
+      setSampleSource(null);
+      setSampleNote(e instanceof Error ? e.message : "Failed to load");
+    } finally {
+      setLoadingSample(false);
+    }
+  }, [selectedStoreId]);
+
+  // Reset state when changing store + load fresh sample
   useEffect(() => {
     setAttemptId(null);
     setAttempt(null);
@@ -89,7 +121,8 @@ export function TestCallTab({
       clearInterval(pollRef.current);
       pollRef.current = null;
     }
-  }, [selectedStoreId]);
+    loadSampleOrder();
+  }, [selectedStoreId, loadSampleOrder]);
 
   const startPolling = (id: string) => {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -132,6 +165,7 @@ export function TestCallTab({
           store_id: selectedStoreId,
           customer_phone: phone,
           is_test_call: true,
+          order: sampleOrder ?? undefined,
         }),
       });
       const data = await res.json();
@@ -180,36 +214,84 @@ export function TestCallTab({
       <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-6">
         <h3 className="text-white font-medium mb-1">Test Call</h3>
         <p className="text-sm text-gray-500 mb-4">
-          Tatawagin ka ng AI gamit ang sample order. Cost: ~$0.20–0.35 per
-          call. Counted separately from store budget.
+          Tatawagin ka ng AI gamit ang real order data from your Shopify store
+          — para parang totoong customer call. Cost: ~$0.20–0.35 per call.
+          Counted separately from store budget.
         </p>
 
         <div className="bg-gray-900/40 border border-gray-700/40 rounded-lg p-4 mb-4">
-          <p className="text-xs text-gray-400 mb-2 uppercase tracking-wide">
-            Sample order na sasabihin ng AI:
-          </p>
-          <div className="text-sm text-gray-200 space-y-1">
-            <div>
-              <span className="text-gray-500">Customer:</span> Juan Cruz
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2">
+              <p className="text-xs text-gray-400 uppercase tracking-wide">
+                Sample order Maria will read:
+              </p>
+              {sampleSource === "shopify" && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-900/40 border border-emerald-700/40 text-emerald-300 flex items-center gap-1">
+                  <ShoppingBag size={10} />
+                  Live Shopify
+                </span>
+              )}
+              {sampleSource === "synthetic" && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700 text-gray-300">
+                  Synthetic (no Shopify orders)
+                </span>
+              )}
             </div>
-            <div>
-              <span className="text-gray-500">Order:</span> #TEST-001
-            </div>
-            <div>
-              <span className="text-gray-500">Items:</span> 1x Hair Patches Set,
-              1x Toner
-            </div>
-            <div>
-              <span className="text-gray-500">Total:</span> ₱1,499.00
-            </div>
-            <div>
-              <span className="text-gray-500">Address:</span> 123 Sample Street,
-              Quezon City
-            </div>
-            <div>
-              <span className="text-gray-500">Payment:</span> COD
-            </div>
+            <button
+              type="button"
+              onClick={loadSampleOrder}
+              disabled={loadingSample}
+              className="text-xs text-gray-400 hover:text-white flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              title="Pull a different recent order"
+            >
+              {loadingSample ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <RefreshCw size={12} />
+              )}
+              Refresh
+            </button>
           </div>
+
+          {loadingSample && !sampleOrder ? (
+            <div className="text-sm text-gray-500 py-2 flex items-center gap-2">
+              <Loader2 size={14} className="animate-spin" />
+              Pulling recent order from Shopify...
+            </div>
+          ) : sampleOrder ? (
+            <div className="text-sm text-gray-200 space-y-1">
+              <div>
+                <span className="text-gray-500">Customer:</span>{" "}
+                {sampleOrder.customer_name}
+              </div>
+              <div>
+                <span className="text-gray-500">Order:</span>{" "}
+                {sampleOrder.order_name}
+              </div>
+              <div>
+                <span className="text-gray-500">Items:</span>{" "}
+                {sampleOrder.order_items}
+              </div>
+              <div>
+                <span className="text-gray-500">Total:</span> ₱
+                {sampleOrder.total}
+              </div>
+              <div>
+                <span className="text-gray-500">Address:</span>{" "}
+                {sampleOrder.address}
+              </div>
+              <div>
+                <span className="text-gray-500">Payment:</span>{" "}
+                {sampleOrder.payment_method}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500">No sample available</p>
+          )}
+
+          {sampleNote && (
+            <p className="text-xs text-yellow-400/80 mt-2">{sampleNote}</p>
+          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

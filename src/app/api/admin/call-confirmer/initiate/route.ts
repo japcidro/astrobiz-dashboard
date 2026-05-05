@@ -116,17 +116,39 @@ export async function POST(req: Request) {
     .maybeSingle();
   const storeName = store?.name ?? "Astrobiz";
 
-  // 4. Build order context (test call = sample data, real call = from body)
+  // 4. Build order context.
+  // - Test call with passed-in order: use it (real Shopify sample fetched on UI)
+  // - Test call without order: fallback synthetic SAMPLE_ORDER
+  // - Real call: use passed-in order data
   const isTest = body.is_test_call ?? false;
-  const order: OrderContext = isTest
+  const passedOrder = body.order;
+  const hasFullPassedOrder =
+    passedOrder &&
+    passedOrder.customer_name &&
+    passedOrder.order_name &&
+    passedOrder.order_items &&
+    passedOrder.total;
+
+  const order: OrderContext = hasFullPassedOrder
+    ? {
+        customer_name: passedOrder.customer_name!,
+        order_name: passedOrder.order_name!,
+        order_items: passedOrder.order_items!,
+        total: passedOrder.total!,
+        address: passedOrder.address ?? "your shipping address",
+        payment_method: passedOrder.payment_method ?? "Cash on Delivery",
+        store_name: storeName,
+      }
+    : isTest
     ? { ...SAMPLE_ORDER, store_name: storeName }
     : {
-        customer_name: body.order?.customer_name ?? "Customer",
-        order_name: body.order?.order_name ?? body.shopify_order_name ?? "your order",
-        order_items: body.order?.order_items ?? "your items",
-        total: body.order?.total ?? "0.00",
-        address: body.order?.address ?? "your shipping address",
-        payment_method: body.order?.payment_method ?? "Cash on Delivery",
+        customer_name: passedOrder?.customer_name ?? "Customer",
+        order_name:
+          passedOrder?.order_name ?? body.shopify_order_name ?? "your order",
+        order_items: passedOrder?.order_items ?? "your items",
+        total: passedOrder?.total ?? "0.00",
+        address: passedOrder?.address ?? "your shipping address",
+        payment_method: passedOrder?.payment_method ?? "Cash on Delivery",
         store_name: storeName,
       };
 
