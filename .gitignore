@@ -48,3 +48,4 @@ pick-pack-module/
 
 # supabase CLI local cache (machine-specific: cli-latest, project-ref, pooler-url, etc.)
 supabase/.temp/
+.env*.local
