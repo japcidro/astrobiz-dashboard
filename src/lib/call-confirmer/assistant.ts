@@ -33,7 +33,7 @@ const TRANSCRIBER_LANG: Record<CallConfirmerLanguage, string> = {
 };
 
 // Common Tagalog/Filipino keywords + brand vocab that boost transcription accuracy.
-// Deepgram "keywords" with intensity > 1 increases the model's prior on these terms.
+// Deepgram "keywords" with integer intensity (Vapi rejects decimals).
 const FILIPINO_KEYWORDS = [
   "po:2",
   "opo:2",
@@ -45,19 +45,19 @@ const FILIPINO_KEYWORDS = [
   "confirm:2",
   "order:2",
   "Maria:2",
-  "totoo:1.5",
   "hindi:2",
-  "tama:1.5",
-  "Pilipinas:1.5",
-  "address:1.5",
-  "bahay:1.5",
-  "delivery:1.5",
+  "tama:2",
+  "totoo:1",
+  "Pilipinas:1",
+  "address:1",
+  "bahay:1",
+  "delivery:1",
   "COD:2",
-  "Philippines:1.5",
-  "kayo:1.5",
-  "ninyo:1.5",
-  "ito:1.5",
-  "yan:1.5",
+  "Philippines:1",
+  "kayo:1",
+  "ninyo:1",
+  "ito:1",
+  "yan:1",
 ];
 
 export function buildSystemPrompt(
