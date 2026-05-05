@@ -8,7 +8,10 @@ interface Props {
   onChange: (storeId: string) => void;
   label?: string;
   className?: string;
+  includeAllOption?: boolean;
 }
+
+export const ALL_STORES_VALUE = "__all__";
 
 export function StoreSelector({
   stores,
@@ -16,6 +19,7 @@ export function StoreSelector({
   onChange,
   label = "Store",
   className = "",
+  includeAllOption = false,
 }: Props) {
   return (
     <div className={`flex items-center gap-2 ${className}`}>
@@ -25,6 +29,7 @@ export function StoreSelector({
         onChange={(e) => onChange(e.target.value)}
         className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
       >
+        {includeAllOption && <option value={ALL_STORES_VALUE}>All stores</option>}
         {stores.map((s) => (
           <option key={s.id} value={s.id}>
             {s.name}

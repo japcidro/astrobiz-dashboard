@@ -16,7 +16,7 @@ import type {
   CallAttempt,
   ShopifyStoreLite,
 } from "@/lib/call-confirmer/types";
-import { StoreSelector } from "./store-selector";
+import { StoreSelector, ALL_STORES_VALUE } from "./store-selector";
 
 interface Props {
   stores: ShopifyStoreLite[];
@@ -70,6 +70,8 @@ const OUTCOME_BADGE: Record<
 type ScopeFilter = "all" | "real" | "test";
 
 export function HistoryTab({ stores, selectedStoreId, onStoreChange }: Props) {
+  // History defaults to "All stores" so admin can debug across stores easily
+  const [historyStoreId, setHistoryStoreId] = useState<string>(ALL_STORES_VALUE);
   const [attempts, setAttempts] = useState<CallAttempt[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -78,12 +80,19 @@ export function HistoryTab({ stores, selectedStoreId, onStoreChange }: Props) {
     null
   );
 
+  // Keep parent in sync when user picks a specific store (so other tabs follow)
+  const handleStoreChange = (id: string) => {
+    setHistoryStoreId(id);
+    if (id !== ALL_STORES_VALUE) onStoreChange(id);
+  };
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams();
-      params.set("store_id", selectedStoreId);
+      if (historyStoreId && historyStoreId !== ALL_STORES_VALUE)
+        params.set("store_id", historyStoreId);
       if (scope === "test") params.set("only_test", "true");
       if (scope === "real") params.set("include_test", "false");
       const res = await fetch(
@@ -97,11 +106,14 @@ export function HistoryTab({ stores, selectedStoreId, onStoreChange }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [selectedStoreId, scope]);
+  }, [historyStoreId, scope]);
 
   useEffect(() => {
-    if (selectedStoreId) load();
-  }, [selectedStoreId, scope, load]);
+    load();
+  }, [historyStoreId, scope, load]);
+
+  // suppress unused var warning while keeping the prop available for future use
+  void selectedStoreId;
 
   const refreshSingle = async (id: string) => {
     try {
@@ -125,8 +137,9 @@ export function HistoryTab({ stores, selectedStoreId, onStoreChange }: Props) {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <StoreSelector
           stores={stores}
-          value={selectedStoreId}
-          onChange={onStoreChange}
+          value={historyStoreId}
+          onChange={handleStoreChange}
+          includeAllOption
         />
         <div className="flex items-center gap-2">
           <ScopeFilterButton
