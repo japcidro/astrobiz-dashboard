@@ -186,11 +186,29 @@ export async function POST(req: Request) {
 
   // Status updates: keep status fresh
   if (eventType === "status-update") {
-    const newStatus = mapStatus(msg.call?.status ?? msg.status, msg.endedReason);
+    const endedReason = msg.call?.endedReason ?? msg.endedReason;
+    const newStatus = mapStatus(msg.call?.status ?? msg.status, endedReason);
     if (newStatus && newStatus !== attempt.status) {
       const updates: Record<string, unknown> = { status: newStatus };
       if (newStatus === "in_progress" && !attempt.status.includes("progress")) {
         updates.started_at = new Date().toISOString();
+      }
+      // If call ended via status-update (e.g. pipeline errors that skip
+      // end-of-call-report), record the reason + ended_at so the UI can
+      // show what actually broke instead of a bare "FAILED".
+      const TERMINAL = new Set([
+        "completed",
+        "failed",
+        "no_answer",
+        "voicemail",
+        "busy",
+        "escalated",
+      ]);
+      if (TERMINAL.has(newStatus)) {
+        updates.ended_at = new Date().toISOString();
+        if (endedReason) {
+          updates.handoff_reason = `Vapi: ${endedReason}`;
+        }
       }
       await supabase
         .from("call_attempts")
