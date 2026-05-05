@@ -58,6 +58,22 @@ export interface VapiCallResponse {
   customer: { number: string };
   cost?: number;
   createdAt: string;
+  startedAt?: string;
+  endedAt?: string;
+  endedReason?: string;
+  analysis?: {
+    summary?: string;
+    successEvaluation?: string;
+    structuredData?: Record<string, unknown>;
+  };
+  artifact?: {
+    recordingUrl?: string;
+    transcript?: string;
+    messages?: { role: string; message?: string; content?: string }[];
+  };
+  messages?: { role: string; message?: string; content?: string }[];
+  transcript?: string;
+  recordingUrl?: string;
 }
 
 export class VapiError extends Error {
