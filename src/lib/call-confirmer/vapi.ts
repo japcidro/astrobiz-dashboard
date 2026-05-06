@@ -50,6 +50,7 @@ export interface VapiAssistantConfig {
     | "assistant-waits-for-user";
   maxDurationSeconds: number;
   endCallFunctionEnabled?: boolean;
+  endCallPhrases?: string[];
   voicemailDetection?: {
     provider: "vapi" | "twilio" | "google" | "openai";
     voicemailExpectedDurationSeconds?: number;

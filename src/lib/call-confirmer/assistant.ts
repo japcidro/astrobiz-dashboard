@@ -263,6 +263,19 @@ export function buildAssistantConfig(
     // If hit, Vapi plays endCallMessage and disconnects.
     maxDurationSeconds: Math.min(config.per_call_max_seconds, 90),
     endCallFunctionEnabled: true,
+    // Auto-hangup phrases — Vapi ends the call after Maria says any of these.
+    // More reliable than relying on the LLM to call the endCall function tool.
+    // These are her exact closing phrases from the system prompt's outcome paths.
+    endCallPhrases: [
+      "ipapadala na po namin agad",  // Path 1: confirmed
+      "ipapasa ko sa team",           // Path 2/3: declined or deferred
+      "ipapasa nalang sa team",
+      "tatawagan kayo ng team",       // human handoff / callback
+      "tatawagan ulit kayo ng team",
+      "salamat po, bye",              // Path 4: anything else
+      "paalam po",                    // angry customer cleanup
+      "salamat po sa oras ninyo",     // graceful timeout wrap-up
+    ],
     // Voicemail detection DISABLED — Twilio AMD false-positives on PH carriers.
     // endCallMessage = what Vapi plays if it forcibly cuts the call (e.g. max
     // duration hit). Polite hand-off so customer isn't dropped silently.
