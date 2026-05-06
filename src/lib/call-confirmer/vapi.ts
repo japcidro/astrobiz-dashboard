@@ -37,7 +37,11 @@ export interface VapiAssistantConfig {
     keywords?: string[];
     smartFormat?: boolean;
   };
-  firstMessage: string;
+  firstMessage?: string;
+  firstMessageMode?:
+    | "assistant-speaks-first"
+    | "assistant-speaks-first-with-model-generated-message"
+    | "assistant-waits-for-user";
   maxDurationSeconds: number;
   endCallFunctionEnabled?: boolean;
   voicemailDetection?: {

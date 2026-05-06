@@ -35,37 +35,6 @@ interface RawOrder {
   }[];
 }
 
-// Tagalog "ng" form for quantities — used naturally before nouns.
-// "1 Glow Up Patches" → "isang Glow Up Patches" (sounds human, not robotic).
-const TAGALOG_QTY: Record<number, string> = {
-  1: "isang",
-  2: "dalawang",
-  3: "tatlong",
-  4: "apat na",
-  5: "limang",
-  6: "anim na",
-  7: "pitong",
-  8: "walong",
-  9: "siyam na",
-  10: "sampung",
-};
-
-function tagalogQuantity(n: number): string {
-  if (n in TAGALOG_QTY) return TAGALOG_QTY[n];
-  // 11+ — just say the number, the LLM can handle it
-  return String(n);
-}
-
-// Strip trailing ".00" / ".0" from peso amounts. Real PH humans never say
-// "990 point zero zero pesos" — they say "nine ninety" or "990".
-function formatPesoAmount(rawPrice: string): string {
-  const num = parseFloat(rawPrice);
-  if (Number.isNaN(num)) return rawPrice;
-  if (Number.isInteger(num)) return String(num);
-  // For non-zero cents (rare in PH ecom), keep 2 decimal places.
-  return num.toFixed(2);
-}
-
 function maskPhone(phone: string | null | undefined): string {
   if (!phone) return "no phone on file";
   // Keep first 4 + last 2 digits, mask middle for display
@@ -87,27 +56,21 @@ function formatOrderContext(
       .join(" ") ||
     "Customer";
 
-  // Format items so Maria reads them like a HUMAN, not raw data:
-  // - "1x Glow Up Patches (GLP1-patches)" → "isang Glow Up Patches"
-  // - "3x Hair Patches" → "tatlong Hair Patches"
-  // - Drop SKU codes in parentheses + drop all-caps variant titles
+  // Send RAW Shopify data to Maria. The LLM (gpt-4o-mini) is responsible
+  // for translating "1x Glow Up Patches (GLP1-patches)" → "isang Glow Up
+  // Patches" and "990.00" → "nine hundred ninety" naturally during the call.
+  // This is what we're paying OpenAI for — no manual pre-formatting.
   const items =
     raw.line_items
       .map((li) => {
-        const cleanTitle = li.title.replace(/\s*\([^)]*\)\s*$/, "").trim();
         const variant =
           li.variant_title &&
-          !/^[A-Z0-9_-]+$/.test(li.variant_title) &&
           li.variant_title.toLowerCase() !== "default title"
             ? ` (${li.variant_title})`
             : "";
-        return `${tagalogQuantity(li.quantity)} ${cleanTitle}${variant}`;
+        return `${li.quantity}x ${li.title}${variant}`;
       })
       .join(", ") || "your order";
-
-  // Format total: strip ".00" cents (real humans don't say "point zero zero")
-  // Only keep decimals if they're meaningful (not .00 or .0)
-  const totalFormatted = formatPesoAmount(raw.total_price);
 
   const addr = raw.shipping_address;
   const addressParts = addr
@@ -129,7 +92,7 @@ function formatOrderContext(
     customer_name: customerName,
     order_name: raw.name,
     order_items: items,
-    total: totalFormatted,
+    total: raw.total_price,
     address: addressParts,
     payment_method: paymentMethod,
     store_name: storeName,
