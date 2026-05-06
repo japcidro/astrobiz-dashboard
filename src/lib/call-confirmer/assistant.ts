@@ -170,14 +170,16 @@ export function buildAssistantConfig(
       provider: "11labs",
       voiceId: config.voice_id,
       model: "eleven_multilingual_v2",
-      stability: 0.65,        // higher = more consistent pronunciation
-      similarityBoost: 0.85,  // higher = closer to source voice
-      style: 0.2,             // lower = less expressive but more reliable
+      stability: 0.55,        // slightly less = more dynamic/faster cadence
+      similarityBoost: 0.80,
+      style: 0.25,
       useSpeakerBoost: true,
+      speed: 1.15,            // 15% faster than default — natural CSR pace
+      optimizeStreamingLatency: 3, // faster TTS streaming (1-4, higher = lower latency)
     },
     transcriber: {
       provider: "deepgram",
-      model: "nova-2",
+      model: "nova-3",        // newer model, better multilingual recognition
       language: TRANSCRIBER_LANG[lang],
       ...(lang === "taglish" || lang === "tagalog"
         ? { keywords: FILIPINO_KEYWORDS, smartFormat: true }
@@ -186,19 +188,13 @@ export function buildAssistantConfig(
     firstMessage: buildFirstMessage(config),
     maxDurationSeconds: config.per_call_max_seconds,
     endCallFunctionEnabled: true,
-    // Voicemail detection DISABLED — Twilio AMD false-positives on PH
-    // mobile carriers (auto-flags real humans as voicemail when carrier
-    // routing has any silent intro). Maria will speak even on voicemails;
-    // worst case wastes one call's audio on a dead voicemail (~$0.05),
-    // but real humans actually get through.
-    // Re-enable later if voicemail-leaving becomes a real cost issue.
-    // voicemailDetection: { provider: "vapi", beepMaxAwaitSeconds: 30 },
-    // voicemailMessage: "",
+    // Voicemail detection DISABLED — Twilio AMD false-positives on PH carriers.
     endCallMessage: "Salamat po, bye!",
     silenceTimeoutSeconds: 10,        // hang up after 10s of dead air
-    responseDelaySeconds: 0.3,        // quicker turn-taking
-    llmRequestDelaySeconds: 0.05,     // fire LLM request sooner
-    numWordsToInterruptAssistant: 2,
+    responseDelaySeconds: 0.2,        // very fast turn-taking (was 0.3)
+    llmRequestDelaySeconds: 0,        // no delay before firing LLM
+    numWordsToInterruptAssistant: 1,  // interrupt on 1 word (was 2) — more responsive
+    backgroundDenoisingEnabled: true, // helps Vapi distinguish speech from carrier noise
     recordingEnabled: options.recordingEnabled ?? true,
   };
 }

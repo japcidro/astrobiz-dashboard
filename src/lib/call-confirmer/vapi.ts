@@ -27,6 +27,8 @@ export interface VapiAssistantConfig {
     similarityBoost?: number;
     style?: number;
     useSpeakerBoost?: boolean;
+    speed?: number;                       // 0.7-1.2 typical, 1.0 = default
+    optimizeStreamingLatency?: number;    // 0-4, higher = lower latency
   };
   transcriber: {
     provider: "deepgram";
@@ -49,6 +51,7 @@ export interface VapiAssistantConfig {
   responseDelaySeconds?: number;
   llmRequestDelaySeconds?: number;
   numWordsToInterruptAssistant?: number;
+  backgroundDenoisingEnabled?: boolean;
   recordingEnabled?: boolean;
   hipaaEnabled?: boolean;
 }
