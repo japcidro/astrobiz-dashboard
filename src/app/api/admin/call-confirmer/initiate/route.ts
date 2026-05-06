@@ -22,8 +22,8 @@ interface InitiateBody {
 const SAMPLE_ORDER: OrderContext = {
   customer_name: "Juan Cruz",
   order_name: "#TEST-001",
-  order_items: "1x Hair Patches Set, 1x Toner",
-  total: "1499.00",
+  order_items: "isang Hair Patches Set, isang Toner",
+  total: "1499",
   address: "123 Sample Street, Quezon City, Metro Manila",
   payment_method: "Cash on Delivery",
   store_name: "Astrobiz Test Store",
