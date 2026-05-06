@@ -30,13 +30,19 @@ export interface VapiAssistantConfig {
     speed?: number;                       // 0.7-1.2 typical, 1.0 = default
     optimizeStreamingLatency?: number;    // 0-4, higher = lower latency
   };
-  transcriber: {
-    provider: "deepgram";
-    model: "nova-2" | "nova-3";
-    language: string;
-    keywords?: string[];
-    smartFormat?: boolean;
-  };
+  transcriber:
+    | {
+        provider: "deepgram";
+        model: "nova-2" | "nova-3";
+        language: string;
+        keywords?: string[];
+        smartFormat?: boolean;
+      }
+    | {
+        provider: "openai";
+        model: "whisper-1" | "gpt-4o-mini-transcribe" | "gpt-4o-transcribe";
+        language?: string;
+      };
   firstMessage?: string;
   firstMessageMode?:
     | "assistant-speaks-first"

@@ -23,42 +23,13 @@ const LANGUAGE_INSTRUCTIONS: Record<CallConfirmerLanguage, string> = {
     "Speak in clear English. Be warm and professional like a CSR. Short sentences.",
 };
 
-// Deepgram language codes per language mode.
-// "multi" = code-switching mode (handles Taglish English+Tagalog naturally).
-// Falls back to single-language codes for pure modes.
+// OpenAI Whisper language codes (ISO 639-1). Whisper handles Taglish
+// best with "tl" (Tagalog) — it natively supports code-switching with English.
 const TRANSCRIBER_LANG: Record<CallConfirmerLanguage, string> = {
-  taglish: "multi",
+  taglish: "tl",
   tagalog: "tl",
   english: "en",
 };
-
-// Common Tagalog/Filipino keywords + brand vocab that boost transcription accuracy.
-// Deepgram "keywords" with integer intensity (Vapi rejects decimals).
-const FILIPINO_KEYWORDS = [
-  "po:2",
-  "opo:2",
-  "salamat:2",
-  "kuya:2",
-  "ate:2",
-  "sige:2",
-  "yes:2",
-  "confirm:2",
-  "order:2",
-  "Maria:2",
-  "hindi:2",
-  "tama:2",
-  "totoo:1",
-  "Pilipinas:1",
-  "address:1",
-  "bahay:1",
-  "delivery:1",
-  "COD:2",
-  "Philippines:1",
-  "kayo:1",
-  "ninyo:1",
-  "ito:1",
-  "yan:1",
-];
 
 export function buildSystemPrompt(
   config: CallConfirmerConfig
@@ -191,12 +162,12 @@ export function buildAssistantConfig(
       optimizeStreamingLatency: 3, // faster TTS streaming (1-4, higher = lower latency)
     },
     transcriber: {
-      provider: "deepgram",
-      model: "nova-3",        // newer model, better multilingual recognition
+      // OpenAI Whisper — significantly better than Deepgram for Filipino/Taglish.
+      // gpt-4o-mini-transcribe is the fastest + cheapest of OpenAI's options
+      // and handles code-switching natively.
+      provider: "openai",
+      model: "gpt-4o-mini-transcribe",
       language: TRANSCRIBER_LANG[lang],
-      ...(lang === "taglish" || lang === "tagalog"
-        ? { keywords: FILIPINO_KEYWORDS, smartFormat: true }
-        : { smartFormat: true }),
     },
     // LLM-generated greeting — Maria uses gpt-4o-mini's brain to translate
     // raw order data ("1x Glow Up Patches" → "isang Glow Up Patches") into
