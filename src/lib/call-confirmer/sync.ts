@@ -75,32 +75,72 @@ export function deriveOutcome(
       reason: "Call timed out at max duration",
     };
 
-  // Vapi's success evaluation is "true"/"false" string when enabled
+  // Vapi's success evaluation: "true" is a strong confirm signal.
+  // "false" does NOT necessarily mean declined — could be silence, hangup,
+  // unclear customer response, etc. So we only trust "true" here and let
+  // summary parsing handle the rest.
   if (successEvaluation === "true" || successEvaluation === "yes") {
     return { outcome: "confirmed", needsVa: false, reason: null };
-  }
-  if (successEvaluation === "false" || successEvaluation === "no") {
-    return { outcome: "declined", needsVa: false, reason: null };
   }
 
   if (!summary) return { outcome: null, needsVa: false, reason: null };
 
   const lower = summary.toLowerCase();
 
-  // Order matters: check confirmation FIRST since "the user accepted" must
-  // beat the substring match in "did not accept" or similar negatives.
-  // First check explicit declines.
+  // 1) Silence / hangup / no response → unreachable (NOT declined)
   if (
-    lower.includes("did not accept") ||
-    lower.includes("did not confirm") ||
-    lower.includes("declined the order") ||
-    lower.includes("refused") ||
-    lower.includes("doesn't want") ||
-    lower.includes("does not want")
+    lower.includes("silence") ||
+    lower.includes("did not respond") ||
+    lower.includes("no response") ||
+    lower.includes("hung up") ||
+    lower.includes("dropped") ||
+    lower.includes("disconnected")
+  ) {
+    return {
+      outcome: "unreachable",
+      needsVa: true,
+      reason: "Call ended without customer response",
+    };
+  }
+
+  // 2) Strong confirmation phrases (check BEFORE generic decline to avoid
+  //    false positives like "user did not decline → confirmed").
+  if (
+    lower.includes("user accepted") ||
+    lower.includes("customer accepted") ||
+    lower.includes("user confirmed") ||
+    lower.includes("customer confirmed") ||
+    lower.includes("user agreed") ||
+    lower.includes("customer agreed") ||
+    lower.includes("user said yes") ||
+    lower.includes("customer said yes") ||
+    lower.includes("confirmed the order") ||
+    lower.includes("order was confirmed") ||
+    lower.includes("order is confirmed")
+  ) {
+    return { outcome: "confirmed", needsVa: false, reason: null };
+  }
+
+  // 3) Explicit decline phrases (very strict — only if summary clearly says
+  //    customer rejected the order, not just any mention of "decline")
+  if (
+    lower.includes("user declined") ||
+    lower.includes("customer declined") ||
+    lower.includes("user rejected") ||
+    lower.includes("customer rejected") ||
+    lower.includes("user cancel") ||
+    lower.includes("customer cancel") ||
+    lower.includes("user did not want") ||
+    lower.includes("customer did not want") ||
+    lower.includes("did not place") ||
+    lower.includes("user said no") ||
+    lower.includes("customer said no") ||
+    lower.includes("did not order")
   ) {
     return { outcome: "declined", needsVa: false, reason: null };
   }
 
+  // 4) Escalation
   if (
     lower.includes("escalat") ||
     lower.includes("transfer to") ||
@@ -113,6 +153,7 @@ export function deriveOutcome(
     };
   }
 
+  // 5) Callback request
   if (
     lower.includes("callback") ||
     lower.includes("call back") ||
@@ -126,42 +167,9 @@ export function deriveOutcome(
     };
   }
 
-  // Strong confirmation signals (must be after declines so we don't false-positive)
-  if (
-    lower.includes("user accepted") ||
-    lower.includes("customer accepted") ||
-    lower.includes("user confirmed") ||
-    lower.includes("customer confirmed") ||
-    lower.includes("user agreed") ||
-    lower.includes("customer agreed") ||
-    lower.includes("order is confirmed") ||
-    lower.includes("user said yes") ||
-    lower.includes("customer said yes") ||
-    lower.includes("confirmed the order")
-  ) {
-    return { outcome: "confirmed", needsVa: false, reason: null };
-  }
-
-  // Generic plain decline (after specific declines + after confirmations to
-  // avoid false matches against phrases like "user did not decline")
-  if (
-    lower.includes("decline") ||
-    lower.includes("cancel") ||
-    lower.includes("did not order")
-  ) {
-    return { outcome: "declined", needsVa: false, reason: null };
-  }
-
-  // Weak confirmation (last resort)
-  if (
-    lower.includes("confirm") ||
-    lower.includes("accepted") ||
-    lower.includes("agreed")
-  ) {
-    return { outcome: "confirmed", needsVa: false, reason: null };
-  }
-
-  return { outcome: null, needsVa: false, reason: null };
+  // No clear signal — leave outcome null. UI will show "completed" with no
+  // outcome banner. Safer than guessing wrong.
+  return { outcome: null, needsVa: true, reason: "Outcome unclear from summary — needs VA review" };
 }
 
 export function normalizeTranscript(

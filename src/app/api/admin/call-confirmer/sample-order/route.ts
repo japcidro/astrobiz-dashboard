@@ -56,11 +56,22 @@ function formatOrderContext(
       .join(" ") ||
     "Customer";
 
+  // Format items naturally for TTS:
+  // - Strip parenthetical SKU codes / variant codes (Maria will mispronounce "GLP1-patches")
+  // - Keep variant titles only if they look like real human labels (>3 chars, no all-caps codes)
   const items =
     raw.line_items
       .map((li) => {
-        const variant = li.variant_title ? ` (${li.variant_title})` : "";
-        return `${li.quantity}x ${li.title}${variant}`;
+        // Drop SKU-like suffixes from the title: "Glow Up Patches (GLP1-patches)" → "Glow Up Patches"
+        const cleanTitle = li.title.replace(/\s*\([^)]*\)\s*$/, "").trim();
+        // Keep variant only if it's a meaningful label (color, size) not a SKU code
+        const variant =
+          li.variant_title &&
+          !/^[A-Z0-9_-]+$/.test(li.variant_title) && // not all-caps/digits
+          li.variant_title.toLowerCase() !== "default title"
+            ? ` (${li.variant_title})`
+            : "";
+        return `${li.quantity}x ${cleanTitle}${variant}`;
       })
       .join(", ") || "your order";
 
