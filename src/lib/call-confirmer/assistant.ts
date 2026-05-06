@@ -186,15 +186,18 @@ export function buildAssistantConfig(
     firstMessage: buildFirstMessage(config),
     maxDurationSeconds: config.per_call_max_seconds,
     endCallFunctionEnabled: true,
-    voicemailDetection: {
-      provider: "vapi",
-      beepMaxAwaitSeconds: 30,
-    },
-    voicemailMessage: "", // empty string = hang up immediately on voicemail (no cost)
+    // Voicemail detection DISABLED — Twilio AMD false-positives on PH
+    // mobile carriers (auto-flags real humans as voicemail when carrier
+    // routing has any silent intro). Maria will speak even on voicemails;
+    // worst case wastes one call's audio on a dead voicemail (~$0.05),
+    // but real humans actually get through.
+    // Re-enable later if voicemail-leaving becomes a real cost issue.
+    // voicemailDetection: { provider: "vapi", beepMaxAwaitSeconds: 30 },
+    // voicemailMessage: "",
     endCallMessage: "Salamat po, bye!",
-    silenceTimeoutSeconds: 10,        // was 15 — hang up faster on dead air
-    responseDelaySeconds: 0.3,        // was 0.4 — quicker turn-taking
-    llmRequestDelaySeconds: 0.05,     // was 0.1 — fire LLM request sooner
+    silenceTimeoutSeconds: 10,        // hang up after 10s of dead air
+    responseDelaySeconds: 0.3,        // quicker turn-taking
+    llmRequestDelaySeconds: 0.05,     // fire LLM request sooner
     numWordsToInterruptAssistant: 2,
     recordingEnabled: options.recordingEnabled ?? true,
   };
