@@ -246,11 +246,12 @@ export function buildAssistantConfig(
       optimizeStreamingLatency: 3, // faster TTS streaming (1-4, higher = lower latency)
     },
     transcriber: {
-      // OpenAI Whisper — significantly better than Deepgram for Filipino/Taglish.
-      // gpt-4o-mini-transcribe is the fastest + cheapest of OpenAI's options
-      // and handles code-switching natively.
+      // OpenAI gpt-4o-transcribe — highest quality OpenAI ASR, handles
+      // Filipino/Taglish best. The cheaper -mini version was hallucinating
+      // (random Korean chars, "blow-up patches" misheard).
+      // Cost: ~$0.006/min vs $0.003 for mini — worth it for accuracy.
       provider: "openai",
-      model: "gpt-4o-mini-transcribe",
+      model: "gpt-4o-transcribe",
       language: TRANSCRIBER_LANG[lang],
     },
     // LLM-generated greeting — Maria uses gpt-4o-mini's brain to translate

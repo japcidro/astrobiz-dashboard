@@ -140,16 +140,30 @@ export function deriveOutcome(
     return { outcome: "declined", needsVa: false, reason: null };
   }
 
-  // 4) Escalation
+  // 4) Escalation / team handoff (Maria deferred a question to support team)
   if (
     lower.includes("escalat") ||
     lower.includes("transfer to") ||
-    lower.includes("support team")
+    lower.includes("support team") ||
+    lower.includes("team will") ||
+    lower.includes("team to") ||
+    lower.includes("ipapasa") ||
+    lower.includes("connect them with") ||
+    lower.includes("connecting them with") ||
+    lower.includes("offered to connect") ||
+    lower.includes("offered connecting") ||
+    lower.includes("team to resolve") ||
+    lower.includes("resolve concerns") ||
+    lower.includes("team to handle") ||
+    lower.includes("team to follow")
   ) {
     return {
       outcome: "escalated_to_human",
       needsVa: true,
-      reason: "AI escalated to human",
+      // Use the FIRST SENTENCE of the summary as the reason — gives VA
+      // actual context ("user questioned the address", etc) instead of
+      // a useless generic label.
+      reason: extractFirstSentence(summary),
     };
   }
 
@@ -163,13 +177,56 @@ export function deriveOutcome(
     return {
       outcome: "needs_callback",
       needsVa: true,
-      reason: "Customer requested callback",
+      reason: extractFirstSentence(summary),
     };
   }
 
-  // No clear signal — leave outcome null. UI will show "completed" with no
-  // outcome banner. Safer than guessing wrong.
-  return { outcome: null, needsVa: true, reason: "Outcome unclear from summary — needs VA review" };
+  // No clear signal — surface the AI summary itself as the handoff_reason
+  // so the VA has CONTEXT, not just a useless "Outcome unclear" label.
+  return {
+    outcome: null,
+    needsVa: true,
+    reason: extractFirstSentence(summary),
+  };
+}
+
+/**
+ * Pull the most informative sentence from an AI summary for VA context.
+ * Prefers sentences that mention the customer's question or concern.
+ */
+function extractFirstSentence(summary: string): string {
+  // Try to find a sentence that mentions what the customer asked/said
+  const sentences = summary
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  // Prefer the sentence that mentions customer concern/question/issue
+  const concernKeywords = [
+    "user asked",
+    "customer asked",
+    "user questioned",
+    "customer questioned",
+    "user wanted",
+    "customer wanted",
+    "user requested",
+    "customer requested",
+    "user inquired",
+    "concern",
+    "issue",
+    "problem",
+    "complaint",
+  ];
+  for (const s of sentences) {
+    const sl = s.toLowerCase();
+    if (concernKeywords.some((k) => sl.includes(k))) {
+      return s.length > 220 ? s.slice(0, 217) + "..." : s;
+    }
+  }
+
+  // Otherwise return the first non-trivial sentence
+  const first = sentences[0] ?? summary;
+  return first.length > 220 ? first.slice(0, 217) + "..." : first;
 }
 
 export function normalizeTranscript(
