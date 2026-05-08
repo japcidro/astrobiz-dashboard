@@ -31,6 +31,8 @@ import {
   ClipboardList,
   Trophy,
   PhoneCall,
+  Target,
+  AlertTriangle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -189,6 +191,19 @@ const navEntries: NavEntry[] = [
         icon: <FileText size={18} />,
         roles: ["admin"],
       },
+      {
+        label: "Packing Errors",
+        href: "/fulfillment/packing-errors",
+        icon: <AlertTriangle size={18} />,
+        roles: ["admin", "fulfillment"],
+        section: "KPI Inputs",
+      },
+      {
+        label: "Stock Count",
+        href: "/fulfillment/stock-count",
+        icon: <ClipboardList size={18} />,
+        roles: ["admin", "fulfillment"],
+      },
     ],
   },
   {
@@ -253,7 +268,20 @@ const navEntries: NavEntry[] = [
         icon: <BookOpen size={18} />,
         roles: ["admin"],
       },
+      {
+        label: "Creative Attribution",
+        href: "/marketing/creative-tagging",
+        icon: <Target size={18} />,
+        roles: ["admin", "marketing"],
+        section: "KPI Inputs",
+      },
     ],
+  },
+  {
+    label: "KPI Dashboard",
+    href: "/admin/kpi-dashboard",
+    icon: <Target size={20} />,
+    roles: ["admin"],
   },
   {
     label: "Notifications",
