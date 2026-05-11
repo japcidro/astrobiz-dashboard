@@ -1,11 +1,71 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 // Meta's /copies call can take a few seconds. Bump from default.
 export const maxDuration = 60;
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
+
+// Mark the source ad as scaled in scaling_detection_cache so the "↑ SCALED"
+// badge appears immediately. Without this, the badge waits up to 30 min for
+// the next /api/cron/refresh-scaling-detection tick — which led to users
+// double-promoting because the UI looked unchanged after a successful copy.
+//
+// Best-effort: swallows all errors. The cron will fill in any missing
+// creative_id/campaign_id on its next run.
+async function markSourceAdScaledInCache(
+  supabase: SupabaseClient,
+  args: {
+    sourceAdId: string;
+    sourceAccountId: string | null;
+    copiedAdId: string | null;
+    scalingCampaignId: string;
+    scalingStoreName: string;
+  }
+): Promise<void> {
+  try {
+    const now = new Date().toISOString();
+
+    // Update first to preserve creative_id/campaign_id from prior cron runs
+    // (those columns drive scaling-campaign matching — wiping them would
+    // break the next cron tick's rollup detection for this ad).
+    const { data: existing } = await supabase
+      .from("scaling_detection_cache")
+      .select("fb_ad_id")
+      .eq("fb_ad_id", args.sourceAdId)
+      .maybeSingle();
+
+    if (existing) {
+      await supabase
+        .from("scaling_detection_cache")
+        .update({
+          in_scaling: true,
+          scaled_ad_id: args.copiedAdId,
+          scaled_in_campaign: args.scalingCampaignId,
+          scaled_in_store: args.scalingStoreName,
+          refreshed_at: now,
+        })
+        .eq("fb_ad_id", args.sourceAdId);
+    } else {
+      await supabase.from("scaling_detection_cache").insert({
+        fb_ad_id: args.sourceAdId,
+        creative_id: null,
+        campaign_id: null,
+        account_id: args.sourceAccountId,
+        in_scaling: true,
+        scaled_ad_id: args.copiedAdId,
+        scaled_in_campaign: args.scalingCampaignId,
+        scaled_in_store: args.scalingStoreName,
+        self_is_scaling: false,
+        refreshed_at: now,
+      });
+    }
+  } catch (e) {
+    console.error("[scaling/promote] cache mark failed (non-fatal)", e);
+  }
+}
 
 interface PromoteBody {
   ad_id?: string;
@@ -390,6 +450,13 @@ export async function POST(request: Request) {
             console.info(
               `[scaling/promote] recreate fallback succeeded: source=${adId} new_ad=${copiedAdId}`
             );
+            await markSourceAdScaledInCache(supabase, {
+              sourceAdId: adId,
+              sourceAccountId,
+              copiedAdId,
+              scalingCampaignId: scalingRow.campaign_id as string,
+              scalingStoreName: scalingRow.store_name as string,
+            });
             // Skip the diagnostic+error path below by returning early.
             return Response.json({
               success: true,
@@ -508,6 +575,14 @@ export async function POST(request: Request) {
   console.info(
     `[scaling/promote] employee=${employee.id} ad=${adId} → adset=${targetAdsetId} (store=${targetStore}) copied_ad=${copiedAdId} status=${statusOption} new_adset=${createdAdsetId ?? "no"}`
   );
+
+  await markSourceAdScaledInCache(supabase, {
+    sourceAdId: adId,
+    sourceAccountId,
+    copiedAdId,
+    scalingCampaignId: scalingRow.campaign_id as string,
+    scalingStoreName: scalingRow.store_name as string,
+  });
 
   return Response.json({
     success: true,

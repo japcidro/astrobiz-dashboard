@@ -11,6 +11,28 @@ export const maxDuration = 300;
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
 const BATCH_SIZE = 50;
 
+// Name-based fallback: FB Ads Manager's "Duplicate" sometimes creates a
+// fresh creative_id for the copy, breaking the creative-id match. The
+// duplicate's name is the original + " - Copy" (or " (copy)", " - Copy 2",
+// etc.). Strip those suffixes so we can match by stem when creative_id
+// matching falls through. Without this, users see "not yet scaled" on
+// ads that were copied via the FB UI and double-promote them.
+function stripCopySuffix(name: string): string {
+  let n = name.trim();
+  let prev = "";
+  while (n !== prev) {
+    prev = n;
+    n = n.replace(/\s*[-–—]\s*copy(\s*\d+)?\s*$/i, "").trim();
+    n = n.replace(/\s*\(\s*copy(\s*\d+)?\s*\)\s*$/i, "").trim();
+    n = n.replace(/\s+copy(\s*\d+)?\s*$/i, "").trim();
+  }
+  return n;
+}
+
+function nameStem(name: string | null | undefined): string {
+  return stripCopySuffix((name ?? "").toString()).toLowerCase();
+}
+
 // Refreshes scaling_detection_cache so /api/marketing/scaling/detect can
 // serve purely from Supabase. Runs every 30 min via Vercel cron.
 //
@@ -80,7 +102,13 @@ export async function GET(request: Request) {
   }
 
   // --- 2. Walk each scaling campaign's ads → {creative_id → scaled_ad_id}
+  //         AND a parallel {name_stem → scaled_ad_id} map for name-based
+  //         fallback when FB-UI duplicates have fresh creative_ids.
   const scalingCreativeMap = new Map<
+    string,
+    Map<string, string>
+  >();
+  const scalingNameMap = new Map<
     string,
     Map<string, string>
   >();
@@ -89,9 +117,10 @@ export async function GET(request: Request) {
     await Promise.all(
       scalingCampaigns.map(async (sc) => {
         const creativeIds = new Map<string, string>();
+        const nameStems = new Map<string, string>();
         let next:
           | string
-          | null = `${FB_API_BASE}/${sc.campaign_id}/ads?fields=id,creative{id}&limit=200&access_token=${encodeURIComponent(token)}`;
+          | null = `${FB_API_BASE}/${sc.campaign_id}/ads?fields=id,name,creative{id}&limit=200&access_token=${encodeURIComponent(token)}`;
         while (next) {
           fbCalls++;
           const res = await fbFetchWithLimits(
@@ -101,7 +130,11 @@ export async function GET(request: Request) {
           );
           if (!res.ok) break;
           const json = (await res.json()) as {
-            data?: Array<{ id: string; creative?: { id?: string } }>;
+            data?: Array<{
+              id: string;
+              name?: string;
+              creative?: { id?: string };
+            }>;
             paging?: { next?: string };
           };
           for (const ad of json.data ?? []) {
@@ -109,10 +142,15 @@ export async function GET(request: Request) {
             if (cid && !creativeIds.has(cid)) {
               creativeIds.set(cid, ad.id);
             }
+            const stem = nameStem(ad.name);
+            if (stem && !nameStems.has(stem)) {
+              nameStems.set(stem, ad.id);
+            }
           }
           next = json.paging?.next ?? null;
         }
         scalingCreativeMap.set(sc.campaign_id, creativeIds);
+        scalingNameMap.set(sc.campaign_id, nameStems);
       })
     );
   } catch (e) {
@@ -141,11 +179,19 @@ export async function GET(request: Request) {
 
   type CachedAdRow = {
     ad_id?: string;
+    ad?: string;
     campaign_id?: string;
     account_id?: string;
   };
   const cachedRows =
     (adsCache?.response_data as { data?: CachedAdRow[] } | null)?.data ?? [];
+
+  // Build ad_id → name lookup so we can do name-stem fallback matching
+  // for ads whose creative_id changed (e.g. FB Ads Manager duplicate).
+  const nameByAd = new Map<string, string>();
+  for (const r of cachedRows) {
+    if (r.ad_id && r.ad) nameByAd.set(r.ad_id, r.ad);
+  }
 
   if (cachedRows.length === 0) {
     return Response.json({
@@ -282,6 +328,26 @@ export async function GET(request: Request) {
         if (scaledAdId && sc.campaign_id !== info.campaign_id) {
           match = { sc_campaign: sc.campaign_id, scaled_ad_id: scaledAdId };
           break;
+        }
+      }
+    }
+
+    // Fallback: name-stem match. Catches FB Ads Manager duplicates that
+    // got a fresh creative_id (e.g. "ILP-050126JO3" → "ILP-050126JO3 - Copy").
+    // Skip self-scaling source ads — their name will trivially match
+    // themselves once stripped of the "- Copy" suffix.
+    if (!match && !selfScaling) {
+      const sourceStem = nameStem(nameByAd.get(adId));
+      if (sourceStem) {
+        for (const sc of scalingCampaigns) {
+          if (sc.campaign_id === info.campaign_id) continue;
+          const nmap = scalingNameMap.get(sc.campaign_id);
+          if (!nmap) continue;
+          const scaledAdId = nmap.get(sourceStem);
+          if (scaledAdId && scaledAdId !== adId) {
+            match = { sc_campaign: sc.campaign_id, scaled_ad_id: scaledAdId };
+            break;
+          }
         }
       }
     }
