@@ -1,5 +1,96 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-05-11: VA Dialer foundation (Phase 2, Day 1) — uncommitted
+
+Server-side scaffolding for the upcoming browser softphone. No UI yet —
+the actual dialer + VA queue ship in Day 3-4. Twilio console setup is
+manual one-time (TwiML App + API Key) and pending user action.
+
+- **Migration** `supabase/va-dialer-migration.sql` (idempotent, applied
+  to prod Supabase):
+  - `va_dialer_config` (singleton id='default') — admin-editable budget
+    + recording retention. Seeded with **$15/day cap, 60-day retention,
+    enabled=true**.
+  - `va_call_spend_daily` — per-day rollup of VA call cost. Separate
+    pool from AI Call Confirmer's `call_spend_daily` (which is
+    per-store) so the team-wide $15 budget tracks cleanly.
+  - `call_attempts` extended with `locked_by` + `locked_until` for
+    optimistic queue-row locking ("Take Call" button reserves a row
+    for 30s before another VA can grab it).
+  - Helpers: `va_dialer_has_budget()`, `va_queue_claim()`,
+    `increment_va_call_spend()` (security definer; webhook calls them).
+  - RLS: admin all-access on both new tables; VA can read config only.
+- **Token endpoint** `POST /api/twilio/voice-token` — mints a 1hr
+  Twilio Voice access token for the browser SDK. Refuses with 429 if
+  today's spend hit the cap. Identity = `va-{employee.id}`.
+- **NPM packages** added: `twilio` (server, token signing) +
+  `@twilio/voice-sdk` (browser).
+- **Pending user setup**:
+  - Twilio TwiML App "Astrobiz VA Dialer" with Voice Request URL
+    `/api/twilio/voice-twiml` and Status Callback URL
+    `/api/twilio/voice-status` (POST both).
+  - Vercel env vars: `TWILIO_API_KEY`, `TWILIO_API_SECRET`,
+    `TWILIO_VA_APP_SID`.
+- **Decisions locked from planning round**:
+  - Browser softphone (headset, no physical phone)
+  - Shared queue (not per-VA assignment)
+  - Manual dial allowed (call any number outside queue)
+  - Recording auto-delete after 60 days
+  - $15/day VA-only cap (separate from $5/day AI cap = $20/day total max)
+  - Recording disclosure played before connecting (PH legal compliance)
+
+## 2026-05-08: Admin KPI Dashboard — traffic-light tiles + manual entry forms
+
+CEO-only `/admin/kpi-dashboard` showing weekly accountability metrics
+across Marketing, Sales/VA, and Fulfillment. Locked thresholds (red /
+yellow / green) editable in `kpi_targets`. Snapshots computed nightly
+at 23:55 PHT via cron, drilldown sidebar shows raw breakdown.
+
+- **Migration** `supabase/kpi-dashboard-migration.sql`:
+  - `kpi_targets` (seeded with 11 KPIs across 4 segments — marketing,
+    sales_va, fulfillment, watch)
+  - `kpi_daily_snapshots` (one row per kpi/scope/employee/day; unique
+    index uses `nulls not distinct` so team-scope rows upsert cleanly)
+  - `packing_errors` — fulfillment lead's EOD QA log; distinct from
+    pack_verifications (which captures in-process scan mismatches)
+  - `stock_counts` + `stock_count_watchlist` — Sunday physical count
+    form, top-N SKUs admin-managed
+  - `fb_ad_attribution` — maps an FB ad to the marketer who created
+    it (FB API created_by isn't reliable when Business Manager user
+    is shared)
+  - `call_attempts` extended with `va_id` + `call_source` (`ai` |
+    `va_browser` | `manual_log`); outcome enum extended with
+    `no_answer` and `cancelled`
+- **KPIs wired (live):**
+  - 🎯 RTS rate 14d (CEO watch) — first measurement showed **13.8%
+    (green)**
+  - VA confirmation rate, calls/day, time-to-first-call, save rate,
+    queue cleared (zero now; will populate when Phase 2 dialer ships)
+  - Perfect pack rate (joins pack_verifications × jt_deliveries ×
+    packing_errors × call_attempts confirmation timestamp)
+  - Stock variance (waits on Sunday counts)
+  - Creatives tested / week (waits on marketing tagging)
+- **KPIs deferred (clearly TODO'd in `lib/kpi/compute.ts`)**: FB
+  winners detection (needs daily insights cache), blended ROAS (needs
+  FB Insights API integration). Time-to-first-call uses queue dwell
+  proxy until Shopify order timestamps cached locally.
+- **Cron** `/api/cron/compute-kpis` — runs `55 15 * * *` (23:55 PHT).
+  Admin can also trigger on-demand via `POST /api/kpi/recompute` (the
+  "Recompute now" button on the dashboard).
+- **UI**:
+  - `/admin/kpi-dashboard` — 11 traffic-light tiles grouped by
+    segment, summary counter, drilldown side panel
+  - `/marketing/creative-tagging` — marketers claim FB ad IDs (counts
+    toward "creatives tested / week")
+  - `/fulfillment/stock-count` — Sunday count form, pre-fills expected
+    qty from `inventory_snapshots`
+  - `/fulfillment/packing-errors` — fulfillment lead's EOD log; logs
+    7 error types incl. `late_ship` so perfect-pack folds in <24h SLA
+  - Sidebar nav added for all 4 routes
+- **Conventions**: read-only dashboard reads from `kpi_daily_snapshots`
+  only (cron writes; never recomputes on page load). All queries use
+  `fetchAllRows()` to avoid the silent 1000-row PostgREST cap.
+
 ## 2026-04-20: Scaling-campaign promote action (Phase B)
 
 Actually copies a testing ad into the store's scaling campaign.
