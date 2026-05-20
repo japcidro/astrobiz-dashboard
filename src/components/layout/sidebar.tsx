@@ -364,7 +364,7 @@ export function Sidebar({ employeeName, employeeRole }: SidebarProps) {
       {/* Logo */}
       <div className="shrink-0 p-6 border-b border-gray-800">
         <h1 className="text-xl font-bold text-white">Astrobiz</h1>
-        <p className="text-xs text-gray-500 mt-1">Employee Dashboard</p>
+        <p className="text-xs text-gray-500 mt-1">Operations Dashboard</p>
       </div>
 
       {/* Nav */}
