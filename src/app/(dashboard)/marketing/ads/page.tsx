@@ -1975,21 +1975,37 @@ export default function AdsPage() {
                       {drillLevel === "ad" && (
                         <td className="px-3 py-2.5 text-center whitespace-nowrap">
                           <div className="flex items-center justify-center gap-2">
-                            {rowData.preview_url ? (
-                              <a
-                                href={rowData.preview_url as string}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={(e) => e.stopPropagation()}
-                                className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors text-xs"
-                                title="View ad on Facebook"
-                              >
-                                <ExternalLink size={13} />
-                                View
-                              </a>
-                            ) : (
-                              <span className="text-gray-600 text-xs">—</span>
-                            )}
+                            {(() => {
+                              // Always render a View link. Prefer the live FB
+                              // post URL (effective_object_story_id), but fall
+                              // back to Ads Manager when FB doesn't expose a
+                              // post — common for paused ads, deleted posts,
+                              // catalog/DPA creatives, etc.
+                              const hasPost = Boolean(rowData.preview_url);
+                              const acctNum = String(
+                                rowData.account_id as string
+                              ).replace(/^act_/, "");
+                              const href = hasPost
+                                ? (rowData.preview_url as string)
+                                : `https://business.facebook.com/adsmanager/manage/ads?act=${acctNum}&selected_ad_ids=${rowData.ad_id as string}`;
+                              return (
+                                <a
+                                  href={href}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors text-xs"
+                                  title={
+                                    hasPost
+                                      ? "View ad post on Facebook"
+                                      : "Open ad in Ads Manager (no public post link available)"
+                                  }
+                                >
+                                  <ExternalLink size={13} />
+                                  View
+                                </a>
+                              );
+                            })()}
                             <Link
                               href={`/marketing/ai-analytics?deconstruct_ad=${encodeURIComponent(rowData.ad_id as string)}`}
                               onClick={(e) => e.stopPropagation()}
