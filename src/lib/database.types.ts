@@ -14,48 +14,6 @@ export type Database = {
   }
   public: {
     Tables: {
-      ad_approved_script_links: {
-        Row: {
-          approved_script_id: string
-          fb_ad_account_id: string
-          fb_ad_id: string
-          id: string
-          linked_at: string
-          linked_by: string | null
-        }
-        Insert: {
-          approved_script_id: string
-          fb_ad_account_id: string
-          fb_ad_id: string
-          id?: string
-          linked_at?: string
-          linked_by?: string | null
-        }
-        Update: {
-          approved_script_id?: string
-          fb_ad_account_id?: string
-          fb_ad_id?: string
-          id?: string
-          linked_at?: string
-          linked_by?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "ad_approved_script_links_approved_script_id_fkey"
-            columns: ["approved_script_id"]
-            isOneToOne: false
-            referencedRelation: "approved_scripts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "ad_approved_script_links_linked_by_fkey"
-            columns: ["linked_by"]
-            isOneToOne: false
-            referencedRelation: "employees"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       ad_comparative_analyses: {
         Row: {
           account_ids: string[]
@@ -237,7 +195,6 @@ export type Database = {
           mode: string
           name: string
           shopify_store_id: string | null
-          source_script_id: string | null
           status: Database["public"]["Enums"]["ad_draft_status"]
           submitted_at: string | null
           updated_at: string
@@ -259,7 +216,6 @@ export type Database = {
           mode?: string
           name: string
           shopify_store_id?: string | null
-          source_script_id?: string | null
           status?: Database["public"]["Enums"]["ad_draft_status"]
           submitted_at?: string | null
           updated_at?: string
@@ -281,7 +237,6 @@ export type Database = {
           mode?: string
           name?: string
           shopify_store_id?: string | null
-          source_script_id?: string | null
           status?: Database["public"]["Enums"]["ad_draft_status"]
           submitted_at?: string | null
           updated_at?: string
@@ -299,13 +254,6 @@ export type Database = {
             columns: ["shopify_store_id"]
             isOneToOne: false
             referencedRelation: "shopify_stores"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "ad_drafts_source_script_id_fkey"
-            columns: ["source_script_id"]
-            isOneToOne: false
-            referencedRelation: "approved_scripts"
             referencedColumns: ["id"]
           },
         ]
@@ -604,82 +552,67 @@ export type Database = {
           },
         ]
       }
-      approved_script_creatives: {
+      approved_script_creatives_archive_2026_05: {
         Row: {
-          approved_script_id: string
-          creative_type: string
-          fb_ad_account_id: string
+          approved_script_id: string | null
+          creative_type: string | null
+          fb_ad_account_id: string | null
           fb_image_hash: string | null
           fb_video_id: string | null
           file_name: string | null
           id: string
           label: string | null
           thumbnail_url: string | null
-          uploaded_at: string
+          uploaded_at: string | null
           uploaded_by: string | null
         }
         Insert: {
-          approved_script_id: string
-          creative_type: string
-          fb_ad_account_id: string
+          approved_script_id?: string | null
+          creative_type?: string | null
+          fb_ad_account_id?: string | null
           fb_image_hash?: string | null
           fb_video_id?: string | null
           file_name?: string | null
-          id?: string
+          id: string
           label?: string | null
           thumbnail_url?: string | null
-          uploaded_at?: string
+          uploaded_at?: string | null
           uploaded_by?: string | null
         }
         Update: {
-          approved_script_id?: string
-          creative_type?: string
-          fb_ad_account_id?: string
+          approved_script_id?: string | null
+          creative_type?: string | null
+          fb_ad_account_id?: string | null
           fb_image_hash?: string | null
           fb_video_id?: string | null
           file_name?: string | null
           id?: string
           label?: string | null
           thumbnail_url?: string | null
-          uploaded_at?: string
+          uploaded_at?: string | null
           uploaded_by?: string | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "approved_script_creatives_approved_script_id_fkey"
-            columns: ["approved_script_id"]
-            isOneToOne: false
-            referencedRelation: "approved_scripts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "approved_script_creatives_uploaded_by_fkey"
-            columns: ["uploaded_by"]
-            isOneToOne: false
-            referencedRelation: "employees"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
-      approved_scripts: {
+      approved_scripts_archive_2026_05: {
         Row: {
-          angle_title: string
+          angle_title: string | null
           angle_type: string | null
-          approved_at: string
-          approved_by: string
+          approved_at: string | null
+          approved_by: string | null
           avatar: string | null
           awareness_level: string | null
           big_idea: string | null
-          body_script: string
+          body_script: string | null
           capacity: number | null
           final_video_url: string | null
           funnel_stage: string | null
-          hook: string
+          hook: string | null
           hook_framework: string | null
           id: string
           intensity: number | null
           performance_metrics: Json | null
-          performance_status: string
+          performance_status: string | null
           performance_validated_at: string | null
           production_notes: string | null
           script_number: number | null
@@ -687,33 +620,33 @@ export type Database = {
           source_thread_id: string | null
           source_winner_ad_id: string | null
           source_winner_analysis_id: string | null
-          status: Database["public"]["Enums"]["approved_script_status"]
-          store_name: string
+          status: Database["public"]["Enums"]["approved_script_status"] | null
+          store_name: string | null
           strategic_format: string | null
-          updated_at: string
+          updated_at: string | null
           updated_by: string | null
-          variable_shifts: Json
-          variant_hooks: string[]
+          variable_shifts: Json | null
+          variant_hooks: string[] | null
           video_format: string | null
         }
         Insert: {
-          angle_title: string
+          angle_title?: string | null
           angle_type?: string | null
-          approved_at?: string
-          approved_by: string
+          approved_at?: string | null
+          approved_by?: string | null
           avatar?: string | null
           awareness_level?: string | null
           big_idea?: string | null
-          body_script: string
+          body_script?: string | null
           capacity?: number | null
           final_video_url?: string | null
           funnel_stage?: string | null
-          hook: string
+          hook?: string | null
           hook_framework?: string | null
-          id?: string
+          id: string
           intensity?: number | null
           performance_metrics?: Json | null
-          performance_status?: string
+          performance_status?: string | null
           performance_validated_at?: string | null
           production_notes?: string | null
           script_number?: number | null
@@ -721,33 +654,33 @@ export type Database = {
           source_thread_id?: string | null
           source_winner_ad_id?: string | null
           source_winner_analysis_id?: string | null
-          status?: Database["public"]["Enums"]["approved_script_status"]
-          store_name: string
+          status?: Database["public"]["Enums"]["approved_script_status"] | null
+          store_name?: string | null
           strategic_format?: string | null
-          updated_at?: string
+          updated_at?: string | null
           updated_by?: string | null
-          variable_shifts?: Json
-          variant_hooks?: string[]
+          variable_shifts?: Json | null
+          variant_hooks?: string[] | null
           video_format?: string | null
         }
         Update: {
-          angle_title?: string
+          angle_title?: string | null
           angle_type?: string | null
-          approved_at?: string
-          approved_by?: string
+          approved_at?: string | null
+          approved_by?: string | null
           avatar?: string | null
           awareness_level?: string | null
           big_idea?: string | null
-          body_script?: string
+          body_script?: string | null
           capacity?: number | null
           final_video_url?: string | null
           funnel_stage?: string | null
-          hook?: string
+          hook?: string | null
           hook_framework?: string | null
           id?: string
           intensity?: number | null
           performance_metrics?: Json | null
-          performance_status?: string
+          performance_status?: string | null
           performance_validated_at?: string | null
           production_notes?: string | null
           script_number?: number | null
@@ -755,45 +688,16 @@ export type Database = {
           source_thread_id?: string | null
           source_winner_ad_id?: string | null
           source_winner_analysis_id?: string | null
-          status?: Database["public"]["Enums"]["approved_script_status"]
-          store_name?: string
+          status?: Database["public"]["Enums"]["approved_script_status"] | null
+          store_name?: string | null
           strategic_format?: string | null
-          updated_at?: string
+          updated_at?: string | null
           updated_by?: string | null
-          variable_shifts?: Json
-          variant_hooks?: string[]
+          variable_shifts?: Json | null
+          variant_hooks?: string[] | null
           video_format?: string | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "approved_scripts_approved_by_fkey"
-            columns: ["approved_by"]
-            isOneToOne: false
-            referencedRelation: "employees"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "approved_scripts_source_thread_id_fkey"
-            columns: ["source_thread_id"]
-            isOneToOne: false
-            referencedRelation: "ai_generations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "approved_scripts_source_winner_analysis_id_fkey"
-            columns: ["source_winner_analysis_id"]
-            isOneToOne: false
-            referencedRelation: "ad_creative_analyses"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "approved_scripts_updated_by_fkey"
-            columns: ["updated_by"]
-            isOneToOne: false
-            referencedRelation: "employees"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       attendance_events: {
         Row: {
