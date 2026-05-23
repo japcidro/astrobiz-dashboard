@@ -19,8 +19,6 @@ import {
   DollarSign,
   Calculator,
   Sparkles,
-  BookOpen,
-  Image as ImageIcon,
   ChevronDown,
   ChevronRight,
   BarChart3,
@@ -255,18 +253,6 @@ const navEntries: NavEntry[] = [
         icon: <Sparkles size={18} />,
         roles: ["admin", "marketing"],
         section: "Creative Generator",
-      },
-      {
-        label: "Content Studio",
-        href: "/marketing/content-studio",
-        icon: <ImageIcon size={18} />,
-        roles: ["admin", "marketing"],
-      },
-      {
-        label: "AI Knowledge",
-        href: "/marketing/ai-settings",
-        icon: <BookOpen size={18} />,
-        roles: ["admin"],
       },
       {
         label: "Creative Attribution",
