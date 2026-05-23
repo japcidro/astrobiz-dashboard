@@ -46,7 +46,7 @@ Team members are pre-registered by admin in Settings (email + role). On first Go
 | `brand_system_prompts` | Per-store system prompt (1 row per brand) | `creative-generator-v2-migration.sql` |
 | `brand_reference_files` | Per-store uploaded reference files w/ extracted text | `creative-generator-v2-migration.sql` |
 | `ai_generations` | Saved AI chat threads | `ai-tables-migration.sql` |
-| `approved_scripts` | Curated scripts saved from chat for production use | `approved-scripts-migration.sql` |
+| `ad_creative_analyses` | Deconstructor output per ad: transcript, hook, classification, scenes (Gemini Flash) | (see crons) |
 
 ## Pages & Routes
 
@@ -104,7 +104,6 @@ Team members are pre-registered by admin in Settings (email + role). On first Go
 | `/marketing/create` | Single ad creation wizard (campaign → adset → creative → ad) |
 | `/marketing/bulk-create` | Bulk create: per-row adset name + ad, spreadsheet table, bulk file upload |
 | `/marketing/drafts` | Saved ad drafts |
-| `/marketing/ai-generator` | Per-brand Claude chat — drag-drop reference files + system prompt + chat |
 
 ### Settings (`/admin/settings`) — Admin Only
 - **Team Management**: Add/edit/remove employees, assign roles
@@ -161,7 +160,6 @@ Team members are pre-registered by admin in Settings (email + role). On first Go
 | `brand-files/upload` | POST | Multipart upload — extracts text from .txt/.md/.docx/.pdf |
 | `brand-files/[id]` | DELETE | Remove reference file (Storage + DB) |
 | `history` | GET/POST | Save + fetch chat threads (shared per role) |
-| `approved-scripts` | GET/POST/...| Curated script library + creative linking + performance |
 
 ### Other
 | Route | Method | Purpose |
@@ -217,39 +215,32 @@ Team members are pre-registered by admin in Settings (email + role). On first Go
 - Facebook: matched by campaign name keywords
 - J&T: matched by sender name (contains-based)
 
-## Creative Generator (v2 — Claude Project style)
+## Creative Loop (where script generation lives)
 
-### Model
-Each brand (Shopify store) has:
-- **1 system prompt** (`brand_system_prompts`) — editable per brand
-- **N reference files** (`brand_reference_files`) — uploaded .txt/.md/.docx/.pdf,
-  text extracted server-side and stored alongside the original blob in the
-  private `brand-files` Supabase Storage bucket
-- **Categories** for files: winning_scripts, brand_voice, product_info,
-  customer_reviews, other
+Script generation runs externally in the user's Claude Max subscription
+(separate Claude Project). The dashboard handles the supporting loop
+around it:
 
-### Generate Flow
-`/api/ai/generate` loads the brand's system prompt + all reference files
-(concat by category) into the Claude Sonnet 4.6 system block (ephemeral
-cache), then sends the message thread. Single chat — no tool_use, no
-structured-output validators, no doc-readiness gating.
-
-### Chat UI (`/marketing/ai-generator`)
-Three-column layout per selected brand:
-- **Left:** Reference Files panel — drag-drop upload + categorized list
-- **Center:** Chat — message stream + input; each assistant turn has a
-  "Save to Approved Library" button that maps the message to the
-  existing `approved_scripts` schema
-- **Right:** System Prompt editor + recent threads (per brand)
-
-Threads auto-save to `ai_generations` (tool_type = "chat"). Approved
-scripts feed into the existing Approved Library tab with creative
-linking and performance tracking still wired up.
+1. **FB ads run** → metrics flow through the Facebook Insights API
+2. **`/api/cron/deconstruct-top-ads`** (1:30 AM daily) picks the top
+   spend + purchase ads, runs Gemini Flash deconstruction, writes
+   structured analysis (transcript, hook anatomy, scenes, classification,
+   format compatibility, etc.) to `ad_creative_analyses`
+3. **`/api/cron/detect-alerts`** (every 30 min) fires `new_winner` alerts
+   when an ad clears the threshold (7-day spend ≥ ₱5k, ROAS ≥ 5.0)
+4. The user reads/uses the analyses + briefing summaries to inform what
+   to feed back into their Claude Project knowledge base
 
 ### Archived legacy
-The previous knowledge-base model (`ai_store_docs` — 6 docs + 3
-system prompts per store + 3 sub-tools) is archived in
-`ai_store_docs_archive_2026_05`. See
+Earlier iterations of an in-dashboard script generator were built and
+removed after the cost reality (Opus 4.7 for the context size) didn't
+match the user's flat Claude Max subscription. Two layers archived:
+
+- `ai_store_docs_archive_2026_05` (19 rows) — the v1 knowledge-base model
+- `approved_scripts_archive_2026_05` (52 rows) — the v2 curated library
+- `approved_script_creatives_archive_2026_05` (16 rows) — manual ad→script links
+
+See `supabase/approved-scripts-rollback-migration.sql` and
 `supabase/creative-generator-v2-migration.sql`.
 
 ## Shareable Module
@@ -281,7 +272,6 @@ src/
         create/                      # Single ad wizard
         bulk-create/                 # Bulk ad creation
         drafts/                      # Ad drafts
-        ai-generator/                # Per-brand Claude chat (v2)
       va/orders/                     # Orders & Parcels
       time-tracker/                  # Time tracking
     (legal)/                         # Public policy pages
