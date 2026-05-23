@@ -65,11 +65,11 @@ export function AiKeyManager({
     setError(null);
     setSuccess(null);
     try {
-      const res = await fetch("/api/ai/docs", {
-        method: "POST",
+      const res = await fetch("/api/settings", {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          _save_setting: settingKey,
+          key: settingKey,
           value: apiKey.trim(),
         }),
       });
