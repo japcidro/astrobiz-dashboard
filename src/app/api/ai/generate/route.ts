@@ -37,10 +37,12 @@ const MODEL = "claude-opus-4-7";
 const MAX_TOKENS = 16384;
 const TRANSPORT_RETRIES = 3;
 
-// Opus 4.7 advertised at 1M tokens. ~4 chars per token English, slightly
-// denser for Taglish. We cap at 800K chars (~200K tokens of headroom for the
-// response + safety) to fail fast with a clear error rather than time out.
-const MAX_CONTEXT_CHARS = 800_000;
+// Opus 4.7 has a 1M input-token context window. At ~3.5 chars/token for
+// mixed English + Taglish, that maps to ~3.5M chars of input. We cap at 3M
+// chars (~857K input tokens) to leave ~150K tokens of headroom for the
+// response + safety margin. Fail fast with a clear error if exceeded rather
+// than letting the request hang past the gateway timeout.
+const MAX_CONTEXT_CHARS = 3_000_000;
 
 const DEFAULT_SYSTEM_PROMPT =
   "You are a creative ad strategist and copywriter helping the user adapt and write ad scripts for their brand. " +
