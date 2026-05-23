@@ -17,12 +17,7 @@ const CTA_OPTIONS: { value: CTAType; label: string }[] = [
 interface StepAdProps {
   data: AdFormData;
   adAccountId: string;
-  sourceScriptId: string | null;
   onUpdate: (updates: Partial<AdFormData>) => void;
-  onSourceScriptIdChange: (id: string | null) => void;
-  // Pre-filters the Script Picker to this store's scripts so marketers
-  // can't accidentally attach a cross-store script to the ad.
-  storeNameFilter?: string | null;
 }
 
 export function StepAd({

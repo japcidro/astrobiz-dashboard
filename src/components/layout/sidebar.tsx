@@ -247,13 +247,6 @@ const navEntries: NavEntry[] = [
         roles: ["admin", "marketing"],
       },
       {
-        label: "Approved Library",
-        href: "/marketing/ai-generator",
-        icon: <Trophy size={18} />,
-        roles: ["admin", "marketing"],
-        section: "Scripts",
-      },
-      {
         label: "Creative Attribution",
         href: "/marketing/creative-tagging",
         icon: <Target size={18} />,

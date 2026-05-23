@@ -28,9 +28,6 @@ export interface BulkAdRow {
   description: string;
   status: "pending" | "uploading" | "submitting" | "done" | "error";
   error: string | null;
-  source_script_id: string | null;
-  source_script_title: string | null;
-  library_creative_id: string | null;
 }
 
 interface AdRowsTableProps {
@@ -229,7 +226,6 @@ export function AdRowsTable({
             creative_type: "video",
             status: "done",
             error: null,
-            library_creative_id: null,
           });
         } else {
           const { image_hash } = await uploadImage(file, adAccountId, token);
@@ -240,7 +236,6 @@ export function AdRowsTable({
             creative_type: "image",
             status: "done",
             error: null,
-            library_creative_id: null,
           });
         }
       } catch (err) {

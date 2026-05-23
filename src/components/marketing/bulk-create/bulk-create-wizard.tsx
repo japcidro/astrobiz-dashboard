@@ -53,9 +53,6 @@ export interface BulkAdRow {
   description: string;
   status: "pending" | "uploading" | "submitting" | "done" | "error";
   error: string | null;
-  source_script_id: string | null;
-  source_script_title: string | null;
-  library_creative_id: string | null;
 }
 
 // ─── CTA Options ───
@@ -92,9 +89,6 @@ function makeEmptyRow(): BulkAdRow {
     description: "",
     status: "pending",
     error: null,
-    source_script_id: null,
-    source_script_title: null,
-    library_creative_id: null,
   };
 }
 

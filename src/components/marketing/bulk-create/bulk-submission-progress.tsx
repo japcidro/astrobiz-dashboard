@@ -17,8 +17,6 @@ export interface BulkAdRow {
   description: string;
   status: "pending" | "uploading" | "submitting" | "done" | "error";
   error: string | null;
-  source_script_id: string | null;
-  source_script_title: string | null;
 }
 
 interface BulkSubmissionProgressProps {
@@ -105,26 +103,23 @@ export function BulkSubmissionProgress({
           );
           const rowAdData = buildAdData(row);
 
-          // If this row is linked to an approved script OR a store is
-          // selected, create an ad_draft first. The draft captures
-          // source_script_id and shopify_store_id — both tracebacks we
-          // want persisted against the fb_ad_id that the create endpoint
-          // later stamps.
+          // If a store is selected, create an ad_draft first so the
+          // shopify_store_id is persisted against the fb_ad_id that the
+          // create endpoint later stamps.
           let draftId: string | null = null;
-          if (row.source_script_id || shopifyStoreId) {
+          if (shopifyStoreId) {
             const draftRes = await fetch("/api/facebook/drafts", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 ad_account_id: adAccountId,
-                name: row.ad_name || row.adset_name || "Bulk Script Ad",
+                name: row.ad_name || row.adset_name || "Bulk Ad",
                 mode: effectiveMode,
                 existing_campaign_id: effectiveCampaignId,
                 existing_adset_id: null,
                 campaign_data: effectiveCampaignData,
                 adset_data: rowAdsetData,
                 ad_data: rowAdData,
-                source_script_id: row.source_script_id,
                 shopify_store_id: shopifyStoreId,
               }),
             });
