@@ -43,8 +43,10 @@ Team members are pre-registered by admin in Settings (email + role). On first Go
 | `shopify_stores` | Shopify store credentials (OAuth) | `shopify-stores-migration.sql` + `shopify-oauth-migration.sql` |
 | `cogs_items` | Cost of goods per SKU per store | `profit-tables-migration.sql` |
 | `jt_deliveries` | J&T Express delivery tracking (upsert by waybill) | `profit-tables-migration.sql` |
-| `ai_store_docs` | Per-store AI knowledge documents (6 docs + 3 system prompts) | `ai-tables-migration.sql` |
-| `ai_generations` | Saved AI generation history | `ai-tables-migration.sql` |
+| `brand_system_prompts` | Per-store system prompt (1 row per brand) | `creative-generator-v2-migration.sql` |
+| `brand_reference_files` | Per-store uploaded reference files w/ extracted text | `creative-generator-v2-migration.sql` |
+| `ai_generations` | Saved AI chat threads | `ai-tables-migration.sql` |
+| `approved_scripts` | Curated scripts saved from chat for production use | `approved-scripts-migration.sql` |
 
 ## Pages & Routes
 
@@ -102,8 +104,7 @@ Team members are pre-registered by admin in Settings (email + role). On first Go
 | `/marketing/create` | Single ad creation wizard (campaign → adset → creative → ad) |
 | `/marketing/bulk-create` | Bulk create: per-row adset name + ad, spreadsheet table, bulk file upload |
 | `/marketing/drafts` | Saved ad drafts |
-| `/marketing/ai-generator` | AI chat interface (Claude API) with per-store knowledge |
-| `/marketing/ai-settings` | Per-store AI knowledge document management (admin only) |
+| `/marketing/ai-generator` | Per-brand Claude chat — drag-drop reference files + system prompt + chat |
 
 ### Settings (`/admin/settings`) — Admin Only
 - **Team Management**: Add/edit/remove employees, assign roles
@@ -154,9 +155,13 @@ Team members are pre-registered by admin in Settings (email + role). On first Go
 ### AI (`/api/ai/`)
 | Route | Method | Purpose |
 |-------|--------|---------|
-| `generate` | POST | Call Claude API with store knowledge as context |
-| `docs` | GET/POST/DELETE | Per-store knowledge document CRUD |
-| `history` | GET/POST | Save + fetch generation history (shared) |
+| `generate` | POST | Claude chat with per-brand system prompt + reference files |
+| `brand-prompt` | GET/PUT | Per-brand system prompt CRUD |
+| `brand-files` | GET | List per-brand reference files |
+| `brand-files/upload` | POST | Multipart upload — extracts text from .txt/.md/.docx/.pdf |
+| `brand-files/[id]` | DELETE | Remove reference file (Storage + DB) |
+| `history` | GET/POST | Save + fetch chat threads (shared per role) |
+| `approved-scripts` | GET/POST/...| Curated script library + creative linking + performance |
 
 ### Other
 | Route | Method | Purpose |
@@ -212,31 +217,40 @@ Team members are pre-registered by admin in Settings (email + role). On first Go
 - Facebook: matched by campaign name keywords
 - J&T: matched by sender name (contains-based)
 
-## AI Generator
+## Creative Generator (v2 — Claude Project style)
 
-### Per-Store Knowledge (9 documents)
-6 shared knowledge docs + 3 system instructions:
+### Model
+Each brand (Shopify store) has:
+- **1 system prompt** (`brand_system_prompts`) — editable per brand
+- **N reference files** (`brand_reference_files`) — uploaded .txt/.md/.docx/.pdf,
+  text extracted server-side and stored alongside the original blob in the
+  private `brand-files` Supabase Storage bucket
+- **Categories** for files: winning_scripts, brand_voice, product_info,
+  customer_reviews, other
 
-**Knowledge Docs (shared across all 3 tools):**
-1. Market Sophistication Document
-2. New Information Prompt Document
-3. New Mechanism Prompt Document
-4. Origins Edition / Evolved Avatar Training
-5. Market Research Document
-6. Winning Ad Template
+### Generate Flow
+`/api/ai/generate` loads the brand's system prompt + all reference files
+(concat by category) into the Claude Sonnet 4.6 system block (ephemeral
+cache), then sends the message thread. Single chat — no tool_use, no
+structured-output validators, no doc-readiness gating.
 
-**System Instructions (one per tool):**
-7. Angle Generator System Instruction
-8. Script Creator System Instruction
-9. Format Expansion System Instruction
+### Chat UI (`/marketing/ai-generator`)
+Three-column layout per selected brand:
+- **Left:** Reference Files panel — drag-drop upload + categorized list
+- **Center:** Chat — message stream + input; each assistant turn has a
+  "Save to Approved Library" button that maps the message to the
+  existing `approved_scripts` schema
+- **Right:** System Prompt editor + recent threads (per brand)
 
-### Chat Interface
-- Full conversation with follow-ups
-- Tool selector: Angle Generator | Script Creator | Format Expansion
-- Each tool uses its own system instruction + shared knowledge
-- Auto-save threads after each AI response
-- Shared history across team (admin + marketing)
-- Module-level cache for navigation persistence
+Threads auto-save to `ai_generations` (tool_type = "chat"). Approved
+scripts feed into the existing Approved Library tab with creative
+linking and performance tracking still wired up.
+
+### Archived legacy
+The previous knowledge-base model (`ai_store_docs` — 6 docs + 3
+system prompts per store + 3 sub-tools) is archived in
+`ai_store_docs_archive_2026_05`. See
+`supabase/creative-generator-v2-migration.sql`.
 
 ## Shareable Module
 
@@ -267,8 +281,7 @@ src/
         create/                      # Single ad wizard
         bulk-create/                 # Bulk ad creation
         drafts/                      # Ad drafts
-        ai-generator/                # AI chat interface
-        ai-settings/                 # AI knowledge docs
+        ai-generator/                # Per-brand Claude chat (v2)
       va/orders/                     # Orders & Parcels
       time-tracker/                  # Time tracking
     (legal)/                         # Public policy pages
@@ -308,7 +321,9 @@ supabase/
   shopify-stores-migration.sql       # Shopify stores table
   shopify-oauth-migration.sql        # OAuth columns for shopify_stores
   profit-tables-migration.sql        # cogs_items + jt_deliveries
-  ai-tables-migration.sql            # ai_store_docs + ai_generations
+  ai-tables-migration.sql            # ai_generations (legacy ai_store_docs dropped)
+  creative-generator-v2-migration.sql # brand_system_prompts + brand_reference_files + brand-files bucket
+  content-studio-rollback-migration.sql # Drops legacy Content Studio resources
 ```
 
 ## Environment Variables
