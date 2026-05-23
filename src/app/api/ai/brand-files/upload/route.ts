@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
-import { detectFileType, extractText } from "@/lib/ai/file-extractors";
+import { resolveFileType, extractText } from "@/lib/ai/file-extractors";
 import { BRAND_FILE_CATEGORIES, type BrandFileCategory } from "@/lib/ai/brand-types";
 
 export const dynamic = "force-dynamic";
@@ -48,15 +48,16 @@ export async function POST(request: Request) {
     );
   }
 
-  const fileType = detectFileType(file.name);
-  if (!fileType) {
-    return Response.json(
-      { error: "Unsupported file type. Allowed: .txt, .md, .docx, .pdf" },
-      { status: 400 }
-    );
-  }
-
   const buffer = Buffer.from(await file.arrayBuffer());
+
+  // Resolve type from the bytes (magic-byte sniff), falling back to the
+  // filename only for the md-vs-txt distinction. A .docx-named file that
+  // is actually plain markdown will be reclassified here.
+  const resolved = resolveFileType(buffer, file.name);
+  if (!resolved.ok) {
+    return Response.json({ error: resolved.error }, { status: 400 });
+  }
+  const fileType = resolved.type;
 
   let extractedText: string;
   try {
