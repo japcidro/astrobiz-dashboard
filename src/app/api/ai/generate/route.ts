@@ -2,6 +2,10 @@ import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
 
 export const dynamic = "force-dynamic";
+// Large-context Opus 4.7 calls with 200K+ tokens can run 60-120s. The default
+// Vercel function timeout (300s on Fluid Compute) is enough, but we set it
+// explicitly to defend against any environment with a shorter default.
+export const maxDuration = 300;
 
 interface ClientMessage {
   role: "user" | "assistant";
@@ -26,9 +30,17 @@ interface ClaudeApiResult {
   errorText: string;
 }
 
-const MODEL = "claude-sonnet-4-6";
+// Opus 4.7 (1M token context window) — fits 9-10 large brand reference docs
+// + a 50K-char system prompt comfortably. Sonnet 4.6 caps at 200K which is
+// not enough for the production workload.
+const MODEL = "claude-opus-4-7";
 const MAX_TOKENS = 16384;
 const TRANSPORT_RETRIES = 3;
+
+// Opus 4.7 advertised at 1M tokens. ~4 chars per token English, slightly
+// denser for Taglish. We cap at 800K chars (~200K tokens of headroom for the
+// response + safety) to fail fast with a clear error rather than time out.
+const MAX_CONTEXT_CHARS = 800_000;
 
 const DEFAULT_SYSTEM_PROMPT =
   "You are a creative ad strategist and copywriter helping the user adapt and write ad scripts for their brand. " +
@@ -97,6 +109,28 @@ export async function POST(request: Request) {
   const referenceContext = (files ?? [])
     .map((f) => `=== ${f.title} ===\n${f.extracted_text}`)
     .join("\n\n");
+
+  // Early validation: if combined context is too large for the model, return
+  // a clear error now rather than letting the Claude API reject silently or
+  // letting the request hang past the gateway timeout.
+  const userMessageChars = messages.reduce(
+    (sum, m) => sum + (m.content?.length ?? 0),
+    0
+  );
+  const totalContextChars =
+    systemPromptContent.length + referenceContext.length + userMessageChars;
+  if (totalContextChars > MAX_CONTEXT_CHARS) {
+    const estTokens = Math.round(totalContextChars / 4);
+    return Response.json(
+      {
+        error:
+          `Combined context (${totalContextChars.toLocaleString()} chars / ` +
+          `~${estTokens.toLocaleString()} tokens) exceeds the model limit. ` +
+          `Remove some reference files or shorten the system prompt for this brand.`,
+      },
+      { status: 400 }
+    );
+  }
 
   const systemBlocks: Array<{
     type: "text";

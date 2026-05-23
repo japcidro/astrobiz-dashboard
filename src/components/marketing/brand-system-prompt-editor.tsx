@@ -99,13 +99,24 @@ export function BrandSystemPromptEditor({ storeName }: Props) {
             <RefreshCw size={14} className="animate-spin text-gray-500" />
           </div>
         ) : (
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder={PLACEHOLDER}
-            rows={10}
-            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none font-mono"
-          />
+          <>
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder={PLACEHOLDER}
+              rows={20}
+              className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-y font-mono min-h-[200px]"
+            />
+            <div className="flex items-center justify-between mt-1.5 text-[10px] text-gray-500">
+              <span>
+                {prompt.length.toLocaleString()} chars · ~
+                {Math.round(prompt.length / 4).toLocaleString()} tokens
+              </span>
+              {dirty && (
+                <span className="text-yellow-500">Unsaved changes</span>
+              )}
+            </div>
+          </>
         )}
         {error && (
           <div className="mt-2 p-2 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-[11px] flex items-start gap-1.5">
