@@ -10,16 +10,15 @@
 -- ============================================
 
 -- ============================================================
--- DROP STORAGE POLICIES + BUCKET CONTENTS + BUCKET
+-- DROP STORAGE POLICIES
+-- (The `content-studio` bucket itself must be deleted via the Storage
+--  REST API or the Supabase dashboard — Supabase blocks direct DELETE
+--  from storage.buckets via SQL by design.)
 -- ============================================================
 drop policy if exists "content_studio_storage_insert" on storage.objects;
 drop policy if exists "content_studio_storage_read" on storage.objects;
 drop policy if exists "content_studio_storage_update" on storage.objects;
 drop policy if exists "content_studio_storage_delete" on storage.objects;
-
--- Delete every object inside the bucket before dropping the bucket itself
-delete from storage.objects where bucket_id = 'content-studio';
-delete from storage.buckets where id = 'content-studio';
 
 -- ============================================================
 -- DROP TABLE POLICIES (defensive — table drop also removes them)
