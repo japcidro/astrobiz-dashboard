@@ -15,6 +15,8 @@ import {
   MessageCircle,
   BookmarkPlus,
   AlertCircle,
+  PanelLeft,
+  PanelRight,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -62,6 +64,19 @@ export default function AiGeneratorPage() {
 
   const [threads, setThreads] = useState<Thread[]>([]);
   const [showHistory, setShowHistory] = useState(false);
+  const [showFiles, setShowFiles] = useState(true);
+  const [showPrompt, setShowPrompt] = useState(true);
+
+  // Auto-collapse side panels on narrow viewports (below xl/1280px).
+  // The 3-column layout (260px Files + flex Chat + 320px Prompt) needs
+  // ~900px minimum to render comfortably; below that we hide the side
+  // panels by default and let the user toggle them open from the header.
+  useEffect(() => {
+    if (typeof window !== "undefined" && window.innerWidth < 1280) {
+      setShowFiles(false);
+      setShowPrompt(false);
+    }
+  }, []);
 
   const [saveIndex, setSaveIndex] = useState<number | null>(null);
 
@@ -263,26 +278,50 @@ export default function AiGeneratorPage() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {view === "chat" && (
             <>
               <button
+                onClick={() => setShowFiles((s) => !s)}
+                title={showFiles ? "Hide files panel" : "Show files panel"}
+                className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-sm transition-colors cursor-pointer ${
+                  showFiles
+                    ? "bg-emerald-600 text-white"
+                    : "bg-gray-800 text-gray-400 hover:text-white"
+                }`}
+              >
+                <PanelLeft size={14} />
+                <span className="hidden sm:inline">Files</span>
+              </button>
+              <button
+                onClick={() => setShowPrompt((s) => !s)}
+                title={showPrompt ? "Hide system prompt" : "Show system prompt"}
+                className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-sm transition-colors cursor-pointer ${
+                  showPrompt
+                    ? "bg-emerald-600 text-white"
+                    : "bg-gray-800 text-gray-400 hover:text-white"
+                }`}
+              >
+                <PanelRight size={14} />
+                <span className="hidden sm:inline">Prompt</span>
+              </button>
+              <button
                 onClick={() => setShowHistory(!showHistory)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer ${
+                className={`flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-sm transition-colors cursor-pointer ${
                   showHistory
                     ? "bg-emerald-600 text-white"
                     : "bg-gray-800 text-gray-400 hover:text-white"
                 }`}
               >
                 <MessageSquare size={14} />
-                History
+                <span className="hidden sm:inline">History</span>
               </button>
               <button
                 onClick={handleNewThread}
-                className="flex items-center gap-1.5 bg-gray-800 text-gray-400 hover:text-white px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 bg-gray-800 text-gray-400 hover:text-white px-2.5 py-2 rounded-lg text-sm transition-colors cursor-pointer"
               >
                 <Plus size={14} />
-                New Chat
+                <span className="hidden sm:inline">New Chat</span>
               </button>
             </>
           )}
@@ -333,14 +372,20 @@ export default function AiGeneratorPage() {
           <ApprovedLibrary storeName={storeName} />
         </div>
       ) : (
-        <div className="flex-1 grid grid-cols-[260px_1fr_320px] gap-3 overflow-hidden">
-          {storeName ? (
-            <BrandFilesPanel storeName={storeName} />
-          ) : (
-            <div />
-          )}
+        <div
+          className={`flex-1 grid gap-3 overflow-hidden ${
+            showFiles && showPrompt
+              ? "grid-cols-[260px_1fr_320px]"
+              : showFiles
+              ? "grid-cols-[260px_1fr]"
+              : showPrompt
+              ? "grid-cols-[1fr_320px]"
+              : "grid-cols-1"
+          }`}
+        >
+          {storeName && showFiles && <BrandFilesPanel storeName={storeName} />}
 
-          <div className="flex flex-col gap-3 overflow-hidden">
+          <div className="flex flex-col gap-3 overflow-hidden min-w-0">
             {showHistory && (
               <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl max-h-48 overflow-y-auto">
                 <div className="p-2 border-b border-gray-700/50 sticky top-0 bg-gray-800/95 backdrop-blur">
@@ -584,9 +629,11 @@ export default function AiGeneratorPage() {
             </div>
           </div>
 
-          <div className="overflow-y-auto">
-            {storeName && <BrandSystemPromptEditor storeName={storeName} />}
-          </div>
+          {storeName && showPrompt && (
+            <div className="overflow-y-auto">
+              <BrandSystemPromptEditor storeName={storeName} />
+            </div>
+          )}
         </div>
       )}
 
