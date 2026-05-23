@@ -18,7 +18,6 @@ import {
   FileText,
   DollarSign,
   Calculator,
-  Sparkles,
   ChevronDown,
   ChevronRight,
   BarChart3,
@@ -248,11 +247,11 @@ const navEntries: NavEntry[] = [
         roles: ["admin", "marketing"],
       },
       {
-        label: "AI Generator",
+        label: "Approved Library",
         href: "/marketing/ai-generator",
-        icon: <Sparkles size={18} />,
+        icon: <Trophy size={18} />,
         roles: ["admin", "marketing"],
-        section: "Creative Generator",
+        section: "Scripts",
       },
       {
         label: "Creative Attribution",
