@@ -32,15 +32,14 @@ export async function POST(request: Request) {
   if (typeof storeName !== "string" || !storeName) {
     return Response.json({ error: "store_name is required" }, { status: 400 });
   }
-  if (
-    typeof category !== "string" ||
-    !BRAND_FILE_CATEGORIES.includes(category as BrandFileCategory)
-  ) {
-    return Response.json(
-      { error: `category must be one of: ${BRAND_FILE_CATEGORIES.join(", ")}` },
-      { status: 400 }
-    );
-  }
+  // Category is optional from the client. Defaults to "other" — kept in the
+  // DB schema so categorization stays possible if we ever surface it, but
+  // not required for upload to keep the UX frictionless.
+  const resolvedCategory: BrandFileCategory =
+    typeof category === "string" &&
+    BRAND_FILE_CATEGORIES.includes(category as BrandFileCategory)
+      ? (category as BrandFileCategory)
+      : "other";
   if (file.size > MAX_FILE_SIZE_BYTES) {
     return Response.json(
       { error: `File too large (max ${MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB)` },
@@ -106,7 +105,7 @@ export async function POST(request: Request) {
     .insert({
       store_name: storeName,
       title,
-      category,
+      category: resolvedCategory,
       file_url: storagePath,
       file_name: file.name,
       file_type: fileType,

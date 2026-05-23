@@ -81,10 +81,12 @@ export async function POST(request: Request) {
   const systemPromptContent =
     promptRow?.system_prompt?.trim() || DEFAULT_SYSTEM_PROMPT;
 
-  // Per-brand reference files — concat extracted_text grouped by category.
+  // Per-brand reference files — concat extracted_text, ordered oldest-first.
+  // Category is no longer surfaced to the model (the upload UX dropped it
+  // entirely); titles alone are enough labels for the AI.
   const { data: files, error: filesErr } = await supabase
     .from("brand_reference_files")
-    .select("title, category, extracted_text")
+    .select("title, extracted_text")
     .eq("store_name", store_name)
     .order("created_at", { ascending: true });
 
@@ -93,10 +95,7 @@ export async function POST(request: Request) {
   }
 
   const referenceContext = (files ?? [])
-    .map(
-      (f) =>
-        `=== [${f.category}] ${f.title} ===\n${f.extracted_text}`
-    )
+    .map((f) => `=== ${f.title} ===\n${f.extracted_text}`)
     .join("\n\n");
 
   const systemBlocks: Array<{
