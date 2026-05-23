@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useCallback, useState } from "react";
+import { useRef, useCallback } from "react";
 import {
   Upload,
   X,
@@ -8,11 +8,7 @@ import {
   AlertCircle,
   Loader2,
   Plus,
-  Sparkles,
-  Save,
 } from "lucide-react";
-import type { ApprovedScript } from "@/lib/ai/approved-scripts-types";
-import { ScriptPickerModal } from "../script-picker-modal";
 import { PresetPicker } from "./preset-picker";
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
@@ -34,18 +30,12 @@ export interface BulkAdRow {
   error: string | null;
   source_script_id: string | null;
   source_script_title: string | null;
-  // Set when the row was populated via the Library import flow — the creative
-  // already lives in approved_script_creatives. Lets us hide the
-  // "Save to Library" button in that case (avoids duplicate saves).
   library_creative_id: string | null;
 }
 
 interface AdRowsTableProps {
   rows: BulkAdRow[];
   adAccountId: string;
-  creativeType: "image" | "video";
-  // Pre-filters the per-row Script Picker to this store. Optional.
-  storeNameFilter?: string | null;
   // Enables per-field Preset picker (ad name / primary text / headline /
   // description). Null disables the picker with a hint to select a store.
   shopifyStoreId?: string | null;
@@ -216,8 +206,6 @@ async function runWithConcurrency<T>(
 export function AdRowsTable({
   rows,
   adAccountId,
-  creativeType,
-  storeNameFilter,
   shopifyStoreId,
   onUpdateRow,
   onAddRow,
@@ -225,28 +213,6 @@ export function AdRowsTable({
 }: AdRowsTableProps) {
   const bulkInputRef = useRef<HTMLInputElement>(null);
   const rowInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
-
-  // Per-row script picker: track which row is picking so we know which row
-  // to fill when the user selects a script from the modal.
-  const [pickerTargetRowId, setPickerTargetRowId] = useState<string | null>(
-    null
-  );
-
-  // Linking is metadata-only: we attach source_script_id so the feedback loop
-  // (script-performance.ts) can roll up Meta metrics per script. We do NOT
-  // populate copy fields — marketers write their own headline/primary_text/
-  // description so the AI can later compare copy variants under the same script.
-  const handlePickScript = useCallback(
-    (script: ApprovedScript) => {
-      if (!pickerTargetRowId) return;
-      onUpdateRow(pickerTargetRowId, {
-        source_script_id: script.id,
-        source_script_title: script.angle_title,
-      });
-      setPickerTargetRowId(null);
-    },
-    [pickerTargetRowId, onUpdateRow]
-  );
 
   // Upload a single file for a given row — detect type from file MIME
   const uploadFileForRow = useCallback(
@@ -412,7 +378,7 @@ export function AdRowsTable({
                   />
                 </td>
 
-                {/* Ad Name + optional script link */}
+                {/* Ad Name */}
                 <td className="px-2 py-1.5 bg-gray-800/50">
                   <div className="space-y-1">
                     <div className="flex items-center justify-end">
@@ -438,42 +404,6 @@ export function AdRowsTable({
                         !row.ad_name.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
                       }`}
                     />
-                    {row.source_script_id ? (
-                      <div className="flex items-center gap-1 text-[10px]">
-                        <Sparkles
-                          size={9}
-                          className="text-emerald-400 flex-shrink-0"
-                        />
-                        <span
-                          className="text-emerald-400 truncate flex-1"
-                          title={row.source_script_title ?? ""}
-                        >
-                          {row.source_script_title}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            onUpdateRow(row.id, {
-                              source_script_id: null,
-                              source_script_title: null,
-                            })
-                          }
-                          className="text-gray-600 hover:text-red-400 flex-shrink-0 cursor-pointer"
-                          title="Unlink script"
-                        >
-                          <X size={10} />
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setPickerTargetRowId(row.id)}
-                        className="flex items-center gap-1 text-[10px] text-gray-500 hover:text-emerald-400 cursor-pointer"
-                      >
-                        <Sparkles size={9} />
-                        Link script
-                      </button>
-                    )}
                   </div>
                 </td>
 
@@ -534,25 +464,6 @@ export function AdRowsTable({
                         </button>
                       )}
                     </div>
-                    {row.source_script_id &&
-                      !row.library_creative_id &&
-                      (row.image_hash || row.video_id) &&
-                      row.status === "done" &&
-                      adAccountId && (
-                        <SaveToLibraryButton
-                          scriptId={row.source_script_id}
-                          creativeType={row.creative_type}
-                          imageHash={row.image_hash}
-                          videoId={row.video_id}
-                          fileName={row.file_name}
-                          adAccountId={adAccountId}
-                          onSaved={(creativeId) =>
-                            onUpdateRow(row.id, {
-                              library_creative_id: creativeId,
-                            })
-                          }
-                        />
-                      )}
                   </div>
                 </td>
 
@@ -666,106 +577,6 @@ export function AdRowsTable({
         Add Row
       </button>
 
-      <ScriptPickerModal
-        open={pickerTargetRowId !== null}
-        onClose={() => setPickerTargetRowId(null)}
-        onPick={handlePickScript}
-        defaultStoreFilter={storeNameFilter}
-      />
-    </div>
-  );
-}
-
-// ── Save-to-Library button ──────────────────────────────────────────────────
-//
-// Shown when a row has (a) a linked source script, (b) an uploaded creative,
-// and (c) isn't already sourced from the Library. Saves a new row to
-// approved_script_creatives so next time the launcher can import it directly
-// without re-uploading.
-
-function SaveToLibraryButton({
-  scriptId,
-  creativeType,
-  imageHash,
-  videoId,
-  fileName,
-  adAccountId,
-  onSaved,
-}: {
-  scriptId: string;
-  creativeType: "image" | "video";
-  imageHash: string | null;
-  videoId: string | null;
-  fileName: string | null;
-  adAccountId: string;
-  onSaved: (creativeId: string) => void;
-}) {
-  const [state, setState] = useState<
-    "idle" | "saving" | "saved" | "error"
-  >("idle");
-  const [message, setMessage] = useState<string | null>(null);
-
-  const save = async () => {
-    setState("saving");
-    setMessage(null);
-    try {
-      const res = await fetch(
-        `/api/ai/approved-scripts/${scriptId}/creatives`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            fb_ad_account_id: adAccountId,
-            creative_type: creativeType,
-            fb_image_hash: creativeType === "image" ? imageHash : null,
-            fb_video_id: creativeType === "video" ? videoId : null,
-            file_name: fileName,
-          }),
-        }
-      );
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed to save");
-      onSaved(json.creative?.id as string);
-      setState("saved");
-    } catch (e) {
-      setState("error");
-      setMessage(e instanceof Error ? e.message : "Failed to save");
-    }
-  };
-
-  if (state === "saved") {
-    return (
-      <span className="inline-flex items-center gap-1 text-[10px] text-emerald-400">
-        <CheckCircle size={10} />
-        In Library
-      </span>
-    );
-  }
-
-  return (
-    <div className="flex items-center gap-1">
-      <button
-        type="button"
-        onClick={save}
-        disabled={state === "saving"}
-        title="Add this creative to the script's Library so next time it's one click to import"
-        className="inline-flex items-center gap-1 text-[10px] text-gray-500 hover:text-emerald-300 disabled:opacity-50 cursor-pointer"
-      >
-        {state === "saving" ? (
-          <Loader2 size={9} className="animate-spin" />
-        ) : (
-          <Save size={9} />
-        )}
-        {state === "saving" ? "Saving..." : "Save to Library"}
-      </button>
-      {state === "error" && message && (
-        <span
-          className="text-[10px] text-red-400 truncate"
-          title={message}
-        >
-          {message}
-        </span>
-      )}
     </div>
   );
 }

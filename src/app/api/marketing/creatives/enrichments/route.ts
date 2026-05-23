@@ -6,31 +6,18 @@ export const dynamic = "force-dynamic";
 
 // GET /api/marketing/creatives/enrichments
 //
-// Returns the analyzed-status and winner-pool-status maps for ALL ads the
-// caller has access to. Designed to be called once per page load alongside
-// /api/facebook/all-ads — the client joins by ad_id locally. We don't filter
-// by ad_id list because both source tables are tiny (currently ~19 analyses
-// and a handful of winner links per store), so the simpler scan-all is
-// faster and less code than a 200-id IN-clause round trip.
+// STUB ROUTE — kept alive for backwards compatibility with the
+// marketing/creatives page caller, which expects a 200 response with this
+// shape. The approved-scripts / winners enrichment was removed when the
+// "Approved Library" feature was killed; the `winners` map is now always
+// empty. The `analyses` map remains because the deconstructor (which uses
+// `ad_creative_analyses`) is still a live feature.
 //
 // Response shape:
 //   {
 //     analyses: { [ad_id]: { has_analysis: true, has_v2: boolean } },
-//     winners:  { [ad_id]: {
-//                  approved_script_id: string,
-//                  label: string,           // angle_title
-//                  store_name: string,
-//                  performance_status: string,
-//                  roas: number | null,
-//                  cpp: number | null,
-//                  purchases: number | null,
-//                  max_consecutive: number | null,
-//                  linked_at: string,
-//                } }
+//     winners:  {}   // always empty — approved-scripts feature removed
 //   }
-//
-// Both maps are keyed by fb_ad_id (same id space as all-ads /data[*].ad_id),
-// so the client can do row.winner = winners[row.ad_id] in one pass.
 export async function GET() {
   const employee = await getEmployee();
   if (!employee) {
@@ -42,16 +29,9 @@ export async function GET() {
 
   const supabase = await createClient();
 
-  // Pull both maps in parallel — neither blocks the other.
-  const [analysesRes, linksRes] = await Promise.all([
-    supabase.from("ad_creative_analyses").select("ad_id, analysis"),
-    supabase
-      .from("ad_approved_script_links")
-      .select(
-        "fb_ad_id, approved_script_id, linked_at, " +
-          "approved_scripts(angle_title, store_name, performance_status, performance_metrics)"
-      ),
-  ]);
+  const analysesRes = await supabase
+    .from("ad_creative_analyses")
+    .select("ad_id, analysis");
 
   const analyses: Record<string, { has_analysis: true; has_v2: boolean }> = {};
   for (const row of analysesRes.data ?? []) {
@@ -62,56 +42,10 @@ export async function GET() {
     };
   }
 
-  // Each link row joins one approved_scripts row. We trust the FK so the
-  // nested object is non-null — but Supabase types it as possibly-null, so
-  // we narrow defensively.
-  interface LinkJoined {
-    fb_ad_id: string;
-    approved_script_id: string;
-    linked_at: string;
-    approved_scripts: {
-      angle_title: string;
-      store_name: string;
-      performance_status: string;
-      performance_metrics: {
-        roas?: number;
-        cpp?: number;
-        purchases?: number;
-        max_consecutive?: number;
-      } | null;
-    } | null;
-  }
-
-  const winners: Record<
-    string,
-    {
-      approved_script_id: string;
-      label: string;
-      store_name: string;
-      performance_status: string;
-      roas: number | null;
-      cpp: number | null;
-      purchases: number | null;
-      max_consecutive: number | null;
-      linked_at: string;
-    }
-  > = {};
-
-  for (const row of (linksRes.data ?? []) as unknown as LinkJoined[]) {
-    if (!row.approved_scripts) continue;
-    const m = row.approved_scripts.performance_metrics ?? {};
-    winners[row.fb_ad_id] = {
-      approved_script_id: row.approved_script_id,
-      label: row.approved_scripts.angle_title,
-      store_name: row.approved_scripts.store_name,
-      performance_status: row.approved_scripts.performance_status,
-      roas: m.roas ?? null,
-      cpp: m.cpp ?? null,
-      purchases: m.purchases ?? null,
-      max_consecutive: m.max_consecutive ?? null,
-      linked_at: row.linked_at,
-    };
-  }
+  // Approved-scripts enrichment is gone. Keep the key for backwards compat
+  // with callers that destructure { winners } — they'll just see an empty
+  // object and skip the winner badge entirely.
+  const winners: Record<string, never> = {};
 
   return Response.json({ analyses, winners });
 }

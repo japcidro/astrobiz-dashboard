@@ -84,9 +84,9 @@ async function fetchWithRetry(
 }
 
 // Legacy descriptive fields are kept (transcript / hook / scenes / visual_style /
-// tone / cta / language / duration_seconds) because the Compare flow and the
-// approved-library UI consume them. The new fields below are the v2.0
-// Winning DNA Report — the replicable structural extraction.
+// tone / cta / language / duration_seconds) because the Compare flow consumes
+// them. The new fields below are the v2.0 Winning DNA Report — the replicable
+// structural extraction.
 export interface AdDeconstruction {
   // — Legacy descriptive layer —
   transcript: string;

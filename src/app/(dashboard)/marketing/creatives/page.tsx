@@ -642,17 +642,8 @@ export default function CreativesPage() {
         <DeconstructionDetailModal
           row={activeRow}
           adName={modalAdName}
-          storeNames={storeNames}
-          inferredStore={
-            deriveStore(
-              filteredRows.find((r) => r.ad_id === activeRow.ad_id)?.campaign ??
-                "",
-              storeNames
-            ) ?? (storeFilter !== "ALL" ? storeFilter : null)
-          }
           onClose={() => {
             setActiveRow(null);
-            // Refresh enrichments — user may have just hit "Add to Winners"
             loadEnrichments();
           }}
           onRerun={rerunActive}

@@ -17,13 +17,11 @@ import {
   GitCompareArrows,
   Trash2,
   Sparkles,
-  Trophy,
 } from "lucide-react";
 import {
   PromoteToScalingModal,
   type PromoteSubject,
 } from "@/components/marketing/promote-to-scaling-modal";
-import { AddToWinnersModal } from "@/components/marketing/add-to-winners-modal";
 import { deriveStore } from "@/lib/shopify/derive-store";
 import { ComparativeReportView } from "@/components/marketing/comparative-report";
 import type {
@@ -1147,11 +1145,6 @@ export function DeconstructionPanel({
         <DeconstructionDetailModal
           row={activeRow}
           adName={adMap.get(activeRow.ad_id)?.ad ?? null}
-          storeNames={storeNames}
-          inferredStore={
-            deriveStore(adMap.get(activeRow.ad_id)?.campaign ?? "", storeNames) ??
-            (storeFilter !== "ALL" ? storeFilter : null)
-          }
           onClose={() => setActiveRow(null)}
           onRerun={() => runAnalyze(activeRow.ad_id, true)}
           rerunning={analyzing}
@@ -1546,56 +1539,18 @@ function MetricBadge({
 export function DeconstructionDetailModal({
   row,
   adName,
-  storeNames,
-  inferredStore,
   onClose,
   onRerun,
   rerunning,
 }: {
   row: DeconstructionRow;
   adName: string | null;
-  storeNames: string[];
-  inferredStore: string | null;
   onClose: () => void;
   onRerun: () => void;
   rerunning: boolean;
 }) {
   const a = row.analysis;
   const hasV2 = !!a.viral_mechanism;
-
-  const [winnerStatus, setWinnerStatus] = useState<{
-    in_winners_pool: boolean;
-    label: string | null;
-    store_name: string | null;
-  } | null>(null);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [justAdded, setJustAdded] = useState(false);
-
-  // Probe for existing link on mount, and again after a successful add so the
-  // header badge flips to "In Winners Pool" without a page refresh.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(
-          `/api/ai/approved-scripts/promote-external-winner?ad_id=${encodeURIComponent(row.ad_id)}`
-        );
-        if (!res.ok) return;
-        const json = await res.json();
-        if (cancelled) return;
-        setWinnerStatus({
-          in_winners_pool: !!json.in_winners_pool,
-          label: json.label ?? null,
-          store_name: json.store_name ?? null,
-        });
-      } catch {
-        // non-fatal — button just stays in default state
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [row.ad_id, justAdded]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-start md:items-center justify-center bg-black/70 p-4 overflow-y-auto">
@@ -1642,35 +1597,12 @@ export function DeconstructionDetailModal({
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            {/* Winners-pool action: badge if already in, button if eligible,
-                disabled hint if legacy (no v2.0 fields → re-run first). */}
-            {winnerStatus?.in_winners_pool ? (
-              <span
-                className="inline-flex items-center gap-1.5 text-[11px] bg-amber-500/15 text-amber-300 border border-amber-500/30 rounded px-2 py-1 font-medium"
-                title={
-                  winnerStatus.label
-                    ? `Linked as: ${winnerStatus.label}${winnerStatus.store_name ? ` (${winnerStatus.store_name})` : ""}`
-                    : "Already in winners pool"
-                }
-              >
-                <Trophy size={12} />
-                In Winners Pool
-              </span>
-            ) : hasV2 ? (
-              <button
-                onClick={() => setShowAddModal(true)}
-                className="inline-flex items-center gap-1.5 text-xs bg-amber-600 hover:bg-amber-500 text-white font-medium px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors"
-                title="Feed this winner's DNA into future angle generation + format expansion"
-              >
-                <Trophy size={12} />
-                Add to Winners
-              </button>
-            ) : (
+            {!hasV2 && (
               <button
                 onClick={onRerun}
                 disabled={rerunning}
                 className="inline-flex items-center gap-1.5 text-[11px] text-amber-300/80 hover:text-amber-200 border border-amber-700/40 hover:border-amber-600 rounded px-2 py-1 cursor-pointer disabled:opacity-40"
-                title="Legacy deconstruction. Re-run to extract v2.0 Winning DNA, then you can add to winners."
+                title="Legacy deconstruction. Re-run to extract v2.0 Winning DNA."
               >
                 {rerunning ? (
                   <Loader2 size={11} className="animate-spin" />
@@ -1688,20 +1620,6 @@ export function DeconstructionDetailModal({
             </button>
           </div>
         </div>
-
-        {showAddModal && (
-          <AddToWinnersModal
-            adId={row.ad_id}
-            adName={adName}
-            storeNames={storeNames}
-            defaultStore={inferredStore}
-            onClose={() => setShowAddModal(false)}
-            onSuccess={() => {
-              setShowAddModal(false);
-              setJustAdded((v) => !v); // re-trigger probe
-            }}
-          />
-        )}
 
         {/* Body */}
         <div className="p-5 space-y-5 max-h-[70vh] overflow-y-auto">

@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ChevronRight,
   Loader2,
-  Sparkles,
 } from "lucide-react";
 import Link from "next/link";
 import type {
@@ -17,10 +16,6 @@ import type {
 import { StepCampaign } from "@/components/marketing/create/step-campaign";
 import { StepAdset } from "@/components/marketing/create/step-adset";
 import { PageSelector } from "@/components/marketing/create/page-selector";
-import {
-  CreativePickerModal,
-  type PickedCreative,
-} from "../creative-picker-modal";
 import { StoreDefaultsSelector } from "../store-defaults-selector";
 import {
   resolveNamePattern,
@@ -58,13 +53,8 @@ export interface BulkAdRow {
   description: string;
   status: "pending" | "uploading" | "submitting" | "done" | "error";
   error: string | null;
-  // Link back to the approved script that sourced this ad. Persisted on the
-  // ad_draft row so performance aggregation can trace ad → fb_ad_id →
-  // source_script_id. Nullable: rows can still be written from scratch.
   source_script_id: string | null;
   source_script_title: string | null;
-  // Set when the row was populated via the Library import flow — the
-  // creative already lives in approved_script_creatives. Null otherwise.
   library_creative_id: string | null;
 }
 
@@ -200,7 +190,7 @@ export function BulkCreateWizard() {
 
   // Section 0: Store (drives per-store autofill; nullable)
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
-  const [selectedStoreName, setSelectedStoreName] = useState<string | null>(null);
+  const [, setSelectedStoreName] = useState<string | null>(null);
 
   // Ad rows
   const [rows, setRows] = useState<BulkAdRow[]>(() => [
@@ -211,9 +201,6 @@ export function BulkCreateWizard() {
 
   // Section D: Submission
   const [submitting, setSubmitting] = useState(false);
-
-  // Script importing (multi-pick from Approved Library)
-  const [scriptPickerOpen, setScriptPickerOpen] = useState(false);
 
   // ─── Fetch accounts on mount ───
   useEffect(() => {
@@ -377,37 +364,6 @@ export function BulkCreateWizard() {
 
   const handleRemoveRow = useCallback((id: string) => {
     setRows((prev) => prev.filter((r) => r.id !== id));
-  }, []);
-
-  // Turns selected Library creatives into pre-filled rows: each picked
-  // creative becomes one row with the FB image_hash / video_id already
-  // attached, source_script_id linked for performance traceback, and ad
-  // copy fields LEFT EMPTY (the launcher picks presets instead). If the
-  // only current rows are untouched empties, replace them; otherwise append.
-  const handleImportCreatives = useCallback((picked: PickedCreative[]) => {
-    if (picked.length === 0) return;
-    const newRows: BulkAdRow[] = picked.map(({ script, creative }) => ({
-      ...makeEmptyRow(),
-      creative_type: creative.creative_type,
-      image_hash: creative.fb_image_hash,
-      video_id: creative.fb_video_id,
-      file_name: creative.file_name,
-      status: "done",
-      source_script_id: script.id,
-      source_script_title: script.angle_title,
-      library_creative_id: creative.id,
-    }));
-    setRows((prev) => {
-      const existingHasContent = prev.some(
-        (r) =>
-          r.ad_name.trim() ||
-          r.primary_text.trim() ||
-          r.headline.trim() ||
-          r.image_hash ||
-          r.video_id
-      );
-      return existingHasContent ? [...prev, ...newRows] : newRows;
-    });
   }, []);
 
   const handleUpdateRowStatus = useCallback(
@@ -705,37 +661,6 @@ export function BulkCreateWizard() {
             </div>
           </div>
 
-          {/* Import from Approved Library (creatives) */}
-          <div className="mb-4">
-            <button
-              type="button"
-              onClick={() => setScriptPickerOpen(true)}
-              disabled={!adAccountId}
-              title={
-                !adAccountId
-                  ? "Select an ad account first so we know which creatives are valid"
-                  : "Pick creatives from the Approved Library"
-              }
-              className="flex items-center gap-2 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-600/50 text-emerald-300 hover:text-emerald-200 text-sm px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Sparkles size={14} />
-              Import from Approved Library
-            </button>
-            <p className="mt-1.5 text-[11px] text-gray-500">
-              Pick creatives already uploaded to the Library. Each becomes a
-              row with the video/image attached and the source script linked.
-              Ad copy stays empty — fill it with presets per field.
-            </p>
-          </div>
-
-          <CreativePickerModal
-            open={scriptPickerOpen}
-            onClose={() => setScriptPickerOpen(false)}
-            onPickMany={handleImportCreatives}
-            defaultStoreFilter={selectedStoreName}
-            requireAdAccountId={adAccountId || null}
-          />
-
           {/* Default Copy (fill all rows) */}
           <div className="mb-4 bg-gray-700/20 border border-gray-700/50 rounded-lg p-4">
             <div className="flex items-center justify-between mb-3">
@@ -789,8 +714,6 @@ export function BulkCreateWizard() {
             onAddRow={handleAddRow}
             onRemoveRow={handleRemoveRow}
             adAccountId={adAccountId}
-            creativeType={creativeType}
-            storeNameFilter={selectedStoreName}
             shopifyStoreId={selectedStoreId}
           />
         </Section>

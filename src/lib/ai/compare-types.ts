@@ -1,10 +1,9 @@
 import type { ConsistencyTier, DailyAdMetrics } from "@/lib/facebook/insights-daily";
 
 // Mirrors the AdDeconstruction shape in lib/gemini/deconstruct.ts. Legacy
-// fields are required (consumed by compare flow + approved-library UI).
-// v2.0 Winning DNA Report fields are optional here so older rows in
-// ad_creative_analyses (analyzed before the v2.0 prompt rollout) still type-
-// check when read back.
+// fields are required (consumed by the compare flow). v2.0 Winning DNA
+// Report fields are optional here so older rows in ad_creative_analyses
+// (analyzed before the v2.0 prompt rollout) still type-check when read back.
 export interface AdDeconstruction {
   transcript: string;
   hook: {
