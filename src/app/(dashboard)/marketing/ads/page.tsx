@@ -101,6 +101,8 @@ interface AggRow {
   count: number;
   active_count: number; // how many child ads are ACTIVE
   unknown_count: number; // how many child ads have UNKNOWN status (FB structure fetch issue)
+  disapproved_count: number; // child ads rejected by FB ad review (DISAPPROVED / AD_*_DISAPPROVED)
+  issues_count: number; // child ads in WITH_ISSUES / PENDING_BILLING_INFO / policy-violation states
   scheduled: boolean; // start_time is in the future
   updated_time: string | null;
   start_time: string | null;
@@ -148,6 +150,18 @@ function aggregate(
 
     const active_count = group.filter((r) => r.status === "ACTIVE").length;
     const unknown_count = group.filter((r) => r.status === "UNKNOWN").length;
+    // FB returns "DISAPPROVED" as the ad's effective_status when ad review
+    // rejects it. getDeliveryStatus passes that through unchanged when the
+    // parent campaign/adset is ACTIVE, so we just match the substring to be
+    // safe against variants ("AD_DISAPPROVED", etc.).
+    const disapproved_count = group.filter((r) =>
+      r.status?.includes("DISAPPROVED")
+    ).length;
+    // WITH_ISSUES / PENDING_BILLING_INFO surface policy or payment problems
+    // that also silently stop delivery — worth flagging at rollup.
+    const issues_count = group.filter(
+      (r) => r.status === "WITH_ISSUES" || r.status === "PENDING_BILLING_INFO"
+    ).length;
 
     // Prefer entity's OWN updated_time, but fall back to the most recent
     // child ad updated_time, then to campaign — so the column is never empty
@@ -191,6 +205,8 @@ function aggregate(
       count: group.length,
       active_count,
       unknown_count,
+      disapproved_count,
+      issues_count,
       scheduled,
       updated_time: entityUpdated,
       start_time: earliestStart,
@@ -1142,6 +1158,10 @@ export default function AdsPage() {
   const renderStatusBadge = (s: string) => {
     let style = "text-gray-400 bg-gray-700/50";
     if (s === "ACTIVE") style = "text-green-400 bg-green-900/50";
+    else if (s.includes("DISAPPROVED"))
+      style = "text-red-300 bg-red-900/60 ring-1 ring-red-500/60";
+    else if (s === "WITH_ISSUES" || s === "PENDING_BILLING_INFO")
+      style = "text-red-300 bg-red-900/40";
     else if (s.includes("PAUSED"))
       style = "text-yellow-400 bg-yellow-900/50";
     else if (s.includes("DELETED") || s === "OFF")
@@ -1866,6 +1886,40 @@ export default function AdsPage() {
                               className="text-gray-600 flex-shrink-0"
                             />
                           )}
+                          {drillLevel !== "ad" && (() => {
+                            const agg = rowData as unknown as AggRow;
+                            const disapproved = agg.disapproved_count ?? 0;
+                            if (disapproved > 0) {
+                              return (
+                                <span
+                                  className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-red-900/60 text-red-200 ring-1 ring-red-500/60 flex-shrink-0"
+                                  title={`${disapproved} ad${
+                                    disapproved === 1 ? "" : "s"
+                                  } DISAPPROVED by Facebook ad review — drill in to fix.`}
+                                >
+                                  ⛔ {disapproved} DISAPPROVED
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
+                          {drillLevel !== "ad" && (() => {
+                            const agg = rowData as unknown as AggRow;
+                            const issues = agg.issues_count ?? 0;
+                            if (issues > 0) {
+                              return (
+                                <span
+                                  className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-red-900/40 text-red-300 flex-shrink-0"
+                                  title={`${issues} ad${
+                                    issues === 1 ? "" : "s"
+                                  } in WITH_ISSUES / billing — delivery may be paused.`}
+                                >
+                                  ⚠ {issues} ISSUES
+                                </span>
+                              );
+                            }
+                            return null;
+                          })()}
                           {drillLevel !== "ad" && (() => {
                             const agg = rowData as unknown as AggRow;
                             const active = agg.active_count;
