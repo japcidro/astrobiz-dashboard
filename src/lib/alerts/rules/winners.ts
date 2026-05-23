@@ -20,7 +20,7 @@ const NEW_WINNER_MIN_ROAS = 5.0;
 // been flagged before as a new_winner. Dedup per ad_id for 14d.
 // This is the rollup early-warning. The strict "clear winner"
 // classification (3 consecutive days at 5+ ROAS) lives in
-// classifyConsistency / auto-deconstruct-winners.
+// classifyConsistency (called from deconstruct-top-ads).
 // ===================================================================
 export async function detectNewWinners(
   supabase: SupabaseClient,
