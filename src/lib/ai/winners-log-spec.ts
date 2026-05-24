@@ -70,15 +70,17 @@ RULES:
 
 OUTPUT FORMAT FOR THIS REQUEST:
 - The user will provide ONE OR MORE ads in numbered blocks (=== AD #1, AD #2, ...).
-- Produce ONE complete Log entry per ad following the 7-block structure above.
-- Use markdown level-2 headings for entries: "## ENTRY: <ad_name>" then "### BLOCK 1 — AD INFO" etc.
-- After the final entry, append these two closing sections:
+- Output the SYNTHESIS FIRST, then the entries. The Script Creator reads this
+  file from the top, so Patterns and Untested Territory must appear before the
+  per-ad entries. Use this exact order:
+
     ## PATTERNS OBSERVED
         Cross-ad patterns split by Result (winners vs losers). A pattern only
         counts as "real" when >= 3 entries share the relevant trait. Below that
         threshold every pattern stays "[DRAFT — HUMAN REVIEW REQUIRED]" and
         explicitly says how many more entries are needed. Each pattern names
         the transferable hypothesis AND the A/B that would confirm it.
+
     ## ANTI-COLLAPSE RULE
         Verbatim text:
         "Every batch of scripts generated from this Log must still include at
@@ -86,11 +88,28 @@ OUTPUT FORMAT FOR THIS REQUEST:
         awareness level — regardless of what past performance favours. A loop
         that only rewards the current champion guarantees a future plateau.
         The Log must sharpen the proven AND keep hunting for the next winner."
-        Then a sub-section "### Untested Territory" listing avatars (A–E), hook
-        types (3 proven), video formats (1–15), and awareness levels NOT yet
-        appearing in any entry in this Log. This list is the concrete menu for
-        Anti-Collapse picks.
 
+        ### Untested Territory
+        Listing avatars (A–E), hook types (3 proven), video formats (1–15),
+        and awareness levels NOT yet appearing in any entry in this Log. This
+        list is the concrete menu for Anti-Collapse picks.
+
+    ## ENTRY: <first ad name>
+        ### BLOCK 1 — AD INFO
+        ### BLOCK 2 — METRICS
+        ### BLOCK 3 — CLASSIFICATION
+        ### BLOCK 4 — THE SCRIPT
+        ### BLOCK 5 — VERBATIM ASSET CAPTURE
+        ### BLOCK 6 — COMPLIANCE SNAPSHOT
+        ### BLOCK 7 — THE JUDGEMENT
+
+    ## ENTRY: <second ad name>
+        ... (same 7-block structure)
+
+- You must analyze all ads internally BEFORE writing the synthesis at the top —
+  Patterns and Untested Territory require seeing every entry's classification
+  first. Generate the synthesis based on that internal analysis, then output
+  the entries.
 - Output the entire response in plain markdown (no JSON wrapping, no preamble).
-- Start IMMEDIATELY with "## ENTRY: <first ad name>". No "Here is the Log" line.
+- Start IMMEDIATELY with "## PATTERNS OBSERVED". No "Here is the Log" line.
 `;

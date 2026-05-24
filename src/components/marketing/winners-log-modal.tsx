@@ -217,15 +217,11 @@ export function WinnersLogModal({ storeFilter, onClose }: Props) {
           )}
           {result && view === "cards" && parsed && (
             <>
-              {parsed.entries.length === 0 && (
-                <div className="text-xs text-gray-500">
-                  No entries parsed from the model output — switch to Raw .md
-                  to see the unstructured response.
-                </div>
-              )}
-              {parsed.entries.map((entry, i) => (
-                <LogEntryCard key={i} entry={entry} />
-              ))}
+              {/* Synthesis at the top — Patterns Observed + Anti-Collapse +
+                  Untested Territory — matches the .md file's top-down order.
+                  The Script Creator reads this file from the top, so the
+                  takeaways and the Untested Territory menu must appear
+                  before the per-ad entries. */}
               {parsed.patterns_markdown && (
                 <ClosingSection
                   icon={<FileText size={14} className="text-gray-400" />}
@@ -242,6 +238,15 @@ export function WinnersLogModal({ storeFilter, onClose }: Props) {
                   defaultOpen
                 />
               )}
+              {parsed.entries.length === 0 && (
+                <div className="text-xs text-gray-500">
+                  No entries parsed from the model output — switch to Raw .md
+                  to see the unstructured response.
+                </div>
+              )}
+              {parsed.entries.map((entry, i) => (
+                <LogEntryCard key={i} entry={entry} />
+              ))}
             </>
           )}
         </div>
