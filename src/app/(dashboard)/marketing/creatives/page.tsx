@@ -306,38 +306,64 @@ export default function CreativesPage() {
 
   // /api/facebook/all-ads intentionally returns thumbnail_url: null for
   // every ad (creative joins would time out the main payload). After the
-  // ads load, fire a background fetch against /api/facebook/ad-creatives
-  // which batches in 50s + parallelizes — merge the thumbnails back into
-  // the row state when it returns. Non-fatal if it fails.
+  // ads load, fire background fetches against /api/facebook/ad-creatives
+  // and merge the results back into row state.
+  //
+  // Two safety rails on the request volume:
+  //   1) include_zero_spend=1 means the payload can contain 6k+ ads. We
+  //      cap thumbnail fetches to the TOP 300 by spend so we don't burn
+  //      the FB rate limit (200/hour) with one page load. The rest can
+  //      use the gray placeholder — anything not in the top 300 is by
+  //      definition low-activity.
+  //   2) Even within the cap, we chunk the URL client-side (50 per
+  //      request) — joining all IDs into one GET produces a 150KB+ URL
+  //      that Vercel rejects with 414 and silently breaks every thumbnail.
   const loadThumbnails = useCallback(async (rows: AdRow[]) => {
-    const ids = rows.map((r) => r.ad_id).filter(Boolean);
+    const candidates = [...rows]
+      .sort((a, b) => b.spend - a.spend)
+      .slice(0, 300);
+    const ids = candidates.map((r) => r.ad_id).filter(Boolean);
     if (ids.length === 0) return;
-    try {
-      const res = await fetch(
-        `/api/facebook/ad-creatives?ids=${ids.join(",")}`
-      );
-      if (!res.ok) return;
-      const json = (await res.json()) as {
-        creatives: Record<
-          string,
-          { preview_url: string | null; thumbnail_url: string | null }
-        >;
-      };
-      const creatives = json.creatives ?? {};
-      setAds((prev) =>
-        prev.map((a) => {
-          const c = creatives[a.ad_id];
-          if (!c) return a;
-          return {
-            ...a,
-            thumbnail_url: c.thumbnail_url ?? a.thumbnail_url,
-            preview_url: c.preview_url ?? a.preview_url,
-          };
-        })
-      );
-    } catch {
-      /* non-fatal */
+
+    const CHUNK_SIZE = 50;
+    const chunks: string[][] = [];
+    for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+      chunks.push(ids.slice(i, i + CHUNK_SIZE));
     }
+
+    // As each chunk returns, merge its thumbnails into state so the user
+    // sees the visible ads fill in progressively rather than waiting for
+    // all 100+ chunks to complete.
+    await Promise.all(
+      chunks.map(async (chunk) => {
+        try {
+          const res = await fetch(
+            `/api/facebook/ad-creatives?ids=${chunk.join(",")}`
+          );
+          if (!res.ok) return;
+          const json = (await res.json()) as {
+            creatives: Record<
+              string,
+              { preview_url: string | null; thumbnail_url: string | null }
+            >;
+          };
+          const creatives = json.creatives ?? {};
+          setAds((prev) =>
+            prev.map((a) => {
+              const c = creatives[a.ad_id];
+              if (!c) return a;
+              return {
+                ...a,
+                thumbnail_url: c.thumbnail_url ?? a.thumbnail_url,
+                preview_url: c.preview_url ?? a.preview_url,
+              };
+            })
+          );
+        } catch {
+          /* per-chunk failure is non-fatal */
+        }
+      })
+    );
   }, []);
 
   const loadAds = useCallback(
