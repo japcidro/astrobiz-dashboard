@@ -3,17 +3,14 @@ import { getEmployee } from "@/lib/supabase/get-employee";
 import { WINNERS_LOG_SYSTEM_PROMPT } from "@/lib/ai/winners-log-spec";
 
 export const dynamic = "force-dynamic";
-// Opus 4.7 with ~30K tokens of pooled-ad input + ~10-20K tokens out can
-// run 60-120s. 300s gives plenty of headroom.
+// Opus 4.7 with ~50K tokens of pooled-ad input + deconstructor data +
+// 10-20K tokens out can run 90-180s on bigger pools. 300s headroom.
 export const maxDuration = 300;
 
 const MODEL = "claude-opus-4-7";
 const MAX_TOKENS = 32_000;
-
-// Hard cap on the combined per-ad data we send. Opus 4.7 has 1M tokens
-// but realistic Log batches are 5-30 ads; we sanity-cap chars at 800K
-// (~200K input tokens) to fail fast on a runaway batch.
 const MAX_INPUT_CHARS = 800_000;
+const HOOK_RATE_DATE_PRESET = "last_14d";
 
 interface DeconstructionAnalysis {
   transcript?: string;
@@ -33,6 +30,7 @@ interface FbAdRow {
   ad_id: string;
   ad: string;
   campaign: string;
+  account: string;
   spend: number;
   purchases: number;
   cpa: number;
@@ -47,6 +45,56 @@ interface ClaudeResponse {
   usage?: Record<string, number>;
 }
 
+// Per-ad hook rate: FB doesn't expose this in the cached payload, so we
+// pull it on demand for each Log generation. Tiny cost (one parallel
+// fan-out per Log run). Hook rate = 3-sec views / impressions × 100.
+async function fetchHookRates(
+  adIds: string[],
+  token: string
+): Promise<Record<string, number | null>> {
+  const out: Record<string, number | null> = {};
+  await Promise.all(
+    adIds.map(async (adId) => {
+      try {
+        const params = new URLSearchParams({
+          access_token: token,
+          date_preset: HOOK_RATE_DATE_PRESET,
+          fields: "video_3_sec_watched_actions,impressions",
+        });
+        const res = await fetch(
+          `https://graph.facebook.com/v21.0/${adId}/insights?${params}`,
+          { cache: "no-store" }
+        );
+        if (!res.ok) {
+          out[adId] = null;
+          return;
+        }
+        const json = await res.json();
+        const data = json.data?.[0];
+        if (!data) {
+          out[adId] = null;
+          return;
+        }
+        const threeSec = parseFloat(
+          (
+            data.video_3_sec_watched_actions as
+              | Array<{ action_type: string; value: string }>
+              | undefined
+          )?.find((a) => a.action_type === "video_view")?.value ?? "0"
+        );
+        const impressions = parseFloat(data.impressions ?? "0");
+        out[adId] =
+          impressions > 0 && !isNaN(threeSec)
+            ? (threeSec / impressions) * 100
+            : null;
+      } catch {
+        out[adId] = null;
+      }
+    })
+  );
+  return out;
+}
+
 export async function POST(request: Request) {
   const employee = await getEmployee();
   if (!employee) return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -59,12 +107,19 @@ export async function POST(request: Request) {
 
   const supabase = await createClient();
 
-  // 1. Anthropic key
-  const { data: keyRow } = await supabase
-    .from("app_settings")
-    .select("value")
-    .eq("key", "anthropic_api_key")
-    .single();
+  // 1. Credentials
+  const [{ data: keyRow }, { data: fbTokenRow }] = await Promise.all([
+    supabase
+      .from("app_settings")
+      .select("value")
+      .eq("key", "anthropic_api_key")
+      .single(),
+    supabase
+      .from("app_settings")
+      .select("value")
+      .eq("key", "fb_access_token")
+      .single(),
+  ]);
   if (!keyRow?.value) {
     return Response.json(
       { error: "Anthropic API key not configured. Go to Settings." },
@@ -72,6 +127,7 @@ export async function POST(request: Request) {
     );
   }
   const apiKey = keyRow.value as string;
+  const fbToken = (fbTokenRow?.value as string | undefined) ?? null;
 
   // 2. Winner pool ads
   let poolQ = supabase
@@ -89,12 +145,11 @@ export async function POST(request: Request) {
   }
   const adIds = poolRows.map((r) => r.ad_id as string);
 
-  // 3. Deconstruction analyses for those ads (transcript + classification)
-  const { data: analyses, error: anaErr } = await supabase
+  // 3. Deconstruction analyses (transcript + ILP classification)
+  const { data: analyses } = await supabase
     .from("ad_creative_analyses")
     .select("ad_id, analysis, created_at")
     .in("ad_id", adIds);
-  if (anaErr) return Response.json({ error: anaErr.message }, { status: 500 });
   const analysisByAd = new Map<string, DeconstructionAnalysis>();
   for (const row of (analyses ?? []) as Array<{
     ad_id: string;
@@ -103,18 +158,14 @@ export async function POST(request: Request) {
     analysisByAd.set(row.ad_id, row.analysis);
   }
 
-  // 4. FB metrics for those ads — use the cached all-ads payload as the
-  //    canonical source. We don't refetch from FB; just pull from cache.
-  //    No date range filter here — the cache already represents the last
-  //    14-day window which is what the Log assumes.
+  // 4. FB metrics — pull from the cached all-ads payload
   const baseUrl =
-    process.env.NEXT_PUBLIC_SITE_URL ??
-    `${url.protocol}//${url.host}`;
+    process.env.NEXT_PUBLIC_SITE_URL ?? `${url.protocol}//${url.host}`;
   let fbMetrics: Record<string, FbAdRow> = {};
   try {
     const cookieHeader = request.headers.get("cookie") ?? "";
     const fbRes = await fetch(
-      `${baseUrl}/api/facebook/all-ads?date_preset=last_14d&account=ALL`,
+      `${baseUrl}/api/facebook/all-ads?date_preset=last_14d&account=ALL&include_zero_spend=1`,
       { cache: "no-store", headers: { cookie: cookieHeader } }
     );
     if (fbRes.ok) {
@@ -127,30 +178,41 @@ export async function POST(request: Request) {
     fbMetrics = {};
   }
 
-  // 5. Build user message — one block per ad with everything Claude needs
+  // 5. Hook rate per ad — computed from FB Insights (3-sec views / impressions)
+  const hookRates = fbToken
+    ? await fetchHookRates(adIds, fbToken)
+    : ({} as Record<string, number | null>);
+
+  // 6. Build user message — one block per ad with all the v2.0 fields
   const adBlocks: string[] = [];
   for (const p of poolRows) {
     const adId = p.ad_id as string;
     const ana = analysisByAd.get(adId);
     const fb = fbMetrics[adId];
+    const hr = hookRates[adId];
+    const hookRateField =
+      hr != null ? `${hr.toFixed(2)}% (3-sec views / impressions)` : "";
+
     const block = [
       `=== AD #${adBlocks.length + 1} ===`,
       `ad_id: ${adId}`,
       `ad_name: ${fb?.ad ?? "(unknown — not in last_14d FB cache)"}`,
       `campaign: ${fb?.campaign ?? "(unknown)"}`,
+      `account: ${fb?.account ?? "(unknown)"}`,
       `store: ${p.store_name ?? "(unknown)"}`,
       `tagged_at: ${p.tagged_at}`,
       ``,
-      `-- METRICS (last_14d window, FB cache) --`,
-      `spend_php: ${fb ? fb.spend.toFixed(2) : ""}`,
+      `-- METRICS (last_14d window) --`,
+      `spend_php: ${fb && fb.spend ? fb.spend.toFixed(2) : ""}`,
       `purchases: ${fb?.purchases ?? ""}`,
       `cpa_php: ${fb?.cpa ? fb.cpa.toFixed(2) : ""}`,
       `roas: ${fb?.roas ? fb.roas.toFixed(2) + "x" : ""}`,
       `impressions: ${fb?.impressions ?? ""}`,
       `ctr_pct: ${fb?.ctr ? fb.ctr.toFixed(2) : ""}`,
+      `hook_rate_pct: ${hookRateField}`,
       `current_status: ${fb?.status ?? ""}`,
       ``,
-      `-- DECONSTRUCTOR ANALYSIS (Gemini Flash) --`,
+      `-- DECONSTRUCTOR ANALYSIS (use this verbatim for BLOCK 3 classification) --`,
       ana
         ? JSON.stringify(
             {
@@ -168,7 +230,7 @@ export async function POST(request: Request) {
             null,
             2
           )
-        : "(no deconstruction available for this ad)",
+        : "(no deconstruction available — derive classification from the script + metrics, and flag every tag as Classification Confidence: ambiguous)",
       ``,
       `-- TRANSCRIPT --`,
       ana?.transcript ?? "(no transcript available)",
@@ -182,11 +244,12 @@ export async function POST(request: Request) {
     `BRAND: ${storeFilter ?? "(all brands)"}`,
     `GENERATED AT: ${new Date().toISOString()}`,
     ``,
-    `Below is one structured block per ad in the Winners Pool. Build the`,
-    `Log document per the Section 4 entry format. Determine each Result`,
-    `(WINNER/LOSER/MIXED) by comparing the metrics relative to the others`,
-    `in this batch. Then append the Patterns Observed + Anti-Collapse`,
-    `Reminder sections per Section 6.`,
+    `Below is one structured block per ad in the Winners Pool. Produce one`,
+    `7-block Log entry per ad following the v2.0 schema in your system prompt.`,
+    `Determine each Result (WINNER / LOSER / INCONCLUSIVE) by comparing the`,
+    `metrics relative to the others in this batch and against the Script C`,
+    `40.38% hook rate benchmark. Then append PATTERNS OBSERVED and the`,
+    `ANTI-COLLAPSE RULE (with Untested Territory list) per the spec.`,
     ``,
     ...adBlocks,
   ].join("\n");
@@ -200,7 +263,7 @@ export async function POST(request: Request) {
     );
   }
 
-  // 6. Call Claude Opus 4.7
+  // 7. Call Claude Opus 4.7
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
