@@ -6,6 +6,7 @@ import type { AdDeconstruction } from "@/lib/ai/compare-types";
 interface ScalingRow {
   fb_ad_id: string;
   in_scaling: boolean;
+  self_is_scaling: boolean;
 }
 
 export const dynamic = "force-dynamic";
@@ -14,15 +15,21 @@ export const dynamic = "force-dynamic";
 //
 // Side-loaded data the Creatives page joins to FB ad rows by ad_id:
 //   - analyses: which ads have a Gemini deconstruction (and v2.0 fields)
-//   - scaling:  which ads are currently inside a scaling campaign (from
-//               scaling_detection_cache, refreshed every 30 min by cron)
+//   - scaling:  per ad, two flags from scaling_detection_cache —
+//                 self_is_scaling: the ad ITSELF lives in a scaling
+//                                  campaign (this is the "Scaling only"
+//                                  filter target)
+//                 in_scaling:      a testing-campaign ad whose creative
+//                                  has been duplicated into a scaling
+//                                  campaign (informational — "earned a
+//                                  scale")
 //   - winners:  always empty — approved-scripts feature was removed
 //               (kept in the response shape for backwards compat)
 //
 // Response shape:
 //   {
 //     analyses: { [ad_id]: { has_analysis: true, has_v2: boolean } },
-//     scaling:  { [ad_id]: { in_scaling: boolean } },
+//     scaling:  { [ad_id]: { self_is_scaling: boolean, in_scaling: boolean } },
 //     winners:  {}
 //   }
 export async function GET() {
@@ -44,7 +51,7 @@ export async function GET() {
       () =>
         supabase
           .from("scaling_detection_cache")
-          .select("fb_ad_id, in_scaling"),
+          .select("fb_ad_id, in_scaling, self_is_scaling"),
       { orderColumn: "fb_ad_id" }
     ),
   ]);
@@ -58,9 +65,15 @@ export async function GET() {
     };
   }
 
-  const scaling: Record<string, { in_scaling: boolean }> = {};
+  const scaling: Record<
+    string,
+    { self_is_scaling: boolean; in_scaling: boolean }
+  > = {};
   for (const r of scalingRes.data ?? []) {
-    scaling[r.fb_ad_id] = { in_scaling: r.in_scaling };
+    scaling[r.fb_ad_id] = {
+      self_is_scaling: r.self_is_scaling,
+      in_scaling: r.in_scaling,
+    };
   }
 
   const winners: Record<string, never> = {};

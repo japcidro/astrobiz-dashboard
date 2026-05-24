@@ -51,7 +51,10 @@ interface AdRow {
 
 interface Enrichments {
   analyses: Record<string, { has_analysis: true; has_v2: boolean }>;
-  scaling: Record<string, { in_scaling: boolean }>;
+  scaling: Record<
+    string,
+    { self_is_scaling: boolean; in_scaling: boolean }
+  >;
   winners: Record<
     string,
     {
@@ -319,11 +322,15 @@ export default function CreativesPage() {
     }
     if (campaignFilter !== "all" && tab !== "winners") {
       // tab=winners ignores campaign filter — winners stay visible regardless
-      // of whether they're currently in a scaling campaign or not.
+      // of where they're running now.
+      //
+      // We filter on `self_is_scaling` (the ad ITSELF lives in a scaling
+      // campaign), NOT `in_scaling` (a testing ad whose creative was scaled
+      // — those are testing ads we want to keep visible). Ads not in the
+      // cache at all default to testing.
       rows = rows.filter((r) => {
-        const s = enrichments.scaling[r.ad_id];
-        const inScaling = s?.in_scaling ?? false;
-        return campaignFilter === "scaling" ? inScaling : !inScaling;
+        const isScalingAd = enrichments.scaling[r.ad_id]?.self_is_scaling ?? false;
+        return campaignFilter === "scaling" ? isScalingAd : !isScalingAd;
       });
     }
     if (search.trim()) {
