@@ -18,19 +18,23 @@ import {
   Sparkles,
   Wand2,
   ExternalLink,
-  GitCompareArrows,
   Play,
   Pause,
   TrendingUp,
 } from "lucide-react";
-import {
-  DeconstructionDetailModal,
-  ComparativeReportModal,
-  type DeconstructionRow,
-} from "@/components/marketing/deconstruction-panel";
+import { IlpDeconstructionModal } from "@/components/marketing/ilp-deconstruction-modal";
 import { WinnersLogModal } from "@/components/marketing/winners-log-modal";
+
+// Minimal shape we need to drive the deconstruction modal — populated
+// from the clicked AdRow. The new modal handles fetching the full
+// transcript + ILP analysis itself.
+interface ActiveAd {
+  ad_id: string;
+  ad: string;
+  thumbnail_url: string | null;
+  preview_url: string | null;
+}
 import { deriveStore } from "@/lib/shopify/derive-store";
-import type { ComparativeReport } from "@/lib/ai/compare-types";
 import type { DatePreset } from "@/lib/facebook/types";
 
 // ─── Types ───
@@ -110,9 +114,6 @@ const DATE_PRESETS: { label: string; value: DatePreset }[] = [
   { label: "This Month", value: "this_month" },
   { label: "Last Month", value: "last_month" },
 ];
-
-const COMPARE_MIN = 2;
-const COMPARE_MAX = 10;
 
 // FB ad-entity statuses the user can actually flip from the dashboard.
 // Mirrors the gate used in the Ad Performance page so behavior is
@@ -263,25 +264,9 @@ export default function CreativesPage() {
   // Selection (used only in Winners tab for Compare)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // Modal state
-  const [activeRow, setActiveRow] = useState<DeconstructionRow | null>(null);
-  const [modalAdName, setModalAdName] = useState<string | null>(null);
-  const [analyzingId, setAnalyzingId] = useState<string | null>(null);
-  const [analyzeError, setAnalyzeError] = useState<string | null>(null);
-
-  const [compareReport, setCompareReport] = useState<{
-    report: ComparativeReport;
-    inputs_snapshot: unknown;
-    store_name: string | null;
-  } | null>(null);
-  const [comparing, setComparing] = useState(false);
-  const [compareError, setCompareError] = useState<string | null>(null);
-  const [compareProgress, setCompareProgress] = useState<{
-    stage: "deconstructing" | "comparing";
-    current: number;
-    total: number;
-    label: string;
-  } | null>(null);
+  // Active ad in the deconstruction modal. The modal handles fetching
+  // the transcript + running the ILP 8-zone analysis itself.
+  const [activeAd, setActiveAd] = useState<ActiveAd | null>(null);
 
   // ─── Data loaders ───
 
@@ -644,86 +629,20 @@ export default function CreativesPage() {
   }, [enrichedRows]);
 
   // ─── Row click → modal ───
-
-  const openRow = useCallback(
-    async (row: EnrichedRow) => {
-      setAnalyzeError(null);
-      setModalAdName(row.ad);
-
-      // If already analyzed, fetch the single row by ad_id. The endpoint
-      // returns { row } (singular) for that mode, not the list shape.
-      if (row.analysis) {
-        try {
-          const res = await fetch(
-            `/api/marketing/ai-analytics/deconstructions?ad_id=${encodeURIComponent(row.ad_id)}`
-          );
-          const json = (await res.json()) as { row: DeconstructionRow | null };
-          if (json.row) setActiveRow(json.row);
-          else setAnalyzeError("Couldn't load deconstruction.");
-        } catch {
-          setAnalyzeError("Couldn't load deconstruction.");
-        }
-        return;
-      }
-
-      // Not analyzed — kick off deconstruction inline. The on-demand endpoint
-      // returns the freshly-saved row in the response.
-      if (!row.account_id) {
-        setAnalyzeError("Can't analyze external winners without a live ad account context.");
-        return;
-      }
-      setAnalyzingId(row.ad_id);
-      try {
-        const res = await fetch("/api/marketing/ai-analytics/deconstruct", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ad_id: row.ad_id,
-            account_id: row.account_id,
-            trigger_source: "on_demand",
-          }),
-        });
-        const json = await res.json();
-        if (!res.ok) {
-          throw new Error(json.error || `Analyze failed (${res.status})`);
-        }
-        if (json.row) setActiveRow(json.row as DeconstructionRow);
-        // Refresh enrichments so the table flips its "Analyzed" indicator.
-        loadEnrichments();
-      } catch (e) {
-        setAnalyzeError(e instanceof Error ? e.message : "Analyze failed");
-      } finally {
-        setAnalyzingId(null);
-      }
-    },
-    [loadEnrichments]
-  );
-
-  // Wired onRerun for the modal — re-runs deconstruction on the same ad.
-  const rerunActive = useCallback(async () => {
-    if (!activeRow) return;
-    setAnalyzingId(activeRow.ad_id);
-    try {
-      const res = await fetch("/api/marketing/ai-analytics/deconstruct", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ad_id: activeRow.ad_id,
-          account_id: activeRow.account_id,
-          force_refresh: true,
-          trigger_source: "on_demand",
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Re-run failed");
-      if (json.row) setActiveRow(json.row as DeconstructionRow);
-      loadEnrichments();
-    } catch (e) {
-      setAnalyzeError(e instanceof Error ? e.message : "Re-run failed");
-    } finally {
-      setAnalyzingId(null);
-    }
-  }, [activeRow, loadEnrichments]);
+  //
+  // Just hand the minimum the modal needs (ad_id + display fields). The
+  // modal does its own transcript + ILP-analysis fetch via
+  // /api/marketing/deconstructor/from-analysis, and dedupes against
+  // ilp_deconstructions by transcript hash so repeat clicks on the same
+  // ad are instant + free.
+  const openRow = useCallback((row: EnrichedRow) => {
+    setActiveAd({
+      ad_id: row.ad_id,
+      ad: row.ad,
+      thumbnail_url: row.thumbnail_url,
+      preview_url: row.preview_url,
+    });
+  }, []);
 
   // Deep-link: ?ad_id=X auto-opens that row's modal once the table is ready.
   // Used by the redirect from /marketing/ai-analytics?deconstruct_ad=X and
@@ -745,132 +664,6 @@ export default function CreativesPage() {
       }, 0);
     }
   }, [deepLinkAdId, loading, enrichedRows, router, openRow]);
-
-  // ─── Compare flow (Winners tab only) ───
-
-  const selectedRows = useMemo(
-    () => filteredRows.filter((r) => selectedIds.has(r.ad_id)),
-    [filteredRows, selectedIds]
-  );
-  const selectedStores = useMemo(
-    () => Array.from(new Set(selectedRows.map((r) => r.store).filter(Boolean))),
-    [selectedRows]
-  );
-  const canCompare =
-    selectedIds.size >= COMPARE_MIN &&
-    selectedIds.size <= COMPARE_MAX &&
-    !comparing;
-
-  const runCompare = useCallback(
-    async (forceRefresh = false) => {
-      const ids = Array.from(selectedIds);
-      if (ids.length < COMPARE_MIN || ids.length > COMPARE_MAX) {
-        setCompareError(
-          `Select ${COMPARE_MIN}-${COMPARE_MAX} winners para mag-compare.`
-        );
-        return;
-      }
-      if (selectedStores.length > 1) {
-        setCompareError(
-          `Mixed stores (${selectedStores.join(", ")}). Compare must be one store.`
-        );
-        return;
-      }
-      setComparing(true);
-      setCompareError(null);
-      setCompareReport(null);
-
-      // Stage 1: deconstruct any unanalyzed selections (winners are usually
-      // analyzed, but this stays defensive in case a winner was added before
-      // its analysis finished — shouldn't happen with the current button
-      // gating but covers external-import edge cases).
-      const needAnalyze = ids.filter((id) => !enrichments.analyses[id]);
-      for (let i = 0; i < needAnalyze.length; i++) {
-        const id = needAnalyze[i];
-        const row = filteredRows.find((r) => r.ad_id === id);
-        if (!row || !row.account_id) continue;
-        setCompareProgress({
-          stage: "deconstructing",
-          current: i + 1,
-          total: needAnalyze.length,
-          label: row.ad,
-        });
-        try {
-          const r = await fetch("/api/marketing/ai-analytics/deconstruct", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              ad_id: id,
-              account_id: row.account_id,
-              trigger_source: "on_demand",
-            }),
-          });
-          if (!r.ok) {
-            const j = await r.json().catch(() => ({}));
-            throw new Error((j as { error?: string }).error || `Failed`);
-          }
-        } catch (e) {
-          setCompareError(
-            e instanceof Error ? e.message : "Deconstruction failed"
-          );
-          setCompareProgress(null);
-          setComparing(false);
-          return;
-        }
-      }
-      if (needAnalyze.length > 0) await loadEnrichments();
-
-      // Stage 2: comparative analysis
-      setCompareProgress({
-        stage: "comparing",
-        current: 0,
-        total: 0,
-        label: "Running Claude Opus strategic analysis…",
-      });
-      try {
-        const res = await fetch("/api/marketing/ai-analytics/compare", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ad_ids: ids,
-            date_preset: datePreset,
-            force_refresh: forceRefresh,
-          }),
-        });
-        const json = await res.json();
-        if (!res.ok) {
-          throw new Error(
-            (json as { error?: string }).error || `Compare failed (${res.status})`
-          );
-        }
-        const row = (json as {
-          row: {
-            analysis: ComparativeReport;
-            inputs_snapshot: unknown;
-            store_name: string | null;
-          };
-        }).row;
-        setCompareReport({
-          report: row.analysis,
-          inputs_snapshot: row.inputs_snapshot,
-          store_name: row.store_name,
-        });
-      } catch (e) {
-        setCompareError(e instanceof Error ? e.message : "Compare failed");
-      } finally {
-        setComparing(false);
-        setCompareProgress(null);
-      }
-    },
-    [
-      selectedIds,
-      selectedStores,
-      filteredRows,
-      enrichments.analyses,
-      datePreset,
-      loadEnrichments,
-    ]
-  );
 
   // ─── Refresh button (rate-limit aware via /api/facebook/all-ads) ───
 
@@ -930,13 +723,6 @@ export default function CreativesPage() {
         </div>
       )}
 
-      {analyzeError && (
-        <div className="p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-sm flex items-start gap-2">
-          <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
-          <div>{analyzeError}</div>
-        </div>
-      )}
-
       {tab === "winners" && (
         <WinnersPoolToolbar
           poolCount={counts.winners}
@@ -968,31 +754,30 @@ export default function CreativesPage() {
           })
         }
         onRowClick={openRow}
-        analyzingId={analyzingId}
         togglingIds={togglingIds}
         onToggleAd={toggleAdStatus}
         attributions={enrichments.attributions}
         scaling={enrichments.scaling}
       />
 
-      {activeRow && (
-        <DeconstructionDetailModal
-          row={activeRow}
-          adName={modalAdName}
-          onClose={() => {
-            setActiveRow(null);
-            loadEnrichments();
-          }}
-          onRerun={rerunActive}
-          rerunning={analyzingId === activeRow.ad_id}
-          isTaggedWinner={!!enrichments.winner_pool[activeRow.ad_id]}
-          taggingWinner={taggingWinnerId === activeRow.ad_id}
+      {activeAd && (
+        <IlpDeconstructionModal
+          adId={activeAd.ad_id}
+          adName={activeAd.ad}
+          thumbnailUrl={activeAd.thumbnail_url}
+          previewUrl={activeAd.preview_url}
+          isTaggedWinner={!!enrichments.winner_pool[activeAd.ad_id]}
+          taggingWinner={taggingWinnerId === activeAd.ad_id}
           onToggleWinnerTag={() =>
             toggleWinnerTag(
-              activeRow.ad_id,
-              !!enrichments.winner_pool[activeRow.ad_id]
+              activeAd.ad_id,
+              !!enrichments.winner_pool[activeAd.ad_id]
             )
           }
+          onClose={() => {
+            setActiveAd(null);
+            loadEnrichments();
+          }}
         />
       )}
 
@@ -1000,17 +785,6 @@ export default function CreativesPage() {
         <WinnersLogModal
           storeFilter={storeFilter}
           onClose={() => setLogModalOpen(false)}
-        />
-      )}
-
-      {compareReport && (
-        <ComparativeReportModal
-          report={compareReport.report}
-          inputsSnapshot={compareReport.inputs_snapshot}
-          storeName={compareReport.store_name}
-          onClose={() => setCompareReport(null)}
-          onRerun={() => runCompare(true)}
-          rerunning={comparing}
         />
       )}
     </div>
@@ -1242,92 +1016,6 @@ function WinnersPoolToolbar({
   );
 }
 
-function CompareToolbar({
-  selected,
-  stores,
-  canCompare,
-  comparing,
-  progress,
-  error,
-  onRun,
-  onClear,
-}: {
-  selected: number;
-  stores: (string | null)[];
-  canCompare: boolean;
-  comparing: boolean;
-  progress: {
-    stage: "deconstructing" | "comparing";
-    current: number;
-    total: number;
-    label: string;
-  } | null;
-  error: string | null;
-  onRun: () => void;
-  onClear: () => void;
-}) {
-  const filteredStores = stores.filter((s): s is string => !!s);
-  return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 space-y-2">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="text-xs text-gray-400">
-          <span className="text-white font-bold text-base mr-2">
-            {selected}
-          </span>
-          selected · max {COMPARE_MAX}
-          {selected < COMPARE_MIN && ` · need ≥${COMPARE_MIN}`}
-          {filteredStores.length === 1 && (
-            <span className="ml-2 text-emerald-400">
-              · {filteredStores[0]}
-            </span>
-          )}
-          {filteredStores.length > 1 && (
-            <span className="ml-2 text-red-400">
-              · Mixed ({filteredStores.join(", ")})
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {selected > 0 && (
-            <button
-              onClick={onClear}
-              disabled={comparing}
-              className="text-xs text-gray-400 hover:text-white px-3 py-1.5 cursor-pointer disabled:opacity-40"
-            >
-              Clear
-            </button>
-          )}
-          <button
-            onClick={onRun}
-            disabled={!canCompare}
-            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
-          >
-            {comparing ? (
-              <Loader2 size={12} className="animate-spin" />
-            ) : (
-              <GitCompareArrows size={12} />
-            )}
-            {comparing ? "Working…" : "Compare"}
-          </button>
-        </div>
-      </div>
-      {progress && (
-        <div className="text-[11px] text-blue-300 flex items-center gap-2">
-          <Loader2 size={11} className="animate-spin" />
-          {progress.stage === "deconstructing"
-            ? `Deconstructing ${progress.current}/${progress.total}: ${progress.label}`
-            : progress.label}
-        </div>
-      )}
-      {error && (
-        <div className="text-[11px] text-red-300 flex items-center gap-2">
-          <AlertCircle size={11} />
-          {error}
-        </div>
-      )}
-    </div>
-  );
-}
 
 function CreativesTable({
   tab,
@@ -1339,7 +1027,6 @@ function CreativesTable({
   selectedIds,
   onToggleSelect,
   onRowClick,
-  analyzingId,
   togglingIds,
   onToggleAd,
   attributions,
@@ -1354,7 +1041,6 @@ function CreativesTable({
   selectedIds: Set<string>;
   onToggleSelect: (id: string) => void;
   onRowClick: (row: EnrichedRow) => void;
-  analyzingId: string | null;
   togglingIds: Set<string>;
   onToggleAd: (adId: string, currentStatus: string) => void;
   attributions: Record<string, Attribution>;
@@ -1543,12 +1229,7 @@ function CreativesTable({
                     {r.cpa ? `₱${Math.round(r.cpa)}` : "—"}
                   </td>
                   <td className="px-3 py-2.5 text-xs">
-                    {analyzingId === r.ad_id ? (
-                      <span className="inline-flex items-center gap-1 text-blue-300">
-                        <Loader2 size={11} className="animate-spin" />
-                        Analyzing…
-                      </span>
-                    ) : r.analysis ? (
+                    {r.analysis ? (
                       r.analysis.has_v2 ? (
                         <span className="inline-flex items-center gap-1 text-emerald-300">
                           <CheckCircle2 size={11} />
