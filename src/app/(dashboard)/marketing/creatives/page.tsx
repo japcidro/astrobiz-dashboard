@@ -57,6 +57,15 @@ interface Enrichments {
     string,
     { self_is_scaling: boolean; in_scaling: boolean }
   >;
+  attributions: Record<
+    string,
+    {
+      source: "autopilot" | "manual";
+      reason: string | null;
+      actor_name: string | null;
+      at: string;
+    }
+  >;
   winners: Record<
     string,
     {
@@ -72,6 +81,8 @@ interface Enrichments {
     }
   >;
 }
+
+type Attribution = Enrichments["attributions"][string];
 
 type Tab = "all" | "winners";
 type CampaignType = "testing" | "scaling" | "all";
@@ -203,6 +214,7 @@ export default function CreativesPage() {
   const [enrichments, setEnrichments] = useState<Enrichments>({
     analyses: {},
     scaling: {},
+    attributions: {},
     winners: {},
   });
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
@@ -857,6 +869,7 @@ export default function CreativesPage() {
         analyzingId={analyzingId}
         togglingIds={togglingIds}
         onToggleAd={toggleAdStatus}
+        attributions={enrichments.attributions}
       />
 
       {activeRow && (
@@ -1163,6 +1176,7 @@ function CreativesTable({
   analyzingId,
   togglingIds,
   onToggleAd,
+  attributions,
 }: {
   tab: Tab;
   rows: EnrichedRow[];
@@ -1176,6 +1190,7 @@ function CreativesTable({
   analyzingId: string | null;
   togglingIds: Set<string>;
   onToggleAd: (adId: string, currentStatus: string) => void;
+  attributions: Record<string, Attribution>;
 }) {
   if (loading && rows.length === 0) {
     return (
@@ -1310,6 +1325,7 @@ function CreativesTable({
                       adId={r.ad_id}
                       toggling={togglingIds.has(r.ad_id)}
                       onToggle={onToggleAd}
+                      attribution={attributions[r.ad_id] ?? null}
                     />
                   </td>
                   <td className="px-3 py-2.5 text-right font-mono text-xs text-gray-200">
@@ -1454,47 +1470,89 @@ function StatusCell({
   adId,
   toggling,
   onToggle,
+  attribution,
 }: {
   status: string;
   adId: string;
   toggling: boolean;
   onToggle: (adId: string, currentStatus: string) => void;
+  attribution: Attribution | null;
 }) {
   const { label, className } = statusBadgeStyle(status);
   const canToggle = TOGGLEABLE_STATUSES.has(status);
   const isActive = status === "ACTIVE";
 
+  // Subtitle only makes sense when the ad is currently off / problematic.
+  // We skip it when the badge is already "Rejected" (FB-side, no extra
+  // signal from our logs) and when status is ACTIVE.
+  const showSubtitle =
+    attribution &&
+    status !== "ACTIVE" &&
+    !status.includes("DISAPPROVED");
+
   return (
-    <div className="flex items-center gap-1.5">
-      <span
-        className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${className}`}
-        title={status}
-      >
-        {label}
-      </span>
-      {canToggle && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggle(adId, status);
-          }}
-          disabled={toggling}
-          title={isActive ? "Pause ad" : "Activate ad"}
-          className={`p-1 rounded transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait ${
-            isActive
-              ? "text-gray-400 hover:text-red-300 hover:bg-red-900/30"
-              : "text-gray-400 hover:text-green-300 hover:bg-green-900/30"
-          }`}
+    <div className="flex flex-col gap-0.5">
+      <div className="flex items-center gap-1.5">
+        <span
+          className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${className}`}
+          title={status}
         >
-          {toggling ? (
-            <Loader2 size={12} className="animate-spin" />
-          ) : isActive ? (
-            <Pause size={12} />
-          ) : (
-            <Play size={12} />
-          )}
-        </button>
+          {label}
+        </span>
+        {canToggle && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggle(adId, status);
+            }}
+            disabled={toggling}
+            title={isActive ? "Pause ad" : "Activate ad"}
+            className={`p-1 rounded transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait ${
+              isActive
+                ? "text-gray-400 hover:text-red-300 hover:bg-red-900/30"
+                : "text-gray-400 hover:text-green-300 hover:bg-green-900/30"
+            }`}
+          >
+            {toggling ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : isActive ? (
+              <Pause size={12} />
+            ) : (
+              <Play size={12} />
+            )}
+          </button>
+        )}
+      </div>
+      {showSubtitle && attribution && (
+        <AttributionSubtitle attribution={attribution} />
       )}
     </div>
+  );
+}
+
+function AttributionSubtitle({ attribution }: { attribution: Attribution }) {
+  const when = timeAgo(attribution.at);
+  if (attribution.source === "autopilot") {
+    const reason = attribution.reason
+      ? attribution.reason.replace(/_/g, " ")
+      : "rule";
+    return (
+      <p
+        className="text-[10px] text-gray-500 leading-tight max-w-[180px] truncate"
+        title={`Auto-paused (${reason}) ${when}`}
+      >
+        <span className="text-purple-400">Auto</span> · {reason} · {when}
+      </p>
+    );
+  }
+  // manual
+  const who = attribution.actor_name ?? "Someone";
+  return (
+    <p
+      className="text-[10px] text-gray-500 leading-tight max-w-[180px] truncate"
+      title={`Manually paused by ${who} ${when}`}
+    >
+      {who} · {when}
+    </p>
   );
 }

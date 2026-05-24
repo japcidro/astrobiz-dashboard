@@ -745,6 +745,7 @@ export type Database = {
         Row: {
           account_id: string | null
           action: string
+          actor_id: string | null
           ad_id: string
           ad_name: string | null
           adset_id: string | null
@@ -767,6 +768,7 @@ export type Database = {
         Insert: {
           account_id?: string | null
           action: string
+          actor_id?: string | null
           ad_id: string
           ad_name?: string | null
           adset_id?: string | null
@@ -789,6 +791,7 @@ export type Database = {
         Update: {
           account_id?: string | null
           action?: string
+          actor_id?: string | null
           ad_id?: string
           ad_name?: string | null
           adset_id?: string | null
@@ -809,6 +812,13 @@ export type Database = {
           undone_by?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "autopilot_actions_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "autopilot_actions_paused_action_id_fkey"
             columns: ["paused_action_id"]

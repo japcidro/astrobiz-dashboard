@@ -57,6 +57,20 @@ export async function POST(request: Request) {
         throw new Error(err.error?.message || `FB API error: ${res.status}`);
       }
 
+      // Log the manual toggle into autopilot_actions so the Creatives page
+      // can surface "Paused by Julius · 2h ago" alongside autopilot pauses.
+      // Non-fatal — a failed audit insert must not break the toggle itself.
+      try {
+        await supabase.from("autopilot_actions").insert({
+          action: new_status === "PAUSED" ? "manual_paused" : "manual_resumed",
+          ad_id: entity_id,
+          actor_id: employee.id,
+          status: "success",
+        });
+      } catch {
+        /* audit insert is best-effort */
+      }
+
       return Response.json({ success: true, entity_id, status: new_status });
     }
 
