@@ -96,12 +96,11 @@ export function WinnersLogModal({ storeFilter, onClose }: Props) {
 
   const handleDownload = () => {
     if (!result) return;
-    const date = new Date().toISOString().split("T")[0];
-    const storeSlug =
-      result.store && result.store !== "ALL"
-        ? result.store.toLowerCase().replace(/\s+/g, "-")
-        : "all";
-    const filename = `winners-log-${storeSlug}-${date}.md`;
+    // Fixed filename per request — the file always overwrites the prior
+    // version in the user's Claude Project knowledge base, so a single
+    // canonical name keeps the upload step zero-friction. Date / brand
+    // context is already in the document body.
+    const filename = "ILP_Winning_Ad_Log.md";
     const blob = new Blob([result.markdown], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
