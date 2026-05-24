@@ -51,6 +51,7 @@ interface AdRow {
 
 interface Enrichments {
   analyses: Record<string, { has_analysis: true; has_v2: boolean }>;
+  scaling: Record<string, { in_scaling: boolean }>;
   winners: Record<
     string,
     {
@@ -68,6 +69,7 @@ interface Enrichments {
 }
 
 type Tab = "all" | "winners";
+type CampaignType = "testing" | "scaling" | "all";
 type SortKey = "spend" | "purchases" | "roas" | "cpa" | "linked_at";
 
 const DATE_PRESETS: { label: string; value: DatePreset }[] = [
@@ -108,6 +110,9 @@ export default function CreativesPage() {
   const [datePreset, setDatePreset] = useState<DatePreset>("last_14d");
   const [accountFilter, setAccountFilter] = useState("ALL");
   const [storeFilter, setStoreFilter] = useState<string>("ALL");
+  // Default to testing campaigns — the user's main use case for this page
+  // is finding new winners, which happen in testing not scaling.
+  const [campaignFilter, setCampaignFilter] = useState<CampaignType>("testing");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("spend");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -117,6 +122,7 @@ export default function CreativesPage() {
   const [storeNames, setStoreNames] = useState<string[]>([]);
   const [enrichments, setEnrichments] = useState<Enrichments>({
     analyses: {},
+    scaling: {},
     winners: {},
   });
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
@@ -173,6 +179,42 @@ export default function CreativesPage() {
     }
   }, []);
 
+  // /api/facebook/all-ads intentionally returns thumbnail_url: null for
+  // every ad (creative joins would time out the main payload). After the
+  // ads load, fire a background fetch against /api/facebook/ad-creatives
+  // which batches in 50s + parallelizes — merge the thumbnails back into
+  // the row state when it returns. Non-fatal if it fails.
+  const loadThumbnails = useCallback(async (rows: AdRow[]) => {
+    const ids = rows.map((r) => r.ad_id).filter(Boolean);
+    if (ids.length === 0) return;
+    try {
+      const res = await fetch(
+        `/api/facebook/ad-creatives?ids=${ids.join(",")}`
+      );
+      if (!res.ok) return;
+      const json = (await res.json()) as {
+        creatives: Record<
+          string,
+          { preview_url: string | null; thumbnail_url: string | null }
+        >;
+      };
+      const creatives = json.creatives ?? {};
+      setAds((prev) =>
+        prev.map((a) => {
+          const c = creatives[a.ad_id];
+          if (!c) return a;
+          return {
+            ...a,
+            thumbnail_url: c.thumbnail_url ?? a.thumbnail_url,
+            preview_url: c.preview_url ?? a.preview_url,
+          };
+        })
+      );
+    } catch {
+      /* non-fatal */
+    }
+  }, []);
+
   const loadAds = useCallback(
     async (forceRefresh: boolean) => {
       const setter = forceRefresh ? setRefreshing : setLoading;
@@ -184,17 +226,20 @@ export default function CreativesPage() {
         const res = await fetch(url);
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "Failed to load ads");
-        setAds((json.data as AdRow[]) ?? []);
+        const data = (json.data as AdRow[]) ?? [];
+        setAds(data);
         setAccounts((json.accounts as { id: string; name: string }[]) ?? []);
         setRefreshedAt((json.refreshed_at as string) ?? null);
         if (json.throttled_refresh) setThrottled(true);
+        // Background thumbnail merge — doesn't block the table render.
+        void loadThumbnails(data);
       } catch (e) {
         setError(e instanceof Error ? e.message : "Failed to load ads");
       } finally {
         setter(false);
       }
     },
-    [datePreset, accountFilter]
+    [datePreset, accountFilter, loadThumbnails]
   );
 
   // Initial loads
@@ -272,6 +317,15 @@ export default function CreativesPage() {
     if (storeFilter !== "ALL") {
       rows = rows.filter((r) => r.store === storeFilter);
     }
+    if (campaignFilter !== "all" && tab !== "winners") {
+      // tab=winners ignores campaign filter — winners stay visible regardless
+      // of whether they're currently in a scaling campaign or not.
+      rows = rows.filter((r) => {
+        const s = enrichments.scaling[r.ad_id];
+        const inScaling = s?.in_scaling ?? false;
+        return campaignFilter === "scaling" ? inScaling : !inScaling;
+      });
+    }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       rows = rows.filter(
@@ -312,7 +366,16 @@ export default function CreativesPage() {
     });
 
     return rows;
-  }, [enrichedRows, tab, storeFilter, search, sortKey, sortDir]);
+  }, [
+    enrichedRows,
+    tab,
+    storeFilter,
+    campaignFilter,
+    enrichments.scaling,
+    search,
+    sortKey,
+    sortDir,
+  ]);
 
   const counts = useMemo(() => {
     const all = enrichedRows.filter((r) => r.spend > 0 || !!r.winner).length;
@@ -581,6 +644,8 @@ export default function CreativesPage() {
         storeFilter={storeFilter}
         setStoreFilter={setStoreFilter}
         storeNames={storeNames}
+        campaignFilter={campaignFilter}
+        setCampaignFilter={setCampaignFilter}
         search={search}
         setSearch={setSearch}
       />
@@ -760,6 +825,8 @@ function Filters({
   storeFilter,
   setStoreFilter,
   storeNames,
+  campaignFilter,
+  setCampaignFilter,
   search,
   setSearch,
 }: {
@@ -771,6 +838,8 @@ function Filters({
   storeFilter: string;
   setStoreFilter: (v: string) => void;
   storeNames: string[];
+  campaignFilter: CampaignType;
+  setCampaignFilter: (v: CampaignType) => void;
   search: string;
   setSearch: (v: string) => void;
 }) {
@@ -810,6 +879,16 @@ function Filters({
             {a.name}
           </option>
         ))}
+      </select>
+      <select
+        value={campaignFilter}
+        onChange={(e) => setCampaignFilter(e.target.value as CampaignType)}
+        className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+        title="Filter by campaign type. Testing campaigns are where new winning creatives are usually found."
+      >
+        <option value="testing">Testing only</option>
+        <option value="scaling">Scaling only</option>
+        <option value="all">All campaigns</option>
       </select>
       <div className="relative flex-1 min-w-[200px]">
         <Search

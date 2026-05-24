@@ -1,22 +1,29 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
+import { fetchAllRows } from "@/lib/supabase/paginate";
 import type { AdDeconstruction } from "@/lib/ai/compare-types";
+
+interface ScalingRow {
+  fb_ad_id: string;
+  in_scaling: boolean;
+}
 
 export const dynamic = "force-dynamic";
 
 // GET /api/marketing/creatives/enrichments
 //
-// STUB ROUTE — kept alive for backwards compatibility with the
-// marketing/creatives page caller, which expects a 200 response with this
-// shape. The approved-scripts / winners enrichment was removed when the
-// "Approved Library" feature was killed; the `winners` map is now always
-// empty. The `analyses` map remains because the deconstructor (which uses
-// `ad_creative_analyses`) is still a live feature.
+// Side-loaded data the Creatives page joins to FB ad rows by ad_id:
+//   - analyses: which ads have a Gemini deconstruction (and v2.0 fields)
+//   - scaling:  which ads are currently inside a scaling campaign (from
+//               scaling_detection_cache, refreshed every 30 min by cron)
+//   - winners:  always empty — approved-scripts feature was removed
+//               (kept in the response shape for backwards compat)
 //
 // Response shape:
 //   {
 //     analyses: { [ad_id]: { has_analysis: true, has_v2: boolean } },
-//     winners:  {}   // always empty — approved-scripts feature removed
+//     scaling:  { [ad_id]: { in_scaling: boolean } },
+//     winners:  {}
 //   }
 export async function GET() {
   const employee = await getEmployee();
@@ -29,9 +36,18 @@ export async function GET() {
 
   const supabase = await createClient();
 
-  const analysesRes = await supabase
-    .from("ad_creative_analyses")
-    .select("ad_id, analysis");
+  const [analysesRes, scalingRes] = await Promise.all([
+    supabase.from("ad_creative_analyses").select("ad_id, analysis"),
+    // scaling_detection_cache has ~6k rows; bare .select() would silently
+    // cap at 1000. Page through with fetchAllRows.
+    fetchAllRows<ScalingRow>(
+      () =>
+        supabase
+          .from("scaling_detection_cache")
+          .select("fb_ad_id, in_scaling"),
+      { orderColumn: "fb_ad_id" }
+    ),
+  ]);
 
   const analyses: Record<string, { has_analysis: true; has_v2: boolean }> = {};
   for (const row of analysesRes.data ?? []) {
@@ -42,10 +58,12 @@ export async function GET() {
     };
   }
 
-  // Approved-scripts enrichment is gone. Keep the key for backwards compat
-  // with callers that destructure { winners } — they'll just see an empty
-  // object and skip the winner badge entirely.
+  const scaling: Record<string, { in_scaling: boolean }> = {};
+  for (const r of scalingRes.data ?? []) {
+    scaling[r.fb_ad_id] = { in_scaling: r.in_scaling };
+  }
+
   const winners: Record<string, never> = {};
 
-  return Response.json({ analyses, winners });
+  return Response.json({ analyses, scaling, winners });
 }
