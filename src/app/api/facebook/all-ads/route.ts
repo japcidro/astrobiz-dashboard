@@ -24,7 +24,11 @@ const STRUCTURE_CACHE_TTL = 30 * 60 * 1000; // 30 minutes for structure
 // scope happened less than THROTTLE_MS ago, a new ?refresh=1 request
 // is silently downgraded to a cache read. Prevents the Refresh button
 // from nuking the FB rate budget when multiple users press it.
-const MANUAL_REFRESH_THROTTLE_MS = 5 * 60 * 1000;
+// Manual Refresh button throttle. Used to be 5 min, which felt unresponsive
+// when a real refresh failed silently — the user would click again and get
+// a "throttled" no-op without understanding why. 60s is enough to stop spam
+// clicks while letting a deliberate retry through within a sensible window.
+const MANUAL_REFRESH_THROTTLE_MS = 60 * 1000;
 
 const INSIGHTS_FIELDS = [
   "account_name",

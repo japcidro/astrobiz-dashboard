@@ -6,7 +6,19 @@ export const maxDuration = 300; // 5 minutes max
 
 // Date presets to pre-compute
 const PNL_DATE_FILTERS = ["today", "yesterday", "last_7d", "this_month", "last_30d"];
-const ADS_DATE_PRESETS = ["today", "yesterday", "last_7_days", "this_month", "last_30_days"];
+// IMPORTANT: these strings MUST match the values the dashboard sends from
+// DATE_PRESETS in marketing/creatives/page.tsx and marketing/ads/page.tsx.
+// A previous version used "last_7_days"/"last_30_days" (with underscores)
+// which silently warmed cache keys the UI never reads — every dashboard
+// view stayed days stale. Keep these aligned with the UI list.
+const ADS_DATE_PRESETS = [
+  "today",
+  "yesterday",
+  "last_7d",
+  "last_14d",
+  "last_30d",
+  "this_month",
+];
 
 export async function GET(request: Request) {
   // Verify cron secret

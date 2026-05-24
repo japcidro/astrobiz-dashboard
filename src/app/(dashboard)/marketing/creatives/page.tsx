@@ -1001,9 +1001,16 @@ function PageHeader({
       </div>
       <div className="flex items-center gap-2">
         {refreshedAt && (
-          <span className="text-[11px] text-gray-500">
+          <span
+            className={`text-[11px] ${throttled ? "text-amber-400" : "text-gray-500"}`}
+            title={
+              throttled
+                ? "Your refresh was throttled because another refresh ran < 60s ago. The data shown is the prior cache. Wait a moment and click Refresh again."
+                : undefined
+            }
+          >
             Last refreshed: {timeAgo(refreshedAt)}
-            {throttled && " · refresh throttled (5 min)"}
+            {throttled && " · refresh throttled (try again in ~60s)"}
           </span>
         )}
         <button
