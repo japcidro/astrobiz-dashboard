@@ -19,6 +19,8 @@ import {
   Wand2,
   ExternalLink,
   GitCompareArrows,
+  Play,
+  Pause,
 } from "lucide-react";
 import {
   DeconstructionDetailModal,
@@ -88,6 +90,81 @@ const DATE_PRESETS: { label: string; value: DatePreset }[] = [
 const COMPARE_MIN = 2;
 const COMPARE_MAX = 10;
 
+// FB ad-entity statuses the user can actually flip from the dashboard.
+// Mirrors the gate used in the Ad Performance page so behavior is
+// consistent. Parent-paused ("CAMPAIGN PAUSED" / "ADSET PAUSED"),
+// DELETED, ARCHIVED, UNKNOWN, and "ACCOUNT *" are not flippable from
+// an ad-level toggle.
+const TOGGLEABLE_STATUSES = new Set([
+  "ACTIVE",
+  "PAUSED",
+  "IN_PROCESS",
+  "WITH_ISSUES",
+  "PENDING_REVIEW",
+  "PREAPPROVED",
+  "PENDING_BILLING_INFO",
+  "DISAPPROVED",
+]);
+
+function statusBadgeStyle(status: string): {
+  label: string;
+  className: string;
+} {
+  const s = status || "UNKNOWN";
+  if (s === "ACTIVE") {
+    return {
+      label: "Active",
+      className: "bg-green-900/40 text-green-300 border-green-700/50",
+    };
+  }
+  if (s === "PAUSED") {
+    return {
+      label: "Paused",
+      className: "bg-gray-800 text-gray-400 border-gray-700",
+    };
+  }
+  if (s.includes("DISAPPROVED")) {
+    return {
+      label: "Rejected",
+      className: "bg-red-900/40 text-red-300 border-red-700/50",
+    };
+  }
+  if (s === "WITH_ISSUES" || s === "PENDING_BILLING_INFO") {
+    return {
+      label: s === "WITH_ISSUES" ? "Issues" : "Billing",
+      className: "bg-amber-900/40 text-amber-300 border-amber-700/50",
+    };
+  }
+  if (s === "PENDING_REVIEW" || s === "IN_PROCESS" || s === "PREAPPROVED") {
+    return {
+      label: s === "IN_PROCESS" ? "Processing" : "Review",
+      className: "bg-blue-900/40 text-blue-300 border-blue-700/50",
+    };
+  }
+  if (s.startsWith("CAMPAIGN ")) {
+    return {
+      label: "Camp. " + s.slice(9).toLowerCase(),
+      className: "bg-orange-900/40 text-orange-300 border-orange-700/50",
+    };
+  }
+  if (s.startsWith("ADSET ")) {
+    return {
+      label: "Adset " + s.slice(6).toLowerCase(),
+      className: "bg-orange-900/40 text-orange-300 border-orange-700/50",
+    };
+  }
+  if (s.startsWith("ACCOUNT ")) {
+    return {
+      label: "Account " + s.slice(8).toLowerCase(),
+      className: "bg-red-900/30 text-red-300 border-red-700/40",
+    };
+  }
+  return {
+    label: s.toLowerCase(),
+    className: "bg-gray-800 text-gray-500 border-gray-700",
+  };
+}
+
 // Display only ads with non-zero spend OR a winner mark by default. The FB
 // /insights endpoint already excludes zero-spend rows in the cache, so this
 // is mostly a safety filter for the unioned winner pool.
@@ -134,6 +211,11 @@ export default function CreativesPage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Ads currently mid-toggle. Used to show a spinner per row + disable
+  // the button until the FB call resolves.
+  const [togglingIds, setTogglingIds] = useState<Set<string>>(new Set());
+  const [toggleError, setToggleError] = useState<string | null>(null);
 
   // Selection (used only in Winners tab for Compare)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -243,6 +325,58 @@ export default function CreativesPage() {
       }
     },
     [datePreset, accountFilter, loadThumbnails]
+  );
+
+  // Flip an ad's effective_status via /api/facebook/manage. Optimistic —
+  // patches local state immediately, rolls back on FB error. Costs 1 FB
+  // API call per click; well under the 200/hour rate window.
+  const toggleAdStatus = useCallback(
+    async (adId: string, currentStatus: string) => {
+      if (togglingIds.has(adId)) return;
+      const newStatus =
+        currentStatus === "PAUSED" || currentStatus.includes("DISAPPROVED")
+          ? "ACTIVE"
+          : "PAUSED";
+      setTogglingIds((prev) => new Set(prev).add(adId));
+      setToggleError(null);
+
+      // Optimistic update
+      const previousStatus = currentStatus;
+      setAds((prev) =>
+        prev.map((a) => (a.ad_id === adId ? { ...a, status: newStatus } : a))
+      );
+
+      try {
+        const res = await fetch("/api/facebook/manage", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "toggle_status",
+            entity_id: adId,
+            new_status: newStatus,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          throw new Error(json.error || "Toggle failed");
+        }
+      } catch (e) {
+        // Roll back the optimistic update
+        setAds((prev) =>
+          prev.map((a) =>
+            a.ad_id === adId ? { ...a, status: previousStatus } : a
+          )
+        );
+        setToggleError(e instanceof Error ? e.message : "Toggle failed");
+      } finally {
+        setTogglingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(adId);
+          return next;
+        });
+      }
+    },
+    [togglingIds]
   );
 
   // Initial loads
@@ -664,6 +798,19 @@ export default function CreativesPage() {
         </div>
       )}
 
+      {toggleError && (
+        <div className="p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-sm flex items-start gap-2">
+          <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
+          <div className="flex-1">{toggleError}</div>
+          <button
+            onClick={() => setToggleError(null)}
+            className="text-red-300 hover:text-white text-xs cursor-pointer"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {analyzeError && (
         <div className="p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-sm flex items-start gap-2">
           <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
@@ -708,6 +855,8 @@ export default function CreativesPage() {
         }
         onRowClick={openRow}
         analyzingId={analyzingId}
+        togglingIds={togglingIds}
+        onToggleAd={toggleAdStatus}
       />
 
       {activeRow && (
@@ -1012,6 +1161,8 @@ function CreativesTable({
   onToggleSelect,
   onRowClick,
   analyzingId,
+  togglingIds,
+  onToggleAd,
 }: {
   tab: Tab;
   rows: EnrichedRow[];
@@ -1023,6 +1174,8 @@ function CreativesTable({
   onToggleSelect: (id: string) => void;
   onRowClick: (row: EnrichedRow) => void;
   analyzingId: string | null;
+  togglingIds: Set<string>;
+  onToggleAd: (adId: string, currentStatus: string) => void;
 }) {
   if (loading && rows.length === 0) {
     return (
@@ -1053,6 +1206,7 @@ function CreativesTable({
               )}
               <th className="px-3 py-2 text-left">Ad</th>
               <th className="px-3 py-2 text-left">Store</th>
+              <th className="px-3 py-2 text-left">Status</th>
               <SortHeader
                 label="Spend"
                 k="spend"
@@ -1149,6 +1303,14 @@ function CreativesTable({
                   </td>
                   <td className="px-3 py-2.5 text-xs text-gray-300">
                     {r.store ?? "—"}
+                  </td>
+                  <td className="px-3 py-2.5 text-xs">
+                    <StatusCell
+                      status={r.status}
+                      adId={r.ad_id}
+                      toggling={togglingIds.has(r.ad_id)}
+                      onToggle={onToggleAd}
+                    />
                   </td>
                   <td className="px-3 py-2.5 text-right font-mono text-xs text-gray-200">
                     ₱{Math.round(r.spend).toLocaleString()}
@@ -1283,3 +1445,56 @@ function timeAgo(iso: string): string {
 // Wand2 was imported above for a potential "Generate from this winner" CTA;
 // leaving the import for the next iteration that wires it in.
 void Wand2;
+
+// Render an ad's effective_status as a colored badge plus a toggle button
+// (when the status is one the user can actually flip). Clicking the toggle
+// hits /api/facebook/manage with toggle_status — 1 FB API call.
+function StatusCell({
+  status,
+  adId,
+  toggling,
+  onToggle,
+}: {
+  status: string;
+  adId: string;
+  toggling: boolean;
+  onToggle: (adId: string, currentStatus: string) => void;
+}) {
+  const { label, className } = statusBadgeStyle(status);
+  const canToggle = TOGGLEABLE_STATUSES.has(status);
+  const isActive = status === "ACTIVE";
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <span
+        className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${className}`}
+        title={status}
+      >
+        {label}
+      </span>
+      {canToggle && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle(adId, status);
+          }}
+          disabled={toggling}
+          title={isActive ? "Pause ad" : "Activate ad"}
+          className={`p-1 rounded transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait ${
+            isActive
+              ? "text-gray-400 hover:text-red-300 hover:bg-red-900/30"
+              : "text-gray-400 hover:text-green-300 hover:bg-green-900/30"
+          }`}
+        >
+          {toggling ? (
+            <Loader2 size={12} className="animate-spin" />
+          ) : isActive ? (
+            <Pause size={12} />
+          ) : (
+            <Play size={12} />
+          )}
+        </button>
+      )}
+    </div>
+  );
+}
