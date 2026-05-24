@@ -27,6 +27,7 @@ import {
   ComparativeReportModal,
   type DeconstructionRow,
 } from "@/components/marketing/deconstruction-panel";
+import { WinnersLogModal } from "@/components/marketing/winners-log-modal";
 import { deriveStore } from "@/lib/shopify/derive-store";
 import type { ComparativeReport } from "@/lib/ai/compare-types";
 import type { DatePreset } from "@/lib/facebook/types";
@@ -229,6 +230,8 @@ export default function CreativesPage() {
 
   // Ad currently mid-tag/untag (Winners Pool toggle)
   const [taggingWinnerId, setTaggingWinnerId] = useState<string | null>(null);
+  // Show the Log generator modal
+  const [logModalOpen, setLogModalOpen] = useState(false);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
   const [throttled, setThrottled] = useState(false);
 
@@ -890,6 +893,7 @@ export default function CreativesPage() {
         <WinnersPoolToolbar
           poolCount={counts.winners}
           storeFilter={storeFilter}
+          onGenerateLog={() => setLogModalOpen(true)}
         />
       )}
 
@@ -940,6 +944,13 @@ export default function CreativesPage() {
               !!enrichments.winner_pool[activeRow.ad_id]
             )
           }
+        />
+      )}
+
+      {logModalOpen && (
+        <WinnersLogModal
+          storeFilter={storeFilter}
+          onClose={() => setLogModalOpen(false)}
         />
       )}
 
@@ -1137,9 +1148,11 @@ function Filters({
 function WinnersPoolToolbar({
   poolCount,
   storeFilter,
+  onGenerateLog,
 }: {
   poolCount: number;
   storeFilter: string;
+  onGenerateLog: () => void;
 }) {
   const ready = poolCount >= 1;
   return (
@@ -1158,9 +1171,10 @@ function WinnersPoolToolbar({
       </div>
       <button
         disabled={!ready}
+        onClick={onGenerateLog}
         title={
           ready
-            ? "Coming next: generate the structured Log document"
+            ? "Generate the structured Log document for Claude Project"
             : "Tag at least one ad to enable"
         }
         className="bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2 cursor-pointer"
