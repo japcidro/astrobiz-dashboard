@@ -51,6 +51,9 @@ interface AdRow {
   ctr: number;
   thumbnail_url: string | null;
   preview_url: string | null;
+  // FB's created_time for the ad itself. For scaling-campaign duplicates,
+  // this is when the ad was promoted (the moment the duplicate was made).
+  created_time: string | null;
 }
 
 interface Enrichments {
@@ -554,6 +557,7 @@ export default function CreativesPage() {
         ctr: 0,
         thumbnail_url: null,
         preview_url: null,
+        created_time: null,
         store: null,
         analysis: enrichments.analyses[adId] ?? null,
         in_winner_pool: true,
@@ -1492,6 +1496,15 @@ function CreativesTable({
                         <p className="text-[10px] text-gray-500 truncate max-w-[280px]">
                           {r.campaign || "—"}
                         </p>
+                        {scaling[r.ad_id]?.self_is_scaling && r.created_time && (
+                          <p
+                            className="text-[10px] text-purple-400/80 truncate max-w-[280px]"
+                            title={`Added to scaling campaign on ${new Date(r.created_time).toLocaleString()}`}
+                          >
+                            <TrendingUp size={9} className="inline mr-0.5" />
+                            Scaled {timeAgo(r.created_time)}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </td>

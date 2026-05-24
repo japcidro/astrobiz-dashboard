@@ -374,6 +374,7 @@ export async function GET(request: Request) {
       preview_url: string | null;
       thumbnail_url: string | null;
       updated_time: string | null;        // ad's own updated_time
+      created_time: string | null;        // ad's own created_time (FB)
       adset_updated_time: string | null;  // parent adset's updated_time
       campaign_updated_time: string | null; // parent campaign's updated_time
       start_time: string | null;
@@ -398,7 +399,7 @@ export async function GET(request: Request) {
         // Only fetch insights fresh — structure from cache if available
         type CampaignRaw = { id: string; name?: string; effective_status: string; daily_budget?: string; lifetime_budget?: string; updated_time?: string };
         type AdsetRaw = { id: string; name?: string; effective_status: string; campaign_id: string; daily_budget?: string; lifetime_budget?: string; updated_time?: string; start_time?: string; created_time?: string };
-        type AdRaw = { id: string; name?: string; effective_status: string; adset_id: string; updated_time?: string };
+        type AdRaw = { id: string; name?: string; effective_status: string; adset_id: string; updated_time?: string; created_time?: string };
 
         // Helper: log + swallow per-account errors EXCEPT RateLimitedError,
         // which must bubble so the outer handler serves stale cache instead
@@ -440,7 +441,8 @@ export async function GET(request: Request) {
                 // Stripped creative{} expansion — too slow, was causing
                 // /ads to time out and leave all statuses as UNKNOWN.
                 // Creatives can be fetched lazily at ad-drill level.
-                fields: "id,name,effective_status,adset_id,updated_time",
+                fields:
+                  "id,name,effective_status,adset_id,updated_time,created_time",
                 limit: "500",
               }
             ).catch(swallow("ads", [] as AdRaw[])),
@@ -539,6 +541,7 @@ export async function GET(request: Request) {
         const adEffStatus: Record<string, string> = {};
         const adToAdset: Record<string, string> = {};
         const adUpdated: Record<string, string> = {};
+        const adCreated: Record<string, string> = {};
         const adName: Record<string, string> = {};
         // Creative preview/thumbnail no longer fetched in main payload
         // (was causing /ads to time out). Lazy-load in ad-drill view if needed.
@@ -546,6 +549,7 @@ export async function GET(request: Request) {
         for (const a of adsRaw) {
           adEffStatus[a.id] = a.effective_status;
           adToAdset[a.id] = a.adset_id;
+          if (a.created_time) adCreated[a.id] = a.created_time;
           if (a.updated_time) adUpdated[a.id] = a.updated_time;
           if (a.name) adName[a.id] = a.name;
           adPreview[a.id] = { url: null, thumbnail: null };
@@ -634,6 +638,7 @@ export async function GET(request: Request) {
             preview_url: adPreview[adId]?.url || null,
             thumbnail_url: adPreview[adId]?.thumbnail || null,
             updated_time: adUpdated[adId] || null,
+            created_time: adCreated[adId] || null,
             adset_updated_time: adsetUpdated[adToAdset[adId] || (row.adset_id as string)] || null,
             campaign_updated_time: campaignUpdated[row.campaign_id as string] || null,
             start_time: adsetStartTime[adToAdset[adId] || (row.adset_id as string)] || null,
@@ -680,6 +685,7 @@ export async function GET(request: Request) {
               preview_url: null,
               thumbnail_url: null,
               updated_time: adUpdated[a.id] || null,
+              created_time: adCreated[a.id] || null,
               adset_updated_time: adsetUpdated[adsetId] || null,
               campaign_updated_time: campaignUpdated[campaignId] || null,
               start_time: adsetStartTime[adsetId] || null,
