@@ -188,11 +188,19 @@ function statusBadgeStyle(status: string): {
 
 // Tab visibility:
 //   * "winners" tab → only ads in the curated Winners Pool.
-//   * "all" tab → ads with spend, EXCLUDING anything already in the
-//     Winners Pool (so they don't show in both places).
-function isVisible(row: EnrichedRow, tab: Tab): boolean {
+//   * "all" tab → ads with spend, EXCLUDING anything in the Winners Pool
+//     (they have their own tab).
+//   * When campaignFilter is "scaling", we relax the spend-gate so that
+//     a newly-promoted scaling ad with $0 spend yet still appears (this
+//     is the user's primary "did my new scaled ad land?" check).
+function isVisible(
+  row: EnrichedRow,
+  tab: Tab,
+  campaignFilter: CampaignType
+): boolean {
   if (tab === "winners") return row.in_winner_pool;
   if (row.in_winner_pool) return false;
+  if (campaignFilter === "scaling") return true;
   return row.spend > 0;
 }
 
@@ -339,7 +347,12 @@ export default function CreativesPage() {
       setError(null);
       setThrottled(false);
       try {
-        const url = `/api/facebook/all-ads?date_preset=${datePreset}&account=${accountFilter}${forceRefresh ? "&refresh=1" : ""}`;
+        // include_zero_spend=1 so newly-promoted ads (no spend in the
+        // window yet) still appear. The client-side isVisible filter
+        // gates the "All" tab back down to spend>0 — the only place this
+        // matters is when the user picks the "Scaling only" filter,
+        // which intentionally surfaces every ad in the scaling campaign.
+        const url = `/api/facebook/all-ads?date_preset=${datePreset}&account=${accountFilter}&include_zero_spend=1${forceRefresh ? "&refresh=1" : ""}`;
         const res = await fetch(url);
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "Failed to load ads");
@@ -527,7 +540,7 @@ export default function CreativesPage() {
   }, [ads, storeNames, enrichments]);
 
   const filteredRows = useMemo(() => {
-    let rows = enrichedRows.filter((r) => isVisible(r, tab));
+    let rows = enrichedRows.filter((r) => isVisible(r, tab, campaignFilter));
     if (storeFilter !== "ALL") {
       rows = rows.filter((r) => r.store === storeFilter);
     }
