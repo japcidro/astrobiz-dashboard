@@ -55,6 +55,13 @@ names from the build spec:
   BLOCK 7 — THE JUDGEMENT
 
 RULES:
+- BLOCK 1 Result is USER-DRIVEN. Each ad block in the user message carries a
+  manual_result field (WINNER or LOSER) — that is the user's manual call based on
+  whether the ad worked for THEIR metrics. Use it verbatim as the Result. Do NOT
+  override the user's call with a metrics-only re-classification. If metrics seem
+  to disagree with the user's call, surface the tension inside BLOCK 7 (judgement)
+  — not by changing Result. INCONCLUSIVE is reserved for true data gaps, not
+  metric/user disagreement.
 - Hook rate is a required field. If it is missing, write "not provided" and add the
   note that hook strength cannot be judged against the 40.38% benchmark. Never leave
   it silently blank.

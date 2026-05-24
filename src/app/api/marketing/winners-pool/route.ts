@@ -17,7 +17,7 @@ export async function GET(request: Request) {
 
   let q = supabase
     .from("winner_pool_ads")
-    .select("ad_id, store_name, tagged_at, tagged_by")
+    .select("ad_id, store_name, tagged_at, tagged_by, is_winner")
     .order("tagged_at", { ascending: false });
   if (store) q = q.eq("store_name", store);
 

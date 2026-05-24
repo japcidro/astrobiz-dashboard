@@ -78,7 +78,7 @@ export async function GET() {
     // Currently bounded (no Log includes >100 ads); plain select is fine.
     supabase
       .from("winner_pool_ads")
-      .select("ad_id, tagged_at, tagged_by"),
+      .select("ad_id, tagged_at, tagged_by, is_winner"),
   ]);
 
   const analyses: Record<string, { has_analysis: true; has_v2: boolean }> = {};
@@ -199,16 +199,22 @@ export async function GET() {
 
   const winner_pool: Record<
     string,
-    { tagged_at: string; tagged_by_name: string | null }
+    {
+      tagged_at: string;
+      tagged_by_name: string | null;
+      is_winner: boolean;
+    }
   > = {};
   for (const w of (winnersRes.data ?? []) as Array<{
     ad_id: string;
     tagged_at: string;
     tagged_by: string | null;
+    is_winner: boolean | null;
   }>) {
     winner_pool[w.ad_id] = {
       tagged_at: w.tagged_at,
       tagged_by_name: w.tagged_by ? winnerActorMap.get(w.tagged_by) ?? null : null,
+      is_winner: !!w.is_winner,
     };
   }
 

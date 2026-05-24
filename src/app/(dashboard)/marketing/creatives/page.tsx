@@ -21,6 +21,7 @@ import {
   Play,
   Pause,
   TrendingUp,
+  XCircle,
 } from "lucide-react";
 import { IlpDeconstructionModal } from "@/components/marketing/ilp-deconstruction-modal";
 import { WinnersLogModal } from "@/components/marketing/winners-log-modal";
@@ -72,7 +73,7 @@ interface Enrichments {
   >;
   winner_pool: Record<
     string,
-    { tagged_at: string; tagged_by_name: string | null }
+    { tagged_at: string; tagged_by_name: string | null; is_winner: boolean }
   >;
   attributions: Record<
     string,
@@ -214,6 +215,9 @@ interface EnrichedRow extends AdRow {
   in_winner_pool: boolean;
   pool_tagged_at: string | null;
   pool_tagged_by: string | null;
+  // User's manual Winner/Loser call. Only meaningful when in_winner_pool=true.
+  // Untagged-but-pooled (false) means LOSER / didn't work / didn't fit metrics.
+  pool_is_winner: boolean;
 }
 
 // ─── Page ───
@@ -245,8 +249,10 @@ export default function CreativesPage() {
     winners: {},
   });
 
-  // Ad currently mid-tag/untag (Winners Pool toggle)
+  // Ad currently mid-tag/untag (Log Pool add/remove toggle)
   const [taggingWinnerId, setTaggingWinnerId] = useState<string | null>(null);
+  // Ad currently mid-flip on the Winner/Loser classification
+  const [classifyingId, setClassifyingId] = useState<string | null>(null);
   // Show the Log generator modal
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
@@ -417,12 +423,44 @@ export default function CreativesPage() {
         }
         await loadEnrichments();
       } catch (e) {
-        setError(e instanceof Error ? e.message : "Winners Pool toggle failed");
+        setError(e instanceof Error ? e.message : "Log Pool toggle failed");
       } finally {
         setTaggingWinnerId(null);
       }
     },
     [ads, storeNames, taggingWinnerId, loadEnrichments]
+  );
+
+  // Flip an ad's manual Winner/Loser classification while it's in the
+  // Log Pool. Untagged-as-winner (is_winner=false) means LOSER / didn't
+  // work / didn't fit the user's metrics — the Log generator uses this
+  // as ground truth for BLOCK 1 Result, not the metrics.
+  const toggleWinnerClassification = useCallback(
+    async (adId: string, currentlyWinner: boolean) => {
+      if (!adId || classifyingId) return;
+      setClassifyingId(adId);
+      setError(null);
+      try {
+        const res = await fetch(
+          `/api/marketing/winners-pool/${encodeURIComponent(adId)}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ is_winner: !currentlyWinner }),
+          }
+        );
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Classification update failed");
+        await loadEnrichments();
+      } catch (e) {
+        setError(
+          e instanceof Error ? e.message : "Classification update failed"
+        );
+      } finally {
+        setClassifyingId(null);
+      }
+    },
+    [classifyingId, loadEnrichments]
   );
 
   // Flip an ad's effective_status via /api/facebook/manage. Optimistic —
@@ -517,6 +555,7 @@ export default function CreativesPage() {
         in_winner_pool: !!pool,
         pool_tagged_at: pool?.tagged_at ?? null,
         pool_tagged_by: pool?.tagged_by_name ?? null,
+        pool_is_winner: !!pool?.is_winner,
       };
     });
 
@@ -548,6 +587,7 @@ export default function CreativesPage() {
         in_winner_pool: true,
         pool_tagged_at: pool.tagged_at,
         pool_tagged_by: pool.tagged_by_name,
+        pool_is_winner: !!pool.is_winner,
       });
     }
 
@@ -624,8 +664,11 @@ export default function CreativesPage() {
 
   const counts = useMemo(() => {
     const all = enrichedRows.filter((r) => r.spend > 0 && !r.in_winner_pool).length;
-    const winners = enrichedRows.filter((r) => r.in_winner_pool).length;
-    return { all, winners };
+    const pool = enrichedRows.filter((r) => r.in_winner_pool);
+    const winners = pool.length;
+    const tagged_winners = pool.filter((r) => r.pool_is_winner).length;
+    const tagged_losers = winners - tagged_winners;
+    return { all, winners, tagged_winners, tagged_losers };
   }, [enrichedRows]);
 
   // ─── Row click → modal ───
@@ -726,6 +769,8 @@ export default function CreativesPage() {
       {tab === "winners" && (
         <WinnersPoolToolbar
           poolCount={counts.winners}
+          winnerCount={counts.tagged_winners}
+          loserCount={counts.tagged_losers}
           storeFilter={storeFilter}
           onGenerateLog={() => setLogModalOpen(true)}
         />
@@ -758,6 +803,8 @@ export default function CreativesPage() {
         onToggleAd={toggleAdStatus}
         attributions={enrichments.attributions}
         scaling={enrichments.scaling}
+        classifyingId={classifyingId}
+        onToggleWinnerClassification={toggleWinnerClassification}
       />
 
       {activeAd && (
@@ -977,10 +1024,14 @@ function Filters({
 
 function WinnersPoolToolbar({
   poolCount,
+  winnerCount,
+  loserCount,
   storeFilter,
   onGenerateLog,
 }: {
   poolCount: number;
+  winnerCount: number;
+  loserCount: number;
   storeFilter: string;
   onGenerateLog: () => void;
 }) {
@@ -992,11 +1043,15 @@ function WinnersPoolToolbar({
           <span className="font-semibold">{poolCount}</span> ad
           {poolCount === 1 ? "" : "s"} in pool
           {storeFilter !== "ALL" ? ` for ${storeFilter}` : ""}
+          <span className="ml-2 text-[11px] font-normal text-amber-300/80">
+            ({winnerCount} winner{winnerCount === 1 ? "" : "s"} · {loserCount}{" "}
+            loser{loserCount === 1 ? "" : "s"})
+          </span>
         </p>
         <p className="text-[11px] text-amber-300/70 mt-0.5">
-          Add winners AND notable losers to the Log Pool. Generate the Winning
-          &amp; Losing Ads Log to feed into your Claude Project — it learns
-          from comparison.
+          Click the Winner/Loser badge per row to set the manual call.
+          Untagged-as-winner = LOSER (didn&apos;t work / didn&apos;t fit
+          metrics). The Log uses your call as ground truth, not metrics.
         </p>
       </div>
       <button
@@ -1031,6 +1086,8 @@ function CreativesTable({
   onToggleAd,
   attributions,
   scaling,
+  classifyingId,
+  onToggleWinnerClassification,
 }: {
   tab: Tab;
   rows: EnrichedRow[];
@@ -1045,6 +1102,8 @@ function CreativesTable({
   onToggleAd: (adId: string, currentStatus: string) => void;
   attributions: Record<string, Attribution>;
   scaling: Enrichments["scaling"];
+  classifyingId: string | null;
+  onToggleWinnerClassification: (adId: string, currentlyWinner: boolean) => void;
 }) {
   if (loading && rows.length === 0) {
     return (
@@ -1245,19 +1304,39 @@ function CreativesTable({
                       <span className="text-gray-500">—</span>
                     )}
                   </td>
-                  <td className="px-3 py-2.5 text-xs">
+                  <td
+                    className="px-3 py-2.5 text-xs"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     {r.in_winner_pool ? (
-                      <span
-                        className="inline-flex items-center gap-1 text-amber-300"
-                        title={
-                          r.pool_tagged_by
-                            ? `Tagged by ${r.pool_tagged_by}`
-                            : "In Log Pool"
+                      <button
+                        onClick={() =>
+                          onToggleWinnerClassification(
+                            r.ad_id,
+                            r.pool_is_winner
+                          )
                         }
+                        disabled={classifyingId === r.ad_id}
+                        title={
+                          r.pool_is_winner
+                            ? "Tagged as WINNER. Click to flip to Loser."
+                            : "Tagged as LOSER (didn't work / didn't fit metrics). Click to flip to Winner."
+                        }
+                        className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] cursor-pointer disabled:opacity-50 disabled:cursor-wait ${
+                          r.pool_is_winner
+                            ? "bg-amber-500/15 text-amber-300 border-amber-500/40 hover:bg-amber-500/25"
+                            : "bg-gray-500/10 text-gray-400 border-gray-600/40 hover:bg-gray-500/20 hover:text-gray-300"
+                        }`}
                       >
-                        <Trophy size={11} />
-                        In pool
-                      </span>
+                        {classifyingId === r.ad_id ? (
+                          <Loader2 size={10} className="animate-spin" />
+                        ) : r.pool_is_winner ? (
+                          <Trophy size={10} />
+                        ) : (
+                          <XCircle size={10} />
+                        )}
+                        {r.pool_is_winner ? "Winner" : "Loser"}
+                      </button>
                     ) : (
                       <span className="text-gray-500">—</span>
                     )}

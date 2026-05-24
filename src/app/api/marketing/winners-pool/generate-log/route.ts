@@ -132,7 +132,7 @@ export async function POST(request: Request) {
   // 2. Winner pool ads
   let poolQ = supabase
     .from("winner_pool_ads")
-    .select("ad_id, store_name, tagged_at")
+    .select("ad_id, store_name, tagged_at, is_winner")
     .order("tagged_at", { ascending: false });
   if (storeFilter) poolQ = poolQ.eq("store_name", storeFilter);
   const { data: poolRows, error: poolErr } = await poolQ;
@@ -185,13 +185,19 @@ export async function POST(request: Request) {
 
   // 6. Build user message — one block per ad with all the v2.0 fields
   const adBlocks: string[] = [];
-  for (const p of poolRows) {
-    const adId = p.ad_id as string;
+  for (const p of (poolRows as Array<{
+    ad_id: string;
+    store_name: string | null;
+    tagged_at: string;
+    is_winner: boolean | null;
+  }>)) {
+    const adId = p.ad_id;
     const ana = analysisByAd.get(adId);
     const fb = fbMetrics[adId];
     const hr = hookRates[adId];
     const hookRateField =
       hr != null ? `${hr.toFixed(2)}% (3-sec views / impressions)` : "";
+    const manualResult = p.is_winner ? "WINNER" : "LOSER";
 
     const block = [
       `=== AD #${adBlocks.length + 1} ===`,
@@ -201,6 +207,7 @@ export async function POST(request: Request) {
       `account: ${fb?.account ?? "(unknown)"}`,
       `store: ${p.store_name ?? "(unknown)"}`,
       `tagged_at: ${p.tagged_at}`,
+      `manual_result: ${manualResult}   <- USER GROUND TRUTH — USE THIS FOR BLOCK 1 Result`,
       ``,
       `-- METRICS (last_14d window) --`,
       `spend_php: ${fb && fb.spend ? fb.spend.toFixed(2) : ""}`,
@@ -244,12 +251,25 @@ export async function POST(request: Request) {
     `BRAND: ${storeFilter ?? "(all brands)"}`,
     `GENERATED AT: ${new Date().toISOString()}`,
     ``,
-    `Below is one structured block per ad in the Winners Pool. Produce one`,
+    `Below is one structured block per ad in the Log Pool. Produce one`,
     `7-block Log entry per ad following the v2.0 schema in your system prompt.`,
-    `Determine each Result (WINNER / LOSER / INCONCLUSIVE) by comparing the`,
-    `metrics relative to the others in this batch and against the Script C`,
-    `40.38% hook rate benchmark. Then append PATTERNS OBSERVED and the`,
-    `ANTI-COLLAPSE RULE (with Untested Territory list) per the spec.`,
+    ``,
+    `IMPORTANT — Result is user-driven:`,
+    `Use the manual_result field as the BLOCK 1 Result verbatim. The user`,
+    `has manually classified each ad as WINNER or LOSER based on whether it`,
+    `worked for THEIR metrics. Do not override the user's call with a`,
+    `metrics-only re-classification — even if metrics look strong on a`,
+    `manual_result: LOSER, log it as LOSER and use BLOCK 7 to explain why`,
+    `the metrics misled (compliance flag, wrong avatar, off-brand, fluke,`,
+    `etc.). Conversely, do not downgrade a manual_result: WINNER to`,
+    `INCONCLUSIVE just because hook rate underperformed Script C.`,
+    ``,
+    `Still use the Script C 40.38% hook rate benchmark and batch comparison`,
+    `as analytical color inside BLOCKS 2 and 7 — just do not let them change`,
+    `the Result label.`,
+    ``,
+    `Then append PATTERNS OBSERVED (split by Result) and the ANTI-COLLAPSE`,
+    `RULE with Untested Territory list per the spec.`,
     ``,
     ...adBlocks,
   ].join("\n");
