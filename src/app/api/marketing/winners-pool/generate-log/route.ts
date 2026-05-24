@@ -139,7 +139,7 @@ export async function POST(request: Request) {
   if (poolErr) return Response.json({ error: poolErr.message }, { status: 500 });
   if (!poolRows || poolRows.length === 0) {
     return Response.json(
-      { error: "Winners Pool is empty. Tag at least one ad first." },
+      { error: "Log Pool is empty. Tag at least one ad first." },
       { status: 400 }
     );
   }

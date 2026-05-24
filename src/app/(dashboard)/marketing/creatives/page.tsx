@@ -812,8 +812,8 @@ function PageHeader({
           Creatives
         </h1>
         <p className="text-xs text-gray-400 mt-1">
-          Browse, deconstruct, and curate winners. Winners feed the angle
-          generator + format expansion.
+          Browse, deconstruct, and curate ads. Tag winners AND notable losers
+          to the Log Pool — the Log learns from comparison.
         </p>
       </div>
       <div className="flex items-center gap-2">
@@ -861,7 +861,7 @@ function Tabs({
       {(
         [
           { value: "all" as Tab, label: "All Creatives", n: counts.all },
-          { value: "winners" as Tab, label: "Winners Pool", n: counts.winners },
+          { value: "winners" as Tab, label: "Log Pool", n: counts.winners },
         ] as const
       ).map((t) => {
         const active = tab === t.value;
@@ -994,9 +994,9 @@ function WinnersPoolToolbar({
           {storeFilter !== "ALL" ? ` for ${storeFilter}` : ""}
         </p>
         <p className="text-[11px] text-amber-300/70 mt-0.5">
-          Generate the Winning &amp; Losing Ads Log to feed into your Claude
-          Project. Tip: tag a few notable losers too — the Log learns from
-          comparison.
+          Add winners AND notable losers to the Log Pool. Generate the Winning
+          &amp; Losing Ads Log to feed into your Claude Project — it learns
+          from comparison.
         </p>
       </div>
       <button
@@ -1058,7 +1058,7 @@ function CreativesTable({
     return (
       <div className="text-center py-20 text-gray-500 text-sm">
         {tab === "winners"
-          ? "Walang winners pa. Mag-deconstruct ka muna ng ad, then click '+ Add to Winners' sa modal."
+          ? "Walang laman ang Log Pool. Mag-deconstruct ka muna ng ad, then click 'Add to Log Pool' sa modal. Tag winners AND notable losers — the Log learns from comparison."
           : "Walang ads sa selected filters."}
       </div>
     );
@@ -1252,7 +1252,7 @@ function CreativesTable({
                         title={
                           r.pool_tagged_by
                             ? `Tagged by ${r.pool_tagged_by}`
-                            : "In Winners Pool"
+                            : "In Log Pool"
                         }
                       >
                         <Trophy size={11} />

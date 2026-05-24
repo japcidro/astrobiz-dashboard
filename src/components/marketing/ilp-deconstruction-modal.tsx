@@ -273,8 +273,8 @@ export function IlpDeconstructionModal({
               }`}
               title={
                 isTaggedWinner
-                  ? "Remove from Winners Pool"
-                  : "Add to Winners Pool — also tag notable losers; the Log learns from comparison"
+                  ? "Remove from Log Pool"
+                  : "Add to Log Pool — tag winners AND notable losers; the Log learns from comparison"
               }
             >
               {taggingWinner ? (
@@ -282,7 +282,7 @@ export function IlpDeconstructionModal({
               ) : (
                 <Trophy size={12} />
               )}
-              {isTaggedWinner ? "In Winners Pool" : "Tag as Winner"}
+              {isTaggedWinner ? "In Log Pool" : "Add to Log Pool"}
             </button>
             <button
               onClick={onClose}
