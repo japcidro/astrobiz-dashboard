@@ -466,6 +466,42 @@ export async function GET(request: Request) {
           });
         }
 
+        // FB Insights quirk: brand-new ads created today are often missing
+        // from multi-day window aggregations (last_7d, last_14d, etc.)
+        // even though they show up cleanly in the `today` window. The
+        // documented behavior bites us when a marketer scales an ad to a
+        // new campaign — the new ad_id has spend today (visible in Ads
+        // Manager) but FB returns null for it on last_7d. Patch the hole
+        // by fetching today's insights for the same account and merging
+        // any missing ads into insightsData.
+        const shouldMergeToday =
+          !useTimeRange && datePreset !== "today" && datePreset !== "yesterday";
+        if (shouldMergeToday) {
+          const todayInsights = await fbFetchAll<Record<string, unknown>>(
+            `/${account.id}/insights`,
+            token,
+            {
+              fields: INSIGHTS_FIELDS,
+              date_preset: "today",
+              level: "ad",
+              limit: "500",
+            }
+          ).catch(swallow("today-merge", [] as Array<Record<string, unknown>>));
+
+          const seenAdIds = new Set<string>();
+          for (const row of insightsData) {
+            const id = row.ad_id as string | undefined;
+            if (id) seenAdIds.add(id);
+          }
+          for (const row of todayInsights) {
+            const id = row.ad_id as string | undefined;
+            if (id && !seenAdIds.has(id)) {
+              insightsData.push(row);
+              seenAdIds.add(id);
+            }
+          }
+        }
+
         // Build status maps + budget maps + time maps + name maps
         const campaignStatus: Record<string, string> = {};
         const campaignUpdated: Record<string, string> = {};
