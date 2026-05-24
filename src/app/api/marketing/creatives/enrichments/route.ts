@@ -7,6 +7,7 @@ interface ScalingRow {
   fb_ad_id: string;
   in_scaling: boolean;
   self_is_scaling: boolean;
+  scaled_in_campaign: string | null;
 }
 
 interface ActionRow {
@@ -60,7 +61,9 @@ export async function GET() {
       () =>
         supabase
           .from("scaling_detection_cache")
-          .select("fb_ad_id, in_scaling, self_is_scaling"),
+          .select(
+            "fb_ad_id, in_scaling, self_is_scaling, scaled_in_campaign"
+          ),
       { orderColumn: "fb_ad_id" }
     ),
     // Recent pause/resume actions. We pull only paused/resumed (skip
@@ -87,14 +90,36 @@ export async function GET() {
     };
   }
 
+  // Build a campaign_id → campaign_name lookup from store_scaling_campaigns
+  // so we can show "Scaled → CBO-CAPSULED" instead of a bare campaign id.
+  const { data: scalingCampaigns } = await supabase
+    .from("store_scaling_campaigns")
+    .select("campaign_id, campaign_name");
+  const campaignNameById = new Map<string, string>();
+  for (const c of (scalingCampaigns ?? []) as Array<{
+    campaign_id: string;
+    campaign_name: string | null;
+  }>) {
+    if (c.campaign_id && c.campaign_name) {
+      campaignNameById.set(c.campaign_id, c.campaign_name);
+    }
+  }
+
   const scaling: Record<
     string,
-    { self_is_scaling: boolean; in_scaling: boolean }
+    {
+      self_is_scaling: boolean;
+      in_scaling: boolean;
+      scaled_to_campaign: string | null;
+    }
   > = {};
   for (const r of scalingRes.data ?? []) {
     scaling[r.fb_ad_id] = {
       self_is_scaling: r.self_is_scaling,
       in_scaling: r.in_scaling,
+      scaled_to_campaign: r.scaled_in_campaign
+        ? campaignNameById.get(r.scaled_in_campaign) ?? null
+        : null,
     };
   }
 

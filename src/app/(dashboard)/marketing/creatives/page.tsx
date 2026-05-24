@@ -21,6 +21,7 @@ import {
   GitCompareArrows,
   Play,
   Pause,
+  TrendingUp,
 } from "lucide-react";
 import {
   DeconstructionDetailModal,
@@ -56,7 +57,11 @@ interface Enrichments {
   analyses: Record<string, { has_analysis: true; has_v2: boolean }>;
   scaling: Record<
     string,
-    { self_is_scaling: boolean; in_scaling: boolean }
+    {
+      self_is_scaling: boolean;
+      in_scaling: boolean;
+      scaled_to_campaign: string | null;
+    }
   >;
   winner_pool: Record<
     string,
@@ -924,6 +929,7 @@ export default function CreativesPage() {
         togglingIds={togglingIds}
         onToggleAd={toggleAdStatus}
         attributions={enrichments.attributions}
+        scaling={enrichments.scaling}
       />
 
       {activeRow && (
@@ -1287,6 +1293,7 @@ function CreativesTable({
   togglingIds,
   onToggleAd,
   attributions,
+  scaling,
 }: {
   tab: Tab;
   rows: EnrichedRow[];
@@ -1301,6 +1308,7 @@ function CreativesTable({
   togglingIds: Set<string>;
   onToggleAd: (adId: string, currentStatus: string) => void;
   attributions: Record<string, Attribution>;
+  scaling: Enrichments["scaling"];
 }) {
   if (loading && rows.length === 0) {
     return (
@@ -1417,9 +1425,24 @@ function CreativesTable({
                         <div className="w-12 aspect-video rounded bg-gray-800 border border-gray-700 flex-shrink-0" />
                       )}
                       <div className="min-w-0">
-                        <p className="text-white text-xs font-medium truncate max-w-[280px]">
-                          {r.ad}
-                        </p>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <p className="text-white text-xs font-medium truncate max-w-[260px]">
+                            {r.ad}
+                          </p>
+                          {scaling[r.ad_id]?.in_scaling && (
+                            <span
+                              className="inline-flex items-center gap-0.5 text-[9px] font-medium bg-purple-900/40 text-purple-300 border border-purple-700/50 rounded px-1 py-0.5 flex-shrink-0"
+                              title={
+                                scaling[r.ad_id]?.scaled_to_campaign
+                                  ? `Creative duplicated into scaling campaign: ${scaling[r.ad_id]?.scaled_to_campaign}`
+                                  : "Creative duplicated into a scaling campaign"
+                              }
+                            >
+                              <TrendingUp size={9} />
+                              Scaled
+                            </span>
+                          )}
+                        </div>
                         <p className="text-[10px] text-gray-500 truncate max-w-[280px]">
                           {r.campaign || "—"}
                         </p>
