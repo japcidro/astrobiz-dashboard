@@ -9,6 +9,7 @@ import {
   Trophy,
   Info,
   ExternalLink,
+  Wand2,
 } from "lucide-react";
 import {
   ComplianceFlagsBadge,
@@ -32,6 +33,10 @@ interface DeconstructionResult {
 
 interface Props {
   adId: string;
+  // FB ad account id (e.g. "act_123…") — passed through to the transcribe
+  // endpoint so resolveAdVideo can scope its creative lookup. Optional;
+  // resolveAdVideo will still try without it but is more reliable with.
+  accountId: string | null;
   adName: string | null;
   thumbnailUrl: string | null;
   previewUrl: string | null;
@@ -48,6 +53,7 @@ interface Props {
 // repeat clicks on the same ad are free.
 export function IlpDeconstructionModal({
   adId,
+  accountId,
   adName,
   thumbnailUrl,
   previewUrl,
@@ -60,6 +66,8 @@ export function IlpDeconstructionModal({
   const [result, setResult] = useState<DeconstructionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [noTranscript, setNoTranscript] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [transcribeError, setTranscribeError] = useState<string | null>(null);
   const [openZones, setOpenZones] = useState<Set<ZoneId>>(
     new Set(ZONE_ORDER)
   );
@@ -102,6 +110,38 @@ export function IlpDeconstructionModal({
     run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adId]);
+
+  // On-demand: Gemini-transcribes this single ad now, then runs the
+  // 8-zone Claude analysis immediately after. Used when the daily cron
+  // hasn't picked up this ad yet (new ad / low spend / missed top-N).
+  const transcribeNow = useCallback(async () => {
+    if (transcribing) return;
+    setTranscribing(true);
+    setTranscribeError(null);
+    try {
+      const res = await fetch(
+        "/api/marketing/deconstructor/transcribe",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ad_id: adId, account_id: accountId }),
+        }
+      );
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || "Transcribe failed");
+      }
+      // Transcript now exists in ad_creative_analyses — run the 8-zone
+      // Claude analysis against it.
+      await run();
+    } catch (e) {
+      setTranscribeError(
+        e instanceof Error ? e.message : "Transcribe failed"
+      );
+    } finally {
+      setTranscribing(false);
+    }
+  }, [adId, accountId, run, transcribing]);
 
   const toggleZone = (id: ZoneId) =>
     setOpenZones((prev) => {
@@ -186,22 +226,28 @@ export function IlpDeconstructionModal({
             </div>
           )}
 
-          {noTranscript && (
+          {noTranscript && !transcribing && (
             <div className="p-4 bg-gray-800/50 border border-gray-700 rounded-lg text-sm text-gray-300">
               <p className="font-medium text-white mb-2">
                 No transcript captured for this ad yet.
               </p>
               <p className="text-gray-400">
-                The auto-deconstruct cron picks up top-spend ads daily. Two
-                options to get an ILP analysis now:
+                The auto-deconstruct cron picks up top-spend ads daily. You
+                can also force a transcript right now:
               </p>
-              <ol className="list-decimal pl-5 mt-2 space-y-1 text-gray-400">
-                <li>
-                  Wait — within 24h the Gemini cron will fetch a transcript,
-                  then click this row again.
-                </li>
-                <li>
-                  Paste the transcript directly into the standalone{" "}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  onClick={transcribeNow}
+                  disabled={transcribing}
+                  className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-wait text-white text-xs font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer"
+                  title="Force Gemini to transcribe this ad now, then run the 8-zone analysis. Takes 30–90 seconds."
+                >
+                  <Wand2 size={12} />
+                  Deconstruct now
+                </button>
+                <span className="text-[11px] text-gray-500">
+                  Or wait for the daily cron / paste the transcript into the
+                  standalone{" "}
                   <a
                     href="/marketing/deconstructor"
                     className="text-emerald-400 hover:text-emerald-300"
@@ -209,8 +255,26 @@ export function IlpDeconstructionModal({
                     Ad Deconstructor
                   </a>
                   .
-                </li>
-              </ol>
+                </span>
+              </div>
+              {transcribeError && (
+                <div className="mt-3 p-2 bg-red-900/30 border border-red-700/50 rounded text-red-300 text-xs">
+                  <p className="font-medium">Deconstruct failed</p>
+                  <p className="mt-1 break-words">{transcribeError}</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {transcribing && (
+            <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-3 py-16">
+              <Loader2 size={28} className="animate-spin text-emerald-400" />
+              <p className="text-sm">Transcribing video with Gemini…</p>
+              <p className="text-xs text-gray-500 text-center max-w-md">
+                Downloading the FB video and running Gemini Vision over it.
+                Usually 30–90s depending on video size. Claude&apos;s 8-zone
+                analysis kicks in automatically right after.
+              </p>
             </div>
           )}
 

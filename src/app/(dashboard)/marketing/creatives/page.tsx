@@ -31,6 +31,7 @@ import { WinnersLogModal } from "@/components/marketing/winners-log-modal";
 // transcript + ILP analysis itself.
 interface ActiveAd {
   ad_id: string;
+  account_id: string;
   ad: string;
   thumbnail_url: string | null;
   preview_url: string | null;
@@ -681,6 +682,7 @@ export default function CreativesPage() {
   const openRow = useCallback((row: EnrichedRow) => {
     setActiveAd({
       ad_id: row.ad_id,
+      account_id: row.account_id,
       ad: row.ad,
       thumbnail_url: row.thumbnail_url,
       preview_url: row.preview_url,
@@ -810,6 +812,7 @@ export default function CreativesPage() {
       {activeAd && (
         <IlpDeconstructionModal
           adId={activeAd.ad_id}
+          accountId={activeAd.account_id || null}
           adName={activeAd.ad}
           thumbnailUrl={activeAd.thumbnail_url}
           previewUrl={activeAd.preview_url}
