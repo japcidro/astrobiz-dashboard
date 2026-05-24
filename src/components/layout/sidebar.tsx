@@ -30,6 +30,7 @@ import {
   PhoneCall,
   Target,
   AlertTriangle,
+  Sparkles,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -244,6 +245,12 @@ const navEntries: NavEntry[] = [
         label: "AI Analytics",
         href: "/marketing/ai-analytics",
         icon: <BarChart3 size={18} />,
+        roles: ["admin", "marketing"],
+      },
+      {
+        label: "Ad Deconstructor",
+        href: "/marketing/deconstructor",
+        icon: <Sparkles size={18} />,
         roles: ["admin", "marketing"],
       },
       {

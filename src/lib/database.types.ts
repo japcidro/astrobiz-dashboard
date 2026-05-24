@@ -1577,6 +1577,59 @@ export type Database = {
         }
         Relationships: []
       }
+      ilp_deconstructions: {
+        Row: {
+          ad_origin: string | null
+          ad_title: string | null
+          compliance_flags_count: number
+          cost_usd: number | null
+          created_at: string
+          employee_id: string | null
+          id: string
+          model: string | null
+          source_text: string
+          source_text_hash: string
+          tokens_used: Json | null
+          zones: Json
+        }
+        Insert: {
+          ad_origin?: string | null
+          ad_title?: string | null
+          compliance_flags_count?: number
+          cost_usd?: number | null
+          created_at?: string
+          employee_id?: string | null
+          id?: string
+          model?: string | null
+          source_text: string
+          source_text_hash: string
+          tokens_used?: Json | null
+          zones: Json
+        }
+        Update: {
+          ad_origin?: string | null
+          ad_title?: string | null
+          compliance_flags_count?: number
+          cost_usd?: number | null
+          created_at?: string
+          employee_id?: string | null
+          id?: string
+          model?: string | null
+          source_text?: string
+          source_text_hash?: string
+          tokens_used?: Json | null
+          zones?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ilp_deconstructions_employee_id_fkey"
+            columns: ["employee_id"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       inventory_adjustments: {
         Row: {
           adjustment_type: string
