@@ -114,7 +114,9 @@ export async function POST(request: Request) {
         thumbnail_url: video.thumbnail_url,
         analysis: out.analysis as unknown as Record<string, unknown>,
         analyzed_by: employee.id,
-        trigger_source: "manual_modal",
+        // 'on_demand' is the existing whitelisted value for user-initiated
+        // calls (see ad_creative_analyses_trigger_chk check constraint).
+        trigger_source: "on_demand",
         model: out.model,
         tokens_used: out.tokens_used,
         cost_usd: null,
