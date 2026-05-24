@@ -52,7 +52,7 @@ export async function GET() {
 
   const supabase = await createClient();
 
-  const [analysesRes, scalingRes, actionsRes] = await Promise.all([
+  const [analysesRes, scalingRes, actionsRes, winnersRes] = await Promise.all([
     supabase.from("ad_creative_analyses").select("ad_id, analysis"),
     // scaling_detection_cache has ~6k rows; bare .select() would silently
     // cap at 1000. Page through with fetchAllRows.
@@ -71,6 +71,11 @@ export async function GET() {
       .in("action", ["paused", "resumed", "manual_paused", "manual_resumed"])
       .order("created_at", { ascending: false })
       .limit(2000),
+    // Winner pool — admin-curated ads to include in the next Log generation.
+    // Currently bounded (no Log includes >100 ads); plain select is fine.
+    supabase
+      .from("winner_pool_ads")
+      .select("ad_id, tagged_at, tagged_by"),
   ]);
 
   const analyses: Record<string, { has_analysis: true; has_v2: boolean }> = {};
@@ -148,7 +153,43 @@ export async function GET() {
     };
   }
 
+  // winner_pool: { [ad_id]: { tagged_at, tagged_by_name } }
+  const winnerActorIds = Array.from(
+    new Set(
+      ((winnersRes.data ?? []) as Array<{ tagged_by: string | null }>)
+        .map((r) => r.tagged_by)
+        .filter((v): v is string => !!v)
+    )
+  );
+  const winnerActorMap = new Map<string, string>();
+  if (winnerActorIds.length > 0) {
+    const { data: emps } = await supabase
+      .from("employees")
+      .select("id, full_name")
+      .in("id", winnerActorIds);
+    for (const e of (emps ?? []) as { id: string; full_name: string | null }[]) {
+      if (e.full_name) winnerActorMap.set(e.id, e.full_name);
+    }
+  }
+
+  const winner_pool: Record<
+    string,
+    { tagged_at: string; tagged_by_name: string | null }
+  > = {};
+  for (const w of (winnersRes.data ?? []) as Array<{
+    ad_id: string;
+    tagged_at: string;
+    tagged_by: string | null;
+  }>) {
+    winner_pool[w.ad_id] = {
+      tagged_at: w.tagged_at,
+      tagged_by_name: w.tagged_by ? winnerActorMap.get(w.tagged_by) ?? null : null,
+    };
+  }
+
+  // Legacy `winners` key — kept as empty stub for any caller still
+  // destructuring it from the response shape.
   const winners: Record<string, never> = {};
 
-  return Response.json({ analyses, scaling, attributions, winners });
+  return Response.json({ analyses, scaling, attributions, winner_pool, winners });
 }

@@ -17,6 +17,7 @@ import {
   GitCompareArrows,
   Trash2,
   Sparkles,
+  Trophy,
 } from "lucide-react";
 import {
   PromoteToScalingModal,
@@ -1542,12 +1543,18 @@ export function DeconstructionDetailModal({
   onClose,
   onRerun,
   rerunning,
+  isTaggedWinner = false,
+  taggingWinner = false,
+  onToggleWinnerTag,
 }: {
   row: DeconstructionRow;
   adName: string | null;
   onClose: () => void;
   onRerun: () => void;
   rerunning: boolean;
+  isTaggedWinner?: boolean;
+  taggingWinner?: boolean;
+  onToggleWinnerTag?: () => void;
 }) {
   const a = row.analysis;
   const hasV2 = !!a.viral_mechanism;
@@ -1679,43 +1686,32 @@ export function DeconstructionDetailModal({
             Model: {row.model ?? "unknown"}
           </span>
           <div className="flex flex-wrap gap-2 items-center">
-            {/* Expand-from-Winner — only meaningful when the analysis has v2
-                fields (viral_mechanism). Legacy rows would dilute the
-                generator's context, so they're disabled and prompt re-run. */}
-            <a
-              href={`/marketing/ai-generator?tool=scripts&winner_analysis_id=${row.id}`}
-              aria-disabled={!a.viral_mechanism}
-              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors ${
-                a.viral_mechanism
-                  ? "bg-emerald-600 hover:bg-emerald-500 text-white"
-                  : "bg-gray-800 text-gray-500 pointer-events-none cursor-not-allowed"
-              }`}
-              title={
-                a.viral_mechanism
-                  ? "Open Script Creator pre-loaded with this winner's DNA"
-                  : "Re-run with v2.0 prompt to enable expansion"
-              }
-            >
-              <Sparkles size={12} />
-              Expand → Scripts
-            </a>
-            <a
-              href={`/marketing/ai-generator?tool=angles&winner_analysis_id=${row.id}`}
-              aria-disabled={!a.viral_mechanism}
-              className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors ${
-                a.viral_mechanism
-                  ? "bg-emerald-600/30 hover:bg-emerald-500/40 text-emerald-200 border border-emerald-700/50"
-                  : "bg-gray-800 text-gray-500 pointer-events-none cursor-not-allowed border border-gray-700"
-              }`}
-              title={
-                a.viral_mechanism
-                  ? "Open Angle Generator pre-loaded with this winner's DNA"
-                  : "Re-run with v2.0 prompt to enable expansion"
-              }
-            >
-              <Sparkles size={12} />
-              Expand → Angles
-            </a>
+            {/* Tag this ad for the next "Winning & Losing Ads Log" doc.
+                Tip in the title: tag notable LOSERS too — the Log learns
+                from comparison (survivorship bias if winners-only). */}
+            {onToggleWinnerTag && (
+              <button
+                onClick={onToggleWinnerTag}
+                disabled={taggingWinner}
+                className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait ${
+                  isTaggedWinner
+                    ? "bg-amber-500/15 text-amber-300 border border-amber-500/40 hover:bg-amber-500/25"
+                    : "bg-amber-600 hover:bg-amber-500 text-white"
+                }`}
+                title={
+                  isTaggedWinner
+                    ? "This ad is in the Winners Pool. Click to remove. Tip: tag notable losers too — the Log learns from comparison."
+                    : "Add this ad to the Winners Pool for the next generated Log document. Tip: also tag notable losers — the Log learns from comparison."
+                }
+              >
+                {taggingWinner ? (
+                  <Loader2 size={12} className="animate-spin" />
+                ) : (
+                  <Trophy size={12} />
+                )}
+                {isTaggedWinner ? "In Winners Pool" : "Tag as Winner"}
+              </button>
+            )}
             <button
               onClick={onRerun}
               disabled={rerunning}

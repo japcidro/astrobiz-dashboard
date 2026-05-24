@@ -2629,6 +2629,35 @@ export type Database = {
           },
         ]
       }
+      winner_pool_ads: {
+        Row: {
+          ad_id: string
+          store_name: string | null
+          tagged_at: string
+          tagged_by: string | null
+        }
+        Insert: {
+          ad_id: string
+          store_name?: string | null
+          tagged_at?: string
+          tagged_by?: string | null
+        }
+        Update: {
+          ad_id?: string
+          store_name?: string | null
+          tagged_at?: string
+          tagged_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "winner_pool_ads_tagged_by_fkey"
+            columns: ["tagged_by"]
+            isOneToOne: false
+            referencedRelation: "employees"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

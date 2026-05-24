@@ -57,6 +57,10 @@ interface Enrichments {
     string,
     { self_is_scaling: boolean; in_scaling: boolean }
   >;
+  winner_pool: Record<
+    string,
+    { tagged_at: string; tagged_by_name: string | null }
+  >;
   attributions: Record<
     string,
     {
@@ -176,18 +180,22 @@ function statusBadgeStyle(status: string): {
   };
 }
 
-// Display only ads with non-zero spend OR a winner mark by default. The FB
-// /insights endpoint already excludes zero-spend rows in the cache, so this
-// is mostly a safety filter for the unioned winner pool.
+// Tab visibility:
+//   * "winners" tab → only ads in the curated Winners Pool.
+//   * "all" tab → ads with spend, EXCLUDING anything already in the
+//     Winners Pool (so they don't show in both places).
 function isVisible(row: EnrichedRow, tab: Tab): boolean {
-  if (tab === "winners") return !!row.winner;
-  return row.spend > 0 || !!row.winner;
+  if (tab === "winners") return row.in_winner_pool;
+  if (row.in_winner_pool) return false;
+  return row.spend > 0;
 }
 
 interface EnrichedRow extends AdRow {
   store: string | null;
   analysis: { has_analysis: true; has_v2: boolean } | null;
-  winner: Enrichments["winners"][string] | null;
+  in_winner_pool: boolean;
+  pool_tagged_at: string | null;
+  pool_tagged_by: string | null;
 }
 
 // ─── Page ───
@@ -214,9 +222,13 @@ export default function CreativesPage() {
   const [enrichments, setEnrichments] = useState<Enrichments>({
     analyses: {},
     scaling: {},
+    winner_pool: {},
     attributions: {},
     winners: {},
   });
+
+  // Ad currently mid-tag/untag (Winners Pool toggle)
+  const [taggingWinnerId, setTaggingWinnerId] = useState<string | null>(null);
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
   const [throttled, setThrottled] = useState(false);
 
@@ -339,6 +351,45 @@ export default function CreativesPage() {
     [datePreset, accountFilter, loadThumbnails]
   );
 
+  // Toggle an ad in/out of the Winners Pool. The pool is the bucket of
+  // ads the next generated Log document will analyze (winners AND
+  // notable losers — survivorship bias otherwise per the spec).
+  const toggleWinnerTag = useCallback(
+    async (adId: string, currentlyTagged: boolean) => {
+      if (!adId || taggingWinnerId) return;
+      setTaggingWinnerId(adId);
+      setError(null);
+      try {
+        if (currentlyTagged) {
+          const res = await fetch(
+            `/api/marketing/winners-pool/${encodeURIComponent(adId)}`,
+            { method: "DELETE" }
+          );
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error || "Untag failed");
+        } else {
+          const ad = ads.find((a) => a.ad_id === adId);
+          const store = ad?.campaign
+            ? deriveStore(ad.campaign, storeNames)
+            : null;
+          const res = await fetch("/api/marketing/winners-pool", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ad_id: adId, store_name: store }),
+          });
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error || "Tag failed");
+        }
+        await loadEnrichments();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Winners Pool toggle failed");
+      } finally {
+        setTaggingWinnerId(null);
+      }
+    },
+    [ads, storeNames, taggingWinnerId, loadEnrichments]
+  );
+
   // Flip an ad's effective_status via /api/facebook/manage. Optimistic —
   // patches local state immediately, rolls back on FB error. Costs 1 FB
   // API call per click; well under the 200/hour rate window.
@@ -422,39 +473,45 @@ export default function CreativesPage() {
   // ─── Derived rows ───
 
   const enrichedRows = useMemo<EnrichedRow[]>(() => {
-    const rows: EnrichedRow[] = ads.map((a) => ({
-      ...a,
-      store: deriveStore(a.campaign, storeNames),
-      analysis: enrichments.analyses[a.ad_id] ?? null,
-      winner: enrichments.winners[a.ad_id] ?? null,
-    }));
+    const rows: EnrichedRow[] = ads.map((a) => {
+      const pool = enrichments.winner_pool[a.ad_id];
+      return {
+        ...a,
+        store: deriveStore(a.campaign, storeNames),
+        analysis: enrichments.analyses[a.ad_id] ?? null,
+        in_winner_pool: !!pool,
+        pool_tagged_at: pool?.tagged_at ?? null,
+        pool_tagged_by: pool?.tagged_by_name ?? null,
+      };
+    });
 
-    // Surface ghost / external winners that may not appear in the FB ads
-    // payload (e.g. paused ads with zero recent spend). On the Winners tab
-    // we want them visible even without performance metrics — that's the
-    // whole point of marking them.
-    const adIds = new Set(rows.map((r) => r.ad_id));
-    for (const [adId, w] of Object.entries(enrichments.winners)) {
-      if (adIds.has(adId)) continue;
+    // Ghost rows: winner-pool ads that don't appear in the current FB
+    // payload (paused, outside the date window, etc.) — surface them on
+    // the Winners tab anyway so the user sees their full pool.
+    const knownAdIds = new Set(rows.map((r) => r.ad_id));
+    for (const [adId, pool] of Object.entries(enrichments.winner_pool)) {
+      if (knownAdIds.has(adId)) continue;
       rows.push({
         ad_id: adId,
-        ad: w.label,
+        ad: adId, // no FB name available
         account: "—",
         account_id: "",
         campaign: "",
         adset: "",
-        status: "EXTERNAL",
+        status: "PAUSED",
         spend: 0,
-        purchases: w.purchases ?? 0,
-        cpa: w.cpp ?? 0,
-        roas: w.roas ?? 0,
+        purchases: 0,
+        cpa: 0,
+        roas: 0,
         impressions: 0,
         ctr: 0,
         thumbnail_url: null,
         preview_url: null,
-        store: w.store_name,
+        store: null,
         analysis: enrichments.analyses[adId] ?? null,
-        winner: w,
+        in_winner_pool: true,
+        pool_tagged_at: pool.tagged_at,
+        pool_tagged_by: pool.tagged_by_name,
       });
     }
 
@@ -484,8 +541,7 @@ export default function CreativesPage() {
       rows = rows.filter(
         (r) =>
           r.ad.toLowerCase().includes(q) ||
-          r.campaign.toLowerCase().includes(q) ||
-          (r.winner?.label.toLowerCase().includes(q) ?? false)
+          r.campaign.toLowerCase().includes(q)
       );
     }
 
@@ -511,8 +567,8 @@ export default function CreativesPage() {
           bv = b.cpa || Number.MAX_SAFE_INTEGER;
           break;
         case "linked_at":
-          av = a.winner?.linked_at ? Date.parse(a.winner.linked_at) : 0;
-          bv = b.winner?.linked_at ? Date.parse(b.winner.linked_at) : 0;
+          av = a.pool_tagged_at ? Date.parse(a.pool_tagged_at) : 0;
+          bv = b.pool_tagged_at ? Date.parse(b.pool_tagged_at) : 0;
           break;
       }
       return sortDir === "asc" ? av - bv : bv - av;
@@ -531,8 +587,8 @@ export default function CreativesPage() {
   ]);
 
   const counts = useMemo(() => {
-    const all = enrichedRows.filter((r) => r.spend > 0 || !!r.winner).length;
-    const winners = enrichedRows.filter((r) => !!r.winner).length;
+    const all = enrichedRows.filter((r) => r.spend > 0 && !r.in_winner_pool).length;
+    const winners = enrichedRows.filter((r) => r.in_winner_pool).length;
     return { all, winners };
   }, [enrichedRows]);
 
@@ -831,15 +887,9 @@ export default function CreativesPage() {
       )}
 
       {tab === "winners" && (
-        <CompareToolbar
-          selected={selectedIds.size}
-          stores={selectedStores}
-          canCompare={canCompare}
-          comparing={comparing}
-          progress={compareProgress}
-          error={compareError}
-          onRun={() => runCompare(false)}
-          onClear={() => setSelectedIds(new Set())}
+        <WinnersPoolToolbar
+          poolCount={counts.winners}
+          storeFilter={storeFilter}
         />
       )}
 
@@ -882,6 +932,14 @@ export default function CreativesPage() {
           }}
           onRerun={rerunActive}
           rerunning={analyzingId === activeRow.ad_id}
+          isTaggedWinner={!!enrichments.winner_pool[activeRow.ad_id]}
+          taggingWinner={taggingWinnerId === activeRow.ad_id}
+          onToggleWinnerTag={() =>
+            toggleWinnerTag(
+              activeRow.ad_id,
+              !!enrichments.winner_pool[activeRow.ad_id]
+            )
+          }
         />
       )}
 
@@ -1072,6 +1130,44 @@ function Filters({
           className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-8 pr-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
         />
       </div>
+    </div>
+  );
+}
+
+function WinnersPoolToolbar({
+  poolCount,
+  storeFilter,
+}: {
+  poolCount: number;
+  storeFilter: string;
+}) {
+  const ready = poolCount >= 1;
+  return (
+    <div className="flex flex-wrap items-center gap-3 bg-amber-900/15 border border-amber-700/40 rounded-lg p-3">
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-amber-100">
+          <span className="font-semibold">{poolCount}</span> ad
+          {poolCount === 1 ? "" : "s"} in pool
+          {storeFilter !== "ALL" ? ` for ${storeFilter}` : ""}
+        </p>
+        <p className="text-[11px] text-amber-300/70 mt-0.5">
+          Generate the Winning &amp; Losing Ads Log to feed into your Claude
+          Project. Tip: tag a few notable losers too — the Log learns from
+          comparison.
+        </p>
+      </div>
+      <button
+        disabled={!ready}
+        title={
+          ready
+            ? "Coming next: generate the structured Log document"
+            : "Tag at least one ad to enable"
+        }
+        className="bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2 cursor-pointer"
+      >
+        <Sparkles size={14} />
+        Generate Log
+      </button>
     </div>
   );
 }
@@ -1373,15 +1469,17 @@ function CreativesTable({
                     )}
                   </td>
                   <td className="px-3 py-2.5 text-xs">
-                    {r.winner ? (
+                    {r.in_winner_pool ? (
                       <span
                         className="inline-flex items-center gap-1 text-amber-300"
-                        title={r.winner.label}
+                        title={
+                          r.pool_tagged_by
+                            ? `Tagged by ${r.pool_tagged_by}`
+                            : "In Winners Pool"
+                        }
                       >
                         <Trophy size={11} />
-                        {r.winner.performance_status === "validated_winner"
-                          ? "Validated"
-                          : "In pool"}
+                        In pool
                       </span>
                     ) : (
                       <span className="text-gray-500">—</span>
@@ -1389,8 +1487,8 @@ function CreativesTable({
                   </td>
                   {tab === "winners" && (
                     <td className="px-3 py-2.5 text-[11px] text-gray-400">
-                      {r.winner?.linked_at
-                        ? timeAgo(r.winner.linked_at)
+                      {r.pool_tagged_at
+                        ? timeAgo(r.pool_tagged_at)
                         : "—"}
                     </td>
                   )}
