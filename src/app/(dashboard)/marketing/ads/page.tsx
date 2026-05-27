@@ -22,6 +22,7 @@ import Link from "next/link";
 import type { DatePreset } from "@/lib/facebook/types";
 import { QuickActionsModal } from "@/components/marketing/quick-actions-modal";
 import { AutopilotModal } from "@/components/marketing/autopilot-modal";
+import { DisapprovalReasonModal } from "@/components/marketing/disapproval-reason-modal";
 import {
   PromoteToScalingModal,
   type PromoteSubject,
@@ -259,6 +260,14 @@ export default function AdsPage() {
 
   // Quick Actions modal
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
+
+  // Disapproval-reason modal — fetches FB's ad_review_feedback for one ad
+  // when the user clicks "Why?" next to a DISAPPROVED status badge.
+  const [disapprovalAd, setDisapprovalAd] = useState<{
+    ad_id: string;
+    ad_name: string | null;
+    account_id: string | null;
+  } | null>(null);
 
   // Autopilot modal + status
   const [autopilotOpen, setAutopilotOpen] = useState(false);
@@ -1837,6 +1846,28 @@ export default function AdsPage() {
                         <td className="px-3 py-2.5 text-left whitespace-nowrap">
                           <div className="flex items-center gap-1.5">
                             {renderStatusBadge(rowData.status as string)}
+                            {String(rowData.status).includes("DISAPPROVED") && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDisapprovalAd({
+                                    ad_id: rowData.ad_id as string,
+                                    ad_name:
+                                      (rowData.name as string | undefined) ??
+                                      (rowData.ad as string | undefined) ??
+                                      null,
+                                    account_id:
+                                      (rowData.account_id as string | undefined) ??
+                                      null,
+                                  });
+                                }}
+                                className="inline-flex items-center gap-0.5 text-[10px] text-red-300 hover:text-red-200 underline decoration-dotted underline-offset-2 cursor-pointer"
+                                title="Show FB's policy violation reason"
+                              >
+                                Why?
+                              </button>
+                            )}
                             {(() => {
                               const info = scalingInfo.get(
                                 rowData.ad_id as string
@@ -2050,6 +2081,16 @@ export default function AdsPage() {
           </table>
         </div>
       </div>
+
+      {/* Disapproval-reason Modal */}
+      {disapprovalAd && (
+        <DisapprovalReasonModal
+          adId={disapprovalAd.ad_id}
+          adName={disapprovalAd.ad_name}
+          accountId={disapprovalAd.account_id}
+          onClose={() => setDisapprovalAd(null)}
+        />
+      )}
 
       {/* Quick Actions Modal */}
       <QuickActionsModal
