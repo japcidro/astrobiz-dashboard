@@ -1882,33 +1882,68 @@ export default function AdsPage() {
                           <div className="flex items-center justify-center gap-2">
                             {(() => {
                               // Always render a View link. Prefer the live FB
-                              // post URL (effective_object_story_id), but fall
-                              // back to Ads Manager when FB doesn't expose a
-                              // post — common for paused ads, deleted posts,
-                              // catalog/DPA creatives, etc.
+                              // post URL (effective_object_story_id) which
+                              // links to the public post — when missing
+                              // (paused ads, deleted posts, catalog/DPA
+                              // creatives, ad-only creatives that never
+                              // became a page post), fall back to fetching
+                              // FB's preview iframe on click. The fallback
+                              // opens a blank tab IMMEDIATELY to keep the
+                              // popup permission, then redirects it once
+                              // /api/facebook/ad-preview returns the iframe
+                              // src. Last-resort: if FB has no preview at
+                              // all, drop the blank tab to Ads Manager.
                               const hasPost = Boolean(rowData.preview_url);
+                              const adId = rowData.ad_id as string;
                               const acctNum = String(
                                 rowData.account_id as string
                               ).replace(/^act_/, "");
-                              const href = hasPost
-                                ? (rowData.preview_url as string)
-                                : `https://business.facebook.com/adsmanager/manage/ads?act=${acctNum}&selected_ad_ids=${rowData.ad_id as string}`;
+                              const adsManagerHref = `https://business.facebook.com/adsmanager/manage/ads?act=${acctNum}&selected_ad_ids=${adId}`;
+                              if (hasPost) {
+                                return (
+                                  <a
+                                    href={rowData.preview_url as string}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors text-xs"
+                                    title="View ad post on Facebook"
+                                  >
+                                    <ExternalLink size={13} />
+                                    View
+                                  </a>
+                                );
+                              }
                               return (
-                                <a
-                                  href={href}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  onClick={(e) => e.stopPropagation()}
-                                  className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors text-xs"
-                                  title={
-                                    hasPost
-                                      ? "View ad post on Facebook"
-                                      : "Open ad in Ads Manager (no public post link available)"
-                                  }
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const win = window.open(
+                                      "about:blank",
+                                      "_blank",
+                                      "noopener,noreferrer"
+                                    );
+                                    fetch(
+                                      `/api/facebook/ad-preview?ad_id=${encodeURIComponent(adId)}`
+                                    )
+                                      .then((r) => r.json())
+                                      .then((j) => {
+                                        if (!win) return;
+                                        win.location.href =
+                                          (j as { url?: string }).url ||
+                                          adsManagerHref;
+                                      })
+                                      .catch(() => {
+                                        if (win) win.location.href = adsManagerHref;
+                                      });
+                                  }}
+                                  className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors text-xs cursor-pointer"
+                                  title="Open the FB ad preview (no public post — uses FB's preview iframe)"
                                 >
                                   <ExternalLink size={13} />
                                   View
-                                </a>
+                                </button>
                               );
                             })()}
                             <Link
