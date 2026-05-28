@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
 import { AD_REJECTION_SYSTEM_PROMPT } from "@/lib/ai/ad-rejection-spec";
+import crypto from "node:crypto";
 
 export const dynamic = "force-dynamic";
 // Claude Sonnet on a single transcript + policy list takes ~10–25s.
@@ -8,6 +9,25 @@ export const maxDuration = 120;
 
 const MODEL = "claude-sonnet-4-6";
 const MAX_TOKENS = 4_000;
+
+function sha256(s: string): string {
+  return crypto.createHash("sha256").update(s).digest("hex");
+}
+
+// Canonicalize policies for hashing so reorderings / FB description
+// whitespace tweaks don't bust the cache unnecessarily.
+function hashPolicies(policies: PolicyInput[]): string {
+  const canonical = policies
+    .map((p) => ({
+      scope: (p.scope ?? "").trim(),
+      policy: (p.policy ?? "").trim(),
+      description: (p.description ?? "").trim(),
+    }))
+    .sort((a, b) =>
+      `${a.scope}|${a.policy}`.localeCompare(`${b.scope}|${b.policy}`)
+    );
+  return sha256(JSON.stringify(canonical));
+}
 
 interface ClaudeResponse {
   content: Array<{ type: string; text?: string }>;
@@ -37,6 +57,13 @@ export async function POST(request: Request) {
   const body = (await request.json()) as {
     ad_id?: string;
     policies?: PolicyInput[];
+    // force=true bypasses the cache and re-runs Claude. Used by the
+    // 'Re-run' link inside the modal.
+    force?: boolean;
+    // check_only=true returns the cached result if one exists and a 404
+    // (not_cached: true) otherwise. NEVER fires Claude. Used by the
+    // modal to surface a prior analysis on open without re-billing.
+    check_only?: boolean;
   };
   if (!body.ad_id) {
     return Response.json({ error: "ad_id required" }, { status: 400 });
@@ -66,6 +93,46 @@ export async function POST(request: Request) {
       },
       { status: 404 }
     );
+  }
+
+  // 1b. Cache lookup. Re-runs against the same (ad, transcript, policy
+  // set) are instant + free — same hash, return the stored markdown.
+  // Forced re-runs from the UI pass `force=true` to bypass.
+  const transcriptHash = sha256(transcript.trim());
+  const policiesHash = hashPolicies(policies);
+  const force = body.force === true;
+
+  if (!force) {
+    const { data: cached } = await supabase
+      .from("ad_rejection_inferences")
+      .select("markdown, model, tokens_used, created_at")
+      .eq("ad_id", body.ad_id)
+      .eq("transcript_hash", transcriptHash)
+      .eq("policies_hash", policiesHash)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (cached) {
+      return Response.json({
+        ad_id: body.ad_id,
+        markdown: cached.markdown,
+        model: cached.model ?? MODEL,
+        tokens_used: cached.tokens_used ?? null,
+        cached: true,
+        cached_at: cached.created_at,
+      });
+    }
+    // check_only: never fire Claude. The modal uses this on open to
+    // surface a prior cached analysis without re-billing the user.
+    if (body.check_only) {
+      return Response.json(
+        {
+          not_cached: true,
+          error: "No cached analysis for this ad + transcript + policy set.",
+        },
+        { status: 404 }
+      );
+    }
   }
 
   // 2. Anthropic key
@@ -143,10 +210,30 @@ Produce the analysis per your spec. Most-likely triggers first.`;
     );
   }
 
+  // Write-through cache so the next click on this same ad is free.
+  // upsert on the unique (ad_id, transcript_hash, policies_hash) key —
+  // a force=true re-run replaces the prior cached markdown rather than
+  // accumulating duplicates.
+  await supabase
+    .from("ad_rejection_inferences")
+    .upsert(
+      {
+        ad_id: body.ad_id,
+        transcript_hash: transcriptHash,
+        policies_hash: policiesHash,
+        markdown,
+        model: MODEL,
+        tokens_used: json.usage ?? null,
+        employee_id: employee.id,
+      },
+      { onConflict: "ad_id,transcript_hash,policies_hash" }
+    );
+
   return Response.json({
     ad_id: body.ad_id,
     markdown,
     model: MODEL,
     tokens_used: json.usage ?? null,
+    cached: false,
   });
 }

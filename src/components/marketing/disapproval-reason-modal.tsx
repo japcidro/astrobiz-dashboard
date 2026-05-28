@@ -55,6 +55,7 @@ export function DisapprovalReasonModal({ adId, adName, accountId, onClose }: Pro
   const [error, setError] = useState<string | null>(null);
   // AI-inference state — fires only when user clicks the button.
   const [aiMarkdown, setAiMarkdown] = useState<string | null>(null);
+  const [aiCached, setAiCached] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiNoTranscript, setAiNoTranscript] = useState(false);
@@ -87,36 +88,80 @@ export function DisapprovalReasonModal({ adId, adName, accountId, onClose }: Pro
   // AI-inference call. Sends the captured transcript + Meta's policy
   // categories to Claude and gets a line-by-line breakdown of which
   // claims likely triggered the rejection plus compliant rewrites.
-  const runAiAnalysis = useCallback(async () => {
-    if (aiLoading) return;
-    setAiLoading(true);
-    setAiError(null);
-    setAiNoTranscript(false);
-    try {
-      const res = await fetch("/api/marketing/ad-rejection-analysis", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ad_id: adId,
-          policies: data?.policies ?? [],
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        if (json.no_transcript) {
-          setAiNoTranscript(true);
-        } else {
-          throw new Error(json.error || "AI analysis failed");
+  // force=true bypasses the server-side cache for an explicit Re-run.
+  const runAiAnalysis = useCallback(
+    async (force = false) => {
+      if (aiLoading) return;
+      setAiLoading(true);
+      setAiError(null);
+      setAiNoTranscript(false);
+      try {
+        const res = await fetch("/api/marketing/ad-rejection-analysis", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ad_id: adId,
+            policies: data?.policies ?? [],
+            force,
+          }),
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          if (json.no_transcript) {
+            setAiNoTranscript(true);
+          } else {
+            throw new Error(json.error || "AI analysis failed");
+          }
+          return;
         }
-        return;
+        const payload = json as { markdown?: string; cached?: boolean };
+        setAiMarkdown(payload.markdown ?? null);
+        setAiCached(!!payload.cached);
+      } catch (e) {
+        setAiError(e instanceof Error ? e.message : "AI analysis failed");
+      } finally {
+        setAiLoading(false);
       }
-      setAiMarkdown((json as { markdown?: string }).markdown ?? null);
-    } catch (e) {
-      setAiError(e instanceof Error ? e.message : "AI analysis failed");
-    } finally {
-      setAiLoading(false);
-    }
-  }, [adId, data, aiLoading]);
+    },
+    [adId, data, aiLoading]
+  );
+
+  // On open (once FB policies are loaded), peek at the cache. If a
+  // prior analysis exists for this (ad, transcript, policies) tuple,
+  // surface it instantly — no second click, no Claude call. The
+  // check_only flag guarantees this never bills.
+  useEffect(() => {
+    if (!data || aiMarkdown || aiLoading) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/marketing/ad-rejection-analysis", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ad_id: adId,
+            policies: data.policies,
+            check_only: true,
+          }),
+        });
+        if (!res.ok) return; // 404 = no cache yet, that's fine
+        const json = (await res.json()) as {
+          markdown?: string;
+          cached?: boolean;
+        };
+        if (!cancelled && json.markdown) {
+          setAiMarkdown(json.markdown);
+          setAiCached(!!json.cached);
+        }
+      } catch {
+        // Silent — surfacing a cache-check error would be more noise
+        // than signal. The user can still click the button manually.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [adId, data, aiMarkdown, aiLoading]);
 
   // One-click 'Deconstruct now' inside this modal: trigger Gemini to
   // transcribe the ad video, then auto-fire the AI rejection analysis
@@ -139,8 +184,10 @@ export function DisapprovalReasonModal({ adId, adName, accountId, onClose }: Pro
         throw new Error(json.error || "Transcribe failed");
       }
       // Transcript now lives in ad_creative_analyses. Fire the AI
-      // rejection analysis against it immediately.
-      await runAiAnalysis();
+      // rejection analysis against it immediately. Don't force —
+      // a cached result for this (new transcript, same policies) would
+      // be vanishingly rare, but if it exists we still want to honor it.
+      await runAiAnalysis(false);
     } catch (e) {
       setTranscribeError(
         e instanceof Error ? e.message : "Transcribe failed"
@@ -308,8 +355,16 @@ export function DisapprovalReasonModal({ adId, adName, accountId, onClose }: Pro
           {data && !loading && !error && (
             <div className="mt-2 pt-3 border-t border-gray-700/50 space-y-2">
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">
+                <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold flex items-center gap-2">
                   Specific Reasons (AI Inference)
+                  {aiMarkdown && aiCached && (
+                    <span
+                      className="text-[10px] text-gray-400 bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 normal-case tracking-normal"
+                      title="Reusing prior Claude analysis for this exact ad + transcript + policy set. Free, instant."
+                    >
+                      Cached
+                    </span>
+                  )}
                 </h3>
                 <span className="text-[10px] text-yellow-300/80 bg-yellow-900/20 border border-yellow-700/40 rounded px-1.5 py-0.5">
                   AI INFERENCE · NOT META OFFICIAL
@@ -328,7 +383,7 @@ export function DisapprovalReasonModal({ adId, adName, accountId, onClose }: Pro
                     compliant rewrites for each.
                   </p>
                   <button
-                    onClick={runAiAnalysis}
+                    onClick={() => runAiAnalysis(false)}
                     disabled={aiLoading}
                     className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer"
                     title="Run Claude Sonnet 4.6 against the captured transcript + Meta's policy categories. Takes 10–25s."
@@ -400,7 +455,7 @@ export function DisapprovalReasonModal({ adId, adName, accountId, onClose }: Pro
                     <p className="mt-1 break-words">{aiError}</p>
                   </div>
                   <button
-                    onClick={runAiAnalysis}
+                    onClick={() => runAiAnalysis(false)}
                     className="text-xs bg-red-700/30 hover:bg-red-700/50 border border-red-700/50 rounded px-2 py-1 cursor-pointer flex items-center gap-1"
                   >
                     <RefreshCw size={11} />
@@ -474,10 +529,10 @@ export function DisapprovalReasonModal({ adId, adName, accountId, onClose }: Pro
                       category, not the line
                     </p>
                     <button
-                      onClick={runAiAnalysis}
+                      onClick={() => runAiAnalysis(true)}
                       disabled={aiLoading}
                       className="text-[11px] text-gray-400 hover:text-white flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                      title="Re-run AI analysis"
+                      title="Re-run the AI analysis (bypasses cache, re-bills Claude)"
                     >
                       <RefreshCw size={10} />
                       Re-run
