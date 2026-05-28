@@ -8,6 +8,7 @@ import {
   RefreshCw,
   ExternalLink,
   Sparkles,
+  Wand2,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -57,6 +58,10 @@ export function DisapprovalReasonModal({ adId, adName, accountId, onClose }: Pro
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiNoTranscript, setAiNoTranscript] = useState(false);
+  // Transcribe (Gemini) state — fires when user hits 'Deconstruct now'
+  // from inside this modal because no transcript existed yet.
+  const [transcribing, setTranscribing] = useState(false);
+  const [transcribeError, setTranscribeError] = useState<string | null>(null);
 
   const run = useCallback(async () => {
     setLoading(true);
@@ -112,6 +117,38 @@ export function DisapprovalReasonModal({ adId, adName, accountId, onClose }: Pro
       setAiLoading(false);
     }
   }, [adId, data, aiLoading]);
+
+  // One-click 'Deconstruct now' inside this modal: trigger Gemini to
+  // transcribe the ad video, then auto-fire the AI rejection analysis
+  // against the fresh transcript. Saves the marketer from bouncing to
+  // the Creatives page and back.
+  const transcribeAndAnalyze = useCallback(async () => {
+    if (transcribing) return;
+    setTranscribing(true);
+    setTranscribeError(null);
+    setAiError(null);
+    setAiNoTranscript(false);
+    try {
+      const res = await fetch("/api/marketing/deconstructor/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ad_id: adId, account_id: accountId }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json.error || "Transcribe failed");
+      }
+      // Transcript now lives in ad_creative_analyses. Fire the AI
+      // rejection analysis against it immediately.
+      await runAiAnalysis();
+    } catch (e) {
+      setTranscribeError(
+        e instanceof Error ? e.message : "Transcribe failed"
+      );
+    } finally {
+      setTranscribing(false);
+    }
+  }, [adId, accountId, runAiAnalysis, transcribing]);
 
   const acctNum = accountId ? String(accountId).replace(/^act_/, "") : null;
   const adsManagerHref = acctNum
@@ -312,17 +349,46 @@ export function DisapprovalReasonModal({ adId, adName, accountId, onClose }: Pro
                 </div>
               )}
 
-              {aiNoTranscript && (
+              {aiNoTranscript && !transcribing && (
                 <div className="p-3 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-300">
                   <p className="font-medium text-white mb-1">
                     No transcript captured for this ad yet.
                   </p>
-                  <p className="text-gray-400">
-                    The AI analysis needs the ad&apos;s text. Open the ad
-                    in the Creatives page and click{" "}
-                    <span className="text-emerald-300">Deconstruct now</span>{" "}
-                    to capture a transcript, then come back here.
+                  <p className="text-gray-400 mb-3">
+                    The AI analysis needs the ad&apos;s text. Click below
+                    to transcribe the video now (~30–90s), then the
+                    rejection analysis fires automatically.
                   </p>
+                  <button
+                    onClick={transcribeAndAnalyze}
+                    disabled={transcribing}
+                    className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-wait text-white text-xs font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer"
+                    title="Transcribe with Gemini, then auto-run the AI rejection analysis"
+                  >
+                    <Wand2 size={12} />
+                    Deconstruct now
+                  </button>
+                  {transcribeError && (
+                    <div className="mt-3 p-2 bg-red-900/30 border border-red-700/50 rounded text-red-300 text-xs">
+                      <p className="font-medium">Deconstruct failed</p>
+                      <p className="mt-1 break-words">{transcribeError}</p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {transcribing && (
+                <div className="flex items-start gap-2 text-gray-400 py-3 px-3 bg-emerald-900/10 border border-emerald-700/30 rounded-lg">
+                  <Loader2 size={16} className="animate-spin text-emerald-400 mt-0.5 flex-shrink-0" />
+                  <div className="text-xs">
+                    <p className="text-white font-medium">
+                      Transcribing video with Gemini…
+                    </p>
+                    <p className="text-gray-400 mt-0.5">
+                      Downloading the FB video and running Gemini Vision
+                      (30–90s). AI rejection analysis fires right after.
+                    </p>
+                  </div>
                 </div>
               )}
 
