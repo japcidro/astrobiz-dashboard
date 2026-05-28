@@ -1,7 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { X, Loader2, AlertCircle, RefreshCw, ExternalLink } from "lucide-react";
+import {
+  X,
+  Loader2,
+  AlertCircle,
+  RefreshCw,
+  ExternalLink,
+  Sparkles,
+} from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface PolicyEntry {
   scope: string;
@@ -43,6 +52,11 @@ export function DisapprovalReasonModal({ adId, adName, accountId, onClose }: Pro
   const [data, setData] = useState<ReviewFeedback | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // AI-inference state — fires only when user clicks the button.
+  const [aiMarkdown, setAiMarkdown] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiNoTranscript, setAiNoTranscript] = useState(false);
 
   const run = useCallback(async () => {
     setLoading(true);
@@ -64,6 +78,40 @@ export function DisapprovalReasonModal({ adId, adName, accountId, onClose }: Pro
   useEffect(() => {
     run();
   }, [run]);
+
+  // AI-inference call. Sends the captured transcript + Meta's policy
+  // categories to Claude and gets a line-by-line breakdown of which
+  // claims likely triggered the rejection plus compliant rewrites.
+  const runAiAnalysis = useCallback(async () => {
+    if (aiLoading) return;
+    setAiLoading(true);
+    setAiError(null);
+    setAiNoTranscript(false);
+    try {
+      const res = await fetch("/api/marketing/ad-rejection-analysis", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ad_id: adId,
+          policies: data?.policies ?? [],
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        if (json.no_transcript) {
+          setAiNoTranscript(true);
+        } else {
+          throw new Error(json.error || "AI analysis failed");
+        }
+        return;
+      }
+      setAiMarkdown((json as { markdown?: string }).markdown ?? null);
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : "AI analysis failed");
+    } finally {
+      setAiLoading(false);
+    }
+  }, [adId, data, aiLoading]);
 
   const acctNum = accountId ? String(accountId).replace(/^act_/, "") : null;
   const adsManagerHref = acctNum
@@ -212,6 +260,165 @@ export function DisapprovalReasonModal({ adId, adName, accountId, onClose }: Pro
                   )}
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* AI-inference section — fires only on user click. Meta only
+              exposes the policy CATEGORY (e.g. "Health and Wellness");
+              this runs Claude against the captured transcript to infer
+              which specific lines triggered the rejection + how to
+              rewrite them compliantly. */}
+          {data && !loading && !error && (
+            <div className="mt-2 pt-3 border-t border-gray-700/50 space-y-2">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">
+                  Specific Reasons (AI Inference)
+                </h3>
+                <span className="text-[10px] text-yellow-300/80 bg-yellow-900/20 border border-yellow-700/40 rounded px-1.5 py-0.5">
+                  AI INFERENCE · NOT META OFFICIAL
+                </span>
+              </div>
+
+              {!aiMarkdown && !aiLoading && !aiError && !aiNoTranscript && (
+                <div className="p-3 bg-purple-900/15 border border-purple-700/40 rounded-lg">
+                  <p className="text-xs text-gray-300 mb-2">
+                    Meta only returns the policy category. Run Claude
+                    against this ad&apos;s transcript to pinpoint{" "}
+                    <span className="text-white font-medium">
+                      which specific lines
+                    </span>{" "}
+                    most likely triggered the rejection — and get
+                    compliant rewrites for each.
+                  </p>
+                  <button
+                    onClick={runAiAnalysis}
+                    disabled={aiLoading}
+                    className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer"
+                    title="Run Claude Sonnet 4.6 against the captured transcript + Meta's policy categories. Takes 10–25s."
+                  >
+                    <Sparkles size={12} />
+                    Get specific reason (AI)
+                  </button>
+                </div>
+              )}
+
+              {aiLoading && (
+                <div className="flex items-center gap-2 text-gray-400 py-4">
+                  <Loader2 size={16} className="animate-spin text-purple-400" />
+                  <span className="text-xs">
+                    Claude is reading the transcript + Meta&apos;s policy
+                    rules…
+                  </span>
+                </div>
+              )}
+
+              {aiNoTranscript && (
+                <div className="p-3 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-300">
+                  <p className="font-medium text-white mb-1">
+                    No transcript captured for this ad yet.
+                  </p>
+                  <p className="text-gray-400">
+                    The AI analysis needs the ad&apos;s text. Open the ad
+                    in the Creatives page and click{" "}
+                    <span className="text-emerald-300">Deconstruct now</span>{" "}
+                    to capture a transcript, then come back here.
+                  </p>
+                </div>
+              )}
+
+              {aiError && (
+                <div className="p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-xs flex items-start gap-2">
+                  <AlertCircle size={14} className="mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <p className="font-medium">AI analysis failed</p>
+                    <p className="mt-1 break-words">{aiError}</p>
+                  </div>
+                  <button
+                    onClick={runAiAnalysis}
+                    className="text-xs bg-red-700/30 hover:bg-red-700/50 border border-red-700/50 rounded px-2 py-1 cursor-pointer flex items-center gap-1"
+                  >
+                    <RefreshCw size={11} />
+                    Retry
+                  </button>
+                </div>
+              )}
+
+              {aiMarkdown && (
+                <div className="p-4 bg-purple-900/10 border border-purple-700/40 rounded-lg">
+                  <div className="text-sm text-gray-200 leading-relaxed">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        p: ({ children }) => (
+                          <p className="mb-2 last:mb-0">{children}</p>
+                        ),
+                        h1: ({ children }) => (
+                          <h3 className="text-sm font-bold text-white mt-3 mb-1 first:mt-0">
+                            {children}
+                          </h3>
+                        ),
+                        h2: ({ children }) => (
+                          <h3 className="text-sm font-bold text-purple-200 mt-3 mb-1 first:mt-0">
+                            {children}
+                          </h3>
+                        ),
+                        h3: ({ children }) => (
+                          <h4 className="text-xs font-semibold text-white mt-2 mb-1">
+                            {children}
+                          </h4>
+                        ),
+                        ul: ({ children }) => (
+                          <ul className="list-disc pl-5 mb-2 space-y-0.5">
+                            {children}
+                          </ul>
+                        ),
+                        ol: ({ children }) => (
+                          <ol className="list-decimal pl-5 mb-2 space-y-0.5">
+                            {children}
+                          </ol>
+                        ),
+                        strong: ({ children }) => (
+                          <strong className="text-white font-semibold">
+                            {children}
+                          </strong>
+                        ),
+                        em: ({ children }) => (
+                          <em className="text-purple-200 not-italic font-medium">
+                            {children}
+                          </em>
+                        ),
+                        code: ({ children }) => (
+                          <code className="bg-gray-900/70 px-1.5 py-0.5 rounded text-emerald-300 text-[12px] font-mono">
+                            {children}
+                          </code>
+                        ),
+                        blockquote: ({ children }) => (
+                          <blockquote className="border-l-2 border-purple-500/60 pl-3 my-2 text-gray-300 italic">
+                            {children}
+                          </blockquote>
+                        ),
+                      }}
+                    >
+                      {aiMarkdown}
+                    </ReactMarkdown>
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-purple-700/30 flex items-center justify-between gap-2">
+                    <p className="text-[10px] text-gray-500">
+                      Claude Sonnet 4.6 inference · Meta only confirmed the
+                      category, not the line
+                    </p>
+                    <button
+                      onClick={runAiAnalysis}
+                      disabled={aiLoading}
+                      className="text-[11px] text-gray-400 hover:text-white flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                      title="Re-run AI analysis"
+                    >
+                      <RefreshCw size={10} />
+                      Re-run
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
