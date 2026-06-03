@@ -180,7 +180,16 @@ export function PromoteBulkToScalingModal({
       );
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to load adsets");
-      setAdsets((json.adsets as Adset[]) ?? []);
+      const list = (json.adsets as Adset[]) ?? [];
+      setAdsets(list);
+      // Auto-pick a sensible source for "New adset" so the user is never
+      // forced to hunt for one. Meta can't create a blank adset — it must
+      // clone an existing one's targeting/budget — so we default to the
+      // first ACTIVE adset (else the first one). The user can still change
+      // it, and the new adset starts PAUSED for review either way.
+      const def =
+        list.find((a) => a.effective_status === "ACTIVE") ?? list[0];
+      if (def) setTemplateAdsetId(def.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load adsets");
     } finally {
@@ -268,7 +277,7 @@ export function PromoteBulkToScalingModal({
       (destCounts.newShared > 0 || destCounts.new > 0) &&
       !templateAdsetId
     )
-      return "Pick a Template adset to enable the “New adset” rows.";
+      return "Pick a source adset (Copy targeting & budget from) first.";
     if (destCounts.newShared > 0 && sharedNewName.trim().length < 3)
       return "Type a New adset name (min 3 characters).";
     return null;
@@ -562,7 +571,7 @@ export function PromoteBulkToScalingModal({
                             }
                           >
                             {!templateAdsetId
-                              ? "→ New adset — pick a Template adset below first"
+                              ? "→ New adset — pick a source adset below first"
                               : sharedNewName.trim().length < 3
                                 ? "→ New adset — type a name below first"
                                 : `→ ${sharedNewName.trim()} (new)`}
@@ -570,7 +579,7 @@ export function PromoteBulkToScalingModal({
                           <option value="new" disabled={!templateAdsetId}>
                             {templateAdsetId
                               ? "+ New per ad (named after source)"
-                              : "+ New per ad — pick a Template adset below first"}
+                              : "+ New per ad — pick a source adset below first"}
                           </option>
                           {adsets.length > 0 && (
                             <optgroup label="Existing adsets">
@@ -634,10 +643,9 @@ export function PromoteBulkToScalingModal({
           {selectedStore && (
             <div>
               <label className="block text-xs text-gray-400 mb-1.5">
-                Template adset{" "}
+                Copy targeting &amp; budget from{" "}
                 <span className="text-gray-600">
-                  (its targeting/budget gets cloned for any &quot;New
-                  adset&quot; row)
+                  (auto-picked — Meta can&apos;t make a blank adset)
                 </span>
               </label>
               {loadingAdsets ? (
@@ -665,7 +673,7 @@ export function PromoteBulkToScalingModal({
                       : "border-gray-700"
                   }`}
                 >
-                  <option value="">— Pick template adset —</option>
+                  <option value="">— Pick a source adset —</option>
                   {adsets.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.name}
@@ -674,17 +682,10 @@ export function PromoteBulkToScalingModal({
                   ))}
                 </select>
               )}
-              {!templateAdsetId &&
-                adsets.length > 0 &&
-                sharedNewName.trim().length >= 3 && (
-                  <p className="text-[11px] text-orange-300 mt-1.5 flex items-start gap-1">
-                    <AlertCircle size={12} className="mt-0.5 flex-shrink-0" />
-                    Pick a template adset here to unlock the &quot;→{" "}
-                    {sharedNewName.trim()}&quot; option in each ad&apos;s
-                    dropdown. The new adset copies this one&apos;s
-                    targeting/budget.
-                  </p>
-                )}
+              <p className="text-[11px] text-gray-500 mt-1">
+                You still get a brand-new, separate adset — this just gives it
+                a starting targeting/budget. The original is untouched.
+              </p>
             </div>
           )}
 
@@ -708,9 +709,11 @@ export function PromoteBulkToScalingModal({
                 className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500"
               />
               <p className="text-[11px] text-gray-500 mt-1">
-                Cloned from the template above, then renamed. The new adset
-                starts PAUSED — the ads inside it respect the &quot;After
-                copy&quot; choice below.
+                A brand-new adset with this name is created in the scaling
+                campaign (starts PAUSED so you can set its budget/targeting
+                first). Every ad set to &quot;→ New adset&quot; lands inside
+                it; the ads themselves respect the &quot;After copy&quot;
+                choice below.
               </p>
             </div>
           )}
