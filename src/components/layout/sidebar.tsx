@@ -31,6 +31,7 @@ import {
   Target,
   AlertTriangle,
   Sparkles,
+  FileSpreadsheet,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -266,6 +267,12 @@ const navEntries: NavEntry[] = [
     label: "KPI Dashboard",
     href: "/admin/kpi-dashboard",
     icon: <Target size={20} />,
+    roles: ["admin"],
+  },
+  {
+    label: "Compliance",
+    href: "/admin/compliance",
+    icon: <FileSpreadsheet size={20} />,
     roles: ["admin"],
   },
   {
