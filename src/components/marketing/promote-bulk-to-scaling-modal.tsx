@@ -255,6 +255,25 @@ export function PromoteBulkToScalingModal({
     return true;
   })();
 
+  // Plain-language reason the Promote button is disabled, shown in the
+  // footer so the blocker is never a mystery (the most common one: every
+  // row left on "Skip", or a "New adset" row without a template picked).
+  const blockReason = (() => {
+    if (submitting || done) return null;
+    if (!selectedStore) return "Pick a target store first.";
+    if (loadingAdsets) return null;
+    if (destCounts.active === 0)
+      return "Every ad is set to Skip — pick a destination for at least one.";
+    if (
+      (destCounts.newShared > 0 || destCounts.new > 0) &&
+      !templateAdsetId
+    )
+      return "Pick a Template adset to enable the “New adset” rows.";
+    if (destCounts.newShared > 0 && sharedNewName.trim().length < 3)
+      return "Type a New adset name (min 3 characters).";
+    return null;
+  })();
+
   const tally = useMemo(() => {
     let succeeded = 0;
     let failed = 0;
@@ -542,10 +561,16 @@ export function PromoteBulkToScalingModal({
                               sharedNewName.trim().length < 3
                             }
                           >
-                            → {sharedNewName.trim() || "New adset"} (new)
+                            {!templateAdsetId
+                              ? "→ New adset — pick a Template adset below first"
+                              : sharedNewName.trim().length < 3
+                                ? "→ New adset — type a name below first"
+                                : `→ ${sharedNewName.trim()} (new)`}
                           </option>
                           <option value="new" disabled={!templateAdsetId}>
-                            + New per ad (named after source)
+                            {templateAdsetId
+                              ? "+ New per ad (named after source)"
+                              : "+ New per ad — pick a Template adset below first"}
                           </option>
                           {adsets.length > 0 && (
                             <optgroup label="Existing adsets">
@@ -631,7 +656,14 @@ export function PromoteBulkToScalingModal({
                   value={templateAdsetId}
                   onChange={(e) => setTemplateAdsetId(e.target.value)}
                   disabled={submitting || done}
-                  className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500"
+                  className={`w-full bg-gray-800 border text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500 ${
+                    !templateAdsetId &&
+                    (sharedNewName.trim().length >= 3 ||
+                      destCounts.new > 0 ||
+                      destCounts.newShared > 0)
+                      ? "border-orange-500 ring-1 ring-orange-500/40"
+                      : "border-gray-700"
+                  }`}
                 >
                   <option value="">— Pick template adset —</option>
                   {adsets.map((a) => (
@@ -642,6 +674,17 @@ export function PromoteBulkToScalingModal({
                   ))}
                 </select>
               )}
+              {!templateAdsetId &&
+                adsets.length > 0 &&
+                sharedNewName.trim().length >= 3 && (
+                  <p className="text-[11px] text-orange-300 mt-1.5 flex items-start gap-1">
+                    <AlertCircle size={12} className="mt-0.5 flex-shrink-0" />
+                    Pick a template adset here to unlock the &quot;→{" "}
+                    {sharedNewName.trim()}&quot; option in each ad&apos;s
+                    dropdown. The new adset copies this one&apos;s
+                    targeting/budget.
+                  </p>
+                )}
             </div>
           )}
 
@@ -741,6 +784,12 @@ export function PromoteBulkToScalingModal({
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-2 p-4 border-t border-gray-700">
+          {!done && blockReason && (
+            <p className="mr-auto text-[11px] text-orange-300/90 flex items-start gap-1 max-w-[55%]">
+              <AlertCircle size={12} className="mt-0.5 flex-shrink-0" />
+              {blockReason}
+            </p>
+          )}
           <button
             onClick={handleClose}
             disabled={submitting}
