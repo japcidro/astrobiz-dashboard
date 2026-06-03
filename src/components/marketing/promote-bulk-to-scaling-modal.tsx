@@ -58,20 +58,24 @@ interface RowResult {
 }
 
 // Per-ad destination choice.
-//   unset    — user hasn't picked yet (row is ineligible to submit)
-//   skip     — explicitly excluded from this bulk run
-//   new      — clone the global template adset and drop the ad inside
-//   existing — drop the ad into a specific existing scaling adset
+//   unset      — user hasn't picked yet (row is ineligible to submit)
+//   skip       — explicitly excluded from this bulk run
+//   new        — clone the template adset per ad, named after the source adset
+//   new-shared — drop the ad into ONE brand-new adset (custom name) that's
+//                created once and reused for every "new-shared" row
+//   existing   — drop the ad into a specific existing scaling adset
 type Destination =
   | { kind: "unset" }
   | { kind: "skip" }
   | { kind: "new" }
+  | { kind: "new-shared" }
   | { kind: "existing"; adsetId: string };
 
 function serializeDest(d: Destination): string {
   if (d.kind === "unset") return "";
   if (d.kind === "skip") return "skip";
   if (d.kind === "new") return "new";
+  if (d.kind === "new-shared") return "new-shared";
   return `existing:${d.adsetId}`;
 }
 
@@ -79,6 +83,7 @@ function parseDest(v: string): Destination {
   if (v === "") return { kind: "unset" };
   if (v === "skip") return { kind: "skip" };
   if (v === "new") return { kind: "new" };
+  if (v === "new-shared") return { kind: "new-shared" };
   if (v.startsWith("existing:")) {
     return { kind: "existing", adsetId: v.slice("existing:".length) };
   }
@@ -125,6 +130,9 @@ export function PromoteBulkToScalingModal({
   const [adsets, setAdsets] = useState<Adset[]>([]);
   const [loadingAdsets, setLoadingAdsets] = useState(false);
   const [templateAdsetId, setTemplateAdsetId] = useState<string>("");
+  // Custom name for the single shared new adset. Every row set to
+  // "new-shared" lands in one adset created with this name.
+  const [sharedNewName, setSharedNewName] = useState<string>("");
   const [destinations, setDestinations] = useState<Map<string, Destination>>(
     new Map()
   );
@@ -161,6 +169,7 @@ export function PromoteBulkToScalingModal({
     setLoadingAdsets(true);
     setAdsets([]);
     setTemplateAdsetId("");
+    setSharedNewName("");
     // Store change invalidates every per-row existing-adset choice, so
     // reset the map entirely.
     setDestinations(new Map());
@@ -216,22 +225,33 @@ export function PromoteBulkToScalingModal({
   const destCounts = useMemo(() => {
     let existing = 0;
     let makeNew = 0;
+    let makeNewShared = 0;
     let skip = 0;
     let unset = 0;
     for (const s of subjects) {
       const d = destinations.get(s.ad_id) ?? { kind: "unset" as const };
       if (d.kind === "existing") existing++;
       else if (d.kind === "new") makeNew++;
+      else if (d.kind === "new-shared") makeNewShared++;
       else if (d.kind === "skip") skip++;
       else unset++;
     }
-    return { existing, new: makeNew, skip, unset, active: existing + makeNew };
+    return {
+      existing,
+      new: makeNew,
+      newShared: makeNewShared,
+      skip,
+      unset,
+      active: existing + makeNew + makeNewShared,
+    };
   }, [subjects, destinations]);
 
   const canSubmit = (() => {
     if (submitting || done || loadingAdsets || !selectedStore) return false;
     if (destCounts.active === 0) return false;
     if (destCounts.new > 0 && !templateAdsetId) return false;
+    if (destCounts.newShared > 0 && (!templateAdsetId || sharedNewName.trim().length < 3))
+      return false;
     return true;
   })();
 
@@ -259,6 +279,11 @@ export function PromoteBulkToScalingModal({
     setError(null);
     setResults(new Map());
 
+    // The single shared adset is created lazily on the first "new-shared"
+    // row, then its id is reused for every subsequent one so all those ads
+    // land in the SAME new adset instead of one adset per ad.
+    let sharedAdsetId: string | null = null;
+
     for (const subject of subjects) {
       const dest = getDest(subject.ad_id);
       if (dest.kind === "skip" || dest.kind === "unset") {
@@ -266,6 +291,9 @@ export function PromoteBulkToScalingModal({
         continue;
       }
       updateRow(subject.ad_id, { status: "copying" });
+      // Track whether THIS request is the one that creates the shared adset,
+      // so we know to capture created_adset_id from the response.
+      let creatingShared = false;
       try {
         const payload: Record<string, unknown> = {
           ad_id: subject.ad_id,
@@ -274,8 +302,20 @@ export function PromoteBulkToScalingModal({
         };
         if (dest.kind === "existing") {
           payload.target_adset_id = dest.adsetId;
+        } else if (dest.kind === "new-shared") {
+          if (sharedAdsetId) {
+            // Adset already created by an earlier row — just drop into it.
+            payload.target_adset_id = sharedAdsetId;
+          } else {
+            // First "new-shared" row: create the adset with the custom name.
+            creatingShared = true;
+            payload.new_adset = {
+              template_adset_id: templateAdsetId,
+              name: sharedNewName.trim(),
+            };
+          }
         } else {
-          // Clone the selected template, naming the new adset after the
+          // Per-ad "new": clone the template, naming the new adset after the
           // source adset so scaling rows mirror testing.
           payload.new_adset = {
             template_adset_id: templateAdsetId,
@@ -294,6 +334,9 @@ export function PromoteBulkToScalingModal({
             error: json.error || `Promote failed (${res.status})`,
           });
         } else {
+          if (creatingShared && json.created_adset_id) {
+            sharedAdsetId = json.created_adset_id as string;
+          }
           updateRow(subject.ad_id, {
             status: "success",
             copied_ad_id: json.copied_ad_id ?? null,
@@ -359,16 +402,31 @@ export function PromoteBulkToScalingModal({
                 <span className="text-gray-500">Set all to:</span>
                 <button
                   type="button"
+                  onClick={() => setAllDest({ kind: "new-shared" })}
+                  disabled={!templateAdsetId || sharedNewName.trim().length < 3}
+                  title={
+                    !templateAdsetId
+                      ? "Pick a template below first"
+                      : sharedNewName.trim().length < 3
+                        ? "Type a name for the new adset below first"
+                        : "Put every ad into one new adset"
+                  }
+                  className="px-2 py-0.5 rounded border border-gray-700 bg-gray-800 text-gray-300 hover:border-gray-500 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  → New adset
+                </button>
+                <button
+                  type="button"
                   onClick={() => setAllDest({ kind: "new" })}
                   disabled={!templateAdsetId}
                   title={
                     templateAdsetId
-                      ? "Clone template per ad"
+                      ? "Clone template — one new adset per ad, named after its source"
                       : "Pick a template below first"
                   }
                   className="px-2 py-0.5 rounded border border-gray-700 bg-gray-800 text-gray-300 hover:border-gray-500 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  + New
+                  + New per ad
                 </button>
                 <select
                   value=""
@@ -477,8 +535,17 @@ export function PromoteBulkToScalingModal({
                           className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-[11px] rounded px-2 py-1 focus:ring-orange-500 focus:border-orange-500 disabled:opacity-50"
                         >
                           <option value="">— Pick destination —</option>
+                          <option
+                            value="new-shared"
+                            disabled={
+                              !templateAdsetId ||
+                              sharedNewName.trim().length < 3
+                            }
+                          >
+                            → {sharedNewName.trim() || "New adset"} (new)
+                          </option>
                           <option value="new" disabled={!templateAdsetId}>
-                            + New (clone template)
+                            + New per ad (named after source)
                           </option>
                           {adsets.length > 0 && (
                             <optgroup label="Existing adsets">
@@ -538,13 +605,14 @@ export function PromoteBulkToScalingModal({
             )}
           </div>
 
-          {/* Template adset — only used by rows set to "+ New" */}
+          {/* Template adset — cloned for any "New adset" / "New per ad" row */}
           {selectedStore && (
             <div>
               <label className="block text-xs text-gray-400 mb-1.5">
                 Template adset{" "}
                 <span className="text-gray-600">
-                  (cloned when a row is set to &quot;+ New&quot;)
+                  (its targeting/budget gets cloned for any &quot;New
+                  adset&quot; row)
                 </span>
               </label>
               {loadingAdsets ? (
@@ -574,6 +642,33 @@ export function PromoteBulkToScalingModal({
                   ))}
                 </select>
               )}
+            </div>
+          )}
+
+          {/* New adset name — only used by rows set to "→ New adset". Lets
+              the user create ONE custom-named adset and drop the chosen ads
+              into it, instead of one auto-named adset per ad. */}
+          {selectedStore && adsets.length > 0 && (
+            <div>
+              <label className="block text-xs text-gray-400 mb-1.5">
+                New adset name{" "}
+                <span className="text-gray-600">
+                  (one shared adset for every &quot;→ New adset&quot; row)
+                </span>
+              </label>
+              <input
+                type="text"
+                value={sharedNewName}
+                onChange={(e) => setSharedNewName(e.target.value)}
+                disabled={submitting || done}
+                placeholder="e.g. SCALING — JUNE WINNERS"
+                className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500"
+              />
+              <p className="text-[11px] text-gray-500 mt-1">
+                Cloned from the template above, then renamed. The new adset
+                starts PAUSED — the ads inside it respect the &quot;After
+                copy&quot; choice below.
+              </p>
             </div>
           )}
 
