@@ -4,6 +4,7 @@
 
 import * as XLSX from "xlsx";
 import type { AdSpendRow } from "@/app/api/compliance/ad-spend/route";
+import type { SalesCogsRow } from "@/app/api/compliance/sales-cogs/route";
 import type {
   MovementRow,
   SalesOutRow,
@@ -60,6 +61,36 @@ export function exportAdSpend(
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, sheetFrom(formatted), "FB Ad Spend");
   downloadWorkbook(wb, `Ad_Spend_${range.from}_to_${range.to}.xlsx`);
+}
+
+export function exportSalesCogs(
+  rows: SalesCogsRow[],
+  range: { from: string; to: string }
+) {
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const formatted: Record<string, unknown>[] = rows.map((r) => ({
+    Date: r.date,
+    Orders: r.orders,
+    "Gross Sales (PHP)": r2(r.gross_sales),
+    "COGS (PHP)": r2(r.cogs),
+    "Gross Profit (PHP)": r2(r.gross_profit),
+  }));
+
+  formatted.push({
+    Date: "TOTAL",
+    Orders: rows.reduce((s, r) => s + r.orders, 0),
+    "Gross Sales (PHP)": r2(rows.reduce((s, r) => s + r.gross_sales, 0)),
+    "COGS (PHP)": r2(rows.reduce((s, r) => s + r.cogs, 0)),
+    "Gross Profit (PHP)": r2(rows.reduce((s, r) => s + r.gross_profit, 0)),
+  });
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(
+    wb,
+    sheetFrom(formatted.length ? formatted : [{ Note: "No sales in range" }]),
+    "Sales & COGS"
+  );
+  downloadWorkbook(wb, `Sales_COGS_${range.from}_to_${range.to}.xlsx`);
 }
 
 export function exportStockMovement(

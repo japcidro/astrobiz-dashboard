@@ -8,15 +8,21 @@ import {
   DollarSign,
   Package,
   FileSpreadsheet,
+  Receipt,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { AdSpendRow } from "@/app/api/compliance/ad-spend/route";
+import type { SalesCogsRow } from "@/app/api/compliance/sales-cogs/route";
 import type {
   MovementRow,
   SalesOutRow,
   SnapshotRow,
 } from "@/app/api/compliance/stock-movement/route";
-import { exportAdSpend, exportStockMovement } from "@/lib/compliance/export-excel";
+import {
+  exportAdSpend,
+  exportSalesCogs,
+  exportStockMovement,
+} from "@/lib/compliance/export-excel";
 import type { ComplianceDateFilter } from "@/lib/compliance/date-range";
 
 const DATE_PRESETS: { label: string; value: ComplianceDateFilter }[] = [
@@ -32,7 +38,7 @@ const peso = (n: number) =>
   `₱${n.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const num = (n: number) => n.toLocaleString("en-PH");
 
-type Tab = "ad_spend" | "stock";
+type Tab = "ad_spend" | "sales_cogs" | "stock";
 
 export default function CompliancePage() {
   const [tab, setTab] = useState<Tab>("ad_spend");
@@ -51,6 +57,20 @@ export default function CompliancePage() {
   const [adLoading, setAdLoading] = useState(false);
   const [adError, setAdError] = useState<string | null>(null);
   const [adWarnings, setAdWarnings] = useState<string[]>([]);
+
+  // Sales & COGS state
+  const [salesCogsRows, setSalesCogsRows] = useState<SalesCogsRow[]>([]);
+  const [salesCogsSummary, setSalesCogsSummary] = useState<{
+    total_gross_sales: number;
+    total_cogs: number;
+    total_gross_profit: number;
+    total_orders: number;
+    date_from: string;
+    date_to: string;
+  } | null>(null);
+  const [salesCogsLoading, setSalesCogsLoading] = useState(false);
+  const [salesCogsError, setSalesCogsError] = useState<string | null>(null);
+  const [salesCogsWarnings, setSalesCogsWarnings] = useState<string[]>([]);
 
   // Stock state
   const [movements, setMovements] = useState<MovementRow[]>([]);
@@ -102,6 +122,31 @@ export default function CompliancePage() {
     }
   }, [dateFilter, customFrom, customTo, dateParams]);
 
+  const fetchSalesCogs = useCallback(async () => {
+    if (dateFilter === "custom" && (!customFrom || !customTo)) return;
+    setSalesCogsLoading(true);
+    setSalesCogsError(null);
+    try {
+      const p = dateParams();
+      p.set("store", storeFilter);
+      const res = await fetch(`/api/compliance/sales-cogs?${p}`, {
+        cache: "no-store",
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to load sales & COGS");
+      setSalesCogsRows(json.rows || []);
+      setSalesCogsSummary(json.summary || null);
+      if (json.stores) setStores(json.stores);
+      setSalesCogsWarnings(json.warnings || []);
+    } catch (e) {
+      setSalesCogsError(e instanceof Error ? e.message : "Failed to load sales & COGS");
+      setSalesCogsRows([]);
+      setSalesCogsSummary(null);
+    } finally {
+      setSalesCogsLoading(false);
+    }
+  }, [dateFilter, customFrom, customTo, storeFilter, dateParams]);
+
   const fetchStock = useCallback(async () => {
     if (dateFilter === "custom" && (!customFrom || !customTo)) return;
     setStockLoading(true);
@@ -133,8 +178,9 @@ export default function CompliancePage() {
 
   useEffect(() => {
     if (tab === "ad_spend") fetchAdSpend();
+    else if (tab === "sales_cogs") fetchSalesCogs();
     else fetchStock();
-  }, [tab, fetchAdSpend, fetchStock]);
+  }, [tab, fetchAdSpend, fetchSalesCogs, fetchStock]);
 
   const handleExportAd = () => {
     if (adRows.length === 0) {
@@ -160,8 +206,30 @@ export default function CompliancePage() {
     toast.success("Na-download ang Excel file (3 sheets).");
   };
 
-  const loading = tab === "ad_spend" ? adLoading : stockLoading;
-  const refresh = () => (tab === "ad_spend" ? fetchAdSpend() : fetchStock());
+  const handleExportSalesCogs = () => {
+    if (salesCogsRows.length === 0) {
+      toast.error("Walang data na i-e-export. Subukan ang ibang date range.");
+      return;
+    }
+    exportSalesCogs(salesCogsRows, {
+      from: salesCogsSummary?.date_from || "",
+      to: salesCogsSummary?.date_to || "",
+    });
+    toast.success("Na-download ang Excel file.");
+  };
+
+  const loading =
+    tab === "ad_spend"
+      ? adLoading
+      : tab === "sales_cogs"
+        ? salesCogsLoading
+        : stockLoading;
+  const refresh = () =>
+    tab === "ad_spend"
+      ? fetchAdSpend()
+      : tab === "sales_cogs"
+        ? fetchSalesCogs()
+        : fetchStock();
 
   return (
     <div>
@@ -198,6 +266,17 @@ export default function CompliancePage() {
         >
           <DollarSign size={16} />
           Ad Spend
+        </button>
+        <button
+          onClick={() => setTab("sales_cogs")}
+          className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors cursor-pointer ${
+            tab === "sales_cogs"
+              ? "border-white text-white"
+              : "border-transparent text-gray-400 hover:text-white"
+          }`}
+        >
+          <Receipt size={16} />
+          Sales &amp; COGS
         </button>
         <button
           onClick={() => setTab("stock")}
@@ -247,7 +326,7 @@ export default function CompliancePage() {
         </div>
       )}
 
-      {tab === "stock" && stores.length > 0 && (
+      {tab !== "ad_spend" && stores.length > 0 && (
         <div className="flex items-center gap-2 mb-4">
           <label className="text-sm text-gray-400">Store:</label>
           <select
@@ -331,6 +410,87 @@ export default function CompliancePage() {
               ])}
               totalRows={adRows.length}
               emptyMsg="Walang ad spend sa date range na 'to."
+            />
+          )}
+        </>
+      )}
+
+      {/* ============ SALES & COGS TAB ============ */}
+      {tab === "sales_cogs" && (
+        <>
+          {salesCogsError && (
+            <div className="mb-4 p-3 bg-red-900/30 border border-red-700/50 rounded-xl text-red-300 text-sm">
+              {salesCogsError}
+            </div>
+          )}
+
+          {salesCogsWarnings.length > 0 && (
+            <div className="mb-4 p-3 bg-yellow-900/20 border border-yellow-700/50 rounded-xl text-yellow-300 text-sm">
+              <p className="font-medium flex items-center gap-2">
+                <AlertTriangle size={14} /> Heads up:
+              </p>
+              <ul className="mt-1 list-disc list-inside text-yellow-400/80">
+                {salesCogsWarnings.map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div className="mb-4 p-3 bg-blue-900/15 border border-blue-700/30 rounded-xl text-blue-200/90 text-xs leading-relaxed">
+            <strong>Gross Sales</strong> = kabuuang order value (total_price), hindi kasama ang
+            cancelled/voided/refunded. <strong>COGS</strong> = cost per unit (galing COGS table) ×
+            dami na nabenta. Tugmang-tugma sa numbers ng Net Profit tab.
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+            <SummaryCard
+              label="Gross Sales"
+              value={salesCogsSummary ? peso(salesCogsSummary.total_gross_sales) : "—"}
+              loading={salesCogsLoading}
+            />
+            <SummaryCard
+              label="COGS"
+              value={salesCogsSummary ? peso(salesCogsSummary.total_cogs) : "—"}
+              loading={salesCogsLoading}
+            />
+            <SummaryCard
+              label="Gross Profit"
+              value={salesCogsSummary ? peso(salesCogsSummary.total_gross_profit) : "—"}
+              loading={salesCogsLoading}
+            />
+            <SummaryCard
+              label="Orders"
+              value={salesCogsSummary ? num(salesCogsSummary.total_orders) : "—"}
+              loading={salesCogsLoading}
+            />
+          </div>
+
+          <div className="flex justify-end mb-3">
+            <button
+              onClick={handleExportSalesCogs}
+              disabled={salesCogsLoading || salesCogsRows.length === 0}
+              className="flex items-center gap-2 bg-white text-gray-900 font-medium text-sm px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-40 cursor-pointer"
+            >
+              <Download size={16} />
+              Export to Excel
+            </button>
+          </div>
+
+          {salesCogsLoading ? (
+            <LoadingBlock />
+          ) : (
+            <PreviewTable
+              headers={["Date", "Orders", "Gross Sales", "COGS", "Gross Profit"]}
+              rows={salesCogsRows.slice(0, 60).map((r) => [
+                r.date,
+                num(r.orders),
+                peso(r.gross_sales),
+                peso(r.cogs),
+                peso(r.gross_profit),
+              ])}
+              totalRows={salesCogsRows.length}
+              emptyMsg="Walang sales sa date range na 'to."
             />
           )}
         </>
