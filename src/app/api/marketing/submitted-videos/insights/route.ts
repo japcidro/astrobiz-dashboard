@@ -55,7 +55,7 @@ export async function GET(request: Request) {
     if (!row) {
       // No insights yet — ad hasn't delivered.
       return Response.json({
-        data: { has_data: false, spend: 0, purchases: 0, revenue: 0, roas: 0 },
+        data: { has_data: false, spend: 0, purchases: 0, revenue: 0, roas: 0, cpp: 0 },
       });
     }
 
@@ -72,9 +72,17 @@ export async function GET(request: Request) {
       getAction(actionValues, "purchase") ||
       getAction(actionValues, "offsite_conversion.fb_pixel_purchase");
     const roas = spend > 0 ? revenue / spend : 0;
+    const cpp = purchases > 0 ? spend / purchases : 0;
 
     return Response.json({
-      data: { has_data: spend > 0 || purchases > 0, spend, purchases, revenue, roas },
+      data: {
+        has_data: spend > 0 || purchases > 0,
+        spend,
+        purchases,
+        revenue,
+        roas,
+        cpp,
+      },
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Failed to load results";

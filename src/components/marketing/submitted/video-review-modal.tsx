@@ -62,6 +62,7 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
     purchases: number;
     revenue: number;
     roas: number;
+    cpp: number;
   } | null>(null);
   const [resultsLoading, setResultsLoading] = useState(true);
 
@@ -312,9 +313,13 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
                 Loading results…
               </div>
             ) : results?.has_data ? (
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <Stat label="Spend" value={fmtPeso(results.spend)} />
                 <Stat label="Purchases" value={String(results.purchases)} />
+                <Stat
+                  label="Cost / Purchase"
+                  value={results.cpp > 0 ? fmtPeso(results.cpp) : "—"}
+                />
                 <Stat
                   label="ROAS"
                   value={results.roas > 0 ? `${results.roas.toFixed(2)}x` : "—"}
