@@ -220,13 +220,6 @@ const navEntries: NavEntry[] = [
         section: "Ad Management",
       },
       {
-        label: "Fix Rejections",
-        href: "/marketing/fix-rejections",
-        icon: <ShieldCheck size={18} />,
-        roles: ["admin", "marketing"],
-        section: "Ad Management",
-      },
-      {
         label: "Create Ad",
         href: "/marketing/create",
         icon: <PlusCircle size={18} />,
@@ -248,6 +241,12 @@ const navEntries: NavEntry[] = [
         label: "Submitted Videos",
         href: "/marketing/submitted",
         icon: <Clapperboard size={18} />,
+        roles: ["admin", "marketing"],
+      },
+      {
+        label: "Fix Rejections",
+        href: "/marketing/fix-rejections",
+        icon: <ShieldCheck size={18} />,
         roles: ["admin", "marketing"],
       },
       {

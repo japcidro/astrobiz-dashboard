@@ -17,8 +17,67 @@ import { VideoReviewModal } from "./video-review-modal";
 
 type TypeFilter = "all" | "video" | "image";
 type ReviewedFilter = "all" | "unreviewed" | "reviewed";
+type DateRangePreset =
+  | "all"
+  | "today"
+  | "yesterday"
+  | "last_7d"
+  | "last_30d"
+  | "this_month"
+  | "custom";
 
 const LIST_URL = "/api/marketing/submitted-videos";
+
+// Resolves a [start, end] timestamp window (ms) for a date preset / custom
+// range. Defined at module scope so the Date.now() call isn't treated as an
+// impure call during component render (react-hooks/purity).
+function getDateBounds(
+  preset: DateRangePreset,
+  customFrom: string,
+  customTo: string
+): { start: number | null; end: number | null } {
+  if (preset === "all") return { start: null, end: null };
+
+  if (preset === "custom") {
+    const start = customFrom ? new Date(`${customFrom}T00:00:00`).getTime() : null;
+    const end = customTo ? new Date(`${customTo}T23:59:59.999`).getTime() : null;
+    return { start, end };
+  }
+
+  const now = new Date();
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+  const endOfToday = new Date(now);
+  endOfToday.setHours(23, 59, 59, 999);
+
+  switch (preset) {
+    case "today":
+      return { start: startOfToday.getTime(), end: endOfToday.getTime() };
+    case "yesterday": {
+      const s = new Date(startOfToday);
+      s.setDate(s.getDate() - 1);
+      const e = new Date(endOfToday);
+      e.setDate(e.getDate() - 1);
+      return { start: s.getTime(), end: e.getTime() };
+    }
+    case "last_7d": {
+      const s = new Date(startOfToday);
+      s.setDate(s.getDate() - 6);
+      return { start: s.getTime(), end: endOfToday.getTime() };
+    }
+    case "last_30d": {
+      const s = new Date(startOfToday);
+      s.setDate(s.getDate() - 29);
+      return { start: s.getTime(), end: endOfToday.getTime() };
+    }
+    case "this_month": {
+      const s = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      return { start: s.getTime(), end: endOfToday.getTime() };
+    }
+    default:
+      return { start: null, end: null };
+  }
+}
 
 function isScheduled(startTime: string | null): boolean {
   return startTime != null && new Date(startTime).getTime() > Date.now();
@@ -48,6 +107,9 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
   const [reviewedFilter, setReviewedFilter] = useState<ReviewedFilter>("all");
   const [marketerFilter, setMarketerFilter] = useState("all");
   const [storeFilter, setStoreFilter] = useState("all");
+  const [datePreset, setDatePreset] = useState<DateRangePreset>("all");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
 
   const load = useCallback(async (forceRefresh = false) => {
     if (forceRefresh) setRefreshing(true);
@@ -84,6 +146,7 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const { start, end } = getDateBounds(datePreset, customFrom, customTo);
     return ads.filter((a) => {
       if (typeFilter !== "all" && a.creative_type !== typeFilter) return false;
       if (isAdmin && marketerFilter !== "all" && a.marketer_id !== marketerFilter)
@@ -92,6 +155,11 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
         return false;
       if (reviewedFilter === "unreviewed" && a.reviewed_at) return false;
       if (reviewedFilter === "reviewed" && !a.reviewed_at) return false;
+      if (start != null || end != null) {
+        const t = a.submitted_at ? new Date(a.submitted_at).getTime() : 0;
+        if (start != null && t < start) return false;
+        if (end != null && t > end) return false;
+      }
       if (q) {
         const hay = `${a.ad_name} ${a.marketer_name} ${a.headline ?? ""} ${
           a.file_name ?? ""
@@ -107,6 +175,9 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
     reviewedFilter,
     marketerFilter,
     storeFilter,
+    datePreset,
+    customFrom,
+    customTo,
     isAdmin,
   ]);
 
@@ -179,6 +250,40 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
             ["image", "Images"],
           ]}
         />
+
+        <Select
+          value={datePreset}
+          onChange={(v) => setDatePreset(v as DateRangePreset)}
+          options={[
+            ["all", "All dates"],
+            ["today", "Today"],
+            ["yesterday", "Yesterday"],
+            ["last_7d", "Last 7 days"],
+            ["last_30d", "Last 30 days"],
+            ["this_month", "This month"],
+            ["custom", "Custom range"],
+          ]}
+        />
+
+        {datePreset === "custom" && (
+          <div className="flex items-center gap-1.5">
+            <input
+              type="date"
+              value={customFrom}
+              max={customTo || undefined}
+              onChange={(e) => setCustomFrom(e.target.value)}
+              className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-2 text-sm text-white focus:outline-none focus:border-gray-500 cursor-pointer"
+            />
+            <span className="text-gray-500 text-sm">to</span>
+            <input
+              type="date"
+              value={customTo}
+              min={customFrom || undefined}
+              onChange={(e) => setCustomTo(e.target.value)}
+              className="bg-gray-800 border border-gray-700 rounded-lg px-2.5 py-2 text-sm text-white focus:outline-none focus:border-gray-500 cursor-pointer"
+            />
+          </div>
+        )}
 
         {isAdmin && (
           <>
