@@ -71,6 +71,7 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
   const [transcriptLoading, setTranscriptLoading] = useState(false);
   const [transcriptError, setTranscriptError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copiedDetails, setCopiedDetails] = useState(false);
 
   // Videos: resolve a fresh playable URL from FB by video_id. Images display
   // directly from the creative's inline image_url (no call needed).
@@ -175,6 +176,46 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
       setTranscriptError("Transcription failed");
     } finally {
       setTranscriptLoading(false);
+    }
+  };
+
+  // One-click copy of the full ad summary (details + results + transcript)
+  // — formatted for pasting straight into an AI for analysis.
+  const copyDetails = async () => {
+    const r = results;
+    const resultsBlock =
+      r && r.has_data
+        ? [
+            `- Spend: ${fmtPeso(r.spend)}`,
+            `- Purchases: ${r.purchases}`,
+            `- Cost per Purchase: ${r.cpp > 0 ? fmtPeso(r.cpp) : "—"}`,
+            `- ROAS: ${r.roas > 0 ? `${r.roas.toFixed(2)}x` : "—"}`,
+          ].join("\n")
+        : "- No results yet (not yet delivering)";
+
+    const lines: (string | null)[] = [
+      `Ad: ${ad.ad_name}`,
+      `Marketer: ${ad.marketer_name}`,
+      ad.store_name ? `Store: ${ad.store_name}` : null,
+      ad.campaign_name ? `Campaign: ${ad.campaign_name}` : null,
+      ad.adset_name ? `Ad set: ${ad.adset_name}` : null,
+      ad.effective_status ? `Status: ${ad.effective_status}` : null,
+      ad.created_time ? `Created: ${fmtDateTime(ad.created_time)}` : null,
+      "",
+      "Results (lifetime):",
+      resultsBlock,
+    ];
+    if (transcript) {
+      lines.push("", "Transcript:", transcript);
+    }
+    try {
+      await navigator.clipboard.writeText(
+        lines.filter((l) => l !== null).join("\n")
+      );
+      setCopiedDetails(true);
+      setTimeout(() => setCopiedDetails(false), 1500);
+    } catch {
+      // clipboard may be blocked — ignore
     }
   };
 
@@ -304,9 +345,19 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
 
           {/* Results (lifetime spend + purchases from FB) */}
           <div>
-            <p className="text-[11px] uppercase tracking-wider text-gray-500 mb-2">
-              Results (lifetime)
-            </p>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[11px] uppercase tracking-wider text-gray-500">
+                Results (lifetime)
+              </p>
+              <button
+                onClick={copyDetails}
+                title="Copy ad details, results, and transcript for AI"
+                className="flex items-center gap-1 text-xs text-gray-400 hover:text-white cursor-pointer"
+              >
+                {copiedDetails ? <Check size={13} /> : <Copy size={13} />}
+                {copiedDetails ? "Copied" : "Copy all"}
+              </button>
+            </div>
             {resultsLoading ? (
               <div className="flex items-center gap-2 text-sm text-gray-500 py-1">
                 <Loader2 size={14} className="animate-spin" />
