@@ -19,7 +19,6 @@ interface Props {
   ad: SubmittedAd;
   role: "admin" | "marketing";
   onClose: () => void;
-  // Called after a successful reviewed toggle so the list can update in place.
   onReviewedChange: (
     id: string,
     reviewedAt: string | null,
@@ -39,8 +38,9 @@ function fmtDateTime(s: string | null): string {
 }
 
 export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props) {
+  const isVideo = ad.creative_type === "video";
   const [media, setMedia] = useState<SubmittedVideoSource | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(isVideo);
   const [error, setError] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState(false);
   const [reviewedAt, setReviewedAt] = useState<string | null>(ad.reviewed_at);
@@ -48,24 +48,29 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
     ad.reviewed_by_name
   );
 
+  // Videos: resolve a fresh playable URL from FB by video_id. Images display
+  // directly from the creative's inline image_url (no call needed).
   useEffect(() => {
+    if (!isVideo) return;
+    if (!ad.video_id) {
+      setError("No video id on this ad");
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     (async () => {
       setLoading(true);
       setError(null);
       try {
         const res = await fetch(
-          `/api/marketing/submitted-videos/source?id=${ad.id}`
+          `/api/marketing/submitted-videos/source?video_id=${ad.video_id}`
         );
         const json = await res.json();
         if (cancelled) return;
-        if (!res.ok) {
-          setError(json.error || "Failed to load media");
-        } else {
-          setMedia(json.data as SubmittedVideoSource);
-        }
+        if (!res.ok) setError(json.error || "Failed to load video");
+        else setMedia(json.data as SubmittedVideoSource);
       } catch {
-        if (!cancelled) setError("Failed to load media");
+        if (!cancelled) setError("Failed to load video");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -73,9 +78,8 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
     return () => {
       cancelled = true;
     };
-  }, [ad.id]);
+  }, [ad.video_id, isVideo]);
 
-  // Close on Escape.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -91,13 +95,17 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
       const res = await fetch("/api/marketing/submitted-videos", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: ad.id, reviewed: next }),
+        body: JSON.stringify({ id: ad.fb_ad_id, reviewed: next }),
       });
       const json = await res.json();
       if (res.ok) {
         setReviewedAt(json.data.reviewed_at);
         setReviewedByName(json.data.reviewed_by_name);
-        onReviewedChange(ad.id, json.data.reviewed_at, json.data.reviewed_by_name);
+        onReviewedChange(
+          ad.fb_ad_id,
+          json.data.reviewed_at,
+          json.data.reviewed_by_name
+        );
       }
     } finally {
       setReviewing(false);
@@ -105,9 +113,8 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
   };
 
   const isVideoProcessing =
-    ad.creative_type === "video" &&
-    media?.status != null &&
-    media.status !== "ready";
+    isVideo && media?.status != null && media.status !== "ready";
+  const permalink = media?.permalink ?? null;
 
   return (
     <div
@@ -123,7 +130,7 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
           <div className="min-w-0">
             <h2 className="text-white font-semibold truncate">{ad.ad_name}</h2>
             <p className="text-gray-400 text-xs mt-0.5">
-              by {ad.marketer_name} · {fmtDateTime(ad.submitted_at)}
+              by {ad.marketer_name} · {fmtDateTime(ad.created_time)}
             </p>
           </div>
           <button
@@ -150,18 +157,18 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
                 Facebook is still processing this video. Try again shortly.
               </p>
             </div>
-          ) : ad.creative_type === "video" && media?.source ? (
+          ) : isVideo && media?.source ? (
             <video
               src={media.source}
-              poster={media.thumbnail ?? undefined}
+              poster={media.thumbnail ?? ad.thumbnail_url ?? undefined}
               controls
               autoPlay
               className="max-h-[60vh] w-full"
             />
-          ) : media?.source ? (
+          ) : !isVideo && (ad.image_url || ad.thumbnail_url) ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={media.source}
+              src={(ad.image_url || ad.thumbnail_url) as string}
               alt={ad.ad_name}
               className="max-h-[60vh] w-full object-contain"
             />
@@ -174,65 +181,39 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
 
         {/* Details */}
         <div className="p-5 space-y-4">
-          {/* Schedule banner */}
-          {ad.start_time && new Date(ad.start_time).getTime() > Date.now() && (
+          {ad.is_scheduled && ad.start_time && (
             <div className="flex items-center gap-2 text-sm bg-amber-500/10 text-amber-300 border border-amber-500/20 rounded-lg px-3 py-2">
               <Calendar size={15} />
               Scheduled for {fmtDateTime(ad.start_time)} — not yet live
             </div>
           )}
 
-          {/* Ad copy */}
-          {(ad.primary_text || ad.headline) && (
-            <div className="space-y-2">
-              {ad.headline && (
-                <div>
-                  <p className="text-[11px] uppercase tracking-wider text-gray-500">
-                    Headline
-                  </p>
-                  <p className="text-white text-sm">{ad.headline}</p>
-                </div>
-              )}
-              {ad.primary_text && (
-                <div>
-                  <p className="text-[11px] uppercase tracking-wider text-gray-500">
-                    Primary Text
-                  </p>
-                  <p className="text-gray-300 text-sm whitespace-pre-wrap">
-                    {ad.primary_text}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Meta grid */}
           <div className="grid grid-cols-2 gap-3 text-sm">
             <Meta label="Marketer" value={ad.marketer_name} />
             <Meta label="Store" value={ad.store_name ?? "—"} />
-            <Meta label="File" value={ad.file_name ?? "—"} />
+            <Meta label="Campaign" value={ad.campaign_name ?? "—"} />
+            <Meta label="Ad set" value={ad.adset_name ?? "—"} />
             <Meta
               label="Type"
               value={ad.creative_type === "video" ? "Video" : "Image"}
             />
+            <Meta label="Status" value={ad.effective_status ?? "—"} />
           </div>
 
           {/* Actions */}
           <div className="flex items-center gap-3 pt-2 border-t border-gray-800">
-            {ad.fb_ad_id && (
+            <a
+              href={`https://business.facebook.com/adsmanager/manage/ads?selected_ad_ids=${ad.fb_ad_id}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-sm text-gray-300 hover:text-white"
+            >
+              <ExternalLink size={14} />
+              Open in Ads Manager
+            </a>
+            {permalink && (
               <a
-                href={`https://business.facebook.com/adsmanager/manage/ads?selected_ad_ids=${ad.fb_ad_id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1.5 text-sm text-gray-300 hover:text-white"
-              >
-                <ExternalLink size={14} />
-                Open in Ads Manager
-              </a>
-            )}
-            {media?.permalink && (
-              <a
-                href={media.permalink}
+                href={permalink}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-1.5 text-sm text-gray-300 hover:text-white"

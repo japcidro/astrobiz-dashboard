@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   RefreshCw,
   Video,
@@ -21,6 +21,7 @@ type DateRangePreset =
   | "all"
   | "today"
   | "yesterday"
+  | "last_3d"
   | "last_7d"
   | "last_30d"
   | "this_month"
@@ -28,28 +29,55 @@ type DateRangePreset =
 
 const LIST_URL = "/api/marketing/submitted-videos";
 
-// Resolves a [start, end] timestamp window (ms) for a date preset / custom
-// range. Defined at module scope so the Date.now() call isn't treated as an
-// impure call during component render (react-hooks/purity).
+// How many days of FB history to pull for a given filter. The fetch window
+// must cover the filter's range; the client then refines to exact bounds.
+function fetchDaysFor(
+  preset: DateRangePreset,
+  customFrom: string
+): number {
+  switch (preset) {
+    case "today":
+      return 1;
+    case "yesterday":
+      return 2;
+    case "last_3d":
+      return 3;
+    case "last_7d":
+      return 7;
+    case "last_30d":
+      return 30;
+    case "this_month":
+      return new Date().getDate() + 1;
+    case "custom": {
+      if (!customFrom) return 90;
+      const from = new Date(`${customFrom}T00:00:00`).getTime();
+      const days = Math.ceil((Date.now() - from) / 86400000) + 1;
+      return Math.min(120, Math.max(1, days));
+    }
+    case "all":
+    default:
+      return 90;
+  }
+}
+
+// Resolves a [start, end] timestamp window (ms) for the date filter. Defined
+// at module scope so the Date.now() call isn't treated as impure during render.
 function getDateBounds(
   preset: DateRangePreset,
   customFrom: string,
   customTo: string
 ): { start: number | null; end: number | null } {
   if (preset === "all") return { start: null, end: null };
-
   if (preset === "custom") {
     const start = customFrom ? new Date(`${customFrom}T00:00:00`).getTime() : null;
     const end = customTo ? new Date(`${customTo}T23:59:59.999`).getTime() : null;
     return { start, end };
   }
-
   const now = new Date();
   const startOfToday = new Date(now);
   startOfToday.setHours(0, 0, 0, 0);
   const endOfToday = new Date(now);
   endOfToday.setHours(23, 59, 59, 999);
-
   switch (preset) {
     case "today":
       return { start: startOfToday.getTime(), end: endOfToday.getTime() };
@@ -59,6 +87,11 @@ function getDateBounds(
       const e = new Date(endOfToday);
       e.setDate(e.getDate() - 1);
       return { start: s.getTime(), end: e.getTime() };
+    }
+    case "last_3d": {
+      const s = new Date(startOfToday);
+      s.setDate(s.getDate() - 2);
+      return { start: s.getTime(), end: endOfToday.getTime() };
     }
     case "last_7d": {
       const s = new Date(startOfToday);
@@ -79,10 +112,6 @@ function getDateBounds(
   }
 }
 
-function isScheduled(startTime: string | null): boolean {
-  return startTime != null && new Date(startTime).getTime() > Date.now();
-}
-
 function timeAgo(s: string | null): string {
   if (!s) return "";
   const seconds = Math.floor((Date.now() - new Date(s).getTime()) / 1000);
@@ -99,6 +128,7 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
   const [ads, setAds] = useState<SubmittedAd[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [active, setActive] = useState<SubmittedAd | null>(null);
 
   // Filters
@@ -107,41 +137,52 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
   const [reviewedFilter, setReviewedFilter] = useState<ReviewedFilter>("all");
   const [marketerFilter, setMarketerFilter] = useState("all");
   const [storeFilter, setStoreFilter] = useState("all");
-  const [datePreset, setDatePreset] = useState<DateRangePreset>("all");
+  const [datePreset, setDatePreset] = useState<DateRangePreset>("last_7d");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
 
-  const load = useCallback(async (forceRefresh = false) => {
-    if (forceRefresh) setRefreshing(true);
-    else setLoading(true);
-    try {
-      const { data } = await cachedFetch<{ data: SubmittedAd[] }>(LIST_URL, {
-        ttl: 3 * 60 * 1000,
-        forceRefresh,
-      });
-      setAds(data.data || []);
-    } catch {
-      setAds([]);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
+  const fetchDays = useMemo(
+    () => fetchDaysFor(datePreset, customFrom),
+    [datePreset, customFrom]
+  );
+
+  const load = useCallback(
+    async (forceRefresh = false) => {
+      if (forceRefresh) setRefreshing(true);
+      else setLoading(true);
+      setError(null);
+      try {
+        const { data } = await cachedFetch<{ data: SubmittedAd[]; error?: string }>(
+          `${LIST_URL}?days=${fetchDays}`,
+          { ttl: 5 * 60 * 1000, forceRefresh }
+        );
+        if (data.error) setError(data.error);
+        setAds(data.data || []);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load ads");
+        setAds([]);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [fetchDays]
+  );
 
   useEffect(() => {
     load();
   }, [load]);
 
   const marketers = useMemo(() => {
-    const map = new Map<string, string>();
-    ads.forEach((a) => map.set(a.marketer_id, a.marketer_name));
-    return Array.from(map.entries());
+    const set = new Set<string>();
+    ads.forEach((a) => set.add(a.marketer_name));
+    return Array.from(set).sort();
   }, [ads]);
 
   const stores = useMemo(() => {
     const set = new Set<string>();
     ads.forEach((a) => a.store_name && set.add(a.store_name));
-    return Array.from(set);
+    return Array.from(set).sort();
   }, [ads]);
 
   const filtered = useMemo(() => {
@@ -149,20 +190,20 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
     const { start, end } = getDateBounds(datePreset, customFrom, customTo);
     return ads.filter((a) => {
       if (typeFilter !== "all" && a.creative_type !== typeFilter) return false;
-      if (isAdmin && marketerFilter !== "all" && a.marketer_id !== marketerFilter)
+      if (isAdmin && marketerFilter !== "all" && a.marketer_name !== marketerFilter)
         return false;
       if (isAdmin && storeFilter !== "all" && a.store_name !== storeFilter)
         return false;
       if (reviewedFilter === "unreviewed" && a.reviewed_at) return false;
       if (reviewedFilter === "reviewed" && !a.reviewed_at) return false;
       if (start != null || end != null) {
-        const t = a.submitted_at ? new Date(a.submitted_at).getTime() : 0;
+        const t = a.created_time ? new Date(a.created_time).getTime() : 0;
         if (start != null && t < start) return false;
         if (end != null && t > end) return false;
       }
       if (q) {
-        const hay = `${a.ad_name} ${a.marketer_name} ${a.headline ?? ""} ${
-          a.file_name ?? ""
+        const hay = `${a.ad_name} ${a.marketer_name} ${a.campaign_name ?? ""} ${
+          a.store_name ?? ""
         }`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
@@ -182,15 +223,15 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
   ]);
 
   const unreviewedCount = useMemo(
-    () => ads.filter((a) => !a.reviewed_at).length,
-    [ads]
+    () => filtered.filter((a) => !a.reviewed_at).length,
+    [filtered]
   );
 
   const onReviewedChange = useCallback(
     (id: string, reviewedAt: string | null, reviewedByName: string | null) => {
       setAds((prev) =>
         prev.map((a) =>
-          a.id === id
+          a.fb_ad_id === id
             ? { ...a, reviewed_at: reviewedAt, reviewed_by_name: reviewedByName }
             : a
         )
@@ -207,9 +248,9 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
           <h1 className="text-2xl font-bold text-white">Submitted Ad Videos</h1>
           <p className="text-gray-400 mt-1 text-sm">
             {isAdmin
-              ? "Review every ad your marketers submit — watchable here even while scheduled (before they appear in Ad Performance)."
-              : "Your submitted ads. Watchable here even while scheduled."}
-            {isAdmin && unreviewedCount > 0 && (
+              ? "Every ad submitted to Facebook — watchable here even while scheduled (before they appear in Ad Performance)."
+              : "Your submitted ads — watchable here even while scheduled."}
+            {isAdmin && filtered.length > 0 && unreviewedCount > 0 && (
               <span className="ml-2 text-amber-400">
                 {unreviewedCount} not yet reviewed
               </span>
@@ -236,7 +277,7 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search ad, marketer, file…"
+            placeholder="Search ad, marketer, store…"
             className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-gray-500"
           />
         </div>
@@ -258,6 +299,7 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
             ["all", "All dates"],
             ["today", "Today"],
             ["yesterday", "Yesterday"],
+            ["last_3d", "Last 3 days"],
             ["last_7d", "Last 7 days"],
             ["last_30d", "Last 30 days"],
             ["this_month", "This month"],
@@ -302,7 +344,7 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
                 onChange={setMarketerFilter}
                 options={[
                   ["all", "All marketers"],
-                  ...marketers.map(([id, name]) => [id, name] as [string, string]),
+                  ...marketers.map((m) => [m, m] as [string, string]),
                 ]}
               />
             )}
@@ -325,20 +367,23 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
         <div className="flex items-center justify-center py-24">
           <div className="h-6 w-6 border-2 border-white border-t-transparent rounded-full animate-spin" />
         </div>
+      ) : error ? (
+        <div className="text-center py-24">
+          <Clapperboard size={40} className="mx-auto text-gray-600 mb-3" />
+          <p className="text-gray-400">{error}</p>
+        </div>
       ) : filtered.length === 0 ? (
         <div className="text-center py-24">
           <Clapperboard size={40} className="mx-auto text-gray-600 mb-3" />
-          <p className="text-gray-500">No submitted ads to show</p>
+          <p className="text-gray-500">No submitted ads in this range</p>
           <p className="text-gray-600 text-sm mt-1">
-            {ads.length === 0
-              ? "Ads submitted by marketers will appear here."
-              : "Try adjusting the filters."}
+            Try a wider date range or different filters.
           </p>
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
           {filtered.map((ad) => (
-            <AdCard key={ad.id} ad={ad} onOpen={() => setActive(ad)} />
+            <AdCard key={ad.fb_ad_id} ad={ad} onOpen={() => setActive(ad)} />
           ))}
         </div>
       )}
@@ -356,7 +401,8 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
 }
 
 function AdCard({ ad, onOpen }: { ad: SubmittedAd; onOpen: () => void }) {
-  const scheduled = isScheduled(ad.start_time);
+  const [imgFailed, setImgFailed] = useState(false);
+  const thumb = ad.thumbnail_url || ad.image_url;
 
   return (
     <button
@@ -365,13 +411,28 @@ function AdCard({ ad, onOpen }: { ad: SubmittedAd; onOpen: () => void }) {
     >
       {/* Thumbnail */}
       <div className="relative aspect-video bg-black flex items-center justify-center overflow-hidden">
-        <Thumbnail ad={ad} />
+        {thumb && !imgFailed ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={thumb}
+            alt=""
+            className="w-full h-full object-cover"
+            onError={() => setImgFailed(true)}
+          />
+        ) : (
+          <div className="text-gray-700">
+            {ad.creative_type === "video" ? (
+              <Video size={28} />
+            ) : (
+              <ImageIcon size={28} />
+            )}
+          </div>
+        )}
         <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/40 transition-colors">
           <div className="h-10 w-10 rounded-full bg-white/90 flex items-center justify-center">
             <Play size={18} className="text-gray-900 ml-0.5" fill="currentColor" />
           </div>
         </div>
-        {/* Type badge */}
         <span className="absolute top-2 left-2 flex items-center gap-1 bg-black/60 text-white text-[10px] px-1.5 py-0.5 rounded">
           {ad.creative_type === "video" ? (
             <Video size={11} />
@@ -380,14 +441,12 @@ function AdCard({ ad, onOpen }: { ad: SubmittedAd; onOpen: () => void }) {
           )}
           {ad.creative_type === "video" ? "Video" : "Image"}
         </span>
-        {/* Reviewed badge */}
         {ad.reviewed_at && (
           <span className="absolute top-2 right-2 text-green-400 bg-black/60 rounded-full p-0.5">
             <CheckCircle size={15} />
           </span>
         )}
-        {/* Schedule badge */}
-        {scheduled && (
+        {ad.is_scheduled && (
           <span className="absolute bottom-2 left-2 flex items-center gap-1 bg-amber-500/90 text-black text-[10px] font-medium px-1.5 py-0.5 rounded">
             <Calendar size={10} />
             Scheduled
@@ -402,66 +461,9 @@ function AdCard({ ad, onOpen }: { ad: SubmittedAd; onOpen: () => void }) {
           {ad.marketer_name}
           {ad.store_name ? ` · ${ad.store_name}` : ""}
         </p>
-        <p className="text-gray-600 text-[11px] mt-1">{timeAgo(ad.submitted_at)}</p>
+        <p className="text-gray-600 text-[11px] mt-1">{timeAgo(ad.created_time)}</p>
       </div>
     </button>
-  );
-}
-
-// Lazily fetches the FB thumbnail only once the card scrolls into view, so the
-// list itself makes zero Facebook calls until needed.
-function Thumbnail({ ad }: { ad: SubmittedAd }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [url, setUrl] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    let done = false;
-    const io = new IntersectionObserver(
-      (entries) => {
-        if (entries[0]?.isIntersecting && !done) {
-          done = true;
-          io.disconnect();
-          fetch(`/api/marketing/submitted-videos/source?id=${ad.id}`)
-            .then((r) => r.json())
-            .then((j) => {
-              if (j?.data?.thumbnail) setUrl(j.data.thumbnail as string);
-              else setFailed(true);
-            })
-            .catch(() => setFailed(true));
-        }
-      },
-      { rootMargin: "200px" }
-    );
-    io.observe(el);
-    return () => io.disconnect();
-  }, [ad.id]);
-
-  return (
-    <div ref={ref} className="absolute inset-0 flex items-center justify-center">
-      {url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={url}
-          alt=""
-          className="w-full h-full object-cover"
-          onError={() => {
-            setUrl(null);
-            setFailed(true);
-          }}
-        />
-      ) : (
-        <div className="text-gray-700">
-          {failed || ad.creative_type === "image" ? (
-            <ImageIcon size={28} />
-          ) : (
-            <Video size={28} />
-          )}
-        </div>
-      )}
-    </div>
   );
 }
 
