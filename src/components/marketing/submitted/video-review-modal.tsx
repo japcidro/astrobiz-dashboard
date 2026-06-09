@@ -9,6 +9,9 @@ import {
   Circle,
   AlertTriangle,
   Calendar,
+  FileText,
+  Copy,
+  Check,
 } from "lucide-react";
 import type {
   SubmittedAd,
@@ -47,6 +50,12 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
   const [reviewedByName, setReviewedByName] = useState<string | null>(
     ad.reviewed_by_name
   );
+
+  // Transcript (Gemini, transcript-only — generated on demand, then cached).
+  const [transcript, setTranscript] = useState<string | null>(null);
+  const [transcriptLoading, setTranscriptLoading] = useState(false);
+  const [transcriptError, setTranscriptError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   // Videos: resolve a fresh playable URL from FB by video_id. Images display
   // directly from the creative's inline image_url (no call needed).
@@ -87,6 +96,61 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // On open, check for an already-cached transcript (no AI call).
+  useEffect(() => {
+    if (!isVideo) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/marketing/submitted-videos/transcript?fb_ad_id=${ad.fb_ad_id}`
+        );
+        const json = await res.json();
+        if (!cancelled && res.ok && json.data?.transcript) {
+          setTranscript(json.data.transcript as string);
+        }
+      } catch {
+        // ignore — user can still generate
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ad.fb_ad_id, isVideo]);
+
+  const generateTranscript = async () => {
+    setTranscriptLoading(true);
+    setTranscriptError(null);
+    try {
+      const res = await fetch("/api/marketing/submitted-videos/transcript", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fb_ad_id: ad.fb_ad_id,
+          account_id: ad.ad_account_id || undefined,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) setTranscriptError(json.error || "Transcription failed");
+      else setTranscript(json.data.transcript as string);
+    } catch {
+      setTranscriptError("Transcription failed");
+    } finally {
+      setTranscriptLoading(false);
+    }
+  };
+
+  const copyTranscript = async () => {
+    if (!transcript) return;
+    try {
+      await navigator.clipboard.writeText(transcript);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // clipboard may be blocked — ignore
+    }
+  };
 
   const toggleReviewed = async () => {
     const next = !reviewedAt;
@@ -213,8 +277,58 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
             <Meta label="Status" value={ad.effective_status ?? "—"} />
           </div>
 
+          {/* Transcript (video only) */}
+          {isVideo && (
+            <div className="border-t border-gray-800 pt-4">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[11px] uppercase tracking-wider text-gray-500 flex items-center gap-1.5">
+                  <FileText size={13} />
+                  Transcript
+                </p>
+                {transcript && (
+                  <button
+                    onClick={copyTranscript}
+                    className="flex items-center gap-1 text-xs text-gray-400 hover:text-white cursor-pointer"
+                  >
+                    {copied ? <Check size={13} /> : <Copy size={13} />}
+                    {copied ? "Copied" : "Copy"}
+                  </button>
+                )}
+              </div>
+
+              {transcript ? (
+                <div className="max-h-56 overflow-y-auto bg-gray-800/60 border border-gray-700/60 rounded-lg p-3 text-sm text-gray-200 whitespace-pre-wrap">
+                  {transcript}
+                </div>
+              ) : transcriptLoading ? (
+                <div className="flex items-center gap-2 text-sm text-gray-400 py-2">
+                  <Loader2 size={15} className="animate-spin" />
+                  Transcribing… puwedeng abutin ng ilang segundo hanggang ~1-2 min
+                  para sa mahabang video.
+                </div>
+              ) : (
+                <div>
+                  <button
+                    onClick={generateTranscript}
+                    className="flex items-center gap-1.5 text-sm font-medium bg-gray-800 hover:bg-gray-700 text-white px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                  >
+                    <FileText size={14} />
+                    Get transcript
+                  </button>
+                  <p className="text-[11px] text-gray-600 mt-1.5">
+                    Verbatim transcript via Gemini Flash — maliit na AI cost
+                    (~₱1–3 per video), tapos naka-cache na (libre na pag-ulit).
+                  </p>
+                  {transcriptError && (
+                    <p className="text-xs text-red-400 mt-1.5">{transcriptError}</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Actions */}
-          <div className="flex items-center gap-3 pt-2 border-t border-gray-800">
+          <div className="flex items-center gap-3 pt-4 border-t border-gray-800">
             <a
               href={`https://business.facebook.com/adsmanager/manage/ads?selected_ad_ids=${ad.fb_ad_id}`}
               target="_blank"

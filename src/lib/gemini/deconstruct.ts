@@ -841,3 +841,93 @@ export async function deconstructAdVideo(
     }
   }
 }
+
+const TRANSCRIBE_PROMPT = `Transcribe this video ad verbatim — exactly what is spoken (and sung), in the original language (Tagalog/Taglish/English as-is, do not translate).
+
+Rules:
+- Output ONLY the transcript text. No analysis, no summary, no timestamps, no labels, no headings.
+- Write it as clean readable paragraphs (or short lines for distinct spoken segments).
+- If there is meaningful on-screen text that is NOT spoken, append it at the end under a single line "On-screen text:".
+- If the video has no speech and no meaningful on-screen text, reply exactly: (No spoken words in this video.)`;
+
+export interface TranscribeResult {
+  transcript: string;
+  model: string;
+  tokens_used: number | null;
+}
+
+// Transcript-only Gemini call. Same video-upload pipeline as
+// deconstructAdVideo, but it asks for the raw transcript and nothing else —
+// no deconstruction/analysis, plain text out, smaller output budget.
+export async function transcribeAdVideo(
+  videoUrl: string,
+  apiKey: string
+): Promise<TranscribeResult> {
+  const { buffer, mimeType } = await downloadVideo(videoUrl);
+  const useFileApi = buffer.byteLength > INLINE_THRESHOLD_BYTES;
+
+  let videoPart: Record<string, unknown>;
+  let uploadedFileName: string | null = null;
+
+  if (useFileApi) {
+    const uploaded = await uploadToFileApi(buffer, mimeType, apiKey);
+    uploadedFileName = uploaded.name;
+    videoPart = {
+      fileData: { mimeType: uploaded.mimeType, fileUri: uploaded.uri },
+    };
+  } else {
+    videoPart = {
+      inlineData: {
+        mimeType: mimeType.startsWith("video/") ? mimeType : "video/mp4",
+        data: arrayBufferToBase64(buffer),
+      },
+    };
+  }
+
+  const body = {
+    contents: [
+      {
+        role: "user",
+        parts: [videoPart, { text: TRANSCRIBE_PROMPT }],
+      },
+    ],
+    generationConfig: {
+      temperature: 0,
+      maxOutputTokens: 4096,
+    },
+  };
+
+  try {
+    const res = await fetchWithRetry(
+      `${GEMINI_API_BASE}/v1beta/models/${GEMINI_MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+      "transcribe"
+    );
+
+    const json = await res.json();
+    if (!res.ok) {
+      const msg = json?.error?.message ?? `Gemini API error ${res.status}`;
+      throw new Error(msg);
+    }
+
+    const textPart = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (typeof textPart !== "string") {
+      throw new Error("Gemini returned no transcript text");
+    }
+
+    return {
+      transcript: textPart.trim(),
+      model: GEMINI_MODEL,
+      tokens_used:
+        (json?.usageMetadata?.totalTokenCount as number | undefined) ?? null,
+    };
+  } finally {
+    if (uploadedFileName) {
+      void deleteFile(uploadedFileName, apiKey);
+    }
+  }
+}
