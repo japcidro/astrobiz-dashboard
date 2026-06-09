@@ -11,6 +11,7 @@ import {
   Search,
   Clapperboard,
   MessageSquare,
+  Star,
 } from "lucide-react";
 import { cachedFetch } from "@/lib/client-cache";
 import type { SubmittedAd } from "@/lib/marketing/submitted-videos";
@@ -141,6 +142,7 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
   const [datePreset, setDatePreset] = useState<DateRangePreset>("last_7d");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+  const [starredOnly, setStarredOnly] = useState(false);
 
   const fetchDays = useMemo(
     () => fetchDaysFor(datePreset, customFrom),
@@ -197,6 +199,7 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
         return false;
       if (reviewedFilter === "unreviewed" && a.reviewed_at) return false;
       if (reviewedFilter === "reviewed" && !a.reviewed_at) return false;
+      if (starredOnly && !a.is_starred) return false;
       if (start != null || end != null) {
         const t = a.created_time ? new Date(a.created_time).getTime() : 0;
         if (start != null && t < start) return false;
@@ -220,6 +223,7 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
     datePreset,
     customFrom,
     customTo,
+    starredOnly,
     isAdmin,
   ]);
 
@@ -251,6 +255,25 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
     },
     []
   );
+
+  const toggleStar = useCallback(async (id: string, next: boolean) => {
+    // Optimistic — revert on failure.
+    setAds((prev) =>
+      prev.map((a) => (a.fb_ad_id === id ? { ...a, is_starred: next } : a))
+    );
+    try {
+      const res = await fetch("/api/marketing/submitted-videos/star", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fb_ad_id: id, starred: next }),
+      });
+      if (!res.ok) throw new Error();
+    } catch {
+      setAds((prev) =>
+        prev.map((a) => (a.fb_ad_id === id ? { ...a, is_starred: !next } : a))
+      );
+    }
+  }, []);
 
   return (
     <div>
@@ -303,6 +326,22 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
             ["image", "Images"],
           ]}
         />
+
+        <button
+          onClick={() => setStarredOnly((v) => !v)}
+          title="Show starred ads only"
+          className={`flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg border transition-colors cursor-pointer ${
+            starredOnly
+              ? "bg-amber-400/15 border-amber-400/60 text-amber-300"
+              : "bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-500"
+          }`}
+        >
+          <Star
+            size={15}
+            fill={starredOnly ? "currentColor" : "none"}
+          />
+          Starred
+        </button>
 
         <Select
           value={datePreset}
@@ -395,7 +434,12 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
           {filtered.map((ad) => (
-            <AdCard key={ad.fb_ad_id} ad={ad} onOpen={() => setActive(ad)} />
+            <AdCard
+              key={ad.fb_ad_id}
+              ad={ad}
+              onOpen={() => setActive(ad)}
+              onToggleStar={toggleStar}
+            />
           ))}
         </div>
       )}
@@ -407,13 +451,22 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
           onClose={() => setActive(null)}
           onReviewedChange={onReviewedChange}
           onNoteChange={onNoteChange}
+          onStarChange={toggleStar}
         />
       )}
     </div>
   );
 }
 
-function AdCard({ ad, onOpen }: { ad: SubmittedAd; onOpen: () => void }) {
+function AdCard({
+  ad,
+  onOpen,
+  onToggleStar,
+}: {
+  ad: SubmittedAd;
+  onOpen: () => void;
+  onToggleStar: (id: string, next: boolean) => void;
+}) {
   const [imgFailed, setImgFailed] = useState(false);
   const thumb = ad.thumbnail_url || ad.image_url;
 
@@ -479,6 +532,30 @@ function AdCard({ ad, onOpen }: { ad: SubmittedAd; onOpen: () => void }) {
             Scheduled
           </span>
         )}
+        {/* Star toggle — stops propagation so it doesn't open the modal */}
+        <span
+          role="button"
+          tabIndex={0}
+          title={ad.is_starred ? "Starred — click to unstar" : "Star this ad"}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleStar(ad.fb_ad_id, !ad.is_starred);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.stopPropagation();
+              e.preventDefault();
+              onToggleStar(ad.fb_ad_id, !ad.is_starred);
+            }
+          }}
+          className={`absolute bottom-2 right-2 rounded-full p-1.5 cursor-pointer transition-colors ${
+            ad.is_starred
+              ? "bg-black/50 text-amber-400"
+              : "bg-black/50 text-gray-300 hover:text-amber-300 opacity-80 hover:opacity-100"
+          }`}
+        >
+          <Star size={16} fill={ad.is_starred ? "currentColor" : "none"} />
+        </span>
       </div>
 
       {/* Meta */}

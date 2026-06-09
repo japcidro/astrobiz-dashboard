@@ -47,6 +47,9 @@ export interface SubmittedAd {
   note: string | null;
   note_by_name: string | null;
   note_at: string | null;
+
+  // Starred / tagged as a good creative (from fb_ad_stars, keyed by fb_ad_id)
+  is_starred: boolean;
 }
 
 export interface SubmittedVideoSource {

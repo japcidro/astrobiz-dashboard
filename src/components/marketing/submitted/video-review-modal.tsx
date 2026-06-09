@@ -13,6 +13,7 @@ import {
   Copy,
   Check,
   MessageSquare,
+  Star,
 } from "lucide-react";
 import type {
   SubmittedAd,
@@ -33,6 +34,7 @@ interface Props {
     note: string | null,
     noteByName: string | null
   ) => void;
+  onStarChange: (id: string, next: boolean) => void;
 }
 
 function fmtPeso(n: number): string {
@@ -56,6 +58,7 @@ export function VideoReviewModal({
   onClose,
   onReviewedChange,
   onNoteChange,
+  onStarChange,
 }: Props) {
   const isVideo = ad.creative_type === "video";
   const [media, setMedia] = useState<SubmittedVideoSource | null>(null);
@@ -91,6 +94,9 @@ export function VideoReviewModal({
   const [noteAt, setNoteAt] = useState<string | null>(ad.note_at);
   const [savingNote, setSavingNote] = useState(false);
   const [noteSaved, setNoteSaved] = useState(false);
+
+  // Starred (tagged as a good creative).
+  const [starred, setStarred] = useState<boolean>(ad.is_starred);
 
   // Videos: resolve a fresh playable URL from FB by video_id. Images display
   // directly from the creative's inline image_url (no call needed).
@@ -316,12 +322,27 @@ export function VideoReviewModal({
               by {ad.marketer_name} · {fmtDateTime(ad.created_time)}
             </p>
           </div>
-          <button
-            onClick={onClose}
-            className="text-gray-400 hover:text-white p-1 cursor-pointer"
-          >
-            <X size={20} />
-          </button>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={() => {
+                const next = !starred;
+                setStarred(next);
+                onStarChange(ad.fb_ad_id, next);
+              }}
+              title={starred ? "Starred — click to unstar" : "Star this ad"}
+              className={`p-1 cursor-pointer transition-colors ${
+                starred ? "text-amber-400" : "text-gray-400 hover:text-amber-300"
+              }`}
+            >
+              <Star size={19} fill={starred ? "currentColor" : "none"} />
+            </button>
+            <button
+              onClick={onClose}
+              className="text-gray-400 hover:text-white p-1 cursor-pointer"
+            >
+              <X size={20} />
+            </button>
+          </div>
         </div>
 
         {/* Media */}

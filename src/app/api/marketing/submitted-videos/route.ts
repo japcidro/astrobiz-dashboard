@@ -142,6 +142,7 @@ function toSubmittedAd(ad: RawAd, sinceMs: number): SubmittedAd | null {
     note: null,
     note_by_name: null,
     note_at: null,
+    is_starred: false,
   };
 }
 
@@ -287,6 +288,17 @@ export async function GET(request: Request) {
       const nt = noteMap.get(a.fb_ad_id);
       return nt ? { ...a, ...nt } : a;
     });
+  }
+
+  // Merge stars (keyed by fb_ad_id).
+  const { data: stars } = await supabase
+    .from("fb_ad_stars")
+    .select("fb_ad_id");
+  if (stars && stars.length > 0) {
+    const starred = new Set(stars.map((s: { fb_ad_id: string }) => s.fb_ad_id));
+    ads = ads.map((a) =>
+      starred.has(a.fb_ad_id) ? { ...a, is_starred: true } : a
+    );
   }
 
   return Response.json({ data: ads, window_days: days });
