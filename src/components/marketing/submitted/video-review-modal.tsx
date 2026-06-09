@@ -165,13 +165,26 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
               autoPlay
               className="max-h-[60vh] w-full"
             />
-          ) : !isVideo && (ad.image_url || ad.thumbnail_url) ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={(ad.image_url || ad.thumbnail_url) as string}
-              alt={ad.ad_name}
-              className="max-h-[60vh] w-full object-contain"
-            />
+          ) : ad.image_url || ad.thumbnail_url || media?.thumbnail ? (
+            // Image ad, or a video whose inline source couldn't be resolved —
+            // show the thumbnail so there's never a bare error, and point to FB.
+            <div className="relative w-full flex items-center justify-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={
+                  (ad.image_url || ad.thumbnail_url || media?.thumbnail) as string
+                }
+                alt={ad.ad_name}
+                className="max-h-[60vh] w-full object-contain"
+              />
+              {isVideo && (
+                <div className="absolute bottom-0 inset-x-0 bg-black/70 text-gray-200 text-xs text-center py-2 px-3">
+                  Couldn&apos;t load the video inline — use &ldquo;View on
+                  Facebook&rdquo; or &ldquo;Open in Ads Manager&rdquo; below to
+                  watch.
+                </div>
+              )}
+            </div>
           ) : (
             <div className="text-center p-8">
               <p className="text-gray-400 text-sm">Media unavailable</p>

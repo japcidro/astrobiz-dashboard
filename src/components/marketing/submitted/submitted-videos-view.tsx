@@ -407,7 +407,11 @@ function AdCard({ ad, onOpen }: { ad: SubmittedAd; onOpen: () => void }) {
   return (
     <button
       onClick={onOpen}
-      className="group text-left bg-gray-800/50 border border-gray-700/50 rounded-xl overflow-hidden hover:border-gray-500 transition-colors cursor-pointer"
+      className={`group text-left rounded-xl overflow-hidden transition-colors cursor-pointer ${
+        ad.reviewed_at
+          ? "bg-green-500/10 border-2 border-green-500/70 ring-1 ring-green-500/40"
+          : "bg-gray-800/50 border border-gray-700/50 hover:border-gray-500"
+      }`}
     >
       {/* Thumbnail */}
       <div className="relative aspect-video bg-black flex items-center justify-center overflow-hidden">

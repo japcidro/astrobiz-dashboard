@@ -105,7 +105,10 @@ function toSubmittedAd(ad: RawAd, sinceMs: number): SubmittedAd | null {
 
   const creative = ad.creative ?? {};
   const oss = creative.object_story_spec ?? {};
-  const videoId = creative.video_id ?? oss.video_data?.video_id ?? null;
+  // Prefer the object_story_spec video id — that's the uploaded video that
+  // exposes a playable `source`. creative.video_id is an ad-level reference
+  // that returns no source (true for both normal and duplicated "- Copy" ads).
+  const videoId = oss.video_data?.video_id ?? creative.video_id ?? null;
   const imageUrl = creative.image_url ?? oss.link_data?.picture ?? null;
   const campaignName = ad.campaign?.name ?? null;
   const adsetName = ad.adset?.name ?? null;
