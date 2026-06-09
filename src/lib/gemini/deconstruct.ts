@@ -842,13 +842,13 @@ export async function deconstructAdVideo(
   }
 }
 
-const TRANSCRIBE_PROMPT = `Transcribe this video ad verbatim — exactly what is spoken (and sung), in the original language (Tagalog/Taglish/English as-is, do not translate).
+const TRANSCRIBE_PROMPT = `Transcribe the SPOKEN words in this video ad verbatim — exactly what is said (and sung), in the original language (Tagalog/Taglish/English as-is, do not translate).
 
 Rules:
-- Output ONLY the transcript text. No analysis, no summary, no timestamps, no labels, no headings.
+- Output ONLY the spoken transcript. No analysis, no summary, no timestamps, no labels, no headings.
+- Do NOT include on-screen text, captions, or graphics — only what is actually spoken aloud.
 - Write it as clean readable paragraphs (or short lines for distinct spoken segments).
-- If there is meaningful on-screen text that is NOT spoken, append it at the end under a single line "On-screen text:".
-- If the video has no speech and no meaningful on-screen text, reply exactly: (No spoken words in this video.)`;
+- If the video has no spoken words, reply exactly: (No spoken words in this video.)`;
 
 export interface TranscribeResult {
   transcript: string;
