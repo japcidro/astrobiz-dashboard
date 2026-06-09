@@ -10,6 +10,7 @@ import {
   Calendar,
   Search,
   Clapperboard,
+  MessageSquare,
 } from "lucide-react";
 import { cachedFetch } from "@/lib/client-cache";
 import type { SubmittedAd } from "@/lib/marketing/submitted-videos";
@@ -240,6 +241,17 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
     []
   );
 
+  const onNoteChange = useCallback(
+    (id: string, note: string | null, noteByName: string | null) => {
+      setAds((prev) =>
+        prev.map((a) =>
+          a.fb_ad_id === id ? { ...a, note, note_by_name: noteByName } : a
+        )
+      );
+    },
+    []
+  );
+
   return (
     <div>
       {/* Header */}
@@ -394,6 +406,7 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
           role={role}
           onClose={() => setActive(null)}
           onReviewedChange={onReviewedChange}
+          onNoteChange={onNoteChange}
         />
       )}
     </div>
@@ -445,11 +458,21 @@ function AdCard({ ad, onOpen }: { ad: SubmittedAd; onOpen: () => void }) {
           )}
           {ad.creative_type === "video" ? "Video" : "Image"}
         </span>
-        {ad.reviewed_at && (
-          <span className="absolute top-2 right-2 text-green-400 bg-black/60 rounded-full p-0.5">
-            <CheckCircle size={15} />
-          </span>
-        )}
+        <div className="absolute top-2 right-2 flex items-center gap-1">
+          {ad.note && (
+            <span
+              className="text-sky-300 bg-black/60 rounded-full p-1"
+              title="Has a note"
+            >
+              <MessageSquare size={13} />
+            </span>
+          )}
+          {ad.reviewed_at && (
+            <span className="text-green-400 bg-black/60 rounded-full p-0.5">
+              <CheckCircle size={15} />
+            </span>
+          )}
+        </div>
         {ad.is_scheduled && (
           <span className="absolute bottom-2 left-2 flex items-center gap-1 bg-amber-500/90 text-black text-[10px] font-medium px-1.5 py-0.5 rounded">
             <Calendar size={10} />

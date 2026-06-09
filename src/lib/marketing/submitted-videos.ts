@@ -42,6 +42,11 @@ export interface SubmittedAd {
   reviewed_at: string | null;
   reviewed_by: string | null;
   reviewed_by_name: string | null;
+
+  // Note / comment (from fb_ad_notes, keyed by fb_ad_id)
+  note: string | null;
+  note_by_name: string | null;
+  note_at: string | null;
 }
 
 export interface SubmittedVideoSource {

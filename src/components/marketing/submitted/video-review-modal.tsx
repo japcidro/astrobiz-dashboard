@@ -12,6 +12,7 @@ import {
   FileText,
   Copy,
   Check,
+  MessageSquare,
 } from "lucide-react";
 import type {
   SubmittedAd,
@@ -26,6 +27,11 @@ interface Props {
     id: string,
     reviewedAt: string | null,
     reviewedByName: string | null
+  ) => void;
+  onNoteChange: (
+    id: string,
+    note: string | null,
+    noteByName: string | null
   ) => void;
 }
 
@@ -44,7 +50,13 @@ function fmtDateTime(s: string | null): string {
   });
 }
 
-export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props) {
+export function VideoReviewModal({
+  ad,
+  role,
+  onClose,
+  onReviewedChange,
+  onNoteChange,
+}: Props) {
   const isVideo = ad.creative_type === "video";
   const [media, setMedia] = useState<SubmittedVideoSource | null>(null);
   const [loading, setLoading] = useState(isVideo);
@@ -72,6 +84,13 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
   const [transcriptError, setTranscriptError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [copiedDetails, setCopiedDetails] = useState(false);
+
+  // Note / comment on the creative.
+  const [note, setNote] = useState<string>(ad.note ?? "");
+  const [noteByName, setNoteByName] = useState<string | null>(ad.note_by_name);
+  const [noteAt, setNoteAt] = useState<string | null>(ad.note_at);
+  const [savingNote, setSavingNote] = useState(false);
+  const [noteSaved, setNoteSaved] = useState(false);
 
   // Videos: resolve a fresh playable URL from FB by video_id. Images display
   // directly from the creative's inline image_url (no call needed).
@@ -227,6 +246,28 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
       setTimeout(() => setCopied(false), 1500);
     } catch {
       // clipboard may be blocked — ignore
+    }
+  };
+
+  const saveNote = async () => {
+    setSavingNote(true);
+    setNoteSaved(false);
+    try {
+      const res = await fetch("/api/marketing/submitted-videos/note", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fb_ad_id: ad.fb_ad_id, note }),
+      });
+      const json = await res.json();
+      if (res.ok) {
+        setNoteByName(json.data.note_by_name);
+        setNoteAt(json.data.note_at);
+        onNoteChange(ad.fb_ad_id, json.data.note, json.data.note_by_name);
+        setNoteSaved(true);
+        setTimeout(() => setNoteSaved(false), 1500);
+      }
+    } finally {
+      setSavingNote(false);
     }
   };
 
@@ -393,6 +434,58 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
               value={ad.creative_type === "video" ? "Video" : "Image"}
             />
             <Meta label="Status" value={ad.effective_status ?? "—"} />
+          </div>
+
+          {/* Note / comment */}
+          <div className="border-t border-gray-800 pt-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-[11px] uppercase tracking-wider text-gray-500 flex items-center gap-1.5">
+                <MessageSquare size={13} />
+                Note
+              </p>
+              {noteAt && noteByName && (
+                <span className="text-[11px] text-gray-600">
+                  by {noteByName} · {fmtDateTime(noteAt)}
+                </span>
+              )}
+            </div>
+
+            {role === "admin" ? (
+              <div>
+                <textarea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Add a note about this creative…"
+                  rows={3}
+                  className="w-full bg-gray-800/60 border border-gray-700/60 rounded-lg p-3 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-gray-500 resize-y"
+                />
+                <div className="flex items-center gap-2 mt-2">
+                  <button
+                    onClick={saveNote}
+                    disabled={savingNote}
+                    className="flex items-center gap-1.5 text-sm font-medium bg-white text-gray-900 hover:bg-gray-100 px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+                  >
+                    {savingNote ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : noteSaved ? (
+                      <Check size={14} />
+                    ) : null}
+                    {noteSaved ? "Saved" : "Save note"}
+                  </button>
+                  {note.trim() && (
+                    <span className="text-[11px] text-gray-600">
+                      Clearing the box and saving removes the note.
+                    </span>
+                  )}
+                </div>
+              </div>
+            ) : note.trim() ? (
+              <div className="bg-gray-800/60 border border-gray-700/60 rounded-lg p-3 text-sm text-gray-200 whitespace-pre-wrap">
+                {note}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-600">No note yet.</p>
+            )}
           </div>
 
           {/* Transcript (video only) */}

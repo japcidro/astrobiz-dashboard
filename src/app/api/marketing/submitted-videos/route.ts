@@ -139,6 +139,9 @@ function toSubmittedAd(ad: RawAd, sinceMs: number): SubmittedAd | null {
     reviewed_at: null,
     reviewed_by: null,
     reviewed_by_name: null,
+    note: null,
+    note_by_name: null,
+    note_at: null,
   };
 }
 
@@ -258,6 +261,31 @@ export async function GET(request: Request) {
     ads = ads.map((a) => {
       const rv = map.get(a.fb_ad_id);
       return rv ? { ...a, ...rv } : a;
+    });
+  }
+
+  // Merge notes (keyed by fb_ad_id).
+  const { data: notes } = await supabase
+    .from("fb_ad_notes")
+    .select("fb_ad_id, note, updated_at, author:employees!updated_by(full_name)");
+  if (notes && notes.length > 0) {
+    const noteMap = new Map(
+      notes
+        .filter((n: Record<string, unknown>) => ((n.note as string) || "").trim())
+        .map((n: Record<string, unknown>) => [
+          n.fb_ad_id as string,
+          {
+            note: n.note as string,
+            note_at: n.updated_at as string | null,
+            note_by_name:
+              ((n.author as { full_name?: string } | null)?.full_name as string) ??
+              null,
+          },
+        ])
+    );
+    ads = ads.map((a) => {
+      const nt = noteMap.get(a.fb_ad_id);
+      return nt ? { ...a, ...nt } : a;
     });
   }
 
