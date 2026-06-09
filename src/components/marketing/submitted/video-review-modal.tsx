@@ -29,6 +29,10 @@ interface Props {
   ) => void;
 }
 
+function fmtPeso(n: number): string {
+  return `₱${Math.round(n).toLocaleString("en-PH")}`;
+}
+
 function fmtDateTime(s: string | null): string {
   if (!s) return "—";
   return new Date(s).toLocaleString("en-PH", {
@@ -50,6 +54,16 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
   const [reviewedByName, setReviewedByName] = useState<string | null>(
     ad.reviewed_by_name
   );
+
+  // Lifetime results (FB Insights) — spend + purchases. null = still loading.
+  const [results, setResults] = useState<{
+    has_data: boolean;
+    spend: number;
+    purchases: number;
+    revenue: number;
+    roas: number;
+  } | null>(null);
+  const [resultsLoading, setResultsLoading] = useState(true);
 
   // Transcript (Gemini, transcript-only — generated on demand, then cached).
   const [transcript, setTranscript] = useState<string | null>(null);
@@ -96,6 +110,28 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // On open, fetch lifetime spend + purchases for this ad.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setResultsLoading(true);
+      try {
+        const res = await fetch(
+          `/api/marketing/submitted-videos/insights?fb_ad_id=${ad.fb_ad_id}`
+        );
+        const json = await res.json();
+        if (!cancelled && res.ok) setResults(json.data);
+      } catch {
+        // ignore — results just won't show
+      } finally {
+        if (!cancelled) setResultsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ad.fb_ad_id]);
 
   // On open, check for an already-cached transcript (no AI call).
   useEffect(() => {
@@ -265,6 +301,32 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
             </div>
           )}
 
+          {/* Results (lifetime spend + purchases from FB) */}
+          <div>
+            <p className="text-[11px] uppercase tracking-wider text-gray-500 mb-2">
+              Results (lifetime)
+            </p>
+            {resultsLoading ? (
+              <div className="flex items-center gap-2 text-sm text-gray-500 py-1">
+                <Loader2 size={14} className="animate-spin" />
+                Loading results…
+              </div>
+            ) : results?.has_data ? (
+              <div className="grid grid-cols-3 gap-2">
+                <Stat label="Spend" value={fmtPeso(results.spend)} />
+                <Stat label="Purchases" value={String(results.purchases)} />
+                <Stat
+                  label="ROAS"
+                  value={results.roas > 0 ? `${results.roas.toFixed(2)}x` : "—"}
+                />
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">
+                Walang results pa — hindi pa nagde-deliver (scheduled o bago lang).
+              </p>
+            )}
+          </div>
+
           <div className="grid grid-cols-2 gap-3 text-sm">
             <Meta label="Marketer" value={ad.marketer_name} />
             <Meta label="Store" value={ad.store_name ?? "—"} />
@@ -378,6 +440,15 @@ export function VideoReviewModal({ ad, role, onClose, onReviewedChange }: Props)
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="bg-gray-800/60 border border-gray-700/60 rounded-lg px-3 py-2">
+      <p className="text-[10px] uppercase tracking-wider text-gray-500">{label}</p>
+      <p className="text-white text-base font-semibold mt-0.5">{value}</p>
     </div>
   );
 }
