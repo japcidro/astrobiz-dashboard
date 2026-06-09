@@ -32,6 +32,8 @@ import {
   AlertTriangle,
   Sparkles,
   FileSpreadsheet,
+  Clapperboard,
+  ShieldCheck,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -218,6 +220,13 @@ const navEntries: NavEntry[] = [
         section: "Ad Management",
       },
       {
+        label: "Fix Rejections",
+        href: "/marketing/fix-rejections",
+        icon: <ShieldCheck size={18} />,
+        roles: ["admin", "marketing"],
+        section: "Ad Management",
+      },
+      {
         label: "Create Ad",
         href: "/marketing/create",
         icon: <PlusCircle size={18} />,
@@ -233,6 +242,12 @@ const navEntries: NavEntry[] = [
         label: "Ad Drafts",
         href: "/marketing/drafts",
         icon: <FileText size={18} />,
+        roles: ["admin", "marketing"],
+      },
+      {
+        label: "Submitted Videos",
+        href: "/marketing/submitted",
+        icon: <Clapperboard size={18} />,
         roles: ["admin", "marketing"],
       },
       {

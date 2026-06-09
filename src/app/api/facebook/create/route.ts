@@ -320,6 +320,29 @@ export async function POST(request: Request) {
           submitted_at: new Date().toISOString(),
         })
         .eq("id", draft_id);
+    } else {
+      // No draft was tracked for this submission (e.g. a bulk-create row
+      // with no linked Shopify store). Log it anyway so every submitted ad
+      // shows up in the Submitted Ad Videos review screen. Best-effort — a
+      // logging failure must never fail an already-successful ad creation.
+      await supabase
+        .from("ad_drafts")
+        .insert({
+          employee_id: employee.id,
+          ad_account_id,
+          status: "submitted",
+          name: ad_data.name || "Submitted Ad",
+          mode,
+          existing_campaign_id,
+          existing_adset_id,
+          campaign_data,
+          adset_data,
+          ad_data,
+          fb_campaign_id: fbCampaignId,
+          fb_adset_id: fbAdsetId,
+          fb_ad_id: fbAdId,
+          submitted_at: new Date().toISOString(),
+        });
     }
 
     return Response.json({
