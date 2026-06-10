@@ -13,7 +13,9 @@ import {
   HelpCircle,
   Sparkles,
   Wand2,
-  ChevronDown,
+  Pencil,
+  Check,
+  X,
 } from "lucide-react";
 
 // ── Types ──
@@ -46,9 +48,8 @@ interface SafeImage {
 }
 
 type FixState =
-  | { kind: "idle" }
-  | { kind: "running" }
-  | { kind: "done"; ok: boolean; message: string };
+  | { kind: "running"; image: string }
+  | { kind: "done"; ok: boolean; message: string; image: string };
 
 const CTA_OPTIONS = [
   "LEARN_MORE",
@@ -60,36 +61,48 @@ const CTA_OPTIONS = [
   "BOOK_NOW",
 ];
 
+// Shuffle helper (Fisher–Yates) — used to randomize image assignment.
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 export default function FixRejectionsPage() {
   const [ads, setAds] = useState<RejectedAd[]>([]);
   const [accounts, setAccounts] = useState<AccountInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selectedAds, setSelectedAds] = useState<Set<string>>(new Set());
   const [fixStates, setFixStates] = useState<Record<string, FixState>>({});
   const [bulkRunning, setBulkRunning] = useState(false);
-
-  // Why? feedback cache (ad_id → text)
   const [reasons, setReasons] = useState<Record<string, string>>({});
 
-  // ── Safe images ──
+  // ── Safe-image library ──
   const [safeImages, setSafeImages] = useState<SafeImage[]>([]);
-  const [selectedImageId, setSelectedImageId] = useState<string | null>(null);
+  const [selectedImageIds, setSelectedImageIds] = useState<Set<string>>(new Set());
   const [uploading, setUploading] = useState(false);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ── Fix settings (copy is auto-filled from the selected image's AI copy,
-  //    editable if you want to tweak) ──
-  const [headline, setHeadline] = useState("");
-  const [primaryText, setPrimaryText] = useState("");
-  const [description, setDescription] = useState("");
-  const [cta, setCta] = useState("LEARN_MORE");
+  // Per-image copy editor
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState({
+    headline: "",
+    primary_text: "",
+    description: "",
+    cta: "LEARN_MORE",
+  });
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  // ── Engagement burst (shared) ──
   const [budget, setBudget] = useState(50);
   const [days, setDays] = useState(2);
-  const [showCopy, setShowCopy] = useState(false);
 
-  // ── Load rejected ads ──
+  // ── Loaders ──
   const loadAds = useCallback(async (refresh = false) => {
     setLoading(true);
     setError(null);
@@ -123,10 +136,7 @@ export default function FixRejectionsPage() {
     try {
       const res = await fetch("/api/facebook/safe-images");
       const json = await res.json();
-      if (res.ok) {
-        setSafeImages(json.images || []);
-        setSelectedImageId((prev) => prev ?? json.images?.[0]?.id ?? null);
-      }
+      if (res.ok) setSafeImages(json.images || []);
     } catch {
       /* non-fatal */
     }
@@ -136,19 +146,6 @@ export default function FixRejectionsPage() {
     loadAds();
     loadSafeImages();
   }, [loadAds, loadSafeImages]);
-
-  // When the chosen image changes, load its AI copy into the editable fields.
-  const selectedImage = useMemo(
-    () => safeImages.find((i) => i.id === selectedImageId) || null,
-    [safeImages, selectedImageId]
-  );
-  useEffect(() => {
-    if (!selectedImage) return;
-    setHeadline(selectedImage.ai_headline ?? "");
-    setPrimaryText(selectedImage.ai_primary_text ?? "");
-    setDescription(selectedImage.ai_description ?? "");
-    setCta(selectedImage.ai_cta ?? "LEARN_MORE");
-  }, [selectedImage]);
 
   // ── Why? (rejection reason) ──
   const loadReason = useCallback(async (adId: string) => {
@@ -181,48 +178,70 @@ export default function FixRejectionsPage() {
     }
   }, []);
 
-  // ── Selection ──
-  const allSelected = ads.length > 0 && selected.size === ads.length;
-  const toggleAll = () =>
-    setSelected(allSelected ? new Set() : new Set(ads.map((a) => a.ad_id)));
-  const toggleOne = (id: string) =>
-    setSelected((s) => {
+  // ── Ad selection ──
+  const allAdsSelected = ads.length > 0 && selectedAds.size === ads.length;
+  const toggleAllAds = () =>
+    setSelectedAds(allAdsSelected ? new Set() : new Set(ads.map((a) => a.ad_id)));
+  const toggleAd = (id: string) =>
+    setSelectedAds((s) => {
       const next = new Set(s);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
 
-  // ── Safe image upload (AI reads it + writes copy) ──
-  const onUploadFile = async (file: File) => {
+  // ── Image selection ──
+  const toggleImage = (id: string) =>
+    setSelectedImageIds((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  const selectAllImages = () =>
+    setSelectedImageIds(new Set(safeImages.map((i) => i.id)));
+  const clearImages = () => setSelectedImageIds(new Set());
+
+  // ── Upload (AI reads it + writes copy) ──
+  const onUploadFiles = async (files: FileList) => {
     const uploadAccount = accounts[0]?.id || ads[0]?.account_id;
     if (!uploadAccount) {
       alert("No ad account available yet — wait for the rejected ads to load.");
       return;
     }
     setUploading(true);
+    const newIds: string[] = [];
+    let aiMisses = 0;
     try {
-      const res = await fetch("/api/facebook/safe-images", {
-        method: "POST",
-        headers: {
-          "x-account-id": uploadAccount,
-          "x-file-name": file.name,
-          "x-file-content-type": file.type || "image/jpeg",
-          "x-name": file.name.replace(/\.[^.]+$/, ""),
-        },
-        body: file,
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Upload failed");
+      for (const file of Array.from(files)) {
+        const res = await fetch("/api/facebook/safe-images", {
+          method: "POST",
+          headers: {
+            "x-account-id": uploadAccount,
+            "x-file-name": file.name,
+            "x-file-content-type": file.type || "image/jpeg",
+            "x-name": file.name.replace(/\.[^.]+$/, ""),
+          },
+          body: file,
+        });
+        const json = await res.json();
+        if (!res.ok) {
+          alert(`${file.name}: ${json.error || "upload failed"}`);
+          continue;
+        }
+        if (json.image?.id) newIds.push(json.image.id);
+        if (json.image && !json.ai_generated) aiMisses++;
+      }
       await loadSafeImages();
-      setSelectedImageId(json.image?.id ?? null);
-      if (json.image && !json.ai_generated) {
+      // Auto-select freshly uploaded images so they're ready to use.
+      if (newIds.length) {
+        setSelectedImageIds((s) => new Set([...s, ...newIds]));
+      }
+      if (aiMisses > 0) {
         alert(
-          "Image uploaded, but AI couldn't write copy for it (check the Anthropic API key in Settings). You can type copy manually or hit Regenerate."
+          `${aiMisses} image(s) uploaded without AI copy (check the Anthropic API key in Settings). Use Regenerate or Edit on them.`
         );
       }
-    } catch (e) {
-      alert(e instanceof Error ? e.message : "Upload failed");
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -247,21 +266,93 @@ export default function FixRejectionsPage() {
     }
   };
 
+  const startEdit = (img: SafeImage) => {
+    setEditingId(img.id);
+    setEditDraft({
+      headline: img.ai_headline ?? "",
+      primary_text: img.ai_primary_text ?? "",
+      description: img.ai_description ?? "",
+      cta: img.ai_cta ?? "LEARN_MORE",
+    });
+  };
+
+  const saveEdit = async (id: string) => {
+    if (!editDraft.headline.trim()) {
+      alert("Headline can't be empty.");
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      const res = await fetch("/api/facebook/safe-images", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, copy: editDraft }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Save failed");
+      await loadSafeImages();
+      setEditingId(null);
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
   const deleteSafeImage = async (id: string) => {
     if (!confirm("Remove this safe image from the library?")) return;
     try {
       await fetch(`/api/facebook/safe-images?id=${id}`, { method: "DELETE" });
       await loadSafeImages();
-      if (selectedImageId === id) setSelectedImageId(null);
+      setSelectedImageIds((s) => {
+        const next = new Set(s);
+        next.delete(id);
+        return next;
+      });
     } catch {
       /* non-fatal */
     }
   };
 
-  // ── Fix one ad ──
-  const fixOne = useCallback(
-    async (ad: RejectedAd): Promise<boolean> => {
-      setFixStates((s) => ({ ...s, [ad.ad_id]: { kind: "running" } }));
+  // Selected images that actually have copy (usable for a fix).
+  const usableImages = useMemo(
+    () => safeImages.filter((i) => selectedImageIds.has(i.id) && i.ai_headline),
+    [safeImages, selectedImageIds]
+  );
+
+  const canFix = usableImages.length > 0 && selectedAds.size > 0;
+
+  // ── Bulk fix: assign a random image per ad, no repeats until the pool
+  //    of selected images is exhausted (then it cycles with a reshuffle). ──
+  const fixSelected = async () => {
+    if (usableImages.length === 0) {
+      alert("Select at least one library image that has copy.");
+      return;
+    }
+    const targets = ads.filter((a) => selectedAds.has(a.ad_id));
+    if (!targets.length) return;
+    if (
+      !confirm(
+        `Fix ${targets.length} ad(s) using ${usableImages.length} image(s)? Each ad gets a random image (no repeats until the images run out), re-submitted to Meta with that image's copy.`
+      )
+    )
+      return;
+
+    // Precompute assignments.
+    const assignment: Record<string, SafeImage> = {};
+    let pool: SafeImage[] = [];
+    for (const ad of targets) {
+      if (pool.length === 0) pool = shuffle(usableImages);
+      assignment[ad.ad_id] = pool.pop()!;
+    }
+
+    setBulkRunning(true);
+    for (const ad of targets) {
+      const img = assignment[ad.ad_id];
+      setFixStates((s) => ({
+        ...s,
+        [ad.ad_id]: { kind: "running", image: img.name },
+      }));
       try {
         const res = await fetch("/api/facebook/fix-rejection", {
           method: "POST",
@@ -269,12 +360,8 @@ export default function FixRejectionsPage() {
           body: JSON.stringify({
             ad_id: ad.ad_id,
             ad_account_id: ad.account_id,
-            safe_image_id: selectedImageId,
-            // Copy is sent from the (AI-filled, possibly edited) fields.
-            headline,
-            primary_text: primaryText,
-            description,
-            cta,
+            safe_image_id: img.id,
+            // No copy sent — the route uses this image's AI copy.
             engagement_budget: budget,
             engagement_days: days,
           }),
@@ -282,15 +369,14 @@ export default function FixRejectionsPage() {
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "Fix failed");
         const msg = json.engagement_applied
-          ? `Fixed — re-submitted to Meta + ₱${budget}/${days}-day burst set.`
-          : `Creative swapped + re-submitted. ${
-              (json.warnings || []).join(" ") || "Engagement burst not applied."
+          ? `Fixed — re-submitted + ₱${budget}/${days}-day burst.`
+          : `Swapped + re-submitted. ${
+              (json.warnings || []).join(" ") || "Burst not applied."
             }`;
         setFixStates((s) => ({
           ...s,
-          [ad.ad_id]: { kind: "done", ok: true, message: msg },
+          [ad.ad_id]: { kind: "done", ok: true, message: msg, image: img.name },
         }));
-        return true;
       } catch (e) {
         setFixStates((s) => ({
           ...s,
@@ -298,32 +384,10 @@ export default function FixRejectionsPage() {
             kind: "done",
             ok: false,
             message: e instanceof Error ? e.message : "Fix failed",
+            image: img.name,
           },
         }));
-        return false;
       }
-    },
-    [selectedImageId, headline, primaryText, description, cta, budget, days]
-  );
-
-  const canFix = !!selectedImageId && headline.trim().length > 0;
-
-  const fixSelected = async () => {
-    if (!canFix) {
-      alert("Pick a safe image (with AI copy) first.");
-      return;
-    }
-    const targets = ads.filter((a) => selected.has(a.ad_id));
-    if (!targets.length) return;
-    if (
-      !confirm(
-        `Fix ${targets.length} rejected ad(s)? Each one's creative will be replaced with the safe image + AI copy and re-submitted to Meta.`
-      )
-    )
-      return;
-    setBulkRunning(true);
-    for (const ad of targets) {
-      await fixOne(ad);
     }
     setBulkRunning(false);
     loadAds(true);
@@ -346,178 +410,210 @@ export default function FixRejectionsPage() {
         </button>
       </div>
       <p className="text-sm text-gray-400 mb-6 max-w-3xl">
-        Just upload a safe image (a cat works great). The AI reads it and writes
-        the headline, text, description, and CTA to drive harmless engagement —
-        then it swaps that onto your disapproved ads, re-submits them to Meta,
-        and runs a cheap ₱{budget}/{days}-day engagement burst. Same ad ID — no
-        new campaign.
+        Upload safe images once — they stay in your library with AI-written copy.
+        Pick several, select your rejected ads, and Fix: each ad gets a random
+        image (no repeats until the pool runs out), re-submitted to Meta with a
+        ₱{budget}/{days}-day engagement burst. Same ad ID — no new campaign.
       </p>
 
-      {/* ── Safe images + AI copy ── */}
+      {/* ── Library ── */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <h2 className="font-semibold flex items-center gap-2">
-            <ImageIcon size={18} /> Safe image
+            <ImageIcon size={18} /> Image library
+            <span className="text-gray-500 font-normal text-sm">
+              ({selectedImageIds.size} selected)
+            </span>
           </h2>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 rounded border border-emerald-600 disabled:opacity-50"
-          >
-            {uploading ? (
+          <div className="flex items-center gap-2">
+            {safeImages.length > 0 && (
               <>
-                <Loader2 size={13} className="animate-spin" /> Uploading + AI reading…
-              </>
-            ) : (
-              <>
-                <Upload size={13} /> Add image
+                <button
+                  onClick={selectAllImages}
+                  className="text-xs px-2 py-1.5 bg-gray-800 hover:bg-gray-700 rounded border border-gray-700"
+                >
+                  Select all
+                </button>
+                <button
+                  onClick={clearImages}
+                  className="text-xs px-2 py-1.5 bg-gray-800 hover:bg-gray-700 rounded border border-gray-700"
+                >
+                  Clear
+                </button>
               </>
             )}
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) onUploadFile(f);
-            }}
-          />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 rounded border border-emerald-600 disabled:opacity-50"
+            >
+              {uploading ? (
+                <>
+                  <Loader2 size={13} className="animate-spin" /> Uploading + AI…
+                </>
+              ) : (
+                <>
+                  <Upload size={13} /> Add images
+                </>
+              )}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files?.length) onUploadFiles(e.target.files);
+              }}
+            />
+          </div>
         </div>
 
         {safeImages.length === 0 ? (
           <p className="text-xs text-gray-500 py-3">
-            No safe images yet. Upload a cat (or any benign image) — the AI will
-            write the copy for you.
+            No images yet. Upload one or many cats (or any benign images) — the
+            AI writes the copy for each, and they stay here for next time.
           </p>
         ) : (
-          <div className="flex flex-wrap gap-3 mb-2">
-            {safeImages.map((img) => (
-              <div key={img.id} className="relative group">
-                <button
-                  onClick={() => setSelectedImageId(img.id)}
-                  className={`block rounded-lg overflow-hidden border-2 ${
-                    selectedImageId === img.id
-                      ? "border-emerald-400"
-                      : "border-transparent hover:border-gray-600"
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {safeImages.map((img) => {
+              const isSel = selectedImageIds.has(img.id);
+              const isEditing = editingId === img.id;
+              return (
+                <div
+                  key={img.id}
+                  className={`rounded-lg border p-3 ${
+                    isSel
+                      ? "border-emerald-500 bg-emerald-500/5"
+                      : "border-gray-800 bg-gray-800/30"
                   }`}
                 >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={img.source_url}
-                    alt={img.name}
-                    className="w-24 h-24 object-cover bg-gray-800"
-                  />
-                </button>
-                <button
-                  onClick={() => deleteSafeImage(img.id)}
-                  className="absolute top-1 right-1 p-1 bg-black/60 rounded opacity-0 group-hover:opacity-100"
-                  title="Remove"
-                >
-                  <Trash2 size={12} className="text-red-400" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => toggleImage(img.id)}
+                      className="relative shrink-0"
+                      title={isSel ? "Selected" : "Click to select"}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={img.source_url}
+                        alt={img.name}
+                        className="w-20 h-20 object-cover rounded bg-gray-800"
+                      />
+                      {isSel && (
+                        <span className="absolute -top-1.5 -right-1.5 bg-emerald-500 rounded-full p-0.5">
+                          <Check size={12} className="text-white" />
+                        </span>
+                      )}
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs font-medium truncate">{img.name}</div>
+                      {img.ai_headline ? (
+                        <div className="text-[11px] text-gray-400 mt-0.5 line-clamp-3">
+                          <span className="text-emerald-400">{img.ai_headline}</span>
+                          {img.ai_primary_text ? ` — ${img.ai_primary_text}` : ""}
+                        </div>
+                      ) : (
+                        <div className="text-[11px] text-amber-400 mt-0.5">
+                          No copy yet — Regenerate or Edit.
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
-        {/* AI copy preview for the selected image */}
-        {selectedImage && (
-          <div className="mt-3 border-t border-gray-800 pt-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-medium text-emerald-400 flex items-center gap-1.5">
-                <Sparkles size={13} />
-                {selectedImage.ai_generated_at
-                  ? "AI-written copy (used for the fix)"
-                  : "No AI copy yet — regenerate or type below"}
-              </span>
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={() => regenerateCopy(selectedImage.id)}
-                  disabled={regeneratingId === selectedImage.id}
-                  className="flex items-center gap-1 text-xs text-blue-400 hover:underline disabled:opacity-50"
-                >
-                  {regeneratingId === selectedImage.id ? (
-                    <Loader2 size={12} className="animate-spin" />
+                  {!isEditing ? (
+                    <div className="flex items-center gap-3 mt-2 text-[11px]">
+                      <button
+                        onClick={() => regenerateCopy(img.id)}
+                        disabled={regeneratingId === img.id}
+                        className="flex items-center gap-1 text-blue-400 hover:underline disabled:opacity-50"
+                      >
+                        {regeneratingId === img.id ? (
+                          <Loader2 size={11} className="animate-spin" />
+                        ) : (
+                          <Wand2 size={11} />
+                        )}
+                        Regenerate
+                      </button>
+                      <button
+                        onClick={() => startEdit(img)}
+                        className="flex items-center gap-1 text-gray-400 hover:text-gray-200"
+                      >
+                        <Pencil size={11} /> Edit
+                      </button>
+                      <button
+                        onClick={() => deleteSafeImage(img.id)}
+                        className="flex items-center gap-1 text-red-400 hover:underline ml-auto"
+                      >
+                        <Trash2 size={11} /> Remove
+                      </button>
+                    </div>
                   ) : (
-                    <Wand2 size={12} />
+                    <div className="mt-2 space-y-1.5">
+                      <input
+                        value={editDraft.headline}
+                        onChange={(e) =>
+                          setEditDraft((d) => ({ ...d, headline: e.target.value }))
+                        }
+                        placeholder="Headline *"
+                        className="w-full bg-gray-800 rounded px-2 py-1 text-xs border border-gray-700"
+                      />
+                      <textarea
+                        value={editDraft.primary_text}
+                        onChange={(e) =>
+                          setEditDraft((d) => ({ ...d, primary_text: e.target.value }))
+                        }
+                        rows={2}
+                        placeholder="Primary text"
+                        className="w-full bg-gray-800 rounded px-2 py-1 text-xs border border-gray-700"
+                      />
+                      <input
+                        value={editDraft.description}
+                        onChange={(e) =>
+                          setEditDraft((d) => ({ ...d, description: e.target.value }))
+                        }
+                        placeholder="Description"
+                        className="w-full bg-gray-800 rounded px-2 py-1 text-xs border border-gray-700"
+                      />
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={editDraft.cta}
+                          onChange={(e) =>
+                            setEditDraft((d) => ({ ...d, cta: e.target.value }))
+                          }
+                          className="bg-gray-800 rounded px-2 py-1 text-xs border border-gray-700 flex-1"
+                        >
+                          {CTA_OPTIONS.map((c) => (
+                            <option key={c} value={c}>
+                              {c.replace(/_/g, " ")}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={() => saveEdit(img.id)}
+                          disabled={savingEdit}
+                          className="flex items-center gap-1 text-xs px-2 py-1 bg-emerald-600 hover:bg-emerald-500 rounded disabled:opacity-50"
+                        >
+                          {savingEdit ? (
+                            <Loader2 size={11} className="animate-spin" />
+                          ) : (
+                            <Check size={11} />
+                          )}
+                          Save
+                        </button>
+                        <button
+                          onClick={() => setEditingId(null)}
+                          className="flex items-center gap-1 text-xs px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded"
+                        >
+                          <X size={11} />
+                        </button>
+                      </div>
+                    </div>
                   )}
-                  Regenerate
-                </button>
-                <button
-                  onClick={() => setShowCopy((v) => !v)}
-                  className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200"
-                >
-                  <ChevronDown
-                    size={13}
-                    className={showCopy ? "rotate-180 transition" : "transition"}
-                  />
-                  {showCopy ? "Hide / edit" : "Edit copy"}
-                </button>
-              </div>
-            </div>
-
-            {!showCopy ? (
-              <div className="text-xs text-gray-300 space-y-0.5">
-                <div>
-                  <span className="text-gray-500">Headline: </span>
-                  {headline || <span className="text-gray-600">—</span>}
                 </div>
-                <div>
-                  <span className="text-gray-500">Text: </span>
-                  {primaryText || <span className="text-gray-600">—</span>}
-                </div>
-                <div>
-                  <span className="text-gray-500">Description: </span>
-                  {description || <span className="text-gray-600">—</span>}
-                  <span className="text-gray-500"> · CTA: </span>
-                  {cta.replace(/_/g, " ")}
-                </div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-gray-400">Headline *</label>
-                  <input
-                    value={headline}
-                    onChange={(e) => setHeadline(e.target.value)}
-                    className="w-full mt-1 bg-gray-800 rounded px-3 py-2 text-sm border border-gray-700"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-400">Call to action</label>
-                  <select
-                    value={cta}
-                    onChange={(e) => setCta(e.target.value)}
-                    className="w-full mt-1 bg-gray-800 rounded px-3 py-2 text-sm border border-gray-700"
-                  >
-                    {CTA_OPTIONS.map((c) => (
-                      <option key={c} value={c}>
-                        {c.replace(/_/g, " ")}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="md:col-span-2">
-                  <label className="text-xs text-gray-400">Primary text</label>
-                  <textarea
-                    value={primaryText}
-                    onChange={(e) => setPrimaryText(e.target.value)}
-                    rows={2}
-                    className="w-full mt-1 bg-gray-800 rounded px-3 py-2 text-sm border border-gray-700"
-                  />
-                </div>
-                <div className="md:col-span-2">
-                  <label className="text-xs text-gray-400">Description</label>
-                  <input
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    className="w-full mt-1 bg-gray-800 rounded px-3 py-2 text-sm border border-gray-700"
-                  />
-                </div>
-              </div>
-            )}
+              );
+            })}
           </div>
         )}
 
@@ -556,22 +652,22 @@ export default function FixRejectionsPage() {
         </h2>
         <button
           onClick={fixSelected}
-          disabled={!canFix || selected.size === 0 || bulkRunning}
+          disabled={!canFix || bulkRunning}
           className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-emerald-600 hover:bg-emerald-500 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {bulkRunning ? (
             <Loader2 size={15} className="animate-spin" />
           ) : (
-            <ShieldCheck size={15} />
+            <Sparkles size={15} />
           )}
-          Fix selected ({selected.size})
+          Fix selected ({selectedAds.size})
         </button>
       </div>
 
       {!canFix && (
         <div className="flex items-center gap-2 text-xs text-amber-400 mb-3">
           <AlertCircle size={14} />
-          Upload or pick a safe image with AI copy to enable fixing.
+          Select at least one library image (with copy) and one rejected ad.
         </div>
       )}
 
@@ -598,8 +694,8 @@ export default function FixRejectionsPage() {
                 <th className="p-3 w-10">
                   <input
                     type="checkbox"
-                    checked={allSelected}
-                    onChange={toggleAll}
+                    checked={allAdsSelected}
+                    onChange={toggleAllAds}
                   />
                 </th>
                 <th className="p-3 text-left">Ad</th>
@@ -620,8 +716,8 @@ export default function FixRejectionsPage() {
                     <td className="p-3">
                       <input
                         type="checkbox"
-                        checked={selected.has(ad.ad_id)}
-                        onChange={() => toggleOne(ad.ad_id)}
+                        checked={selectedAds.has(ad.ad_id)}
+                        onChange={() => toggleAd(ad.ad_id)}
                       />
                     </td>
                     <td className="p-3">
@@ -652,13 +748,13 @@ export default function FixRejectionsPage() {
                       {st?.kind === "running" && (
                         <span className="flex items-center gap-1 text-blue-400">
                           <Loader2 size={12} className="animate-spin" /> Fixing…
+                          <span className="text-gray-500">({st.image})</span>
                         </span>
                       )}
                       {st?.kind === "done" && (
-                        <span
-                          className={st.ok ? "text-emerald-400" : "text-red-400"}
-                        >
-                          {st.message}
+                        <span className={st.ok ? "text-emerald-400" : "text-red-400"}>
+                          {st.message}{" "}
+                          <span className="text-gray-500">· {st.image}</span>
                         </span>
                       )}
                     </td>

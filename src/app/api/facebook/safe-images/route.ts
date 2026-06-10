@@ -162,9 +162,10 @@ export async function POST(request: Request) {
   }
 }
 
-// PATCH /api/facebook/safe-images  body: { id }
-// Re-run the AI copy generation for an existing safe image (fetches the
-// stored CDN image and re-reads it).
+// PATCH /api/facebook/safe-images
+//   body { id, copy: { headline, primary_text, description, cta } }
+//       → save manual copy edits (no AI call)
+//   body { id }  → re-run AI copy generation (fetches the stored CDN image)
 export async function PATCH(request: Request) {
   const employee = await getEmployee();
   if (!employee) return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -172,10 +173,42 @@ export async function PATCH(request: Request) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const body = (await request.json()) as { id?: string };
+  const body = (await request.json()) as {
+    id?: string;
+    copy?: {
+      headline?: string;
+      primary_text?: string;
+      description?: string;
+      cta?: string;
+    };
+  };
   if (!body.id) return Response.json({ error: "id required" }, { status: 400 });
 
   const supabase = await createClient();
+
+  // Manual save path — no AI call.
+  if (body.copy) {
+    const headline = (body.copy.headline ?? "").trim();
+    if (!headline) {
+      return Response.json({ error: "headline required" }, { status: 400 });
+    }
+    const { data: row, error } = await supabase
+      .from("fix_rejection_safe_images")
+      .update({
+        ai_headline: headline,
+        ai_primary_text: (body.copy.primary_text ?? "").trim(),
+        ai_description: (body.copy.description ?? "").trim(),
+        ai_cta: (body.copy.cta ?? "LEARN_MORE").trim(),
+        ai_generated_at: new Date().toISOString(),
+      })
+      .eq("id", body.id)
+      .eq("active", true)
+      .select(SAFE_IMAGE_FIELDS)
+      .single();
+    if (error) return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({ success: true, image: row });
+  }
+
   const { data: existing } = await supabase
     .from("fix_rejection_safe_images")
     .select("id, source_url")
