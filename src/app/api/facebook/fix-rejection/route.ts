@@ -323,24 +323,52 @@ export async function POST(request: Request) {
     );
   }
 
-  // 5. ₱50/2-day engagement burst on the existing ad set (best-effort).
-  //    Fails harmlessly if the ad set is under a CBO campaign (budget
-  //    lives at campaign level) — the rejection is already cleared.
+  // 5. Engagement burst on the existing ad set, fully automatic. If FB
+  //    rejects the budget as too low, it tells us the minimum — we read
+  //    that and retry at the minimum so no manual step is ever needed.
+  //    Still harmless if the ad set is under a CBO campaign.
   let engagementApplied = false;
+  let appliedBudget = engagementBudget;
   if (adsetId) {
     const endTime = Math.floor(Date.now() / 1000) + engagementDays * 86400;
-    try {
-      await fbPost(`/${adsetId}`, token, {
-        daily_budget: Math.round(engagementBudget * 100).toString(),
+    const setBudget = (php: number) =>
+      fbPost(`/${adsetId}`, token, {
+        daily_budget: Math.round(php * 100).toString(),
         end_time: endTime.toString(),
         status: "ACTIVE",
       });
+    try {
+      await setBudget(engagementBudget);
       engagementApplied = true;
     } catch (e) {
       const msg = e instanceof Error ? e.message : "ad set update failed";
-      warnings.push(
-        `Creative swapped, but the ₱${engagementBudget}/${engagementDays}-day burst couldn't be set on the ad set (${msg}). Set it manually in Ads Manager.`
-      );
+      // Parse "...must be more than PHP61.70..." and retry just above it.
+      const m = msg.match(/more than\s*(?:php|₱|\$|usd)?\s*([\d,]+(?:\.\d+)?)/i);
+      const min = m ? parseFloat(m[1].replace(/,/g, "")) : NaN;
+      if (!Number.isNaN(min)) {
+        let retryBudget = Math.ceil(min);
+        if (retryBudget <= min) retryBudget += 1;
+        try {
+          await setBudget(retryBudget);
+          engagementApplied = true;
+          appliedBudget = retryBudget;
+          if (retryBudget !== engagementBudget) {
+            warnings.push(
+              `₱${engagementBudget} was below FB's minimum — auto-raised to ₱${retryBudget}/day.`
+            );
+          }
+        } catch (e2) {
+          warnings.push(
+            `Creative swapped, but the engagement burst couldn't be set (${
+              e2 instanceof Error ? e2.message : "ad set update failed"
+            }).`
+          );
+        }
+      } else {
+        warnings.push(
+          `Creative swapped, but the engagement burst couldn't be set (${msg}).`
+        );
+      }
     }
   } else {
     warnings.push("Couldn't find the ad set, so the engagement burst was skipped.");
@@ -360,6 +388,7 @@ export async function POST(request: Request) {
     ad_id: adId,
     new_creative_id: newCreativeId,
     engagement_applied: engagementApplied,
+    applied_budget: appliedBudget,
     warnings,
   });
 }

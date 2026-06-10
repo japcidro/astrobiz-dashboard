@@ -61,6 +61,20 @@ const CTA_OPTIONS = [
   "BOOK_NOW",
 ];
 
+// Map a raw FB status to a friendly running/stopped label + color.
+function statusBadge(raw: string | undefined): { text: string; cls: string } {
+  const s = (raw ?? "").toUpperCase();
+  if (!s) return { text: "—", cls: "text-gray-600" };
+  if (s.includes("DISAPPROV")) return { text: "Rejected", cls: "text-red-400" };
+  if (s.includes("WITH_ISSUES")) return { text: "Issues", cls: "text-amber-400" };
+  if (s.includes("PENDING") || s.includes("IN_PROCESS") || s.includes("REVIEW"))
+    return { text: "In review", cls: "text-amber-400" };
+  if (s.includes("PAUSED") || s.includes("ARCHIVED") || s.includes("DELETED"))
+    return { text: "Stopped", cls: "text-gray-400" };
+  if (s === "ACTIVE") return { text: "Running", cls: "text-emerald-400" };
+  return { text: s, cls: "text-gray-400" };
+}
+
 // Shuffle helper (Fisher–Yates) — used to randomize image assignment.
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -121,6 +135,9 @@ export default function FixRejectionsPage() {
   const [fixStates, setFixStates] = useState<Record<string, FixState>>({});
   const [bulkRunning, setBulkRunning] = useState(false);
   const [reasons, setReasons] = useState<Record<string, string>>({});
+  // Live FB delivery status per ad (overrides the loaded list status).
+  const [liveStatus, setLiveStatus] = useState<Record<string, string>>({});
+  const [loadingStatuses, setLoadingStatuses] = useState(false);
 
   // ── Safe-image library ──
   const [safeImages, setSafeImages] = useState<SafeImage[]>([]);
@@ -143,7 +160,7 @@ export default function FixRejectionsPage() {
   const [savingEdit, setSavingEdit] = useState(false);
 
   // ── Engagement burst (shared) ──
-  const [budget, setBudget] = useState(50);
+  const [budget, setBudget] = useState(70);
   const [days, setDays] = useState(2);
 
   // ── Loaders ──
@@ -219,6 +236,26 @@ export default function FixRejectionsPage() {
         ...r,
         [adId]: e instanceof Error ? e.message : "Failed to load reason",
       }));
+    }
+  }, []);
+
+  // ── Live status refresh (batch) ──
+  const refreshStatuses = useCallback(async (ids: string[]) => {
+    const unique = [...new Set(ids)].filter(Boolean);
+    if (unique.length === 0) return;
+    setLoadingStatuses(true);
+    try {
+      const res = await fetch(
+        `/api/facebook/ad-statuses?ad_ids=${encodeURIComponent(unique.join(","))}`
+      );
+      const json = await res.json();
+      if (res.ok && json.statuses) {
+        setLiveStatus((s) => ({ ...s, ...json.statuses }));
+      }
+    } catch {
+      /* non-fatal */
+    } finally {
+      setLoadingStatuses(false);
     }
   }, []);
 
@@ -424,8 +461,9 @@ export default function FixRejectionsPage() {
         });
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "Fix failed");
+        const appliedBudget = json.applied_budget ?? budget;
         const msg = json.engagement_applied
-          ? `Fixed — re-submitted + ₱${budget}/${days}-day burst.`
+          ? `Fixed — re-submitted + ₱${appliedBudget}/${days}-day burst.`
           : `Swapped + re-submitted. ${
               (json.warnings || []).join(" ") || "Burst not applied."
             }`;
@@ -446,7 +484,10 @@ export default function FixRejectionsPage() {
       }
     }
     setBulkRunning(false);
-    loadAds(true);
+    // Pull live status for the fixed ads so the Status column updates
+    // (they'll show "In review" right after re-submission). We don't reload
+    // the disapproved list, so fixed rows stay visible for monitoring.
+    refreshStatuses(targets.map((t) => t.ad_id));
   };
 
   return (
@@ -719,18 +760,29 @@ export default function FixRejectionsPage() {
           Rejected ads{" "}
           <span className="text-gray-500 font-normal">({ads.length})</span>
         </h2>
-        <button
-          onClick={fixSelected}
-          disabled={!canFix || bulkRunning}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-emerald-600 hover:bg-emerald-500 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {bulkRunning ? (
-            <Loader2 size={15} className="animate-spin" />
-          ) : (
-            <Sparkles size={15} />
-          )}
-          Fix selected ({selectedAds.size})
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => refreshStatuses(ads.map((a) => a.ad_id))}
+            disabled={loadingStatuses || ads.length === 0}
+            className="flex items-center gap-2 px-3 py-2 text-sm bg-gray-800 hover:bg-gray-700 rounded-lg disabled:opacity-40"
+            title="Check live delivery status of these ads"
+          >
+            <RefreshCw size={14} className={loadingStatuses ? "animate-spin" : ""} />
+            Refresh statuses
+          </button>
+          <button
+            onClick={fixSelected}
+            disabled={!canFix || bulkRunning}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-emerald-600 hover:bg-emerald-500 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {bulkRunning ? (
+              <Loader2 size={15} className="animate-spin" />
+            ) : (
+              <Sparkles size={15} />
+            )}
+            Fix selected ({selectedAds.size})
+          </button>
+        </div>
       </div>
 
       {!canFix && (
@@ -770,6 +822,7 @@ export default function FixRejectionsPage() {
                 <th className="p-3 text-left">Ad</th>
                 <th className="p-3 text-left">Account</th>
                 <th className="p-3 text-left">Campaign / Ad set</th>
+                <th className="p-3 text-left">Status</th>
                 <th className="p-3 text-left">Reason</th>
                 <th className="p-3 text-left">Result</th>
               </tr>
@@ -797,6 +850,14 @@ export default function FixRejectionsPage() {
                     <td className="p-3 text-gray-400 text-xs">
                       <div>{ad.campaign}</div>
                       <div className="text-gray-600">{ad.adset}</div>
+                    </td>
+                    <td className="p-3 text-xs">
+                      {(() => {
+                        const b = statusBadge(liveStatus[ad.ad_id] ?? ad.status);
+                        return (
+                          <span className={`font-medium ${b.cls}`}>● {b.text}</span>
+                        );
+                      })()}
                     </td>
                     <td className="p-3 text-xs max-w-xs">
                       {reasons[ad.ad_id] ? (
