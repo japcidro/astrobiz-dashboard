@@ -17,6 +17,7 @@ import {
   Check,
   X,
   CircleStop,
+  Eye,
 } from "lucide-react";
 
 // ── Types ──
@@ -34,6 +35,17 @@ interface RejectedAd {
 interface AccountInfo {
   id: string;
   name: string;
+}
+
+interface WatchRow {
+  id: string;
+  ad_id: string;
+  campaign_id: string | null;
+  spend_threshold: number;
+  last_spend: number | null;
+  status: string;
+  since_date: string;
+  paused_at: string | null;
 }
 
 interface SafeImage {
@@ -139,6 +151,9 @@ export default function FixRejectionsPage() {
   // Live FB delivery status per ad (overrides the loaded list status).
   const [liveStatus, setLiveStatus] = useState<Record<string, string>>({});
   const [loadingStatuses, setLoadingStatuses] = useState(false);
+  // Scaling auto-pause watchlist
+  const [watchlist, setWatchlist] = useState<WatchRow[]>([]);
+  const [loadingWatch, setLoadingWatch] = useState(false);
 
   // ── Safe-image library ──
   const [safeImages, setSafeImages] = useState<SafeImage[]>([]);
@@ -204,10 +219,36 @@ export default function FixRejectionsPage() {
     }
   }, []);
 
+  const loadWatchlist = useCallback(async () => {
+    setLoadingWatch(true);
+    try {
+      const res = await fetch("/api/facebook/fix-rejection-autopause");
+      const json = await res.json();
+      if (res.ok) setWatchlist(json.rows || []);
+    } catch {
+      /* non-fatal */
+    } finally {
+      setLoadingWatch(false);
+    }
+  }, []);
+
+  const removeWatch = async (id: string) => {
+    if (!confirm("Stop watching this ad for auto-pause?")) return;
+    try {
+      await fetch(`/api/facebook/fix-rejection-autopause?id=${id}`, {
+        method: "DELETE",
+      });
+      loadWatchlist();
+    } catch {
+      /* non-fatal */
+    }
+  };
+
   useEffect(() => {
     loadAds();
     loadSafeImages();
-  }, [loadAds, loadSafeImages]);
+    loadWatchlist();
+  }, [loadAds, loadSafeImages, loadWatchlist]);
 
   // ── Why? (rejection reason) ──
   const loadReason = useCallback(async (adId: string) => {
@@ -491,6 +532,7 @@ export default function FixRejectionsPage() {
     // (they'll show "In review" right after re-submission). We don't reload
     // the disapproved list, so fixed rows stay visible for monitoring.
     refreshStatuses(targets.map((t) => t.ad_id));
+    loadWatchlist(); // scaling fixes add rows here
   };
 
   // ── Stop (pause) selected ads immediately ──
@@ -793,6 +835,94 @@ export default function FixRejectionsPage() {
           </div>
         </div>
       </div>
+
+      {/* ── Auto-pause watchlist (scaling) ── */}
+      {watchlist.length > 0 && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold flex items-center gap-2">
+              <Eye size={18} /> Auto-pause watchlist
+              <span className="text-gray-500 font-normal text-sm">
+                (scaling ads — paused at their ₱ limit)
+              </span>
+            </h2>
+            <button
+              onClick={loadWatchlist}
+              disabled={loadingWatch}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 rounded-lg disabled:opacity-40"
+            >
+              <RefreshCw size={13} className={loadingWatch ? "animate-spin" : ""} />
+              Refresh
+            </button>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="text-gray-400 text-xs uppercase">
+              <tr>
+                <th className="py-2 text-left">Ad</th>
+                <th className="py-2 text-left">Spend / Limit</th>
+                <th className="py-2 text-left">Status</th>
+                <th className="py-2 text-left">Since</th>
+                <th className="py-2 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {watchlist.map((w) => {
+                const spent = w.last_spend ?? 0;
+                const pct = Math.min(
+                  100,
+                  Math.round((spent / (w.spend_threshold || 1)) * 100)
+                );
+                const isPaused = w.status === "paused";
+                return (
+                  <tr key={w.id} className="border-t border-gray-800">
+                    <td className="py-2 text-xs text-gray-300 font-mono">
+                      {w.ad_id}
+                    </td>
+                    <td className="py-2 text-xs">
+                      <div className="flex items-center gap-2">
+                        <div className="w-24 h-1.5 bg-gray-800 rounded overflow-hidden">
+                          <div
+                            className={`h-full ${
+                              isPaused ? "bg-gray-500" : "bg-emerald-500"
+                            }`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                        <span className="text-gray-400">
+                          ₱{spent.toFixed(2)} / ₱{w.spend_threshold}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-2 text-xs">
+                      {isPaused ? (
+                        <span className="text-gray-400 font-medium">● Paused</span>
+                      ) : (
+                        <span className="text-amber-400 font-medium">
+                          ● Watching
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-2 text-xs text-gray-500">{w.since_date}</td>
+                    <td className="py-2 text-xs text-right">
+                      <button
+                        onClick={() => removeWatch(w.id)}
+                        className="text-red-400 hover:underline"
+                        title="Stop watching"
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <p className="text-[11px] text-gray-500 mt-2">
+            Spend updates every ~15 min. When an ad reaches its limit it&apos;s
+            paused automatically — the scaling budget is never touched.
+          </p>
+        </div>
+      )}
 
       {/* ── Rejected ads ── */}
       <div className="flex items-center justify-between mb-3">
