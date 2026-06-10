@@ -1,18 +1,38 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
+import {
+  generateEngagementCopy,
+  FIX_REJECTION_COPY_MODEL,
+} from "@/lib/ai/fix-rejection-copy";
 
 export const dynamic = "force-dynamic";
+// Upload to FB + a Claude vision call to write copy.
+export const maxDuration = 60;
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
+
+const SAFE_IMAGE_FIELDS =
+  "id, name, source_url, ai_headline, ai_primary_text, ai_description, ai_cta, ai_model, ai_generated_at, created_at";
 
 // Reusable "safe image" library for the Fix Rejections tab. These are the
 // benign images (cats, etc.) that replace a rejected ad's creative so Meta
 // re-approves the ad. FB image hashes are scoped per ad account, so we
 // store the public FB CDN url here and re-mint per-account hashes lazily
-// at fix time (see fix-rejection/route.ts). Uploading once gives us a
-// public url + a first cached hash for whichever account we uploaded to.
+// at fix time (see fix-rejection/route.ts). On upload, Claude (vision)
+// reads the image and writes engagement copy once, cached on the row.
 
-// GET /api/facebook/safe-images → list active safe images
+async function getAnthropicKey(
+  supabase: Awaited<ReturnType<typeof createClient>>
+): Promise<string | null> {
+  const { data } = await supabase
+    .from("app_settings")
+    .select("value")
+    .eq("key", "anthropic_api_key")
+    .single();
+  return (data?.value as string | undefined) ?? null;
+}
+
+// GET /api/facebook/safe-images → list active safe images (+ AI copy)
 export async function GET() {
   const employee = await getEmployee();
   if (!employee) return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -23,7 +43,7 @@ export async function GET() {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("fix_rejection_safe_images")
-    .select("id, name, source_url, created_at")
+    .select(SAFE_IMAGE_FIELDS)
     .eq("active", true)
     .order("created_at", { ascending: false });
 
@@ -100,6 +120,24 @@ export async function POST(request: Request) {
     const firstKey = Object.keys(images)[0];
     const { hash, url } = images[firstKey];
 
+    // Have Claude read the image and write engagement copy (best-effort).
+    let aiFields: Record<string, unknown> = {};
+    const apiKey = await getAnthropicKey(supabase);
+    if (apiKey) {
+      const base64 = Buffer.from(fileBuffer).toString("base64");
+      const copy = await generateEngagementCopy(base64, contentType, apiKey);
+      if (copy) {
+        aiFields = {
+          ai_headline: copy.headline,
+          ai_primary_text: copy.primary_text,
+          ai_description: copy.description,
+          ai_cta: copy.cta,
+          ai_model: FIX_REJECTION_COPY_MODEL,
+          ai_generated_at: new Date().toISOString(),
+        };
+      }
+    }
+
     const { data: row, error } = await supabase
       .from("fix_rejection_safe_images")
       .insert({
@@ -107,14 +145,85 @@ export async function POST(request: Request) {
         source_url: url,
         account_hashes: { [accountId]: hash },
         created_by: employee.id,
+        ...aiFields,
       })
-      .select("id, name, source_url, created_at")
+      .select(SAFE_IMAGE_FIELDS)
+      .single();
+
+    if (error) return Response.json({ error: error.message }, { status: 500 });
+    return Response.json({
+      success: true,
+      image: row,
+      ai_generated: Object.keys(aiFields).length > 0,
+    });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : "Upload failed";
+    return Response.json({ error: message }, { status: 500 });
+  }
+}
+
+// PATCH /api/facebook/safe-images  body: { id }
+// Re-run the AI copy generation for an existing safe image (fetches the
+// stored CDN image and re-reads it).
+export async function PATCH(request: Request) {
+  const employee = await getEmployee();
+  if (!employee) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (!["admin", "marketing"].includes(employee.role)) {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const body = (await request.json()) as { id?: string };
+  if (!body.id) return Response.json({ error: "id required" }, { status: 400 });
+
+  const supabase = await createClient();
+  const { data: existing } = await supabase
+    .from("fix_rejection_safe_images")
+    .select("id, source_url")
+    .eq("id", body.id)
+    .eq("active", true)
+    .maybeSingle<{ id: string; source_url: string }>();
+  if (!existing) return Response.json({ error: "Image not found" }, { status: 404 });
+
+  const apiKey = await getAnthropicKey(supabase);
+  if (!apiKey) {
+    return Response.json(
+      { error: "Anthropic API key not configured. Go to Settings." },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const imgRes = await fetch(existing.source_url);
+    if (!imgRes.ok) throw new Error(`couldn't fetch image (${imgRes.status})`);
+    const mediaType = imgRes.headers.get("content-type") || "image/jpeg";
+    const base64 = Buffer.from(await imgRes.arrayBuffer()).toString("base64");
+
+    const copy = await generateEngagementCopy(base64, mediaType, apiKey);
+    if (!copy) {
+      return Response.json(
+        { error: "AI couldn't generate copy for this image. Try again." },
+        { status: 502 }
+      );
+    }
+
+    const { data: row, error } = await supabase
+      .from("fix_rejection_safe_images")
+      .update({
+        ai_headline: copy.headline,
+        ai_primary_text: copy.primary_text,
+        ai_description: copy.description,
+        ai_cta: copy.cta,
+        ai_model: FIX_REJECTION_COPY_MODEL,
+        ai_generated_at: new Date().toISOString(),
+      })
+      .eq("id", existing.id)
+      .select(SAFE_IMAGE_FIELDS)
       .single();
 
     if (error) return Response.json({ error: error.message }, { status: 500 });
     return Response.json({ success: true, image: row });
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Upload failed";
+    const message = e instanceof Error ? e.message : "Regenerate failed";
     return Response.json({ error: message }, { status: 500 });
   }
 }

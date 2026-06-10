@@ -64,6 +64,10 @@ interface SafeImageRow {
   id: string;
   source_url: string;
   account_hashes: Record<string, string>;
+  ai_headline: string | null;
+  ai_primary_text: string | null;
+  ai_description: string | null;
+  ai_cta: string | null;
 }
 
 // POST /api/facebook/fix-rejection
@@ -104,13 +108,12 @@ export async function POST(request: Request) {
   if (!body.safe_image_id) {
     return Response.json({ error: "safe_image_id is required" }, { status: 400 });
   }
-  const headline = (body.headline ?? "").trim();
-  if (!headline) {
-    return Response.json({ error: "headline is required" }, { status: 400 });
-  }
-  const primaryText = (body.primary_text ?? "").trim();
-  const description = (body.description ?? "").trim();
-  const cta = (body.cta ?? "LEARN_MORE").trim();
+  // Copy is optional in the body — if omitted, we fall back to the safe
+  // image's AI-generated copy (resolved after we fetch the image below).
+  let headline = (body.headline ?? "").trim();
+  let primaryText = (body.primary_text ?? "").trim();
+  let description = (body.description ?? "").trim();
+  let cta = (body.cta ?? "").trim();
   const engagementBudget =
     body.engagement_budget && body.engagement_budget > 0
       ? body.engagement_budget
@@ -213,12 +216,26 @@ export async function POST(request: Request) {
   //    first use — FB image hashes are per-account).
   const { data: safeImage } = await supabase
     .from("fix_rejection_safe_images")
-    .select("id, source_url, account_hashes")
+    .select(
+      "id, source_url, account_hashes, ai_headline, ai_primary_text, ai_description, ai_cta"
+    )
     .eq("id", body.safe_image_id)
     .eq("active", true)
     .maybeSingle<SafeImageRow>();
   if (!safeImage) {
     return Response.json({ error: "Safe image not found" }, { status: 404 });
+  }
+
+  // Fall back to the image's AI-generated copy for any field not overridden.
+  if (!headline) headline = (safeImage.ai_headline ?? "").trim();
+  if (!primaryText) primaryText = (safeImage.ai_primary_text ?? "").trim();
+  if (!description) description = (safeImage.ai_description ?? "").trim();
+  if (!cta) cta = (safeImage.ai_cta ?? "LEARN_MORE").trim();
+  if (!headline) {
+    const msg =
+      "No headline provided and this safe image has no AI copy yet. Regenerate the image's copy or enter a headline.";
+    await logAction({ status: "failed", old_creative_id: oldCreativeId, adset_id: adsetId, error_message: msg });
+    return Response.json({ error: msg }, { status: 400 });
   }
 
   let imageHash = safeImage.account_hashes?.[adAccountId];
