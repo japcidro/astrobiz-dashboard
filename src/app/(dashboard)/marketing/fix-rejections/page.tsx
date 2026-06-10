@@ -71,6 +71,47 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
+// Downscale + re-encode to JPEG in the browser BEFORE upload. Phone photos
+// are often 3-8MB (Vercel caps a function request body at ~4.5MB) and may be
+// HEIC (which FB + Claude reject). This keeps every upload small and JPEG.
+async function compressImage(file: File): Promise<Blob> {
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error("Couldn't read the file."));
+    reader.readAsDataURL(file);
+  });
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const im = new Image();
+    im.onload = () => resolve(im);
+    im.onerror = () =>
+      reject(
+        new Error(
+          "Browser can't open this image (HEIC?). Convert it to JPG or PNG first."
+        )
+      );
+    im.src = dataUrl;
+  });
+  const maxDim = 1280;
+  let { width, height } = img;
+  if (Math.max(width, height) > maxDim) {
+    const scale = maxDim / Math.max(width, height);
+    width = Math.round(width * scale);
+    height = Math.round(height * scale);
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Canvas not available in this browser.");
+  ctx.drawImage(img, 0, 0, width, height);
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, "image/jpeg", 0.85)
+  );
+  if (!blob) throw new Error("Image compression failed.");
+  return blob;
+}
+
 export default function FixRejectionsPage() {
   const [ads, setAds] = useState<RejectedAd[]>([]);
   const [accounts, setAccounts] = useState<AccountInfo[]>([]);
@@ -85,6 +126,9 @@ export default function FixRejectionsPage() {
   const [safeImages, setSafeImages] = useState<SafeImage[]>([]);
   const [selectedImageIds, setSelectedImageIds] = useState<Set<string>>(new Set());
   const [uploading, setUploading] = useState(false);
+  const [uploadLog, setUploadLog] = useState<
+    { name: string; ok: boolean; msg: string }[]
+  >([]);
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -210,37 +254,49 @@ export default function FixRejectionsPage() {
       return;
     }
     setUploading(true);
+    setUploadLog([]);
     const newIds: string[] = [];
-    let aiMisses = 0;
+    const log: { name: string; ok: boolean; msg: string }[] = [];
     try {
       for (const file of Array.from(files)) {
-        const res = await fetch("/api/facebook/safe-images", {
-          method: "POST",
-          headers: {
-            "x-account-id": uploadAccount,
-            "x-file-name": file.name,
-            "x-file-content-type": file.type || "image/jpeg",
-            "x-name": file.name.replace(/\.[^.]+$/, ""),
-          },
-          body: file,
-        });
-        const json = await res.json();
-        if (!res.ok) {
-          alert(`${file.name}: ${json.error || "upload failed"}`);
-          continue;
+        const baseName = file.name.replace(/\.[^.]+$/, "");
+        try {
+          // Shrink + normalize to JPEG client-side (avoids the 4.5MB body
+          // limit and HEIC issues).
+          const blob = await compressImage(file);
+          const res = await fetch("/api/facebook/safe-images", {
+            method: "POST",
+            headers: {
+              "x-account-id": uploadAccount,
+              "x-file-name": `${baseName}.jpg`,
+              "x-file-content-type": "image/jpeg",
+              "x-name": baseName,
+            },
+            body: blob,
+          });
+          const json = await res.json();
+          if (!res.ok) {
+            log.push({ name: file.name, ok: false, msg: json.error || `HTTP ${res.status}` });
+            continue;
+          }
+          if (json.image?.id) newIds.push(json.image.id);
+          log.push({
+            name: file.name,
+            ok: true,
+            msg: json.ai_generated ? "uploaded + AI copy" : "uploaded (no AI copy — regenerate)",
+          });
+        } catch (e) {
+          log.push({
+            name: file.name,
+            ok: false,
+            msg: e instanceof Error ? e.message : "failed",
+          });
         }
-        if (json.image?.id) newIds.push(json.image.id);
-        if (json.image && !json.ai_generated) aiMisses++;
+        setUploadLog([...log]);
       }
       await loadSafeImages();
-      // Auto-select freshly uploaded images so they're ready to use.
       if (newIds.length) {
         setSelectedImageIds((s) => new Set([...s, ...newIds]));
-      }
-      if (aiMisses > 0) {
-        alert(
-          `${aiMisses} image(s) uploaded without AI copy (check the Anthropic API key in Settings). Use Regenerate or Edit on them.`
-        );
       }
     } finally {
       setUploading(false);
@@ -469,6 +525,19 @@ export default function FixRejectionsPage() {
             />
           </div>
         </div>
+
+        {uploadLog.length > 0 && (
+          <div className="mb-3 text-xs space-y-0.5 bg-gray-800/40 border border-gray-800 rounded p-2 max-h-40 overflow-auto">
+            {uploadLog.map((l, i) => (
+              <div
+                key={i}
+                className={l.ok ? "text-emerald-400" : "text-red-400"}
+              >
+                {l.ok ? "✓" : "✕"} {l.name} — {l.msg}
+              </div>
+            ))}
+          </div>
+        )}
 
         {safeImages.length === 0 ? (
           <p className="text-xs text-gray-500 py-3">
