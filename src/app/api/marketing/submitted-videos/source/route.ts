@@ -1,17 +1,19 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
+import { resolveAdVideo } from "@/lib/facebook/video";
 import type { SubmittedVideoSource } from "@/lib/marketing/submitted-videos";
 
 export const dynamic = "force-dynamic";
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
 
-// Resolves a playable video URL on-demand for one Facebook video_id.
+// Resolves a playable video URL on-demand.
 //
-// The video file lives on Facebook — we keep no copy. Here we exchange the
-// video_id for a fresh, temporary CDN URL via the Graph API. The FB token
-// never leaves the server. Images are displayed directly from the creative's
-// inline image_url (no call needed), so this endpoint only handles video.
+// Accepts either ?video_id= (fast path, used by the Submitted Videos grid
+// which already knows the video id) or ?fb_ad_id=&account_id= (used by Ad
+// Performance, where rows carry only the ad id). The FB token never leaves
+// the server. Images are shown from the creative's inline image_url, so this
+// endpoint only handles video.
 export async function GET(request: Request) {
   const employee = await getEmployee();
   if (!employee) {
@@ -22,9 +24,11 @@ export async function GET(request: Request) {
   }
 
   const { searchParams } = new URL(request.url);
-  const videoId = searchParams.get("video_id");
-  if (!videoId) {
-    return Response.json({ error: "Missing video_id" }, { status: 400 });
+  let videoId = searchParams.get("video_id");
+  const fbAdId = searchParams.get("fb_ad_id");
+  const accountId = searchParams.get("account_id") || undefined;
+  if (!videoId && !fbAdId) {
+    return Response.json({ error: "Missing video_id or fb_ad_id" }, { status: 400 });
   }
 
   const supabase = await createClient();
@@ -37,6 +41,37 @@ export async function GET(request: Request) {
     return Response.json({ error: "Facebook token not configured" }, { status: 400 });
   }
   const token = tokenSetting.value as string;
+
+  // No video_id yet (Ad Performance) → resolve the ad's video from FB.
+  let fallbackUrl: string | null = null;
+  let fallbackThumb: string | null = null;
+  if (!videoId && fbAdId) {
+    try {
+      const v = await resolveAdVideo(fbAdId, token, accountId);
+      videoId = v.video_id;
+      fallbackUrl = v.video_url;
+      fallbackThumb = v.thumbnail_url;
+    } catch {
+      // fall through — handled below
+    }
+    if (!videoId && !fallbackUrl) {
+      return Response.json(
+        { error: "No playable video found for this ad" },
+        { status: 404 }
+      );
+    }
+    // Resolved a direct playable URL but no video_id node — return it as-is.
+    if (!videoId && fallbackUrl) {
+      const result: SubmittedVideoSource = {
+        source: fallbackUrl,
+        thumbnail: fallbackThumb,
+        permalink: null,
+        status: "ready",
+        length: null,
+      };
+      return Response.json({ data: result });
+    }
+  }
 
   try {
     const res = await fetch(
@@ -65,8 +100,8 @@ export async function GET(request: Request) {
       : null;
 
     const result: SubmittedVideoSource = {
-      source: (json?.source as string) ?? null,
-      thumbnail: (json?.picture as string) ?? null,
+      source: (json?.source as string) ?? fallbackUrl,
+      thumbnail: (json?.picture as string) ?? fallbackThumb,
       permalink,
       status: videoStatus,
       length: typeof json?.length === "number" ? json.length : null,

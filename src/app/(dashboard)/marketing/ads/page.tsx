@@ -27,6 +27,9 @@ import {
   PromoteToScalingModal,
   type PromoteSubject,
 } from "@/components/marketing/promote-to-scaling-modal";
+import { VideoReviewModal } from "@/components/marketing/submitted/video-review-modal";
+import type { SubmittedAd } from "@/lib/marketing/submitted-videos";
+import { matchAdToStore } from "@/lib/profit/store-matching";
 import {
   PromoteBulkToScalingModal,
   type BulkPromoteSubject,
@@ -236,6 +239,51 @@ const METRIC_COLS: { key: string; label: string }[] = [
   { key: "ctr", label: "CTR" },
 ];
 
+// Attribute a marketer from the ad-name prefix (LIN→Linette, JO→Jhoanna),
+// matching the Submitted Videos screen.
+function marketerFromName(name: string): string {
+  const m = /(LIN|JO)\d*/i.exec(name);
+  if (!m) return "—";
+  const code = m[1].toUpperCase();
+  return code === "LIN" ? "Linette" : code === "JO" ? "Jhoanna" : code;
+}
+
+// Build the SubmittedAd shape the review modal expects from an Ad Performance
+// row. video_id is unknown here, so the modal resolves the video by fb_ad_id;
+// reviewed/note/star are hydrated by the modal on open.
+function viewAdFromRow(rowData: Record<string, unknown>): SubmittedAd {
+  const adName = (rowData.ad as string) || "Ad";
+  const campaignName = (rowData.campaign as string) || null;
+  const adsetName = (rowData.adset as string) || null;
+  const startTime = (rowData.start_time as string) || null;
+  return {
+    fb_ad_id: rowData.ad_id as string,
+    ad_account_id: (rowData.account_id as string) || "",
+    ad_name: adName,
+    creative_type: "video",
+    video_id: null,
+    thumbnail_url: (rowData.thumbnail_url as string) || null,
+    image_url: null,
+    marketer_name: marketerFromName(adName),
+    marketer_code: null,
+    created_time: null,
+    start_time: startTime,
+    effective_status: (rowData.status as string) || null,
+    is_scheduled: startTime ? new Date(startTime).getTime() > Date.now() : false,
+    store_name:
+      matchAdToStore(`${campaignName ?? ""} ${adName}`, adsetName ?? "") || null,
+    campaign_name: campaignName,
+    adset_name: adsetName,
+    reviewed_at: null,
+    reviewed_by: null,
+    reviewed_by_name: null,
+    note: null,
+    note_by_name: null,
+    note_at: null,
+    is_starred: false,
+  };
+}
+
 export default function AdsPage() {
   const [datePreset, setDatePreset] = useState<DatePreset>("today");
   const [allRows, setAllRows] = useState<AdRow[]>([]);
@@ -252,6 +300,8 @@ export default function AdsPage() {
   const [accounts, setAccounts] = useState<AccountInfo[]>([]);
   const [role, setRole] = useState<string>("");
   const [budgets, setBudgets] = useState<Record<string, BudgetInfo>>({});
+  // Ad opened in the inline review modal (replaces the old open-FB-in-new-tab).
+  const [viewAd, setViewAd] = useState<SubmittedAd | null>(null);
 
   // Drill-down state
   const [drillLevel, setDrillLevel] = useState<DrillLevel>("campaign");
@@ -1911,72 +1961,18 @@ export default function AdsPage() {
                       {drillLevel === "ad" && (
                         <td className="px-3 py-2.5 text-center whitespace-nowrap">
                           <div className="flex items-center justify-center gap-2">
-                            {(() => {
-                              // Always render a View link. Prefer the live FB
-                              // post URL (effective_object_story_id) which
-                              // links to the public post — when missing
-                              // (paused ads, deleted posts, catalog/DPA
-                              // creatives, ad-only creatives that never
-                              // became a page post), fall back to fetching
-                              // FB's preview iframe on click. The fallback
-                              // opens a blank tab IMMEDIATELY to keep the
-                              // popup permission, then redirects it once
-                              // /api/facebook/ad-preview returns the iframe
-                              // src. Last-resort: if FB has no preview at
-                              // all, drop the blank tab to Ads Manager.
-                              const hasPost = Boolean(rowData.preview_url);
-                              const adId = rowData.ad_id as string;
-                              const acctNum = String(
-                                rowData.account_id as string
-                              ).replace(/^act_/, "");
-                              const adsManagerHref = `https://business.facebook.com/adsmanager/manage/ads?act=${acctNum}&selected_ad_ids=${adId}`;
-                              if (hasPost) {
-                                return (
-                                  <a
-                                    href={rowData.preview_url as string}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    onClick={(e) => e.stopPropagation()}
-                                    className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors text-xs"
-                                    title="View ad post on Facebook"
-                                  >
-                                    <ExternalLink size={13} />
-                                    View
-                                  </a>
-                                );
-                              }
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    const win = window.open(
-                                      "about:blank",
-                                      "_blank",
-                                      "noopener,noreferrer"
-                                    );
-                                    fetch(
-                                      `/api/facebook/ad-preview?ad_id=${encodeURIComponent(adId)}`
-                                    )
-                                      .then((r) => r.json())
-                                      .then((j) => {
-                                        if (!win) return;
-                                        win.location.href =
-                                          (j as { url?: string }).url ||
-                                          adsManagerHref;
-                                      })
-                                      .catch(() => {
-                                        if (win) win.location.href = adsManagerHref;
-                                      });
-                                  }}
-                                  className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors text-xs cursor-pointer"
-                                  title="Open the FB ad preview (no public post — uses FB's preview iframe)"
-                                >
-                                  <ExternalLink size={13} />
-                                  View
-                                </button>
-                              );
-                            })()}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setViewAd(viewAdFromRow(rowData));
+                              }}
+                              className="inline-flex items-center gap-1 text-blue-400 hover:text-blue-300 transition-colors text-xs cursor-pointer"
+                              title="Watch this ad in a popup"
+                            >
+                              <ExternalLink size={13} />
+                              View
+                            </button>
                             <Link
                               href={`/marketing/ai-analytics?deconstruct_ad=${encodeURIComponent(rowData.ad_id as string)}`}
                               onClick={(e) => e.stopPropagation()}
@@ -2188,6 +2184,18 @@ export default function AdsPage() {
         <div className="fixed bottom-6 right-6 z-50 bg-orange-700/90 border border-orange-500 text-white text-sm px-4 py-2.5 rounded-lg shadow-lg max-w-sm">
           {promoteToast}
         </div>
+      )}
+
+      {/* Inline ad review modal (reused from Submitted Videos) */}
+      {viewAd && (
+        <VideoReviewModal
+          ad={viewAd}
+          role={role === "admin" ? "admin" : "marketing"}
+          onClose={() => setViewAd(null)}
+          onReviewedChange={() => {}}
+          onNoteChange={() => {}}
+          onStarChange={() => {}}
+        />
       )}
     </div>
   );

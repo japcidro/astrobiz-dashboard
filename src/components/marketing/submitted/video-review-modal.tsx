@@ -102,19 +102,19 @@ export function VideoReviewModal({
   // directly from the creative's inline image_url (no call needed).
   useEffect(() => {
     if (!isVideo) return;
-    if (!ad.video_id) {
-      setError("No video id on this ad");
-      setLoading(false);
-      return;
-    }
+    // Submitted Videos already knows the video_id (fast path). Ad Performance
+    // only knows the ad id, so resolve via fb_ad_id + account.
+    const url = ad.video_id
+      ? `/api/marketing/submitted-videos/source?video_id=${ad.video_id}`
+      : `/api/marketing/submitted-videos/source?fb_ad_id=${ad.fb_ad_id}${
+          ad.ad_account_id ? `&account_id=${ad.ad_account_id}` : ""
+        }`;
     let cancelled = false;
     (async () => {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(
-          `/api/marketing/submitted-videos/source?video_id=${ad.video_id}`
-        );
+        const res = await fetch(url);
         const json = await res.json();
         if (cancelled) return;
         if (!res.ok) setError(json.error || "Failed to load video");
@@ -128,7 +128,34 @@ export function VideoReviewModal({
     return () => {
       cancelled = true;
     };
-  }, [ad.video_id, isVideo]);
+  }, [ad.video_id, ad.fb_ad_id, ad.ad_account_id, isVideo]);
+
+  // On open, hydrate the current reviewed / note / starred state so the modal
+  // is correct no matter where it was opened from (grid or Ad Performance).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/marketing/submitted-videos/state?fb_ad_id=${ad.fb_ad_id}`
+        );
+        const json = await res.json();
+        if (cancelled || !res.ok || !json.data) return;
+        const s = json.data;
+        setReviewedAt(s.reviewed_at);
+        setReviewedByName(s.reviewed_by_name);
+        setNote(s.note ?? "");
+        setNoteByName(s.note_by_name);
+        setNoteAt(s.note_at);
+        setStarred(!!s.is_starred);
+      } catch {
+        // keep whatever was passed in via props
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [ad.fb_ad_id]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
