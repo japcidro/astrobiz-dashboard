@@ -64,6 +64,9 @@ interface ObjectStorySpec {
 interface AdCreativeResp {
   id?: string;
   adset_id?: string;
+  campaign_id?: string;
+  campaign?: { name?: string };
+  adset?: { name?: string };
   creative?: { id?: string; object_story_spec?: ObjectStorySpec };
 }
 
@@ -177,13 +180,19 @@ export async function POST(request: Request) {
   let pageId: string | undefined;
   let link: string | undefined;
   let adsetId: string | undefined;
+  let campaignId: string | undefined;
+  let campaignName = "";
+  let adsetName = "";
   try {
     const ad = (await fbGet(`/${adId}`, token, {
       fields:
-        "adset_id,creative{id,object_story_spec}",
+        "adset_id,campaign_id,campaign{name},adset{name},creative{id,object_story_spec}",
     })) as AdCreativeResp;
     oldCreativeId = ad.creative?.id ?? null;
     adsetId = ad.adset_id;
+    campaignId = ad.campaign_id;
+    campaignName = ad.campaign?.name ?? "";
+    adsetName = ad.adset?.name ?? "";
     const oss = ad.creative?.object_story_spec;
     pageId = oss?.page_id;
     link =
@@ -323,10 +332,71 @@ export async function POST(request: Request) {
     );
   }
 
-  // 5. Engagement burst on the existing ad set, fully automatic. If FB
-  //    rejects the budget as too low, it tells us the minimum — we read
-  //    that and retry at the minimum so no manual step is ever needed.
-  //    Still harmless if the ad set is under a CBO campaign.
+  // 4b. Is this ad part of a SCALING campaign? If so we must NOT change the
+  //     budget (it's the shared scaling budget). Detect via the configured
+  //     store_scaling_campaigns OR a "scale/scaling" campaign/ad-set name.
+  let isScaling = false;
+  if (campaignId) {
+    const { data: scRow } = await supabase
+      .from("store_scaling_campaigns")
+      .select("campaign_id")
+      .eq("campaign_id", campaignId)
+      .maybeSingle();
+    isScaling = !!scRow;
+  }
+  if (!isScaling) {
+    isScaling = /scal(e|ing)/i.test(campaignName) || /scal(e|ing)/i.test(adsetName);
+  }
+
+  // 5a. SCALING: leave the budget alone. Register the ad for auto-pause —
+  //     a cron pauses it once its post-fix spend hits the threshold (₱70).
+  if (isScaling) {
+    const phtToday = new Date(Date.now() + 8 * 3600 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    await supabase.from("fix_rejection_autopause").upsert(
+      {
+        ad_id: adId,
+        ad_account_id: adAccountId,
+        campaign_id: campaignId ?? null,
+        spend_threshold: engagementBudget,
+        since_date: phtToday,
+        status: "watching",
+        last_spend: null,
+        paused_at: null,
+        created_by: actorId,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "ad_id" }
+    );
+
+    await logAction({
+      status: "success",
+      old_creative_id: oldCreativeId,
+      new_creative_id: newCreativeId,
+      adset_id: adsetId,
+      engagement_applied: false,
+      error_message: `Scaling campaign — budget left untouched; will auto-pause after ₱${engagementBudget} spend.`,
+    });
+
+    return Response.json({
+      success: true,
+      ad_id: adId,
+      new_creative_id: newCreativeId,
+      scaling: true,
+      autopause_scheduled: true,
+      autopause_threshold: engagementBudget,
+      engagement_applied: false,
+      warnings: [
+        `Scaling campaign — budget untouched. Will auto-pause this ad after ₱${engagementBudget} spend.`,
+      ],
+    });
+  }
+
+  // 5b. Non-scaling: engagement burst on the existing ad set, fully
+  //     automatic. If FB rejects the budget as too low, it tells us the
+  //     minimum — we read that and retry at the minimum so no manual step
+  //     is ever needed. Still harmless if the ad set is under a CBO campaign.
   let engagementApplied = false;
   let appliedBudget = engagementBudget;
   if (adsetId) {

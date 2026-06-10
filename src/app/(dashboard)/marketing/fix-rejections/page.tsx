@@ -463,11 +463,13 @@ export default function FixRejectionsPage() {
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || "Fix failed");
         const appliedBudget = json.applied_budget ?? budget;
-        const msg = json.engagement_applied
-          ? `Fixed — re-submitted + ₱${appliedBudget}/${days}-day burst.`
-          : `Swapped + re-submitted. ${
-              (json.warnings || []).join(" ") || "Burst not applied."
-            }`;
+        const msg = json.scaling
+          ? `Fixed — re-submitted. Scaling: budget untouched, auto-pause at ₱${json.autopause_threshold}.`
+          : json.engagement_applied
+            ? `Fixed — re-submitted + ₱${appliedBudget}/${days}-day burst.`
+            : `Swapped + re-submitted. ${
+                (json.warnings || []).join(" ") || "Burst not applied."
+              }`;
         setFixStates((s) => ({
           ...s,
           [ad.ad_id]: { kind: "done", ok: true, message: msg, image: img.name },
@@ -773,6 +775,11 @@ export default function FixRejectionsPage() {
               onChange={(e) => setBudget(Number(e.target.value))}
               className="w-full mt-1 bg-gray-800 rounded px-3 py-2 text-sm border border-gray-700"
             />
+            <p className="text-[11px] text-gray-500 mt-1">
+              Normal ads: daily budget for the burst. Scaling campaigns: budget
+              is left untouched — this is the spend limit before the ad
+              auto-pauses.
+            </p>
           </div>
           <div>
             <label className="text-xs text-gray-400">Run for (days)</label>

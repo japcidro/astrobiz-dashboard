@@ -13,6 +13,10 @@
       "schedule": "*/10 * * * *"
     },
     {
+      "path": "/api/cron/fix-rejection-autopause",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/cron/deconstruct-top-ads",
       "schedule": "30 1 * * *"
     },
