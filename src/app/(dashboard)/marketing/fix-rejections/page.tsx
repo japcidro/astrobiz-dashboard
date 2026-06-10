@@ -16,6 +16,7 @@ import {
   Pencil,
   Check,
   X,
+  CircleStop,
 } from "lucide-react";
 
 // ── Types ──
@@ -490,6 +491,38 @@ export default function FixRejectionsPage() {
     refreshStatuses(targets.map((t) => t.ad_id));
   };
 
+  // ── Stop (pause) selected ads immediately ──
+  const [stopping, setStopping] = useState(false);
+  const stopSelected = async () => {
+    const ids = ads.filter((a) => selectedAds.has(a.ad_id)).map((a) => a.ad_id);
+    if (ids.length === 0) return;
+    if (!confirm(`Stop (pause) ${ids.length} ad(s) now?`)) return;
+    setStopping(true);
+    try {
+      const res = await fetch("/api/facebook/pause-ads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ad_ids: ids, status: "PAUSED" }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Stop failed");
+      const failed = Object.entries(
+        (json.results ?? {}) as Record<string, { ok: boolean; error?: string }>
+      ).filter(([, v]) => !v.ok);
+      if (failed.length) {
+        alert(
+          `${failed.length} ad(s) couldn't be stopped:\n` +
+            failed.map(([id, v]) => `${id}: ${v.error}`).join("\n")
+        );
+      }
+    } catch (e) {
+      alert(e instanceof Error ? e.message : "Stop failed");
+    } finally {
+      setStopping(false);
+      refreshStatuses(ids);
+    }
+  };
+
   return (
     <div className="p-6 max-w-7xl mx-auto text-gray-100">
       {/* Header */}
@@ -769,6 +802,19 @@ export default function FixRejectionsPage() {
           >
             <RefreshCw size={14} className={loadingStatuses ? "animate-spin" : ""} />
             Refresh statuses
+          </button>
+          <button
+            onClick={stopSelected}
+            disabled={stopping || selectedAds.size === 0}
+            className="flex items-center gap-2 px-3 py-2 text-sm font-medium bg-red-900/70 hover:bg-red-800 text-red-100 rounded-lg disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Pause the selected ads immediately"
+          >
+            {stopping ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <CircleStop size={14} />
+            )}
+            Stop selected ({selectedAds.size})
           </button>
           <button
             onClick={fixSelected}
