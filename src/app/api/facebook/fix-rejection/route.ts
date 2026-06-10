@@ -21,9 +21,16 @@ async function mintImageHash(
   const contentType = imgRes.headers.get("content-type") || "image/jpeg";
   const bytes = await imgRes.arrayBuffer();
 
+  // FB infers the image type from the filename EXTENSION — uploading bytes as
+  // "safe-image" (no extension) fails with subcode 1487411 FileTypeNotSupported.
+  const ext = contentType.includes("png")
+    ? "png"
+    : contentType.includes("webp")
+      ? "webp"
+      : "jpg";
   const form = new FormData();
   form.append("access_token", token);
-  form.append("filename", new Blob([bytes], { type: contentType }), "safe-image");
+  form.append("filename", new Blob([bytes], { type: contentType }), `safe-image.${ext}`);
 
   const res = await fetch(`${FB_API_BASE}/${accountId}/adimages`, {
     method: "POST",
