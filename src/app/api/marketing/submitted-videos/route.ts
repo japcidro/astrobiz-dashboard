@@ -12,9 +12,9 @@ const MAX_PAGES_PER_ACCOUNT = 15; // safety cap (~1500 ads/account)
 const PAGE_SIZE = 100;
 
 // Ad-name prefix → marketer. Names look like "ILP-060726JO1", "CAP-043026LIN1".
-const MARKETERS: { code: string; name: string; match: RegExp }[] = [
-  { code: "LIN", name: "Linette", match: /linette/i },
-  { code: "JO", name: "Jhoanna", match: /jhoanna|^jo\b/i },
+const MARKETERS: { code: string; name: string }[] = [
+  { code: "LIN", name: "Linette" },
+  { code: "JO", name: "Jhoanna" },
 ];
 
 function attributeMarketer(adName: string): {
@@ -28,11 +28,6 @@ function attributeMarketer(adName: string): {
   const code = found[0] ?? null;
   const marketer = code ? MARKETERS.find((x) => x.code === code) : null;
   return { code, name: marketer?.name ?? (code ? code : "Unknown") };
-}
-
-// Which marketer code (if any) does this employee map to?
-function codeForEmployee(fullName: string): string | null {
-  return MARKETERS.find((m) => m.match.test(fullName))?.code ?? null;
 }
 
 // In-memory cache per (accounts+days) scope. Serverless instances are
@@ -236,11 +231,8 @@ export async function GET(request: Request) {
     adsCache.set(cacheKey, { data: ads, timestamp: Date.now() });
   }
 
-  // Marketers see only their own ads (matched by name-prefix code).
-  if (employee.role === "marketing") {
-    const myCode = codeForEmployee(employee.full_name);
-    ads = myCode ? ads.filter((a) => a.marketer_code === myCode) : [];
-  }
+  // Everyone (admin + marketing) sees all submitted ads, so marketers can
+  // review what's working across the team — including ads they didn't create.
 
   // Merge reviewed state (keyed by fb_ad_id).
   const { data: reviews } = await supabase

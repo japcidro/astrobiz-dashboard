@@ -193,10 +193,9 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
     const { start, end } = getDateBounds(datePreset, customFrom, customTo);
     return ads.filter((a) => {
       if (typeFilter !== "all" && a.creative_type !== typeFilter) return false;
-      if (isAdmin && marketerFilter !== "all" && a.marketer_name !== marketerFilter)
+      if (marketerFilter !== "all" && a.marketer_name !== marketerFilter)
         return false;
-      if (isAdmin && storeFilter !== "all" && a.store_name !== storeFilter)
-        return false;
+      if (storeFilter !== "all" && a.store_name !== storeFilter) return false;
       if (reviewedFilter === "unreviewed" && a.reviewed_at) return false;
       if (reviewedFilter === "reviewed" && !a.reviewed_at) return false;
       if (starredOnly && !a.is_starred) return false;
@@ -224,7 +223,6 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
     customFrom,
     customTo,
     starredOnly,
-    isAdmin,
   ]);
 
   const unreviewedCount = useMemo(
@@ -284,7 +282,7 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
           <p className="text-gray-400 mt-1 text-sm">
             {isAdmin
               ? "Every ad submitted to Facebook — watchable here even while scheduled (before they appear in Ad Performance)."
-              : "Your submitted ads — watchable here even while scheduled."}
+              : "Every ad the team submits — review what's working, even ads you didn't create and scheduled ones."}
             {isAdmin && filtered.length > 0 && unreviewedCount > 0 && (
               <span className="ml-2 text-amber-400">
                 {unreviewedCount} not yet reviewed
@@ -379,37 +377,35 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
         )}
 
         {isAdmin && (
-          <>
-            <Select
-              value={reviewedFilter}
-              onChange={(v) => setReviewedFilter(v as ReviewedFilter)}
-              options={[
-                ["all", "All"],
-                ["unreviewed", "Not reviewed"],
-                ["reviewed", "Reviewed"],
-              ]}
-            />
-            {marketers.length > 1 && (
-              <Select
-                value={marketerFilter}
-                onChange={setMarketerFilter}
-                options={[
-                  ["all", "All marketers"],
-                  ...marketers.map((m) => [m, m] as [string, string]),
-                ]}
-              />
-            )}
-            {stores.length > 0 && (
-              <Select
-                value={storeFilter}
-                onChange={setStoreFilter}
-                options={[
-                  ["all", "All stores"],
-                  ...stores.map((s) => [s, s] as [string, string]),
-                ]}
-              />
-            )}
-          </>
+          <Select
+            value={reviewedFilter}
+            onChange={(v) => setReviewedFilter(v as ReviewedFilter)}
+            options={[
+              ["all", "All"],
+              ["unreviewed", "Not reviewed"],
+              ["reviewed", "Reviewed"],
+            ]}
+          />
+        )}
+        {marketers.length > 1 && (
+          <Select
+            value={marketerFilter}
+            onChange={setMarketerFilter}
+            options={[
+              ["all", "All marketers"],
+              ...marketers.map((m) => [m, m] as [string, string]),
+            ]}
+          />
+        )}
+        {stores.length > 0 && (
+          <Select
+            value={storeFilter}
+            onChange={setStoreFilter}
+            options={[
+              ["all", "All stores"],
+              ...stores.map((s) => [s, s] as [string, string]),
+            ]}
+          />
         )}
       </div>
 
