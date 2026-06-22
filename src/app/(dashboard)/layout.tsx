@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getEmployee } from "@/lib/supabase/get-employee";
 import { createClient } from "@/lib/supabase/server";
+import { alertUnauthorizedAccess } from "@/lib/alerts/unauthorized-access";
 import { Sidebar } from "@/components/layout/sidebar";
 import { BackgroundRefresh } from "@/components/layout/background-refresh";
 import { ClockStatusBanner } from "@/components/attendance/clock-status-banner";
@@ -22,8 +23,11 @@ export default async function DashboardLayout({
 
   const employee = await getEmployee();
 
-  // Authenticated but no employee record → show setup message
+  // Authenticated but no employee record → show setup message.
+  // Email the admin (deduped: once per unknown account). Awaited but guarded —
+  // alertUnauthorizedAccess never throws, so this can't block the bounce.
   if (!employee) {
+    await alertUnauthorizedAccess(user.id, user.email ?? undefined);
     return (
       <div className="flex h-screen bg-gray-900 items-center justify-center">
         <div className="text-center max-w-md p-8">
