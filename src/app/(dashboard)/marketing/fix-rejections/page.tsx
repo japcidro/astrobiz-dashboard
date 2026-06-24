@@ -46,6 +46,13 @@ interface WatchRow {
   status: string;
   since_date: string;
   paused_at: string | null;
+  ad_name: string | null;
+  account_name: string | null;
+  campaign_name: string | null;
+  adset_name: string | null;
+  safe_image_name: string | null;
+  is_scaling: boolean | null;
+  engagement_applied: boolean | null;
 }
 
 interface SafeImage {
@@ -301,6 +308,14 @@ export default function FixRejectionsPage() {
     }
   }, []);
 
+  // Pull live FB delivery status for the Fixed-ads tracker whenever it loads,
+  // so each tracked ad shows In review / Running / Stopped (the cron only
+  // tracks watching/paused — this adds Meta's real delivery state).
+  useEffect(() => {
+    if (watchlist.length === 0) return;
+    refreshStatuses(watchlist.map((w) => w.ad_id));
+  }, [watchlist, refreshStatuses]);
+
   // ── Ad selection ──
   const allAdsSelected = ads.length > 0 && selectedAds.size === ads.length;
   const toggleAllAds = () =>
@@ -499,6 +514,10 @@ export default function FixRejectionsPage() {
             // No copy sent — the route uses this image's AI copy.
             engagement_budget: budget,
             engagement_days: days,
+            // Original identity, saved so the Fixed-ads tracker can still show
+            // this ad after its creative becomes the safe image.
+            ad_name: ad.ad,
+            account_name: ad.account,
           }),
         });
         const json = await res.json();
@@ -507,7 +526,9 @@ export default function FixRejectionsPage() {
         const msg = json.scaling
           ? `Fixed — re-submitted. Scaling: budget untouched, auto-pause at ₱${json.autopause_threshold}.`
           : json.engagement_applied
-            ? `Fixed — re-submitted + ₱${appliedBudget}/${days}-day burst.`
+            ? `Fixed — re-submitted + ₱${appliedBudget} burst, auto-pauses at ₱${
+                json.autopause_threshold ?? budget
+              } total.`
             : `Swapped + re-submitted. ${
                 (json.warnings || []).join(" ") || "Burst not applied."
               }`;
@@ -587,7 +608,9 @@ export default function FixRejectionsPage() {
         Upload safe images once — they stay in your library with AI-written copy.
         Pick several, select your rejected ads, and Fix: each ad gets a random
         image (no repeats until the pool runs out), re-submitted to Meta with a
-        ₱{budget}/{days}-day engagement burst. Same ad ID — no new campaign.
+        ₱{budget} lifetime engagement burst that auto-pauses once spent. Same ad
+        ID — no new campaign. Fixed ads stay in the tracker below so you never
+        lose them after the image swap.
       </p>
 
       {/* ── Library ── */}
@@ -808,7 +831,7 @@ export default function FixRejectionsPage() {
         <div className="grid grid-cols-2 gap-4 mt-4 border-t border-gray-800 pt-4 max-w-md">
           <div>
             <label className="text-xs text-gray-400">
-              Engagement budget (₱/day)
+              Lifetime budget (₱ total)
             </label>
             <input
               type="number"
@@ -818,13 +841,13 @@ export default function FixRejectionsPage() {
               className="w-full mt-1 bg-gray-800 rounded px-3 py-2 text-sm border border-gray-700"
             />
             <p className="text-[11px] text-gray-500 mt-1">
-              Normal ads: daily budget for the burst. Scaling campaigns: budget
-              is left untouched — this is the spend limit before the ad
-              auto-pauses.
+              Total spend cap for the ad. Once the ad has spent this much (across
+              all days, not per day) it auto-pauses. Scaling campaigns: budget is
+              left untouched — this is just the spend limit before auto-pause.
             </p>
           </div>
           <div>
-            <label className="text-xs text-gray-400">Run for (days)</label>
+            <label className="text-xs text-gray-400">Max run (days)</label>
             <input
               type="number"
               min={1}
@@ -832,18 +855,22 @@ export default function FixRejectionsPage() {
               onChange={(e) => setDays(Number(e.target.value))}
               className="w-full mt-1 bg-gray-800 rounded px-3 py-2 text-sm border border-gray-700"
             />
+            <p className="text-[11px] text-gray-500 mt-1">
+              Backstop end date for normal ads if the ₱ limit isn&apos;t reached
+              first.
+            </p>
           </div>
         </div>
       </div>
 
-      {/* ── Auto-pause watchlist (scaling) ── */}
+      {/* ── Fixed-ads tracker ── */}
       {watchlist.length > 0 && (
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold flex items-center gap-2">
-              <Eye size={18} /> Auto-pause watchlist
+              <Eye size={18} /> Fixed ads
               <span className="text-gray-500 font-normal text-sm">
-                (scaling ads — paused at their ₱ limit)
+                (auto-pause at their ₱ lifetime limit)
               </span>
             </h2>
             <button
@@ -855,71 +882,104 @@ export default function FixRejectionsPage() {
               Refresh
             </button>
           </div>
-          <table className="w-full text-sm">
-            <thead className="text-gray-400 text-xs uppercase">
-              <tr>
-                <th className="py-2 text-left">Ad</th>
-                <th className="py-2 text-left">Spend / Limit</th>
-                <th className="py-2 text-left">Status</th>
-                <th className="py-2 text-left">Since</th>
-                <th className="py-2 text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {watchlist.map((w) => {
-                const spent = w.last_spend ?? 0;
-                const pct = Math.min(
-                  100,
-                  Math.round((spent / (w.spend_threshold || 1)) * 100)
-                );
-                const isPaused = w.status === "paused";
-                return (
-                  <tr key={w.id} className="border-t border-gray-800">
-                    <td className="py-2 text-xs text-gray-300 font-mono">
-                      {w.ad_id}
-                    </td>
-                    <td className="py-2 text-xs">
-                      <div className="flex items-center gap-2">
-                        <div className="w-24 h-1.5 bg-gray-800 rounded overflow-hidden">
-                          <div
-                            className={`h-full ${
-                              isPaused ? "bg-gray-500" : "bg-emerald-500"
-                            }`}
-                            style={{ width: `${pct}%` }}
-                          />
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-gray-400 text-xs uppercase">
+                <tr>
+                  <th className="py-2 text-left">Ad</th>
+                  <th className="py-2 text-left">Account</th>
+                  <th className="py-2 text-left">Image used</th>
+                  <th className="py-2 text-left">Spend / Limit</th>
+                  <th className="py-2 text-left">Status</th>
+                  <th className="py-2 text-left">Fixed</th>
+                  <th className="py-2 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {watchlist.map((w) => {
+                  const spent = w.last_spend ?? 0;
+                  const pct = Math.min(
+                    100,
+                    Math.round((spent / (w.spend_threshold || 1)) * 100)
+                  );
+                  const isPaused = w.status === "paused";
+                  const live = statusBadge(liveStatus[w.ad_id]);
+                  return (
+                    <tr key={w.id} className="border-t border-gray-800 align-top">
+                      <td className="py-2 pr-3">
+                        <div className="text-xs font-medium text-gray-200">
+                          {w.ad_name || "(unnamed ad)"}
                         </div>
-                        <span className="text-gray-400">
-                          ₱{spent.toFixed(2)} / ₱{w.spend_threshold}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="py-2 text-xs">
-                      {isPaused ? (
-                        <span className="text-gray-400 font-medium">● Paused</span>
-                      ) : (
-                        <span className="text-amber-400 font-medium">
-                          ● Watching
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-2 text-xs text-gray-500">{w.since_date}</td>
-                    <td className="py-2 text-xs text-right">
-                      <button
-                        onClick={() => removeWatch(w.id)}
-                        className="text-red-400 hover:underline"
-                        title="Stop watching"
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                        <div className="text-[11px] text-gray-500 font-mono">
+                          {w.ad_id}
+                        </div>
+                        {w.campaign_name && (
+                          <div className="text-[11px] text-gray-600">
+                            {w.campaign_name}
+                            {w.is_scaling ? " · scaling" : ""}
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-2 pr-3 text-xs text-gray-300">
+                        {w.account_name || "—"}
+                      </td>
+                      <td className="py-2 pr-3 text-xs text-gray-400">
+                        {w.safe_image_name || "—"}
+                      </td>
+                      <td className="py-2 pr-3 text-xs">
+                        <div className="flex items-center gap-2">
+                          <div className="w-20 h-1.5 bg-gray-800 rounded overflow-hidden">
+                            <div
+                              className={`h-full ${
+                                isPaused ? "bg-gray-500" : "bg-emerald-500"
+                              }`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className="text-gray-400">
+                            ₱{spent.toFixed(2)} / ₱{w.spend_threshold}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="py-2 pr-3 text-xs">
+                        {isPaused ? (
+                          <span className="text-gray-400 font-medium">
+                            ● Paused (limit hit)
+                          </span>
+                        ) : (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-amber-400 font-medium">
+                              ● Watching
+                            </span>
+                            {liveStatus[w.ad_id] && (
+                              <span className={live.cls}>{live.text}</span>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                      <td className="py-2 pr-3 text-xs text-gray-500">
+                        {w.since_date}
+                      </td>
+                      <td className="py-2 text-xs text-right">
+                        <button
+                          onClick={() => removeWatch(w.id)}
+                          className="text-red-400 hover:underline"
+                          title="Stop tracking / auto-pausing this ad"
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
           <p className="text-[11px] text-gray-500 mt-2">
-            Spend updates every ~15 min. When an ad reaches its limit it&apos;s
-            paused automatically — the scaling budget is never touched.
+            Every fixed ad stays here even after its creative is swapped to the
+            safe image. Spend updates every ~15 min; once an ad reaches its ₱
+            lifetime limit it&apos;s paused automatically. Scaling-campaign
+            budgets are never touched.
           </p>
         </div>
       )}

@@ -63,6 +63,7 @@ interface ObjectStorySpec {
 
 interface AdCreativeResp {
   id?: string;
+  name?: string;
   adset_id?: string;
   campaign_id?: string;
   campaign?: { name?: string };
@@ -72,6 +73,7 @@ interface AdCreativeResp {
 
 interface SafeImageRow {
   id: string;
+  name: string | null;
   source_url: string;
   account_hashes: Record<string, string>;
   ai_headline: string | null;
@@ -103,8 +105,10 @@ export async function POST(request: Request) {
     primary_text?: string;
     description?: string;
     cta?: string;
-    engagement_budget?: number; // PHP/day, default 50
+    engagement_budget?: number; // PHP total lifetime cap, default 50
     engagement_days?: number; // default 2
+    ad_name?: string; // original ad name (for the Fixed-ads tracker)
+    account_name?: string; // friendly account name (for the tracker)
   };
 
   const adId = body.ad_id?.trim();
@@ -183,16 +187,20 @@ export async function POST(request: Request) {
   let campaignId: string | undefined;
   let campaignName = "";
   let adsetName = "";
+  // Original ad name — captured so the Fixed-ads tracker can still show what
+  // the ad was after its creative is swapped to a safe (animal) image.
+  let adName = (body.ad_name ?? "").trim();
   try {
     const ad = (await fbGet(`/${adId}`, token, {
       fields:
-        "adset_id,campaign_id,campaign{name},adset{name},creative{id,object_story_spec}",
+        "name,adset_id,campaign_id,campaign{name},adset{name},creative{id,object_story_spec}",
     })) as AdCreativeResp;
     oldCreativeId = ad.creative?.id ?? null;
     adsetId = ad.adset_id;
     campaignId = ad.campaign_id;
     campaignName = ad.campaign?.name ?? "";
     adsetName = ad.adset?.name ?? "";
+    if (!adName) adName = ad.name ?? "";
     const oss = ad.creative?.object_story_spec;
     pageId = oss?.page_id;
     link =
@@ -233,7 +241,7 @@ export async function POST(request: Request) {
   const { data: safeImage } = await supabase
     .from("fix_rejection_safe_images")
     .select(
-      "id, source_url, account_hashes, ai_headline, ai_primary_text, ai_description, ai_cta"
+      "id, name, source_url, account_hashes, ai_headline, ai_primary_text, ai_description, ai_cta"
     )
     .eq("id", body.safe_image_id)
     .eq("active", true)
@@ -348,12 +356,17 @@ export async function POST(request: Request) {
     isScaling = /scal(e|ing)/i.test(campaignName) || /scal(e|ing)/i.test(adsetName);
   }
 
-  // 5a. SCALING: leave the budget alone. Register the ad for auto-pause —
-  //     a cron pauses it once its post-fix spend hits the threshold (₱70).
-  if (isScaling) {
-    const phtToday = new Date(Date.now() + 8 * 3600 * 1000)
-      .toISOString()
-      .slice(0, 10);
+  // PHT date the fix happened — the cron measures post-fix spend from here.
+  const phtToday = new Date(Date.now() + 8 * 3600 * 1000)
+    .toISOString()
+    .slice(0, 10);
+
+  // Register the ad in the unified Fixed-ads tracker. The cron pauses it once
+  // TOTAL post-fix spend reaches the ₱ threshold — making the budget a true
+  // LIFETIME cap (not a daily one that resets), for BOTH scaling and normal
+  // ads. The saved names let the page show the ad even after its creative is
+  // swapped to a safe image and it drops off the DISAPPROVED list.
+  async function registerTracker(scaling: boolean, engagementApplied: boolean) {
     await supabase.from("fix_rejection_autopause").upsert(
       {
         ad_id: adId,
@@ -364,11 +377,25 @@ export async function POST(request: Request) {
         status: "watching",
         last_spend: null,
         paused_at: null,
+        is_scaling: scaling,
+        engagement_applied: engagementApplied,
+        engagement_days: engagementDays,
+        ad_name: adName || null,
+        account_name: (body.account_name ?? "").trim() || null,
+        campaign_name: campaignName || null,
+        adset_name: adsetName || null,
+        safe_image_name: safeImage?.name ?? null,
         created_by: actorId,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "ad_id" }
     );
+  }
+
+  // 5a. SCALING: leave the budget alone. Register the ad for auto-pause —
+  //     a cron pauses it once its post-fix spend hits the threshold (₱70).
+  if (isScaling) {
+    await registerTracker(true, false);
 
     await logAction({
       status: "success",
@@ -444,6 +471,12 @@ export async function POST(request: Request) {
     warnings.push("Couldn't find the ad set, so the engagement burst was skipped.");
   }
 
+  // Register in the tracker so the cron caps TOTAL spend at the ₱ threshold
+  // (lifetime budget) and the ad stays visible on the Fixed-ads tracker even
+  // after its creative is swapped. threshold = the same ₱ value used for the
+  // daily burst, so the ad pauses roughly once it has spent that much total.
+  await registerTracker(false, engagementApplied);
+
   await logAction({
     status: engagementApplied ? "success" : "partial",
     old_creative_id: oldCreativeId,
@@ -459,6 +492,8 @@ export async function POST(request: Request) {
     new_creative_id: newCreativeId,
     engagement_applied: engagementApplied,
     applied_budget: appliedBudget,
+    autopause_scheduled: true,
+    autopause_threshold: engagementBudget,
     warnings,
   });
 }

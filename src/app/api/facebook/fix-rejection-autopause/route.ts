@@ -22,7 +22,7 @@ export async function GET() {
   const { data, error } = await supabase
     .from("fix_rejection_autopause")
     .select(
-      "id, ad_id, ad_account_id, campaign_id, spend_threshold, last_spend, status, since_date, paused_at, updated_at, created_at"
+      "id, ad_id, ad_account_id, campaign_id, spend_threshold, last_spend, status, since_date, paused_at, updated_at, created_at, ad_name, account_name, campaign_name, adset_name, safe_image_name, is_scaling, engagement_applied"
     )
     .in("status", ["watching", "paused"])
     .order("created_at", { ascending: false })
