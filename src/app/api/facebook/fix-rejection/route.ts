@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
 import { fbPost, fbGet } from "@/lib/fb-ads-module/fb-api";
+import { isNurseryCampaign } from "@/lib/facebook/nursery";
 
 export const dynamic = "force-dynamic";
 
@@ -211,6 +212,22 @@ export async function POST(request: Request) {
     const msg = e instanceof Error ? e.message : "failed to read ad creative";
     await logAction({ status: "failed", error_message: msg });
     return Response.json({ error: `Couldn't read the ad: ${msg}` }, { status: 502 });
+  }
+
+  // Hard scope: Fix Rejections only touches NURSERY (testing) campaigns. Guard
+  // here too — not just in the listing — so an ad outside a nursery campaign
+  // can never be fixed even if this route is called directly.
+  if (!isNurseryCampaign(campaignName)) {
+    const msg = `Fix Rejections only works on nursery campaigns. "${
+      campaignName || "this ad"
+    }" is not a nursery campaign, so it was skipped.`;
+    await logAction({
+      status: "skipped",
+      old_creative_id: oldCreativeId,
+      adset_id: adsetId,
+      error_message: msg,
+    });
+    return Response.json({ error: msg }, { status: 422 });
   }
 
   // 1b. Fall back to the store's saved defaults for any missing page/link.

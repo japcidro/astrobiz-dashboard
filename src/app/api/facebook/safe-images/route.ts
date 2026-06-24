@@ -120,6 +120,28 @@ export async function POST(request: Request) {
     const firstKey = Object.keys(images)[0];
     const { hash, url } = images[firstKey];
 
+    // The CDN `url` FB returns here is signed and EXPIRES after ~weeks, which
+    // is why old library thumbnails go blank. Fetch the image's stable
+    // `permalink_url` (a non-expiring facebook.com/ads/image link that serves
+    // the bytes directly) and store THAT as source_url. Fall back to the CDN
+    // url if the lookup fails.
+    let sourceUrl = url;
+    try {
+      const permaRes = await fetch(
+        `${FB_API_BASE}/${accountId}/adimages?hashes=${encodeURIComponent(
+          JSON.stringify([hash])
+        )}&fields=permalink_url&access_token=${token}`,
+        { cache: "no-store" }
+      );
+      const permaJson = (await permaRes.json()) as {
+        data?: { permalink_url?: string }[];
+      };
+      const permalink = permaJson.data?.[0]?.permalink_url;
+      if (permalink) sourceUrl = permalink;
+    } catch {
+      /* keep CDN url fallback */
+    }
+
     // Have Claude read the image and write engagement copy (best-effort).
     let aiFields: Record<string, unknown> = {};
     const apiKey = await getAnthropicKey(supabase);
@@ -142,7 +164,7 @@ export async function POST(request: Request) {
       .from("fix_rejection_safe_images")
       .insert({
         name,
-        source_url: url,
+        source_url: sourceUrl,
         account_hashes: { [accountId]: hash },
         created_by: employee.id,
         ...aiFields,

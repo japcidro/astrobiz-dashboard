@@ -187,28 +187,29 @@ export default function FixRejectionsPage() {
   const [days, setDays] = useState(2);
 
   // ── Loaders ──
-  const loadAds = useCallback(async (refresh = false) => {
+  // Pulls DISAPPROVED / WITH_ISSUES ads in NURSERY campaigns straight from FB
+  // (filtered by effective_status), so rejected ads show even when their
+  // campaign/ad set is paused — which the old all-ads view hid.
+  const loadAds = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(
-        `/api/facebook/all-ads?date_preset=last_90d&account=ALL&include_zero_spend=1${
-          refresh ? "&refresh=1" : ""
-        }`
-      );
+      const res = await fetch(`/api/facebook/rejected-ads`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to load ads");
       const rows = (json.data as RejectedAd[]) || [];
-      const rejected = rows.filter((r) => r.status?.includes("DISAPPROVED"));
       const seen = new Set<string>();
       setAds(
-        rejected.filter((r) => {
+        rows.filter((r) => {
           if (seen.has(r.ad_id)) return false;
           seen.add(r.ad_id);
           return true;
         })
       );
       setAccounts((json.accounts as AccountInfo[]) || []);
+      if (Array.isArray(json.errors) && json.errors.length) {
+        setError(`Some accounts couldn't be checked: ${json.errors.join("; ")}`);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
     } finally {
@@ -597,7 +598,7 @@ export default function FixRejectionsPage() {
           <h1 className="text-2xl font-bold">Fix Rejections</h1>
         </div>
         <button
-          onClick={() => loadAds(true)}
+          onClick={() => loadAds()}
           className="flex items-center gap-2 px-3 py-2 text-sm bg-gray-800 hover:bg-gray-700 rounded-lg"
         >
           <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
@@ -610,7 +611,10 @@ export default function FixRejectionsPage() {
         image (no repeats until the pool runs out), re-submitted to Meta with a
         ₱{budget} lifetime engagement burst that auto-pauses once spent. Same ad
         ID — no new campaign. Fixed ads stay in the tracker below so you never
-        lose them after the image swap.
+        lose them after the image swap.{" "}
+        <span className="text-amber-400">
+          Only ads in NURSERY campaigns are shown and fixable.
+        </span>
       </p>
 
       {/* ── Library ── */}
@@ -1048,7 +1052,7 @@ export default function FixRejectionsPage() {
       ) : ads.length === 0 ? (
         <div className="text-center py-12 text-gray-500">
           <CheckCircle2 className="mx-auto mb-2 text-emerald-500" size={28} />
-          No disapproved ads in the last 90 days. 🎉
+          No rejected ads in your nursery campaigns. 🎉
         </div>
       ) : (
         <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
