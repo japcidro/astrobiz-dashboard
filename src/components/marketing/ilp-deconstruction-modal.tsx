@@ -282,10 +282,10 @@ export function IlpDeconstructionModal({
               <Loader2 size={28} className="animate-spin text-emerald-400" />
               <p className="text-sm">Running the 8-zone deconstruction…</p>
               <p className="text-xs text-gray-500 text-center max-w-md">
-                Claude Sonnet 4.6 is mapping this ad to ILP frameworks
-                (avatar A–E, Bypass Formula audit, compliance check). The
-                first run takes 10–30s. Repeat opens on the same ad are
-                instant.
+                Claude Sonnet 4.6 is deconstructing this ad — hook, structure,
+                avatar, mechanism, and compliance. I Love Patches ads get the
+                full ILP framework; other brands get a brand-neutral
+                breakdown. First run takes 10–30s; repeat opens are instant.
               </p>
             </div>
           )}

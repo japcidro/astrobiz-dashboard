@@ -1,6 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
-import { ILP_DECONSTRUCT_SYSTEM_PROMPT } from "@/lib/ai/ilp-deconstruct-spec";
+import {
+  ILP_DECONSTRUCT_SYSTEM_PROMPT,
+  DECONSTRUCT_ENGINE_VERSION,
+} from "@/lib/ai/ilp-deconstruct-spec";
 import { parseDeconstruction } from "@/lib/ai/ilp-deconstruct-parser";
 import crypto from "node:crypto";
 
@@ -63,7 +66,13 @@ export async function POST(request: Request) {
   }
 
   const sourceText = transcript.trim();
-  const sourceHash = crypto.createHash("sha256").update(sourceText).digest("hex");
+  // Fold the engine version into the cache key so a prompt/spec change (e.g.
+  // brand-aware GENERIC mode) invalidates stale ILP-framed results instead of
+  // re-serving them.
+  const sourceHash = crypto
+    .createHash("sha256")
+    .update(`${DECONSTRUCT_ENGINE_VERSION}\n${sourceText}`)
+    .digest("hex");
 
   // 2. Have we already deconstructed this exact transcript? Return the
   //    cached result if so (instant + free).

@@ -1,6 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
-import { ILP_DECONSTRUCT_SYSTEM_PROMPT } from "@/lib/ai/ilp-deconstruct-spec";
+import {
+  ILP_DECONSTRUCT_SYSTEM_PROMPT,
+  DECONSTRUCT_ENGINE_VERSION,
+} from "@/lib/ai/ilp-deconstruct-spec";
 import { parseDeconstruction } from "@/lib/ai/ilp-deconstruct-parser";
 import crypto from "node:crypto";
 
@@ -134,7 +137,7 @@ export async function POST(request: Request) {
   const parsed = parseDeconstruction(markdown);
   const sourceHash = crypto
     .createHash("sha256")
-    .update(source_text.trim())
+    .update(`${DECONSTRUCT_ENGINE_VERSION}\n${source_text.trim()}`)
     .digest("hex");
 
   const { data: saved, error: saveErr } = await supabase
