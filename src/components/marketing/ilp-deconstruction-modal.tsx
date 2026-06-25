@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   X,
   Loader2,
@@ -71,6 +71,15 @@ export function IlpDeconstructionModal({
   const [openZones, setOpenZones] = useState<Set<ZoneId>>(
     new Set(ZONE_ORDER)
   );
+  // Stays true while mounted; the transcribe poll loop checks this so it
+  // never calls setState after the modal closes.
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
 
   const run = useCallback(
     async (force = false) => {
@@ -118,6 +127,15 @@ export function IlpDeconstructionModal({
     if (transcribing) return;
     setTranscribing(true);
     setTranscribeError(null);
+
+    // The transcribe request (FB download + Gemini, up to ~300s) can outlive
+    // the browser's connection: the function keeps running and saves the
+    // transcript even after the client sees "Failed to fetch". So we treat a
+    // dropped connection as "maybe still processing" and poll for the result,
+    // instead of lying to the user that it failed. A real API error (no video,
+    // bad token, Gemini rejected the clip) comes back with a message — surface
+    // that and stop.
+    let networkDropped = false;
     try {
       const res = await fetch(
         "/api/marketing/deconstructor/transcribe",
@@ -131,17 +149,63 @@ export function IlpDeconstructionModal({
       if (!res.ok) {
         throw new Error(json.error || "Transcribe failed");
       }
+      // Fast path: transcribe returned before the connection dropped.
       // Transcript now exists in ad_creative_analyses — run the 8-zone
       // Claude analysis against it.
       await run();
+      if (aliveRef.current) setTranscribing(false);
+      return;
     } catch (e) {
-      setTranscribeError(
-        e instanceof Error ? e.message : "Transcribe failed"
-      );
-    } finally {
-      setTranscribing(false);
+      const msg = e instanceof Error ? e.message : "Transcribe failed";
+      networkDropped =
+        /failed to fetch|load failed|networkerror|fetch failed|terminated/i.test(
+          msg
+        );
+      if (!networkDropped) {
+        if (aliveRef.current) {
+          setTranscribeError(msg);
+          setTranscribing(false);
+        }
+        return;
+      }
     }
-  }, [adId, accountId, run, transcribing]);
+
+    // Connection dropped mid-flight. Poll from-analysis until the transcript
+    // the function is still writing shows up (or we give up after the
+    // function's own 300s ceiling, plus margin).
+    const deadline = Date.now() + 6 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 10_000));
+      if (!aliveRef.current) return;
+      try {
+        const res = await fetch(
+          "/api/marketing/deconstructor/from-analysis",
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ad_id: adId, ad_title: adName }),
+          }
+        );
+        const json = await res.json();
+        if (res.ok) {
+          if (!aliveRef.current) return;
+          setResult(json as DeconstructionResult);
+          setNoTranscript(false);
+          setTranscribeError(null);
+          setTranscribing(false);
+          return;
+        }
+        // Still no_transcript → the function hasn't finished writing. Wait.
+      } catch {
+        // Transient network blip — keep polling.
+      }
+    }
+    if (!aliveRef.current) return;
+    setTranscribeError(
+      "Matagal ang deconstruct na ito (malaking video). Patuloy itong tumatakbo sa likod — isara at buksan ulit ang modal sa loob ng ilang minuto para makita ang resulta."
+    );
+    setTranscribing(false);
+  }, [adId, accountId, adName, run, transcribing]);
 
   const toggleZone = (id: ZoneId) =>
     setOpenZones((prev) => {
