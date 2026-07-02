@@ -269,6 +269,12 @@ const navEntries: NavEntry[] = [
         roles: ["admin", "marketing"],
       },
       {
+        label: "Page Postings",
+        href: "/marketing/page-postings",
+        icon: <Newspaper size={18} />,
+        roles: ["admin"],
+      },
+      {
         label: "Creative Attribution",
         href: "/marketing/creative-tagging",
         icon: <Target size={18} />,
