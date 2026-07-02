@@ -5,6 +5,14 @@ import { Loader2, Send, ImagePlus, X, Newspaper } from "lucide-react";
 import { toast } from "sonner";
 import { PageSelector } from "@/components/marketing/create/page-selector";
 
+const FB_API_BASE = "https://graph.facebook.com/v21.0";
+
+/** Extract a readable error from a Facebook Graph API JSON error body. */
+function fbErrorMessage(json: unknown, fallback: string): string {
+  const err = (json as { error?: Record<string, string> } | null)?.error;
+  return err?.error_user_msg || err?.message || fallback;
+}
+
 export function PagePostForm() {
   const [pageId, setPageId] = useState("");
   const [pageName, setPageName] = useState("");
@@ -27,29 +35,59 @@ export function PagePostForm() {
 
     setPosting(true);
     try {
-      const form = new FormData();
-      form.append("pageId", pageId);
-      form.append("message", message.trim());
-      if (link.trim()) form.append("link", link.trim());
-      if (imageFile) form.append("image", imageFile);
+      // Get a page access token from our server, then publish directly to
+      // Facebook from the browser (avoids the serverless request-body limit
+      // that breaks large image uploads).
+      const tokenRes = await fetch(
+        `/api/facebook/page-post?pageId=${encodeURIComponent(pageId)}`
+      );
+      const tokenJson = await tokenRes.json().catch(() => null);
+      if (!tokenRes.ok || !tokenJson?.token) {
+        toast.error(tokenJson?.error || "Hindi makuha ang page token.");
+        return;
+      }
+      const token: string = tokenJson.token;
 
-      const res = await fetch("/api/facebook/page-post", {
-        method: "POST",
-        body: form,
-      });
-      const json = await res.json();
+      const trimmed = message.trim();
+      let res: Response;
 
+      if (imageFile) {
+        // Photo post — multipart, published by default.
+        const fbForm = new FormData();
+        fbForm.append("access_token", token);
+        fbForm.append("source", imageFile);
+        if (trimmed) fbForm.append("caption", trimmed);
+        res = await fetch(`${FB_API_BASE}/${pageId}/photos`, {
+          method: "POST",
+          body: fbForm,
+        });
+      } else {
+        // Text (+ optional link) post to the page feed.
+        const params = new URLSearchParams({ access_token: token, message: trimmed });
+        if (link.trim()) params.append("link", link.trim());
+        res = await fetch(`${FB_API_BASE}/${pageId}/feed`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: params.toString(),
+        });
+      }
+
+      const json = await res.json().catch(() => null);
       if (!res.ok) {
-        toast.error(json.error || "Hindi na-post. Subukan ulit.");
+        toast.error(fbErrorMessage(json, "Hindi na-post. Subukan ulit."));
         return;
       }
 
+      // photos returns { id, post_id }; feed returns { id }
+      const postId: string = json?.post_id || json?.id || "";
+      const permalink = postId ? `https://www.facebook.com/${postId}` : null;
+
       toast.success(
-        json.permalink ? (
+        permalink ? (
           <span>
             Na-post na sa {pageName || "Page"}!{" "}
             <a
-              href={json.permalink}
+              href={permalink}
               target="_blank"
               rel="noopener noreferrer"
               className="underline font-medium"
