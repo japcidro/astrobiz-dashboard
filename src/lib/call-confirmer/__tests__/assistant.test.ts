@@ -198,6 +198,31 @@ describe("analysis plan", () => {
   });
 });
 
+describe("latency and cost", () => {
+  it("keeps the system prompt small — it is resent on every turn", () => {
+    // At 10.3k chars this was ~2.6k tokens of prefill per turn on gpt-4o, and a
+    // large part of the dead air the customer heard before each reply.
+    expect(buildSystemPrompt(config).length).toBeLessThan(8000);
+  });
+
+  it("uses the low-latency voice model", () => {
+    // multilingual_v2 is the slowest ElevenLabs model to first byte.
+    expect(buildAssistantConfig(config).voice.model).toBe("eleven_turbo_v2_5");
+  });
+
+  it("does not leave a finished call open on the meter", () => {
+    // Silence timeout is the fallback, not the normal exit. Every second past
+    // the last word is billed by Twilio at roughly $0.50/min.
+    const assistant = buildAssistantConfig(config);
+    expect(assistant.silenceTimeoutSeconds).toBeLessThanOrEqual(25);
+    expect(assistant.endCallFunctionEnabled).toBe(true);
+  });
+
+  it("tells the model to hang up immediately after its closing line", () => {
+    expect(buildSystemPrompt(config)).toMatch(/IMMEDIATELY call the endCall/);
+  });
+});
+
 describe("transcriber", () => {
   it("uses Deepgram, which degrades quietly on bad phone audio", () => {
     const t = buildAssistantConfig(config).transcriber;
