@@ -224,9 +224,11 @@ describe("latency and cost", () => {
     expect(buildSystemPrompt(config).length).toBeLessThan(8000);
   });
 
-  it("uses the low-latency voice model", () => {
-    // multilingual_v2 is the slowest ElevenLabs model to first byte.
-    expect(buildAssistantConfig(config).voice.model).toBe("eleven_turbo_v2_5");
+  it("keeps the high-fidelity voice model for cloned voices", () => {
+    // The turbo/flash models are faster but do not reproduce an ElevenLabs voice
+    // clone faithfully, and every store voice here is a clone. Latency is bought
+    // back through the prompt size and prompt hang-up instead.
+    expect(buildAssistantConfig(config).voice.model).toBe("eleven_multilingual_v2");
   });
 
   it("does not leave a finished call open on the meter", () => {

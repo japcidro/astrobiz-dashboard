@@ -483,10 +483,12 @@ export function buildAssistantConfig(
     voice: {
       provider: "11labs",
       voiceId: config.voice_id,
-      // turbo_v2_5, not multilingual_v2. Same voice, roughly half the
-      // time-to-first-byte — multilingual_v2 is the slowest ElevenLabs model
-      // and was a large part of the dead air before she started speaking.
-      model: "eleven_turbo_v2_5",
+      // multilingual_v2, NOT turbo/flash. Slower to first byte by roughly 400ms,
+      // but the store voices are ElevenLabs *clones* and the turbo models do not
+      // reproduce a clone faithfully — the selected voice audibly stopped
+      // sounding like itself. Fidelity wins here: the latency was cut instead by
+      // shrinking the system prompt and ending calls promptly.
+      model: "eleven_multilingual_v2",
       stability: 0.55,        // slightly less = more dynamic/faster cadence
       similarityBoost: 0.80,
       style: 0.25,
