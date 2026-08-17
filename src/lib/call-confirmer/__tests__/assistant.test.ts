@@ -193,24 +193,28 @@ describe("analysis plan", () => {
     );
   });
 
+  it("sends no custom messages, which would stop Vapi binding the schema", () => {
+    // With custom messages Vapi ignored the schema and returned invented fields
+    // ("customer_agrees_to_cash_on_delivery") that sync.ts does not read.
+    expect(buildAnalysisPlan().structuredDataPlan?.messages).toBeUndefined();
+  });
+
+  it("carries the Taglish guidance in the field descriptions", () => {
+    const schema = buildAnalysisPlan().structuredDataPlan?.schema as {
+      properties: { confirmed: { description: string } };
+    };
+    // Without a system message, this is the only place the guidance survives.
+    expect(schema.properties.confirmed.description).toMatch(/Taglish/);
+    expect(schema.properties.confirmed.description).toMatch(/NEVER "yes"/);
+  });
+
   it("is attached to the assistant config", () => {
     expect(buildAssistantConfig(config).analysisPlan?.structuredDataPlan?.enabled).toBe(
       true
     );
   });
 
-  it("injects the transcript, since custom messages replace Vapi's default prompt", () => {
-    const messages = buildAnalysisPlan().structuredDataPlan?.messages ?? [];
-    // Without this the analyser has nothing to read and returns null.
-    expect(messages.some((m) => m.content.includes("{{transcript}}"))).toBe(true);
-  });
 
-  it("includes a user turn — a system-only prompt returns empty", () => {
-    const messages = buildAnalysisPlan().structuredDataPlan?.messages ?? [];
-    const user = messages.find((m) => m.role === "user");
-    expect(user).toBeDefined();
-    expect(user?.content).toContain("{{transcript}}");
-  });
 });
 
 describe("latency and cost", () => {

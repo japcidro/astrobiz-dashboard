@@ -374,33 +374,14 @@ export function buildAnalysisPlan(): NonNullable<
     summaryPlan: { enabled: true },
     structuredDataPlan: {
       enabled: true,
-      // Custom messages REPLACE Vapi's default extraction prompt, which is what
-      // normally injects the transcript — so {{transcript}} has to be here.
+      // NO custom `messages` here, deliberately.
       //
-      // It also needs a USER turn. A system-only message returns empty from the
-      // model (the same failure that made the greeting silent), which is why
-      // structuredData kept coming back null even once {{transcript}} was added.
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are analysing a Filipino order-confirmation call conducted in Taglish " +
-            "(mixed Tagalog and English). Extract the fields exactly as specified by the " +
-            "schema. Base every field ONLY on what was actually said — never guess. " +
-            "If the customer never clearly answered, use \"unclear\".\n\n" +
-            "Speech-to-text on Filipino phone audio is unreliable: brand and place names " +
-            "are often garbled, and a bad line can produce outright nonsense or even the " +
-            "wrong alphabet. Judge intent from context — \"tama naman\", \"sige po\", " +
-            "\"opo\" all mean yes. If the customer's words are unintelligible, that is " +
-            "\"unclear\", NEVER \"yes\".",
-        },
-        {
-          role: "user",
-          content:
-            "Transcript of the call:\n\n{{transcript}}\n\n" +
-            "Extract the structured fields defined by the schema.",
-        },
-      ],
+      // Supplying them stops Vapi binding this schema at all: it returned
+      // invented fields instead ("customer_agrees_to_cash_on_delivery",
+      // "total_amount"), none of which sync.ts reads. Vapi's default extraction
+      // prompt is what binds the schema and injects the transcript, so the
+      // guidance that used to live in a system message now lives in the field
+      // descriptions below, where it survives.
       schema: {
         type: "object",
         properties: {
@@ -408,9 +389,14 @@ export function buildAnalysisPlan(): NonNullable<
             type: "string",
             enum: ["yes", "no", "unclear"],
             description:
-              "Did the customer confirm the order is correct? " +
-              "\"yes\" for opo/sige/tama/oo/correct. \"no\" for hindi/mali/ayoko/cancel. " +
-              "\"unclear\" if they never gave a clear answer, stayed silent, or hung up.",
+              "Did the customer confirm the order is correct? The call is in Taglish " +
+              "(mixed Tagalog and English). \"yes\" for opo/oo/sige/tama/okay/correct. " +
+              "\"no\" for hindi/mali/ayoko/ayaw/cancel, or if they said they were busy " +
+              "or the wrong person. \"unclear\" if they never gave a clear answer, " +
+              "stayed silent, or hung up. Speech-to-text on Filipino phone audio is " +
+              "unreliable and a bad line can produce outright nonsense; if the " +
+              "customer's words are unintelligible that is \"unclear\", NEVER \"yes\". " +
+              "Judge intent from context, not exact wording.",
           },
           address_correct: {
             type: "boolean",
