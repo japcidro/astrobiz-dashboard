@@ -1,5 +1,6 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { getVapiCall } from "./vapi";
+import type { CallStructuredData } from "./vapi";
 import type {
   CallStatus,
   CallOutcome,
@@ -190,6 +191,71 @@ export function deriveOutcome(
   };
 }
 
+// Postgres/PostgREST wording when a column in the payload doesn't exist yet.
+const MISSING_COLUMN_RE =
+  /column .* does not exist|could not find the '.*' column|structured_data|address_confirmed|corrected_address/i;
+
+// Reasons where the customer never actually spoke — structured extraction has
+// nothing to work from, so endedReason stays authoritative.
+const UNREACHABLE_REASONS = new Set([
+  "voicemail",
+  "customer-did-not-answer",
+  "no-answer",
+  "customer-busy",
+  "busy",
+]);
+
+/**
+ * Outcome from Vapi's structured extraction — the reliable path.
+ *
+ * Preferred over deriveOutcome(), which keyword-matches an English summary of a
+ * Taglish call and misclassifies as a result. Returns null when there's nothing
+ * usable, so the caller can fall back.
+ */
+export function deriveOutcomeFromStructured(
+  structured: CallStructuredData | undefined
+): { outcome: CallOutcome | null; needsVa: boolean; reason: string | null } | null {
+  if (!structured?.confirmed) return null;
+
+  const reason = structured.reason?.trim() || null;
+
+  let result: { outcome: CallOutcome | null; needsVa: boolean; reason: string | null };
+  switch (structured.confirmed) {
+    case "yes":
+      result = structured.needs_human
+        ? { outcome: "escalated_to_human", needsVa: true, reason }
+        : { outcome: "confirmed", needsVa: false, reason: null };
+      break;
+    case "no":
+      result = {
+        outcome: "declined",
+        needsVa: Boolean(structured.needs_human),
+        reason,
+      };
+      break;
+    default:
+      result = {
+        outcome: null,
+        needsVa: true,
+        reason: reason ?? "Customer never gave a clear yes or no",
+      };
+  }
+
+  // A corrected address always needs a human, even on a confirmed order — the
+  // order stands, but someone has to verify the new address before it ships.
+  const corrected = structured.corrected_address?.trim();
+  if (structured.address_correct === false || corrected) {
+    result.needsVa = true;
+    result.reason =
+      reason ??
+      (corrected
+        ? `Customer gave a corrected address: ${corrected}`
+        : "Customer said the delivery address is wrong");
+  }
+
+  return result;
+}
+
 /**
  * Pull the most informative sentence from an AI summary for VA context.
  * Prefers sentences that mention the customer's question or concern.
@@ -313,11 +379,20 @@ export async function syncAttemptFromVapi(
 
   const status =
     mapStatus(vapiCall.status, endedReason) ?? "completed";
-  const { outcome, needsVa, reason } = deriveOutcome(
-    endedReason,
-    summary ?? undefined,
-    successEvaluation
-  );
+
+  // Prefer Vapi's typed extraction; fall back to summary keyword matching only
+  // when it's missing (older calls, extraction failure, nobody picked up).
+  const structured = vapiCall.analysis?.structuredData as
+    | CallStructuredData
+    | undefined;
+  const structuredOutcome =
+    endedReason && UNREACHABLE_REASONS.has(endedReason)
+      ? null
+      : deriveOutcomeFromStructured(structured);
+
+  const { outcome, needsVa, reason } =
+    structuredOutcome ??
+    deriveOutcome(endedReason, summary ?? undefined, successEvaluation);
 
   // Only flag as handoff reason if it's a real error, not a clean ending
   const finalReason =
@@ -337,6 +412,17 @@ export async function syncAttemptFromVapi(
     needs_va_followup: needsVa,
     handoff_reason: finalReason,
   };
+  if (structured) {
+    updates.structured_data = structured;
+    if (typeof structured.address_correct === "boolean") {
+      updates.address_confirmed = structured.address_correct;
+    }
+    const corrected = structured.corrected_address?.trim();
+    // Stored for a VA to verify before anything is changed in Shopify — never
+    // written back to the order automatically, since a mis-transcribed address
+    // would ship the parcel to the wrong place.
+    if (corrected) updates.corrected_address = corrected;
+  }
   if (duration != null) updates.duration_seconds = duration;
   if (cost > 0) updates.cost_usd = cost;
   if (startedAt) updates.started_at = startedAt.toISOString();
@@ -350,10 +436,22 @@ export async function syncAttemptFromVapi(
     .eq("id", attemptId)
     .maybeSingle();
 
-  await supabase
+  const { error: updateError } = await supabase
     .from("call_attempts")
     .update(updates)
     .eq("id", attemptId);
+
+  // If the structured-data migration hasn't been applied yet, Postgres rejects
+  // the whole statement — which would silently drop the transcript, cost and
+  // outcome too. Retry with just the long-standing columns so a pending
+  // migration degrades gracefully instead of losing the call record.
+  if (updateError && MISSING_COLUMN_RE.test(updateError.message)) {
+    const core = { ...updates };
+    delete core.structured_data;
+    delete core.address_confirmed;
+    delete core.corrected_address;
+    await supabase.from("call_attempts").update(core).eq("id", attemptId);
+  }
 
   // Increment spend rollup only for the delta (so repeat syncs don't double-count)
   if (existing && TERMINAL_STATUSES.has(status)) {

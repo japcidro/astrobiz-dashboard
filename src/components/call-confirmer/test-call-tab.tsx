@@ -9,7 +9,6 @@ import {
   XCircle,
   AlertTriangle,
   RefreshCw,
-  ShoppingBag,
 } from "lucide-react";
 import type {
   CallConfirmerConfig,
@@ -17,6 +16,7 @@ import type {
   ShopifyStoreLite,
 } from "@/lib/call-confirmer/types";
 import type { OrderContext } from "@/lib/call-confirmer/assistant";
+import { normalizePhPhone } from "@/lib/call-confirmer/phone";
 import { StoreSelector } from "./store-selector";
 
 interface Props {
@@ -76,9 +76,6 @@ export function TestCallTab({
   const [attemptId, setAttemptId] = useState<string | null>(null);
   const [attempt, setAttempt] = useState<CallAttempt | null>(null);
   const [sampleOrder, setSampleOrder] = useState<OrderContext | null>(null);
-  const [sampleSource, setSampleSource] = useState<"shopify" | "synthetic" | null>(
-    null
-  );
   const [sampleNote, setSampleNote] = useState<string | null>(null);
   const [loadingSample, setLoadingSample] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -101,11 +98,9 @@ export function TestCallTab({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Failed to load sample");
       setSampleOrder(data.order);
-      setSampleSource(data.source);
       setSampleNote(data.reason ?? null);
     } catch (e: unknown) {
       setSampleOrder(null);
-      setSampleSource(null);
       setSampleNote(e instanceof Error ? e.message : "Failed to load");
     } finally {
       setLoadingSample(false);
@@ -179,8 +174,10 @@ export function TestCallTab({
 
   const handleCall = async () => {
     setError(null);
-    if (!/^\+\d{10,15}$/.test(phone)) {
-      setError("Phone must be in E.164 format (e.g. +639171234567)");
+    // Typed however is natural ("09171234567"); Twilio needs E.164.
+    const e164 = normalizePhPhone(phone);
+    if (!e164) {
+      setError("Hindi valid ang number. Halimbawa: 09171234567");
       return;
     }
     setInitiating(true);
@@ -193,7 +190,7 @@ export function TestCallTab({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           store_id: selectedStoreId,
-          customer_phone: phone,
+          customer_phone: e164,
           is_test_call: true,
           order: sampleOrder ?? undefined,
         }),
@@ -210,6 +207,7 @@ export function TestCallTab({
   };
 
   const isTerminal = attempt && TERMINAL_STATUSES.has(attempt.status);
+  const normalizedPhone = normalizePhPhone(phone);
 
   return (
     <div className="space-y-6">
@@ -251,22 +249,9 @@ export function TestCallTab({
 
         <div className="bg-gray-900/40 border border-gray-700/40 rounded-lg p-4 mb-4">
           <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <p className="text-xs text-gray-400 uppercase tracking-wide">
-                Sample order Maria will read:
-              </p>
-              {sampleSource === "shopify" && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-900/40 border border-emerald-700/40 text-emerald-300 flex items-center gap-1">
-                  <ShoppingBag size={10} />
-                  Live Shopify
-                </span>
-              )}
-              {sampleSource === "synthetic" && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700 text-gray-300">
-                  Synthetic (no Shopify orders)
-                </span>
-              )}
-            </div>
+            <p className="text-xs text-gray-400 uppercase tracking-wide">
+              Sample order Maria will read:
+            </p>
             <button
               type="button"
               onClick={loadSampleOrder}
@@ -327,7 +312,7 @@ export function TestCallTab({
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="md:col-span-2">
             <label className="block text-sm text-gray-300 mb-1">
-              Your phone (E.164)
+              Your phone
             </label>
             <input
               type="tel"
@@ -335,11 +320,18 @@ export function TestCallTab({
               onChange={(e) => setPhone(e.target.value)}
               disabled={initiating || (!!attempt && !isTerminal)}
               className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
-              placeholder="+639171234567"
+              placeholder="09171234567"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Make sure this number is verified in Twilio Console (or you
-              upgraded out of trial).
+              {phone && !normalizedPhone ? (
+                <span className="text-red-400">
+                  Hindi mukhang PH mobile number ito.
+                </span>
+              ) : normalizedPhone ? (
+                <>Tatawagan: {normalizedPhone}</>
+              ) : (
+                <>09171234567, 9171234567 o +639171234567 — lahat okay.</>
+              )}
             </p>
           </div>
           <div className="flex items-end">
@@ -349,7 +341,7 @@ export function TestCallTab({
                 !ready ||
                 initiating ||
                 (!!attempt && !isTerminal) ||
-                !phone
+                !normalizedPhone
               }
               className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >

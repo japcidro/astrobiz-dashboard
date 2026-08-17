@@ -65,6 +65,31 @@ export interface VapiAssistantConfig {
   backgroundDenoisingEnabled?: boolean;
   recordingEnabled?: boolean;
   hipaaEnabled?: boolean;
+  /** Where Vapi POSTs call events. Without this, no webhook is ever delivered. */
+  server?: { url: string; secret?: string; timeoutSeconds?: number };
+  serverMessages?: string[];
+  analysisPlan?: {
+    summaryPlan?: { enabled?: boolean };
+    successEvaluationPlan?: { enabled?: boolean; rubric?: string };
+    structuredDataPlan?: {
+      enabled?: boolean;
+      schema?: Record<string, unknown>;
+      messages?: { role: string; content: string }[];
+    };
+  };
+}
+
+/**
+ * Typed shape of `analysis.structuredData`, extracted by Vapi at end of call
+ * using the schema in buildAnalysisPlan(). Every field is optional — the LLM
+ * can omit anything, and a failed extraction yields an empty object.
+ */
+export interface CallStructuredData {
+  confirmed?: "yes" | "no" | "unclear";
+  address_correct?: boolean;
+  corrected_address?: string;
+  needs_human?: boolean;
+  reason?: string;
 }
 
 export interface VapiCallResponse {

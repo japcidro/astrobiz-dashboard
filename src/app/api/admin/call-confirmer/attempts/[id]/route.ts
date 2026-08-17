@@ -46,10 +46,18 @@ export async function GET(
       data.status === "busy") &&
     !data.handoff_reason;
 
+  const isTerminal = TERMINAL_STATUSES.has(data.status);
+
+  // A non-terminal attempt is the polling case: the call is live, or it ended
+  // and no webhook arrived. This used to require a TERMINAL status to sync,
+  // which was unreachable without a webhook — so attempts sat on "ringing"
+  // forever and the UI never left "Call in progress".
   if (
     data.provider_call_id &&
-    TERMINAL_STATUSES.has(data.status) &&
-    (!data.transcript || data.cost_usd == null || isFailureMissingReason)
+    (!isTerminal ||
+      !data.transcript ||
+      data.cost_usd == null ||
+      isFailureMissingReason)
   ) {
     await syncAttemptFromVapi(data.id, data.provider_call_id).catch(() => {});
     const { data: refreshed } = await supabase

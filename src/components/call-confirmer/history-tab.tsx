@@ -455,6 +455,19 @@ function AttemptDrawer({
             />
           </div>
 
+          {attempt.corrected_address && (
+            <div className="bg-amber-900/20 border border-amber-600/50 rounded-lg p-3 text-sm">
+              <strong className="text-amber-200">
+                Address correction — needs verification:
+              </strong>
+              <p className="text-amber-100 mt-1">{attempt.corrected_address}</p>
+              <p className="text-amber-300/70 text-xs mt-2">
+                Transcribed from the call. Check the recording before updating
+                the order in Shopify.
+              </p>
+            </div>
+          )}
+
           {attempt.handoff_reason && (
             <div className="bg-orange-900/20 border border-orange-700/40 rounded-lg p-3 text-sm">
               <strong className="text-orange-200">Handoff reason:</strong>
