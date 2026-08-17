@@ -24,51 +24,29 @@ const LANGUAGE_INSTRUCTIONS: Record<CallConfirmerLanguage, string> = {
     "Speak in clear English. Be warm and professional like a CSR. Short sentences.",
 };
 
-// Every mode is locked to English, on purpose.
+// Pinned to English for every mode, and only safe because the transcriber is a
+// Whisper-family model: it stays multilingual, so "en" biases decoding without
+// deleting the Tagalog. Customers speak only Taglish, which is ~70% English.
 //
-// Customers speak only Taglish, which is ~70% English by word count. Leaving the
-// transcriber free to pick a language is what produced the worst failures:
-// gpt-4o-transcribe returned Burmese script ("ABC ရွေ။") and Spanish
-// ("Non debes yaro") on poor lines, and rendered FOLIQ as "Pollit", "Pollak" and
-// "Foodlink" within one call. Pinning the language removes that whole failure
-// mode; the Tagalog words that actually decide the call are recovered through
-// keyword boosting instead (see buildTranscriberKeywords).
+// The earlier "tl" setting was worse — it drifted into Spanish-sounding output
+// ("Non debes yaro", "besyero") and mangled FOLIQ into "Pollit"/"Pollak"/
+// "Foodlink" in a single call. The best transcript observed on a real call used
+// this exact setting: "Good morning po, Sean! Si Lovely po ito from FOLIC.
+// Nagko-confirm lang po sana ako ng order ninyo today."
+//
+// "tl" is therefore not used anywhere. Customers speak only Taglish, so the
+// pure-Tagalog mode is unused in practice and safer left on the English bias.
 const TRANSCRIBER_LANG: Record<CallConfirmerLanguage, string> = {
   taglish: "en",
   tagalog: "en",
   english: "en",
 };
 
-/**
- * Deepgram keyword boosting for the words that decide the outcome.
- *
- * Whisper-family models have no equivalent — this is the main reason for the
- * switch. Weights are Deepgram's `term:boost` form; 2 is a firm nudge, 3 is
- * reserved for proper nouns an English model has no chance of guessing.
- */
-export function buildTranscriberKeywords(
-  config: CallConfirmerConfig,
-  storeName?: string
-): string[] {
-  const base = [
-    // Yes — the only words allowed to advance the call.
-    "opo:2", "oo:2", "sige:2", "tama:2", "okay:2", "ayos:2", "yes:2",
-    // No / refusal — must never be missed, this is the expensive miss.
-    "hindi:2", "mali:2", "ayoko:2", "huwag:2", "wag:2", "ayaw:2", "cancel:2",
-    // "Not now" — routes to the text fallback.
-    "busy:2", "mamaya:2", "abala:2", "saglit:2",
-    // Address correction.
-    "address:2", "palitan:2", "lipat:2", "bahay:2",
-  ];
-  // Proper nouns that came back garbled on real calls.
-  if (config.agent_name) base.push(`${config.agent_name}:3`);
-  if (storeName) {
-    for (const word of storeName.split(/\s+/).filter((w) => w.length > 2)) {
-      base.push(`${word}:3`);
-    }
-  }
-  return base;
-}
+// Keyword boosting lived here. It is gone on purpose: it is Deepgram-only, and
+// on real calls it forced boosted terms onto unrelated sounds — "po" came back
+// as "oo" because "oo" was boosted, and a spurious "Lovely" was inserted twice
+// from boosting the agent name. Boosting a word makes the model hear it where it
+// isn't, which is worse than missing it.
 
 export function buildSystemPrompt(
   config: CallConfirmerConfig
@@ -284,26 +262,44 @@ export function toSpokenItems(raw: string): string {
     .map((s) => s.trim())
     .filter(Boolean);
 
-  const spoken = parts.map((part) =>
-    shortenProductName(
-      part
-        // Drop SKU codes and Shopify's "Default Title" placeholder, but keep
-        // human-readable variants: "(Pink)" → "Pink".
-        .replace(/\s*\(([^)]*)\)/g, (_full, inner: string) => {
-          const label = inner.trim();
-          if (/^default title$/i.test(label)) return "";
-          if (/\d/.test(label) && /^[A-Za-z0-9\-_ ]+$/.test(label)) return "";
-          return ` ${label}`;
-        })
-        // "2x Foo" → "dalawang Foo"
-        .replace(/^(\d+)\s*x\s*/i, (_full, n: string) => {
-          const qty = Number(n);
-          return `${TAGALOG_QUANTITY[qty] ?? qty} `;
-        })
-        .replace(/\s+/g, " ")
-        .trim()
-    )
-  );
+  // Split quantity from product name up front. Doing it later goes wrong
+  // because some Tagalog quantities are two words ("anim na", "apat na"), so a
+  // naive "drop the first token" cannot recover the name.
+  const entries = parts.map((part) => {
+    const cleaned = part
+      // Drop SKU codes and Shopify's "Default Title" placeholder, but keep
+      // human-readable variants: "(Pink)" -> "Pink".
+      .replace(/\s*\(([^)]*)\)/g, (_whole, inner: string) => {
+        const label = inner.trim();
+        if (/^default title$/i.test(label)) return "";
+        if (/\d/.test(label) && /^[A-Za-z0-9\-_ ]+$/.test(label)) return "";
+        return ` ${label}`;
+      })
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const match = cleaned.match(/^(\d+)\s*x\s*(.*)$/i);
+    return match
+      ? { qty: Number(match[1]), name: match[2].trim() }
+      : { qty: null as number | null, name: cleaned };
+  });
+
+  // Shortening is only safe while it keeps the items distinguishable. Two
+  // different products both titled "FOLIQ - ..." collapsed to the same word and
+  // the customer heard "dalawang FOLIQ at anim na FOLIQ" - meaningless. When
+  // that happens, keep the full name for the colliding items.
+  const shortNames = entries.map((e) => shortenProductName(e.name));
+  const counts = new Map<string, number>();
+  for (const name of shortNames) {
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+  }
+
+  const spoken = entries.map((entry, i) => {
+    const short = shortNames[i];
+    const name = (counts.get(short) ?? 0) > 1 ? entry.name : short;
+    if (entry.qty == null) return name;
+    return `${TAGALOG_QUANTITY[entry.qty] ?? entry.qty} ${name}`;
+  });
 
   if (spoken.length <= 1) return spoken[0] ?? "";
   return `${spoken.slice(0, -1).join(", ")} at ${spoken[spoken.length - 1]}`;
@@ -513,17 +509,23 @@ export function buildAssistantConfig(
       optimizeStreamingLatency: 3, // faster TTS streaming (1-4, higher = lower latency)
     },
     transcriber: {
-      // Deepgram, not OpenAI. Whisper-family models are trained on wideband
-      // audio; phone calls are 8kHz narrowband, and when the line is poor they
-      // HALLUCINATE confident text rather than returning nothing — a garbled
-      // "hindi" came back as "Desisyon" and was acted on as consent.
-      // Deepgram is built for telephony and degrades quietly instead, which is
-      // the behaviour you want when the transcript decides whether to ship.
-      provider: "deepgram",
-      model: "nova-2",
+      // gpt-4o-transcribe, NOT Deepgram.
+      //
+      // Deepgram was tried to stop Whisper-family hallucination on bad lines,
+      // and it made things worse: its English model is genuinely monolingual,
+      // so it deleted the Tagalog outright ("Mag-co-confirm lang po sana ako ng
+      // order ninyo today" -> "Confirm order today"), and keyword boosting
+      // forced boosted terms onto unrelated sounds ("po" -> "oo", a spurious
+      // "Lovely" inserted twice).
+      //
+      // Whisper-family models are actually multilingual, so "en" acts as a hint
+      // rather than a constraint and Taglish code-switching survives. The
+      // hallucination risk on poor audio is handled downstream instead: the
+      // prompt refuses to read garbled input as consent, and the analysis plan
+      // scores anything unintelligible as "unclear" rather than "yes".
+      provider: "openai",
+      model: "gpt-4o-transcribe",
       language: TRANSCRIBER_LANG[lang],
-      smartFormat: true,
-      keywords: buildTranscriberKeywords(config, options.storeName),
     },
     // Static greeting, spoken verbatim. Previously this was
     // "assistant-speaks-first-with-model-generated-message", which handed

@@ -3,7 +3,6 @@ import {
   buildAnalysisPlan,
   buildAssistantConfig,
   buildFirstMessage,
-  buildTranscriberKeywords,
   buildSystemPrompt,
   toSpokenAddress,
   toSpokenItems,
@@ -48,6 +47,22 @@ describe("speech transforms", () => {
 
   it("falls back to the digit for quantities above ten", () => {
     expect(toSpokenItems("12x Toner")).toBe("12 Toner");
+  });
+
+  it("keeps full names when shortening would make two items identical", () => {
+    // Both titles start with "FOLIQ —", so trimming produced
+    // "dalawang FOLIQ at anim na FOLIQ" — the customer could not tell them apart.
+    expect(
+      toSpokenItems("2x FOLIQ — Hair Growth Supplement, 6x FOLIQ — Anti Dandruff Shampoo")
+    ).toBe(
+      "dalawang FOLIQ — Hair Growth Supplement at anim na FOLIQ — Anti Dandruff Shampoo"
+    );
+  });
+
+  it("still shortens when the items are already distinguishable", () => {
+    expect(
+      toSpokenItems("2x FOLIQ — Hair Growth Supplement, 1x Biolink — Face Toner")
+    ).toBe("dalawang FOLIQ at isang Biolink");
   });
 
   it("drops trailing .00 so TTS never says 'point zero zero'", () => {
@@ -224,9 +239,9 @@ describe("latency and cost", () => {
 });
 
 describe("transcriber", () => {
-  it("uses Deepgram, which degrades quietly on bad phone audio", () => {
+  it("uses a multilingual model so Taglish is not deleted", () => {
     const t = buildAssistantConfig(config).transcriber;
-    expect(t.provider).toBe("deepgram");
+    expect(t.provider).toBe("openai");
   });
 
   it("pins the language so it cannot switch alphabets mid-call", () => {
@@ -237,20 +252,7 @@ describe("transcriber", () => {
     }
   });
 
-  it("boosts the words that decide the call", () => {
-    const kw = buildTranscriberKeywords(config, "FOLIQ");
-    const terms = kw.map((k) => k.split(":")[0]);
-    // The expensive miss is a refusal read as consent.
-    expect(terms).toEqual(expect.arrayContaining(["opo", "hindi", "mali", "ayoko"]));
-    // Proper nouns an English model cannot guess.
-    expect(kw).toContain("FOLIQ:3");
-    expect(kw).toContain("Lovely:3");
-  });
 
-  it("handles a missing store name without emitting a broken term", () => {
-    const kw = buildTranscriberKeywords(config, undefined);
-    expect(kw.every((k) => /^[^:]+:\d+$/.test(k))).toBe(true);
-  });
 });
 
 describe("webhook wiring", () => {
