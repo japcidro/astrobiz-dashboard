@@ -296,13 +296,14 @@ export async function GET() {
 
   const supabase = await createClient();
 
+  // 25 covers months of a near-daily upload habit; the UI shows 8 until asked.
   const { data: batches, error } = await supabase
     .from("jt_upload_batches")
     .select(
       "id, uploaded_at, completed_at, file_name, row_count, submission_date_min, submission_date_max, stores, backfilled, uploaded_by_employee:employees(full_name)"
     )
     .order("uploaded_at", { ascending: false })
-    .limit(10);
+    .limit(25);
 
   if (error) {
     return Response.json({ error: error.message }, { status: 500 });
