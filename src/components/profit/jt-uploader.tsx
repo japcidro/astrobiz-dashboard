@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
-import { Upload, RefreshCw, CheckCircle, AlertCircle, FileSpreadsheet, History, ArrowRight } from "lucide-react";
-import type { JtUploadResult, JtUploadBatch } from "@/lib/profit/types";
+import { useState, useRef, useCallback } from "react";
+import { Upload, RefreshCw, CheckCircle, AlertCircle, FileSpreadsheet } from "lucide-react";
+import type { JtUploadResult } from "@/lib/profit/types";
+import { formatDateRange } from "@/lib/profit/format-dates";
 
 const COLUMN_MAP: Record<string, string> = {
   "Waybill Number": "waybill",
@@ -21,15 +22,6 @@ const COLUMN_MAP: Record<string, string> = {
   "Payment Method": "payment_method",
   "SigningTime": "signing_time",
 };
-
-/** Rows shown before the "Show all" toggle kicks in. */
-const HISTORY_PREVIEW_ROWS = 8;
-
-/**
- * How far behind the delivery data can fall before the panel warns about it.
- * J&T uploads were a near-daily habit, so anything past a few days is a lapse.
- */
-const STALE_AFTER_DAYS = 3;
 
 interface ParsedPreview {
   rowCount: number;
@@ -62,110 +54,19 @@ function parseSubmissionTime(value: unknown): Date | null {
   return isNaN(d2.getTime()) ? null : d2;
 }
 
-/** "Aug 23, 2026" in PHT — J&T dates are always Philippine time. */
-function formatPhDate(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("en-PH", {
-    timeZone: "Asia/Manila",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+interface JtUploaderProps {
+  /** Fired after a file finishes so the history panel can refresh. */
+  onUploaded?: () => void;
 }
 
-/** "Aug 24, 2026, 10:05 PM" in PHT. The year matters once a gap opens up. */
-function formatPhDateTime(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-PH", {
-    timeZone: "Asia/Manila",
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-function phPart(iso: string, opts: Intl.DateTimeFormatOptions): string {
-  return new Date(iso).toLocaleDateString("en-PH", {
-    timeZone: "Asia/Manila",
-    ...opts,
-  });
-}
-
-/**
- * Collapse a submission range to the shortest unambiguous form:
- *   same day    -> "May 2, 2026"
- *   same month  -> "May 8 – 10, 2026"
- *   same year   -> "Apr 30 – May 1, 2026"
- *   otherwise   -> "Dec 30, 2025 – Jan 2, 2026"
- */
-function formatDateRange(
-  min: string | null | undefined,
-  max: string | null | undefined
-): string {
-  if (!min && !max) return "—";
-  if (!min || !max) return formatPhDate(min || max);
-
-  const opts = { month: "short", day: "numeric" } as const;
-  const startFull = formatPhDate(min);
-  const endFull = formatPhDate(max);
-  if (startFull === endFull) return startFull;
-
-  const sameYear = phPart(min, { year: "numeric" }) === phPart(max, { year: "numeric" });
-  if (!sameYear) return `${startFull} – ${endFull}`;
-
-  const sameMonth = phPart(min, { month: "short" }) === phPart(max, { month: "short" });
-  if (sameMonth) {
-    return `${phPart(min, opts)} – ${phPart(max, { day: "numeric" })}, ${phPart(max, { year: "numeric" })}`;
-  }
-  return `${phPart(min, opts)} – ${endFull}`;
-}
-
-/** "2 hours ago" / "3 days ago" / "3 months ago" — how stale the last upload is. */
-function formatAgo(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 60) return `${days} day${days === 1 ? "" : "s"} ago`;
-  const months = Math.round(days / 30.44);
-  return `${months} month${months === 1 ? "" : "s"} ago`;
-}
-
-export function JtUploader() {
+export function JtUploader({ onUploaded }: JtUploaderProps = {}) {
   const [dragging, setDragging] = useState(false);
   const [parsing, setParsing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState<ParsedPreview | null>(null);
   const [result, setResult] = useState<JtUploadResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [history, setHistory] = useState<JtUploadBatch[]>([]);
-  const [latestSubmission, setLatestSubmission] = useState<string | null>(null);
-  const [historyLoading, setHistoryLoading] = useState(true);
-  const [showAllHistory, setShowAllHistory] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const loadHistory = useCallback(async () => {
-    try {
-      const res = await fetch("/api/profit/jt-upload", { cache: "no-store" });
-      if (!res.ok) return;
-      const json = await res.json();
-      setHistory(json.batches || []);
-      setLatestSubmission(json.latest_submission_date ?? null);
-    } catch {
-      // Non-fatal — the uploader still works without the history panel.
-    } finally {
-      setHistoryLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadHistory();
-  }, [loadHistory]);
 
   const processFile = useCallback(async (file: File) => {
     setParsing(true);
@@ -300,7 +201,7 @@ export function JtUploader() {
       });
       setPreview(null);
       setUploadProgress("");
-      loadHistory();
+      onUploaded?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to upload");
       setUploadProgress("");
@@ -308,18 +209,6 @@ export function JtUploader() {
       setUploading(false);
     }
   };
-
-  // How stale is the delivery data? Measured from the newest parcel in the
-  // database, not the last upload — an upload of old rows doesn't catch you up.
-  const daysBehind =
-    latestSubmission === null
-      ? null
-      : Math.floor((Date.now() - new Date(latestSubmission).getTime()) / 86400000);
-  const isStale = daysBehind !== null && daysBehind > STALE_AFTER_DAYS;
-
-  const visibleHistory = showAllHistory
-    ? history
-    : history.slice(0, HISTORY_PREVIEW_ROWS);
 
   return (
     <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-6 space-y-4">
@@ -355,140 +244,6 @@ export function JtUploader() {
             <span className="text-yellow-300 ml-2">
               ({result.errors.length} errors)
             </span>
-          )}
-        </div>
-      )}
-
-      {/* Upload history — when you last uploaded and what it covered */}
-      {!historyLoading && (
-        <div className="bg-gray-900/40 border border-gray-700/50 rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <History size={15} className="text-gray-400" />
-            <span className="text-sm font-medium text-white">Upload History</span>
-          </div>
-
-          {history.length === 0 ? (
-            <p className="text-sm text-gray-500">
-              No uploads recorded yet. The next file you upload will be tracked here.
-            </p>
-          ) : (
-            <>
-              {/* Where to continue from — the whole point of this panel */}
-              <div
-                className={`flex flex-wrap items-center gap-x-6 gap-y-2 rounded-lg border p-3 mb-4 ${
-                  isStale
-                    ? "bg-amber-900/20 border-amber-700/50"
-                    : "bg-emerald-900/20 border-emerald-700/50"
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  {isStale && <AlertCircle size={16} className="text-amber-400 shrink-0" />}
-                  <div>
-                    <p className="text-[11px] uppercase tracking-wide text-gray-400">
-                      Last uploaded
-                    </p>
-                    <p
-                      className={`text-sm font-semibold ${
-                        isStale ? "text-amber-200" : "text-emerald-200"
-                      }`}
-                    >
-                      {formatPhDateTime(history[0].uploaded_at)}
-                      <span className="font-normal text-gray-400 ml-2">
-                        {formatAgo(history[0].uploaded_at)}
-                      </span>
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <ArrowRight size={14} className="text-gray-500 shrink-0" />
-                  <div>
-                    <p className="text-[11px] uppercase tracking-wide text-gray-400">
-                      Continue from
-                    </p>
-                    <p
-                      className={`text-sm font-semibold ${
-                        isStale ? "text-amber-200" : "text-emerald-200"
-                      }`}
-                    >
-                      {formatPhDate(latestSubmission)}
-                      {daysBehind !== null && daysBehind > 0 && (
-                        <span className="font-normal text-gray-400 ml-2">
-                          {daysBehind} day{daysBehind === 1 ? "" : "s"} of delivery data missing
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Full history table */}
-              <div className="overflow-x-auto -mx-1">
-                <table className="w-full text-sm border-collapse">
-                  <thead>
-                    <tr className="text-left text-xs text-gray-500 border-b border-gray-700/50">
-                      <th className="font-medium px-2 py-2 whitespace-nowrap">Uploaded (PHT)</th>
-                      <th className="font-medium px-2 py-2 text-right whitespace-nowrap">Parcels</th>
-                      <th className="font-medium px-2 py-2 whitespace-nowrap">
-                        Submission dates covered
-                      </th>
-                      <th className="font-medium px-2 py-2 whitespace-nowrap">Stores</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleHistory.map((b, i) => (
-                      <tr
-                        key={b.id}
-                        className={`border-b border-gray-700/30 ${
-                          i === 0 ? "bg-gray-800/40" : ""
-                        }`}
-                      >
-                        <td
-                          className={`px-2 py-2 whitespace-nowrap ${
-                            i === 0 ? "text-white font-medium" : "text-gray-300"
-                          }`}
-                        >
-                          {formatPhDateTime(b.uploaded_at)}
-                          {b.file_name && (
-                            <span className="block text-[11px] text-gray-500 font-normal truncate max-w-[220px]">
-                              {b.file_name}
-                            </span>
-                          )}
-                        </td>
-                        <td
-                          className={`px-2 py-2 text-right tabular-nums whitespace-nowrap ${
-                            i === 0 ? "text-white font-medium" : "text-gray-300"
-                          }`}
-                        >
-                          {b.row_count.toLocaleString()}
-                        </td>
-                        <td
-                          className={`px-2 py-2 whitespace-nowrap ${
-                            i === 0 ? "text-white font-medium" : "text-gray-300"
-                          }`}
-                        >
-                          {formatDateRange(b.submission_date_min, b.submission_date_max)}
-                        </td>
-                        <td className="px-2 py-2 text-gray-400 text-xs">
-                          {b.stores.length > 0 ? b.stores.join(", ") : "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {history.length > HISTORY_PREVIEW_ROWS && (
-                <button
-                  onClick={() => setShowAllHistory((v) => !v)}
-                  className="mt-3 text-xs text-gray-400 hover:text-white transition-colors cursor-pointer"
-                >
-                  {showAllHistory
-                    ? "Show fewer"
-                    : `Show all ${history.length} uploads`}
-                </button>
-              )}
-            </>
           )}
         </div>
       )}

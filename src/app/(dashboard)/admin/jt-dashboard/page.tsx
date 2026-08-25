@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import type { JtDelivery, JtClassification } from "@/lib/profit/types";
 import { JtUploader } from "@/components/profit/jt-uploader";
+import { JtUploadHistory } from "@/components/profit/jt-upload-history";
 import { isKnownStore, KNOWN_STORES } from "@/lib/profit/store-matching";
 
 interface JtSummary {
@@ -85,6 +86,8 @@ export default function JtDashboardPage() {
 
   // Upload section
   const [showUploader, setShowUploader] = useState(false);
+  // Bumped when an upload finishes, so the history panel re-fetches.
+  const [uploadCount, setUploadCount] = useState(0);
 
   const applyDatePreset = useCallback((preset: string) => {
     setDatePreset(preset);
@@ -334,6 +337,9 @@ export default function JtDashboardPage() {
         </div>
       )}
 
+      {/* Upload history — always visible; you need it BEFORE deciding to upload */}
+      <JtUploadHistory refreshKey={uploadCount} />
+
       {/* Upload Section */}
       <div className="mb-6">
         <button
@@ -344,7 +350,9 @@ export default function JtDashboardPage() {
           {showUploader ? "Hide J&T Upload" : "Upload J&T Data"}
           {showUploader ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
-        {showUploader && <JtUploader />}
+        {showUploader && (
+          <JtUploader onUploaded={() => { setUploadCount((n) => n + 1); fetchData(); }} />
+        )}
       </div>
 
       {/* Quick Date Filters */}
