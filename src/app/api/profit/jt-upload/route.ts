@@ -70,6 +70,10 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const rows: JtUploadRow[] = body.rows;
+  // One .xlsx file is POSTed as several batches of 100. They all carry the
+  // same client-generated batch_id so they accumulate into one history row.
+  const batchId: string | null = typeof body.batch_id === "string" ? body.batch_id : null;
+  const fileName: string | null = typeof body.file_name === "string" ? body.file_name : null;
 
   if (!Array.isArray(rows) || rows.length === 0) {
     return Response.json({ error: "rows array is required" }, { status: 400 });
@@ -238,6 +242,32 @@ export async function POST(request: Request) {
     totalUpserted += chunk.length;
   }
 
+  // --- Record this batch in the upload history ---
+  // Best-effort: the parcels are already saved, so a failure here must not
+  // fail the upload — it only costs the "last upload" panel one entry.
+  if (batchId) {
+    const submissionDates = dbRows
+      .map((r) => r.submission_date)
+      .filter((d): d is string => !!d)
+      .sort();
+    const storeNames = Array.from(
+      new Set(dbRows.map((r) => r.store_name).filter((n): n is string => !!n))
+    );
+
+    const { error: batchError } = await supabase.rpc("record_jt_upload_batch", {
+      p_batch_id: batchId,
+      p_file_name: fileName,
+      p_uploaded_by: employee.id,
+      p_row_count: totalUpserted,
+      p_min: submissionDates[0] ?? null,
+      p_max: submissionDates[submissionDates.length - 1] ?? null,
+      p_stores: storeNames,
+    });
+    if (batchError) {
+      console.error("[jt-upload] failed to record upload batch:", batchError.message);
+    }
+  }
+
   return Response.json({
     inserted: totalUpserted,
     updated: 0,
@@ -247,6 +277,56 @@ export async function POST(request: Request) {
     unmatched_to_shopify: dbRows.length - matchedToShopify,
     summary,
     errors,
+  });
+}
+
+/**
+ * Upload history — the most recent files, plus the newest submission date
+ * present in jt_deliveries overall. Together these answer "san ako titigil
+ * at san ako magsisimula ulit?" without reopening the last spreadsheet.
+ */
+export async function GET() {
+  const employee = await getEmployee();
+  if (!employee) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (employee.role !== "admin") {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const supabase = await createClient();
+
+  const { data: batches, error } = await supabase
+    .from("jt_upload_batches")
+    .select(
+      "id, uploaded_at, completed_at, file_name, row_count, submission_date_min, submission_date_max, stores, backfilled, uploaded_by_employee:employees(full_name)"
+    )
+    .order("uploaded_at", { ascending: false })
+    .limit(10);
+
+  if (error) {
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+
+  // The true "continue from" marker: the newest parcel in the table, which may
+  // be newer than the last file's max if an earlier file overlapped it.
+  const { data: newest } = await supabase
+    .from("jt_deliveries")
+    .select("submission_date")
+    .not("submission_date", "is", null)
+    .order("submission_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  return Response.json({
+    batches: (batches || []).map(({ uploaded_by_employee, ...b }) => {
+      // PostgREST types a to-one embed as an array; unwrap either shape.
+      const uploader = Array.isArray(uploaded_by_employee)
+        ? uploaded_by_employee[0]
+        : uploaded_by_employee;
+      return { ...b, uploaded_by_name: uploader?.full_name ?? null };
+    }),
+    latest_submission_date: newest?.submission_date ?? null,
   });
 }
 

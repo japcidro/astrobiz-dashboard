@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
-import { Upload, RefreshCw, CheckCircle, AlertCircle, FileSpreadsheet } from "lucide-react";
-import type { JtUploadResult } from "@/lib/profit/types";
+import { useState, useRef, useCallback, useEffect } from "react";
+import { Upload, RefreshCw, CheckCircle, AlertCircle, FileSpreadsheet, History, ArrowRight } from "lucide-react";
+import type { JtUploadResult, JtUploadBatch } from "@/lib/profit/types";
 
 const COLUMN_MAP: Record<string, string> = {
   "Waybill Number": "waybill",
@@ -26,6 +26,66 @@ interface ParsedPreview {
   rowCount: number;
   detectedStores: string[];
   rows: Record<string, unknown>[];
+  fileName: string;
+  submissionFrom: string | null;
+  submissionTo: string | null;
+}
+
+/**
+ * J&T "Submission Time" arrives as either an Excel serial number or a
+ * "YYYY-MM-DD HH:mm:ss" string. Mirror the server's parseJtDate so the preview
+ * shows the same range the history will record.
+ */
+function parseSubmissionTime(value: unknown): Date | null {
+  if (value == null || value === "") return null;
+  if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
+  if (typeof value === "number") {
+    const d = new Date(new Date(1899, 11, 30).getTime() + value * 86400000);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const str = String(value).trim();
+  if (!str || str === "NaN" || str === "--") return null;
+  const d = new Date(
+    str.replace(" ", "T") + (str.includes("+") || str.includes("Z") ? "" : "+08:00")
+  );
+  if (!isNaN(d.getTime())) return d;
+  const d2 = new Date(str);
+  return isNaN(d2.getTime()) ? null : d2;
+}
+
+/** "Aug 23, 2026" in PHT — J&T dates are always Philippine time. */
+function formatPhDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("en-PH", {
+    timeZone: "Asia/Manila",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+/** "Aug 24, 10:05 PM" in PHT. */
+function formatPhDateTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("en-PH", {
+    timeZone: "Asia/Manila",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+/** "2 hours ago" / "3 days ago" — how stale the last upload is. */
+function formatAgo(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
 }
 
 export function JtUploader() {
@@ -35,7 +95,29 @@ export function JtUploader() {
   const [preview, setPreview] = useState<ParsedPreview | null>(null);
   const [result, setResult] = useState<JtUploadResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [history, setHistory] = useState<JtUploadBatch[]>([]);
+  const [latestSubmission, setLatestSubmission] = useState<string | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [showAllHistory, setShowAllHistory] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const res = await fetch("/api/profit/jt-upload", { cache: "no-store" });
+      if (!res.ok) return;
+      const json = await res.json();
+      setHistory(json.batches || []);
+      setLatestSubmission(json.latest_submission_date ?? null);
+    } catch {
+      // Non-fatal — the uploader still works without the history panel.
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
 
   const processFile = useCallback(async (file: File) => {
     setParsing(true);
@@ -74,10 +156,25 @@ export function JtUploader() {
         }
       }
 
+      // Submission range of THIS file — shown before uploading so you can
+      // confirm it picks up where the last one left off.
+      let minSubmit: number | null = null;
+      let maxSubmit: number | null = null;
+      for (const row of mappedRows) {
+        const d = parseSubmissionTime(row.submission_time);
+        if (!d) continue;
+        const t = d.getTime();
+        if (minSubmit === null || t < minSubmit) minSubmit = t;
+        if (maxSubmit === null || t > maxSubmit) maxSubmit = t;
+      }
+
       setPreview({
         rowCount: mappedRows.length,
         detectedStores: Array.from(storeSet).sort(),
         rows: mappedRows,
+        fileName: file.name,
+        submissionFrom: minSubmit === null ? null : new Date(minSubmit).toISOString(),
+        submissionTo: maxSubmit === null ? null : new Date(maxSubmit).toISOString(),
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to parse file");
@@ -111,6 +208,8 @@ export function JtUploader() {
       // Upload in batches of 100 from the client to avoid Vercel timeout
       const BATCH_SIZE = 100;
       const allRows = preview.rows;
+      // One id for the whole file — the server accumulates the chunks under it.
+      const batchId = crypto.randomUUID();
       let totalInserted = 0;
       let totalProtected = 0;
       const allErrors: string[] = [];
@@ -124,7 +223,11 @@ export function JtUploader() {
         const res = await fetch("/api/profit/jt-upload", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rows: batch }),
+          body: JSON.stringify({
+            rows: batch,
+            batch_id: batchId,
+            file_name: preview.fileName,
+          }),
         });
 
         const contentType = res.headers.get("content-type") || "";
@@ -149,6 +252,7 @@ export function JtUploader() {
       });
       setPreview(null);
       setUploadProgress("");
+      loadHistory();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to upload");
       setUploadProgress("");
@@ -191,6 +295,93 @@ export function JtUploader() {
             <span className="text-yellow-300 ml-2">
               ({result.errors.length} errors)
             </span>
+          )}
+        </div>
+      )}
+
+      {/* Last upload — where to continue from */}
+      {!historyLoading && (
+        <div className="bg-gray-900/40 border border-gray-700/50 rounded-lg p-4">
+          {history.length === 0 ? (
+            <p className="text-sm text-gray-500">
+              Wala pang naitalang upload. Yung susunod mong i-upload ang unang mata-track dito.
+            </p>
+          ) : (
+            <>
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="flex items-center gap-2">
+                  <History size={15} className="text-gray-400" />
+                  <span className="text-sm font-medium text-white">Last upload</span>
+                  <span className="text-xs text-gray-500">
+                    {formatAgo(history[0].uploaded_at)}
+                  </span>
+                </div>
+                {history.length > 1 && (
+                  <button
+                    onClick={() => setShowAllHistory((v) => !v)}
+                    className="text-xs text-gray-400 hover:text-white transition-colors cursor-pointer"
+                  >
+                    {showAllHistory ? "Hide" : `View last ${history.length}`}
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                <div>
+                  <p className="text-xs text-gray-500 mb-0.5">Kailan</p>
+                  <p className="text-white font-medium">
+                    {formatPhDateTime(history[0].uploaded_at)}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {history[0].row_count.toLocaleString()} parcels
+                    {history[0].uploaded_by_name ? ` · ${history[0].uploaded_by_name}` : ""}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-0.5">Sakop na submission dates</p>
+                  <p className="text-white font-medium">
+                    {formatPhDate(history[0].submission_date_min)}
+                    {" – "}
+                    {formatPhDate(history[0].submission_date_max)}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5 truncate">
+                    {history[0].file_name ||
+                      (history[0].backfilled ? "filename not recorded" : "—")}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 mb-0.5">Ituloy mo mula</p>
+                  <p className="text-emerald-300 font-medium flex items-center gap-1.5">
+                    <ArrowRight size={13} />
+                    {formatPhDate(latestSubmission)}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    pinakabagong parcel sa database
+                  </p>
+                </div>
+              </div>
+
+              {showAllHistory && history.length > 1 && (
+                <div className="mt-4 pt-3 border-t border-gray-700/50 space-y-1.5">
+                  {history.slice(1).map((b) => (
+                    <div
+                      key={b.id}
+                      className="flex items-center justify-between gap-3 text-xs text-gray-400"
+                    >
+                      <span className="text-gray-300 whitespace-nowrap">
+                        {formatPhDateTime(b.uploaded_at)}
+                      </span>
+                      <span className="whitespace-nowrap">
+                        {formatPhDate(b.submission_date_min)} – {formatPhDate(b.submission_date_max)}
+                      </span>
+                      <span className="text-gray-500 whitespace-nowrap">
+                        {b.row_count.toLocaleString()} parcels
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -249,6 +440,14 @@ export function JtUploader() {
                 {preview.detectedStores.length > 0
                   ? preview.detectedStores.join(", ")
                   : "None detected"}
+              </span>
+            </div>
+            <div className="col-span-2">
+              <span className="text-gray-400">Submission dates sa file:</span>{" "}
+              <span className="text-white font-medium">
+                {preview.submissionFrom || preview.submissionTo
+                  ? `${formatPhDate(preview.submissionFrom)} – ${formatPhDate(preview.submissionTo)}`
+                  : "Walang mabasang Submission Time"}
               </span>
             </div>
           </div>

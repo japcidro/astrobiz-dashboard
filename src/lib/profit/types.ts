@@ -77,6 +77,21 @@ export type ProfitDateFilter =
   | "last_90d"
   | "custom";
 
+/** One uploaded J&T .xlsx file, as recorded in jt_upload_batches. */
+export interface JtUploadBatch {
+  id: string;
+  uploaded_at: string;
+  completed_at: string | null;
+  file_name: string | null;
+  row_count: number;
+  submission_date_min: string | null;
+  submission_date_max: string | null;
+  stores: string[];
+  /** Reconstructed from jt_deliveries.uploaded_at — no file_name or uploader. */
+  backfilled: boolean;
+  uploaded_by_name: string | null;
+}
+
 export interface JtUploadResult {
   inserted: number;
   updated: number;
