@@ -1,5 +1,6 @@
 import { Layers, TrendingUp, Truck, RotateCcw, ShoppingCart, Target } from "lucide-react";
 import type { ProfitSummary } from "@/lib/profit/types";
+import { formatOrderCount } from "@/lib/profit/format";
 
 interface Props {
   summary: ProfitSummary;
@@ -34,7 +35,7 @@ export function ProfitSummaryCards({
     {
       label: "AOV",
       value: formatCurrency(summary.aov),
-      subtitle: `${summary.order_count.toLocaleString()} orders`,
+      subtitle: `${formatOrderCount(summary.order_count)} orders`,
       subtitleColor: "text-gray-500",
       icon: <ShoppingCart size={20} className="text-purple-400" />,
       bg: "bg-purple-600/20",

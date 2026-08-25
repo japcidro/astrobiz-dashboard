@@ -933,9 +933,11 @@ export async function GET(request: Request) {
     daily.push({
       date,
       revenue: roundCurrency(row.revenue),
-      // Void-adjusted counts are fractional expected values; round only here,
-      // at the display boundary, so the maths upstream stays exact.
-      order_count: Math.round(row.order_count),
+      // Stays fractional. This is the expected number of orders that survive
+      // confirmation, and it's the divisor behind both AOV and CPP — rounding
+      // it here made the summary card divide by 4 while this row divided by
+      // 3.5, so one day reported two different AOVs. Rounded at render only.
+      order_count: row.order_count,
       cogs: roundCurrency(row.cogs),
       ad_spend: roundCurrency(row.ad_spend),
       shipping: roundCurrency(row.shipping),

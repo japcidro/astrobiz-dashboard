@@ -1,5 +1,6 @@
 import { ChevronUp, ChevronDown } from "lucide-react";
 import type { DailyPnlRow } from "@/lib/profit/types";
+import { formatOrderCount } from "@/lib/profit/format";
 
 interface Props {
   rows: DailyPnlRow[];
@@ -41,7 +42,7 @@ function renderCell(key: string, row: DailyPnlRow) {
     case "date":
       return formatDate(row.date);
     case "order_count":
-      return row.order_count.toLocaleString("en-PH");
+      return formatOrderCount(row.order_count);
     case "revenue":
       return (
         <span>

@@ -15,6 +15,7 @@ import {
   SETTLEMENT_WINDOW_DAYS,
 } from "../formulas";
 import { getProvinceCutoff, classifyJtDelivery } from "../province-tiers";
+import { formatOrderCount } from "../format";
 import {
   calculateVoidAdjustmentFactor,
   settledFractionForAge,
@@ -902,5 +903,81 @@ describe("AOV and CPP", () => {
   it("never divides by zero orders", () => {
     expect(calculateAov(5000, 0)).toBe(0);
     expect(calculateCpp(5000, 0)).toBe(0);
+  });
+});
+
+// ============================================================
+// AOV / CPP CONSISTENCY (summary card vs daily row)
+// ============================================================
+describe("AOV and CPP agree wherever they are computed", () => {
+  // The void adjustment leaves a fractional order count: 4 gross orders at
+  // FOLIQ's 12.5% expected cancellation rate is 3.5 expected to survive.
+  // Rounding that to 4 in one place and not the other made the same day
+  // report AOV 2,816.88 on the summary card and 3,217.50 in the table.
+  const revenue = 11_267.52;
+  const adSpend = 1_908.82;
+  const expectedOrders = 3.5;
+
+  it("uses the fractional expected count, not a rounded one", () => {
+    expect(calculateAov(revenue, expectedOrders)).toBeCloseTo(3219.29, 2);
+    expect(calculateCpp(adSpend, expectedOrders)).toBeCloseTo(545.38, 2);
+    // The rounded-count answers are the bug, and must NOT come back.
+    expect(calculateAov(revenue, Math.round(expectedOrders))).not.toBeCloseTo(
+      calculateAov(revenue, expectedOrders),
+      2
+    );
+  });
+
+  it("summing daily rows reproduces the summary figure exactly", () => {
+    // Two days, each void-adjusted to a fraction.
+    const days = [
+      { revenue: 11_267.52, adSpend: 1_908.82, orders: 3.5 },
+      { revenue: 20_400.0, adSpend: 4_100.0, orders: 6.25 },
+    ];
+    const totalRevenue = days.reduce((s, d) => s + d.revenue, 0);
+    const totalAd = days.reduce((s, d) => s + d.adSpend, 0);
+    const totalOrders = days.reduce((s, d) => s + d.orders, 0);
+
+    // Whole-period AOV must equal revenue/orders on the same basis the rows use.
+    expect(calculateAov(totalRevenue, totalOrders)).toBeCloseTo(
+      totalRevenue / 9.75,
+      6
+    );
+    expect(calculateCpp(totalAd, totalOrders)).toBeCloseTo(totalAd / 9.75, 6);
+  });
+
+  it("AOV is unchanged by the void adjustment itself", () => {
+    // Revenue and order count both scale by the same factor, so the average
+    // order value must not move — only CPP should, because ad spend does not
+    // shrink when a lead is deleted.
+    const grossRevenue = 12_877.17;
+    const grossOrders = 4;
+    const factor = 0.875;
+    expect(
+      calculateAov(grossRevenue * factor, grossOrders * factor)
+    ).toBeCloseTo(calculateAov(grossRevenue, grossOrders), 6);
+    expect(calculateCpp(adSpend, grossOrders * factor)).toBeGreaterThan(
+      calculateCpp(adSpend, grossOrders)
+    );
+  });
+});
+
+describe("formatOrderCount", () => {
+  it("shows the fraction so revenue / orders reconciles with the AOV shown", () => {
+    expect(formatOrderCount(3.5)).toBe("3.5");
+    expect(formatOrderCount(6.25)).toBe("6.3");
+  });
+
+  it("renders whole counts plainly", () => {
+    expect(formatOrderCount(4)).toBe("4");
+    expect(formatOrderCount(4.01)).toBe("4");
+  });
+
+  it("drops the fraction once it is noise at scale", () => {
+    expect(formatOrderCount(1404.3)).toBe("1,404");
+  });
+
+  it("survives rubbish input", () => {
+    expect(formatOrderCount(NaN)).toBe("0");
   });
 });
