@@ -15,8 +15,10 @@ const COLUMNS: { key: string; label: string }[] = [
   { key: "order_count", label: "Orders" },
   { key: "cogs", label: "COGS" },
   { key: "ad_spend", label: "Ad Spend" },
-  { key: "shipping", label: "Shipping (PROJECTED)" },
+  { key: "shipping", label: "Shipping" },
   { key: "returns_value", label: "Returns" },
+  { key: "aov", label: "AOV" },
+  { key: "cpp", label: "CPP" },
   { key: "net_profit", label: "Net Profit" },
   { key: "margin_pct", label: "Margin %" },
 ];
@@ -41,8 +43,23 @@ function renderCell(key: string, row: DailyPnlRow) {
     case "order_count":
       return row.order_count.toLocaleString("en-PH");
     case "revenue":
+      return (
+        <span>
+          {formatCurrency(row.revenue)}
+          {row.void_adjusted && (
+            <span
+              className="text-yellow-400 text-xs ml-1.5"
+              title="Revenue held back for cancellations that haven't landed yet — unconfirmed leads are deleted after 3+ days"
+            >
+              (adj)
+            </span>
+          )}
+        </span>
+      );
     case "cogs":
     case "ad_spend":
+    case "aov":
+    case "cpp":
       return formatCurrency(row[key]);
     case "returns_value":
       return (
@@ -57,8 +74,16 @@ function renderCell(key: string, row: DailyPnlRow) {
       );
     case "shipping":
       return (
-        <span className="text-yellow-400">
+        <span className={row.shipping_projected ? "text-yellow-400" : ""}>
           {formatCurrency(row.shipping)}
+          {row.shipping_projected && (
+            <span
+              className="text-xs ml-1.5"
+              title="Some of this day's orders have no J&T parcel on file yet — the gap is estimated at the store's average fee"
+            >
+              (est)
+            </span>
+          )}
         </span>
       );
     case "net_profit":

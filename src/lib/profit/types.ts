@@ -51,8 +51,12 @@ export interface DailyPnlRow {
   returns_value: number;
   net_profit: number;
   margin_pct: number;
+  aov: number;
+  cpp: number;
   shipping_projected: boolean;
   returns_projected: boolean;
+  /** Revenue was held back for cancellations that haven't landed yet. */
+  void_adjusted: boolean;
   in_transit_count: number;
 }
 
@@ -65,6 +69,10 @@ export interface ProfitSummary {
   returns_value: number;
   net_profit: number;
   margin_pct: number;
+  /** Average order value — revenue per surviving order. */
+  aov: number;
+  /** Cost per purchase — ad spend per surviving order. Deleted leads raise it. */
+  cpp: number;
 }
 
 export type ProfitDateFilter =

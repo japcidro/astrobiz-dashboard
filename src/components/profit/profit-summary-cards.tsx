@@ -1,13 +1,21 @@
-import { Layers, TrendingUp, Truck, RotateCcw } from "lucide-react";
+import { Layers, TrendingUp, Truck, RotateCcw, ShoppingCart, Target } from "lucide-react";
 import type { ProfitSummary } from "@/lib/profit/types";
 
 interface Props {
   summary: ProfitSummary;
   loading: boolean;
   returnsProjected?: boolean;
+  shippingProjected?: boolean;
+  voidAdjusted?: boolean;
 }
 
-export function ProfitSummaryCards({ summary, loading, returnsProjected }: Props) {
+export function ProfitSummaryCards({
+  summary,
+  loading,
+  returnsProjected,
+  shippingProjected,
+  voidAdjusted,
+}: Props) {
   const formatCurrency = (val: number) =>
     `₱${val.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -15,10 +23,30 @@ export function ProfitSummaryCards({ summary, loading, returnsProjected }: Props
 
   const metrics = [
     {
-      label: "Revenue",
+      label: voidAdjusted ? "Revenue (ADJUSTED)" : "Revenue",
       value: formatCurrency(summary.revenue),
+      subtitle: voidAdjusted ? "less expected cancellations" : undefined,
+      subtitleColor: "text-yellow-400",
       icon: <span className="text-green-400 font-bold text-lg leading-none">₱</span>,
       bg: "bg-green-600/20",
+      accent: voidAdjusted ? "border-yellow-700/50" : "",
+    },
+    {
+      label: "AOV",
+      value: formatCurrency(summary.aov),
+      subtitle: `${summary.order_count.toLocaleString()} orders`,
+      subtitleColor: "text-gray-500",
+      icon: <ShoppingCart size={20} className="text-purple-400" />,
+      bg: "bg-purple-600/20",
+      accent: "",
+    },
+    {
+      label: "CPP",
+      value: formatCurrency(summary.cpp),
+      subtitle: "ad spend per order",
+      subtitleColor: "text-gray-500",
+      icon: <Target size={20} className="text-cyan-400" />,
+      bg: "bg-cyan-600/20",
       accent: "",
     },
     {
@@ -36,13 +64,20 @@ export function ProfitSummaryCards({ summary, loading, returnsProjected }: Props
       accent: "",
     },
     {
-      label: "Shipping (PROJECTED)",
+      label: shippingProjected ? "Shipping (PART PROJECTED)" : "Shipping",
       value: formatCurrency(summary.shipping),
-      subtitle: "12% of revenue",
-      subtitleColor: "text-yellow-400",
-      icon: <Truck size={20} className="text-yellow-400" />,
-      bg: "bg-yellow-600/20",
-      accent: "border-yellow-700/50",
+      subtitle: shippingProjected
+        ? "actual J&T fee + estimate for unshipped orders"
+        : "actual J&T fee per parcel",
+      subtitleColor: shippingProjected ? "text-yellow-400" : "text-gray-500",
+      icon: (
+        <Truck
+          size={20}
+          className={shippingProjected ? "text-yellow-400" : "text-gray-400"}
+        />
+      ),
+      bg: shippingProjected ? "bg-yellow-600/20" : "bg-gray-600/20",
+      accent: shippingProjected ? "border-yellow-700/50" : "",
     },
     {
       label: returnsProjected ? "Returns (PROJECTED)" : "Returns",

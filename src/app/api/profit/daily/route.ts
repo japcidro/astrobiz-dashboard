@@ -6,8 +6,12 @@ import {
   calculateNetProfit,
   calculateMarginPct,
   calculateUnsettledOrderProjection,
+  calculateVoidAdjustmentFactor,
+  settledFractionForAge,
+  calculateShippingWithProjection,
+  calculateAov,
+  calculateCpp,
   roundCurrency,
-  SHIPPING_RATE,
   RTS_WORST_CASE_RATE,
   RTS_MIN_DELIVERED,
   SETTLEMENT_WINDOW_DAYS,
@@ -406,8 +410,86 @@ export async function GET(request: Request) {
     })
   );
 
+  // Today in PHT, used for per-date age calc. Computed independently from
+  // computeDateRange so backfills (custom date_from/date_to in the past)
+  // still measure age relative to NOW, not the requested period's end.
+  const phNowForAge = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const todayPhtStr = `${phNowForAge.getUTCFullYear()}-${String(
+    phNowForAge.getUTCMonth() + 1
+  ).padStart(2, "0")}-${String(phNowForAge.getUTCDate()).padStart(2, "0")}`;
+  const todayPhtMs = new Date(`${todayPhtStr}T00:00:00+08:00`).getTime();
+  function ageDaysForDate(dateStr: string): number {
+    const d = new Date(`${dateStr}T00:00:00+08:00`).getTime();
+    return Math.floor((todayPhtMs - d) / (1000 * 60 * 60 * 24));
+  }
+
+  // --- 3b. Void adjustment: discount revenue that is going to be cancelled ---
+  //
+  // Orders aren't cancelled when they're placed. An unconfirmed lead is deleted
+  // 3+ days later, so a young date still counts revenue that will disappear —
+  // and its COGS and its shipping with it. Left alone this overstated net
+  // profit on the freshest date by 14% (I LOVE PATCHES) to 41% (FOLIQ).
+  //
+  // Scale revenue, order count and COGS by the store's measured void rate and
+  // how much of that cancellation is still outstanding at this date's age.
+  // Applied BEFORE the RTS projection below, which reads the order count.
+  const voidAdjustedDates = new Set<string>();
+  try {
+    const { data: voidStats } = await supabase
+      .from("store_void_stats")
+      .select("store_name, void_rate, settlement_curve");
+
+    const statsByStore = new Map<string, { rate: number; curve: number[] }>();
+    for (const row of voidStats || []) {
+      statsByStore.set(String(row.store_name).toUpperCase(), {
+        rate: Number(row.void_rate) || 0,
+        curve: (row.settlement_curve || []).map(Number),
+      });
+    }
+
+    const adjustedByStore = new Map<string, number>();
+    for (const key of Array.from(revenueByDateStore.keys())) {
+      const [dateStr, storeName] = key.split("::");
+      const stat = statsByStore.get(storeName);
+      if (!stat || stat.rate <= 0) continue;
+
+      const factor = calculateVoidAdjustmentFactor(
+        stat.rate,
+        settledFractionForAge(stat.curve, ageDaysForDate(dateStr))
+      );
+      if (factor >= 1) continue;
+
+      const revenue = revenueByDateStore.get(key) || 0;
+      adjustedByStore.set(
+        storeName,
+        (adjustedByStore.get(storeName) || 0) + revenue * (1 - factor)
+      );
+
+      revenueByDateStore.set(key, revenue * factor);
+      cogsByDateStore.set(key, (cogsByDateStore.get(key) || 0) * factor);
+      // Fractional orders are correct here — this is an expected value, and
+      // rounding each date would bias the RTS projection that consumes it.
+      orderCountByDateStore.set(key, (orderCountByDateStore.get(key) || 0) * factor);
+      voidAdjustedDates.add(dateStr);
+    }
+
+    for (const [storeName, amount] of adjustedByStore) {
+      if (amount < 1) continue;
+      const stat = statsByStore.get(storeName)!;
+      warnings.push(
+        `${storeName}: -PHP ${Math.round(amount).toLocaleString()} revenue held back for expected cancellations (${(stat.rate * 100).toFixed(1)}% void rate)`
+      );
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    warnings.push(`Void adjustment skipped: ${message}`);
+  }
+
   // --- 4. Fetch Facebook ad spend (daily breakdown) ---
   const adSpendByDateStore = new Map<string, number>();
+  // Parcels seen per (date, store) — drives the shipping projection for
+  // orders that haven't been picked-packed or uploaded yet.
+  const parcelCountByDateStore = new Map<string, number>();
 
   try {
     const { data: tokenSetting } = await supabase
@@ -559,23 +641,29 @@ export async function GET(request: Request) {
 
       const key = `${dateStr}::${(row.store_name || "UNKNOWN").toUpperCase()}`;
 
-      if (row.is_delivered) {
-        shippingByDateStore.set(
-          key,
-          (shippingByDateStore.get(key) || 0) +
-            (parseFloat(String(row.shipping_cost ?? 0)) || 0)
-        );
-      }
+      // Every parcel costs its own zone-based J&T fee — delivered, returned or
+      // still moving. Previously only delivered parcels were counted here and
+      // the total was thrown away downstream in favour of a flat 12%.
+      shippingByDateStore.set(
+        key,
+        (shippingByDateStore.get(key) || 0) +
+          (parseFloat(String(row.shipping_cost ?? 0)) || 0)
+      );
+      parcelCountByDateStore.set(key, (parcelCountByDateStore.get(key) || 0) + 1);
+
       if (row.is_returned) {
-        // Returns cost = lost revenue (COD amount customer didn't pay) + wasted shipping
+        // Returns cost = the COD the customer never paid. NOT the shipping —
+        // J&T bills one way only (delivered parcels average PHP 101.61,
+        // returned PHP 102.36: the same outbound leg, no return charge), and
+        // that fee is already in shippingByDateStore above. Adding it here too
+        // was double-counting the outbound leg.
         // Use cod_amount (actual selling price) over item_value (declared/insured value)
         const codAmount = parseFloat(String(row.cod_amount ?? 0)) || 0;
         const itemValue = parseFloat(String(row.item_value ?? 0)) || 0;
         const lostRevenue = codAmount > 0 ? codAmount : itemValue;
-        const shipCost = parseFloat(String(row.shipping_cost ?? 0)) || 0;
         returnsByDateStore.set(
           key,
-          (returnsByDateStore.get(key) || 0) + lostRevenue + shipCost
+          (returnsByDateStore.get(key) || 0) + lostRevenue
         );
       }
       if (row.classification === "In Transit" || row.classification === "Pending") {
@@ -601,19 +689,11 @@ export async function GET(request: Request) {
   // settled by then). Stores with < 200 settled parcels still use the 25%
   // worst-case rule at the store level — the rate isn't trustworthy yet.
   const returnsProjectedDates = new Set<string>();
-
-  // Today in PHT, used for per-date age calc. Computed independently from
-  // computeDateRange so backfills (custom date_from/date_to in the past)
-  // still measure age relative to NOW, not the requested period's end.
-  const phNowForAge = new Date(Date.now() + 8 * 60 * 60 * 1000);
-  const todayPhtStr = `${phNowForAge.getUTCFullYear()}-${String(
-    phNowForAge.getUTCMonth() + 1
-  ).padStart(2, "0")}-${String(phNowForAge.getUTCDate()).padStart(2, "0")}`;
-  const todayPhtMs = new Date(`${todayPhtStr}T00:00:00+08:00`).getTime();
-  function ageDaysForDate(dateStr: string): number {
-    const d = new Date(`${dateStr}T00:00:00+08:00`).getTime();
-    return Math.floor((todayPhtMs - d) / (1000 * 60 * 60 * 24));
-  }
+  const shippingProjectedDates = new Set<string>();
+  // Blended actual J&T fee per parcel, per store. The fee is zone-based
+  // (PHP 78 Metro Manila -> PHP 259 far provinces), so each store's real mix
+  // gives a far better estimate for unshipped orders than any flat rate.
+  const storeAvgShipping = new Map<string, number>();
 
   try {
     // No filter here at all — was always silently capped to 1000 rows by
@@ -636,20 +716,31 @@ export async function GET(request: Request) {
         returned: number;
         totalReturnCod: number;
         totalReturnShip: number;
+        parcels: number;
+        totalShip: number;
       }>();
 
       for (const row of allJtRows) {
         const store = (row.store_name || "UNKNOWN").toUpperCase();
         if (!storeStats.has(store)) {
-          storeStats.set(store, { delivered: 0, returned: 0, totalReturnCod: 0, totalReturnShip: 0 });
+          storeStats.set(store, {
+            delivered: 0, returned: 0, totalReturnCod: 0, totalReturnShip: 0,
+            parcels: 0, totalShip: 0,
+          });
         }
         const stats = storeStats.get(store)!;
+        stats.parcels++;
+        stats.totalShip += parseFloat(String(row.shipping_cost ?? 0)) || 0;
         if (row.is_delivered) stats.delivered++;
         if (row.is_returned) {
           stats.returned++;
           stats.totalReturnCod += parseFloat(String(row.cod_amount ?? 0)) || 0;
           stats.totalReturnShip += parseFloat(String(row.shipping_cost ?? 0)) || 0;
         }
+      }
+
+      for (const [store, st] of storeStats) {
+        if (st.parcels > 0) storeAvgShipping.set(store, st.totalShip / st.parcels);
       }
 
       const allStoresInData = new Set<string>();
@@ -731,6 +822,28 @@ export async function GET(request: Request) {
     // Non-critical — continue with actual returns data
   }
 
+  // --- 5c. Shipping: real per-parcel J&T fee, projected for unshipped orders --
+  //
+  // Every parcel carries its own zone-based fee, so no flat rate is needed.
+  // But pick-pack lags the order and J&T files are uploaded in batches, so the
+  // newest ~3 days only have parcels for about 60% of their orders. Charging
+  // only what's on file would report almost no shipping cost on those days and
+  // inflate profit — the same trap the void and RTS projections exist to avoid.
+  for (const key of Array.from(revenueByDateStore.keys())) {
+    const [dateStr, storeName] = key.split("::");
+    const orderCount = orderCountByDateStore.get(key) || 0;
+    if (orderCount <= 0) continue;
+
+    const { shipping, isProjected } = calculateShippingWithProjection(
+      shippingByDateStore.get(key) || 0,
+      parcelCountByDateStore.get(key) || 0,
+      orderCount,
+      storeAvgShipping.get(storeName) || 0
+    );
+    shippingByDateStore.set(key, shipping);
+    if (isProjected) shippingProjectedDates.add(dateStr);
+  }
+
   // --- 6. Aggregate per day ---
   const allDates = new Set<string>();
   const allStoreNames = new Set<string>();
@@ -806,17 +919,11 @@ export async function GET(request: Request) {
     if (row) row.returns_value += value;
   }
 
-  // --- 6b. Shipping: always use 12% of revenue as projected estimate ---
-  for (const [, row] of dailyMap) {
-    if (row.revenue > 0) {
-      row.shipping = row.revenue * SHIPPING_RATE;
-    }
-  }
-
   // Build final daily array
   const daily: DailyPnlRow[] = [];
   for (const [date, row] of dailyMap) {
-    const shippingProjected = true; // always projected (12% of revenue)
+    // Only flagged when some of the day's orders still had no parcel on file.
+    const shippingProjected = shippingProjectedDates.has(date);
     const returnsProjected = returnsProjectedDates.has(date);
     const netProfit = calculateNetProfit(
       row.revenue, row.cogs, row.ad_spend, row.shipping, row.returns_value
@@ -826,15 +933,20 @@ export async function GET(request: Request) {
     daily.push({
       date,
       revenue: roundCurrency(row.revenue),
-      order_count: row.order_count,
+      // Void-adjusted counts are fractional expected values; round only here,
+      // at the display boundary, so the maths upstream stays exact.
+      order_count: Math.round(row.order_count),
       cogs: roundCurrency(row.cogs),
       ad_spend: roundCurrency(row.ad_spend),
       shipping: roundCurrency(row.shipping),
       returns_value: roundCurrency(row.returns_value),
       net_profit: roundCurrency(netProfit),
       margin_pct: marginPct,
+      aov: roundCurrency(calculateAov(row.revenue, row.order_count)),
+      cpp: roundCurrency(calculateCpp(row.ad_spend, row.order_count)),
       shipping_projected: shippingProjected,
       returns_projected: returnsProjected,
+      void_adjusted: voidAdjustedDates.has(date),
       in_transit_count: inTransitByDate.get(date) || 0,
     });
   }
@@ -852,6 +964,8 @@ export async function GET(request: Request) {
     returns_value: 0,
     net_profit: 0,
     margin_pct: 0,
+    aov: 0,
+    cpp: 0,
   };
 
   for (const row of daily) {
@@ -875,6 +989,8 @@ export async function GET(request: Request) {
   summary.shipping = roundCurrency(summary.shipping);
   summary.returns_value = roundCurrency(summary.returns_value);
   summary.net_profit = roundCurrency(summary.net_profit);
+  summary.aov = roundCurrency(calculateAov(summary.revenue, summary.order_count));
+  summary.cpp = roundCurrency(calculateCpp(summary.ad_spend, summary.order_count));
 
   const responseData = {
     summary,

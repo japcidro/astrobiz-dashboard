@@ -29,6 +29,10 @@
       "schedule": "0 2 * * *"
     },
     {
+      "path": "/api/cron/refresh-void-stats",
+      "schedule": "0 3 * * *"
+    },
+    {
       "path": "/api/cron/detect-alerts",
       "schedule": "*/30 * * * *"
     },

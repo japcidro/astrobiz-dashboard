@@ -3,7 +3,19 @@
  * These are the EXACT same calculations used in /api/profit/daily.
  */
 
+/**
+ * Legacy flat shipping estimate. Superseded by the real per-parcel J&T fee —
+ * kept only so historical comparisons and tests can still reference it.
+ * @deprecated use calculateShippingWithProjection
+ */
 export const SHIPPING_RATE = 0.12; // 12% of revenue
+
+/**
+ * How many days of order age the void-settlement curve covers. Measured from
+ * real data: cancellations are essentially complete by day 10-14 across every
+ * store, so past this a date's revenue is taken as final.
+ */
+export const VOID_SETTLEMENT_DAYS = 14;
 export const RTS_WORST_CASE_RATE = 0.25; // 25% worst case
 export const RTS_MIN_DELIVERED = 200; // threshold to use actual rate
 // Number of days a parcel needs before its J&T outcome is "settled enough"
@@ -201,4 +213,94 @@ export function calculateUnsettledOrderProjection(
  */
 export function roundCurrency(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+/**
+ * Orders are not cancelled when they are placed. A lead that never answers the
+ * confirmation call gets deleted 3+ days later, so a young date still counts
+ * revenue that is going to disappear. Measured across May-Aug 2026: by the end
+ * of an order's own day essentially none of its cohort's cancellations have
+ * happened yet, half land around day 4, and they are complete by day 10-14.
+ *
+ * Let G be the gross revenue booked on a date, v the share of it eventually
+ * voided, and s(A) the share of that void value already settled at age A:
+ *
+ *   observed R(A) = G * (1 - v * s(A))
+ *   final    R(f) = G * (1 - v)
+ *   =>  R(f) = R(A) * (1 - v) / (1 - v * s(A))
+ *
+ * This returns that multiplier, to be applied to revenue, order count and COGS
+ * alike. 1 means there is nothing left to adjust.
+ */
+export function calculateVoidAdjustmentFactor(
+  voidRate: number,
+  settledFraction: number
+): number {
+  if (!Number.isFinite(voidRate) || voidRate <= 0 || voidRate >= 1) return 1;
+  const s = Math.min(1, Math.max(0, settledFraction));
+  const denominator = 1 - voidRate * s;
+  if (denominator <= 0) return 1;
+  const factor = (1 - voidRate) / denominator;
+  // Can only ever shrink a date — never inflate one.
+  return Math.min(1, Math.max(0, factor));
+}
+
+/**
+ * Read s(A) out of a stored settlement curve, where curve[i] is the share of
+ * void value settled by age i. Ages past the end of the curve are fully settled.
+ */
+export function settledFractionForAge(
+  curve: number[] | null | undefined,
+  ageDays: number
+): number {
+  if (!curve || curve.length === 0) return 1;
+  if (ageDays < 0) return 0;
+  if (ageDays >= curve.length) return 1;
+  const v = curve[ageDays];
+  return Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1;
+}
+
+/**
+ * Shipping for a date = the real J&T fee for every parcel on file, plus the
+ * store's average fee for orders that have no parcel yet.
+ *
+ * The J&T fee is zone-based (PHP 78 to Metro Manila, up to PHP 259 for far
+ * provinces), so the real per-parcel number is meaningfully better than any
+ * flat rate. But J&T files are uploaded in batches and pick-pack lags the
+ * order, so the newest ~3 days only have parcels for about 60% of their
+ * orders. Without the projection those days would show almost no shipping
+ * cost and report inflated profit.
+ */
+export function calculateShippingWithProjection(
+  actualShippingCost: number,
+  parcelCount: number,
+  orderCount: number,
+  avgShippingPerParcel: number
+): { shipping: number; projectedParcels: number; isProjected: boolean } {
+  const missing = Math.max(0, orderCount - parcelCount);
+  const rate = avgShippingPerParcel > 0 ? avgShippingPerParcel : 0;
+  const projected = missing * rate;
+  return {
+    shipping: actualShippingCost + projected,
+    projectedParcels: missing,
+    isProjected: missing > 0 && rate > 0,
+  };
+}
+
+/**
+ * Average order value. Uses the void-adjusted order count, so deleting leads
+ * moves it the way it moves in reality.
+ */
+export function calculateAov(revenue: number, orderCount: number): number {
+  if (orderCount <= 0) return 0;
+  return revenue / orderCount;
+}
+
+/**
+ * Cost per purchase — ad spend divided by orders that survived confirmation.
+ * Deleted leads were paid for but bought nothing, so they raise CPP.
+ */
+export function calculateCpp(adSpend: number, orderCount: number): number {
+  if (orderCount <= 0) return 0;
+  return adSpend / orderCount;
 }

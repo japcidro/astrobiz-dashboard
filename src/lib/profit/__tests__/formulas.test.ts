@@ -16,6 +16,13 @@ import {
 } from "../formulas";
 import { getProvinceCutoff, classifyJtDelivery } from "../province-tiers";
 import {
+  calculateVoidAdjustmentFactor,
+  settledFractionForAge,
+  calculateShippingWithProjection,
+  calculateAov,
+  calculateCpp,
+} from "../formulas";
+import {
   matchAdToStore,
   matchSenderToStore,
   isKnownStore,
@@ -786,5 +793,114 @@ describe("Currency Rounding", () => {
   it("preserves exact values", () => {
     expect(roundCurrency(100.12)).toBe(100.12);
     expect(roundCurrency(0)).toBe(0);
+  });
+});
+
+// ============================================================
+// VOID ADJUSTMENT (late cancellations)
+// ============================================================
+describe("Void adjustment", () => {
+  it("on the order's own day, holds back the store's full void rate", () => {
+    // Nothing settled yet -> discount the whole expected cancellation.
+    expect(calculateVoidAdjustmentFactor(0.084, 0)).toBeCloseTo(0.916, 3);
+    expect(calculateVoidAdjustmentFactor(0.131, 0)).toBeCloseTo(0.869, 3);
+  });
+
+  it("holds back less as the cancellations actually land", () => {
+    const v = 0.084;
+    const d0 = calculateVoidAdjustmentFactor(v, 0);
+    const d3 = calculateVoidAdjustmentFactor(v, 0.42);
+    const d6 = calculateVoidAdjustmentFactor(v, 0.87);
+    expect(d0).toBeLessThan(d3);
+    expect(d3).toBeLessThan(d6);
+    expect(d6).toBeLessThan(1);
+  });
+
+  it("stops adjusting once cancellations are fully settled", () => {
+    expect(calculateVoidAdjustmentFactor(0.084, 1)).toBe(1);
+  });
+
+  it("recovers the true revenue from a partially-settled date", () => {
+    // 100 orders x PHP 1,000 gross, 8.4% will be voided -> PHP 91,600 final.
+    const gross = 100_000;
+    const v = 0.084;
+    for (const settled of [0, 0.25, 0.5, 0.87, 1]) {
+      const observed = gross * (1 - v * settled);
+      const corrected = observed * calculateVoidAdjustmentFactor(v, settled);
+      expect(corrected).toBeCloseTo(gross * (1 - v), 6);
+    }
+  });
+
+  it("never inflates a date and ignores nonsense rates", () => {
+    expect(calculateVoidAdjustmentFactor(0, 0)).toBe(1);
+    expect(calculateVoidAdjustmentFactor(-0.5, 0)).toBe(1);
+    expect(calculateVoidAdjustmentFactor(1.5, 0)).toBe(1);
+    expect(calculateVoidAdjustmentFactor(NaN, 0)).toBe(1);
+    expect(calculateVoidAdjustmentFactor(0.084, 0)).toBeLessThanOrEqual(1);
+  });
+
+  it("reads the settlement curve by age, treating past-the-end as settled", () => {
+    const curve = [0, 0.25, 0.31, 0.42, 0.58, 0.72, 0.87, 0.94, 1];
+    expect(settledFractionForAge(curve, 0)).toBe(0);
+    expect(settledFractionForAge(curve, 3)).toBe(0.42);
+    expect(settledFractionForAge(curve, 99)).toBe(1);
+    expect(settledFractionForAge([], 0)).toBe(1);
+    expect(settledFractionForAge(null, 0)).toBe(1);
+  });
+});
+
+// ============================================================
+// SHIPPING — real per-parcel J&T fee + projection
+// ============================================================
+describe("Shipping with projection", () => {
+  it("uses the real fee when every order already has a parcel", () => {
+    const r = calculateShippingWithProjection(9_777, 100, 100, 97.77);
+    expect(r.shipping).toBe(9_777);
+    expect(r.projectedParcels).toBe(0);
+    expect(r.isProjected).toBe(false);
+  });
+
+  it("fills the gap for orders not shipped yet", () => {
+    // Newest dates only have parcels for ~60% of their orders.
+    const r = calculateShippingWithProjection(6_000, 60, 100, 100);
+    expect(r.shipping).toBe(10_000); // 6,000 actual + 40 x 100 projected
+    expect(r.projectedParcels).toBe(40);
+    expect(r.isProjected).toBe(true);
+  });
+
+  it("charges nothing extra when more parcels exist than orders", () => {
+    // Unlinked parcels land on their submission date and can overshoot.
+    const r = calculateShippingWithProjection(11_000, 110, 100, 100);
+    expect(r.shipping).toBe(11_000);
+    expect(r.projectedParcels).toBe(0);
+  });
+
+  it("cannot invent cost without a rate to project with", () => {
+    const r = calculateShippingWithProjection(0, 0, 50, 0);
+    expect(r.shipping).toBe(0);
+    expect(r.isProjected).toBe(false);
+  });
+});
+
+// ============================================================
+// AOV / CPP
+// ============================================================
+describe("AOV and CPP", () => {
+  it("computes per-order economics", () => {
+    expect(calculateAov(141_000, 100)).toBe(1410);
+    expect(calculateCpp(30_000, 100)).toBe(300);
+  });
+
+  it("deleting leads raises CPP and can move AOV", () => {
+    // 100 orders, 8 deleted. Ad spend was already paid on all 100.
+    const cppBefore = calculateCpp(30_000, 100);
+    const cppAfter = calculateCpp(30_000, 92);
+    expect(cppAfter).toBeGreaterThan(cppBefore);
+    expect(Math.round(cppAfter)).toBe(326);
+  });
+
+  it("never divides by zero orders", () => {
+    expect(calculateAov(5000, 0)).toBe(0);
+    expect(calculateCpp(5000, 0)).toBe(0);
   });
 });

@@ -38,6 +38,8 @@ const defaultSummary: ProfitSummary = {
   returns_value: 0,
   net_profit: 0,
   margin_pct: 0,
+  aov: 0,
+  cpp: 0,
 };
 
 export default function ProfitPage() {
@@ -135,8 +137,11 @@ export default function ProfitPage() {
       returns_value: 0,
       net_profit: 0,
       margin_pct: 0,
+      aov: 0,
+      cpp: 0,
       shipping_projected: false,
       returns_projected: false,
+      void_adjusted: false,
       in_transit_count: 0,
     };
     for (const row of daily) {
@@ -148,11 +153,15 @@ export default function ProfitPage() {
       totals.returns_value += row.returns_value;
       totals.net_profit += row.net_profit;
       totals.in_transit_count += row.in_transit_count;
+      totals.void_adjusted = totals.void_adjusted || row.void_adjusted;
+      totals.shipping_projected = totals.shipping_projected || row.shipping_projected;
     }
     totals.margin_pct =
       totals.revenue > 0
         ? (totals.net_profit / totals.revenue) * 100
         : 0;
+    totals.aov = totals.order_count > 0 ? totals.revenue / totals.order_count : 0;
+    totals.cpp = totals.order_count > 0 ? totals.ad_spend / totals.order_count : 0;
     return totals;
   }, [daily]);
 
@@ -296,6 +305,8 @@ export default function ProfitPage() {
           summary={summary}
           loading={loading}
           returnsProjected={daily.some((r) => r.returns_projected)}
+          shippingProjected={daily.some((r) => r.shipping_projected)}
+          voidAdjusted={daily.some((r) => r.void_adjusted)}
         />
       </div>
 
