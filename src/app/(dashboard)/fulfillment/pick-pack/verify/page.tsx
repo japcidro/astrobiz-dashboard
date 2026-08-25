@@ -7,7 +7,7 @@ import type { VerifyItem, UnfulfilledOrder } from "@/lib/fulfillment/types";
 import { playSuccess, playError, playWarning } from "@/lib/fulfillment/audio";
 import { BarcodeScannerInput } from "@/components/fulfillment/barcode-scanner-input";
 import { ScanFeedback } from "@/components/fulfillment/scan-feedback";
-import { KNOWN_STORES } from "@/lib/profit/store-matching";
+import { ACTIVE_STORES } from "@/lib/profit/store-matching";
 
 type Phase = "scan_order" | "scan_items" | "confirm_sender" | "verified";
 
@@ -489,7 +489,7 @@ export default function VerifyPage() {
               Ano ang nakasulat sa label?
             </label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {KNOWN_STORES.map((store) => {
+              {ACTIVE_STORES.map((store) => {
                 const selected = selectedSender === store;
                 const expected = orderDetails.store_name === store;
                 return (

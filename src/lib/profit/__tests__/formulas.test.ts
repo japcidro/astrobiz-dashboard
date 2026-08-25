@@ -15,7 +15,12 @@ import {
   SETTLEMENT_WINDOW_DAYS,
 } from "../formulas";
 import { getProvinceCutoff, classifyJtDelivery } from "../province-tiers";
-import { matchAdToStore, matchSenderToStore } from "../store-matching";
+import {
+  matchAdToStore,
+  matchSenderToStore,
+  isKnownStore,
+  ACTIVE_STORES,
+} from "../store-matching";
 
 // ============================================================
 // P&L NET PROFIT FORMULA
@@ -574,8 +579,19 @@ describe("Ad Spend Store Attribution", () => {
     expect(matchAdToStore("CAPSULED-NURSERY", "ALL OFF")).toBe("CAPSULED");
   });
 
+  it("campaign with FOLIQ = FOLIQ store", () => {
+    expect(matchAdToStore("FOLIQ-NURSERY", "ALL")).toBe("FOLIQ");
+    expect(matchAdToStore("FOLIQ-SCALING", "ALL")).toBe("FOLIQ");
+  });
+
   it("unrecognized campaign = empty (unattributed)", () => {
     expect(matchAdToStore("RANDOM-CAMPAIGN", "RANDOM-ADSET")).toBe("");
+  });
+
+  it("retired brands are NOT attributed — they have no revenue to offset", () => {
+    expect(matchAdToStore("HIBI-NURSERY", "ALL")).toBe("");
+    expect(matchAdToStore("CBO-HIBI", "")).toBe("");
+    expect(matchAdToStore("SERINA-SCALING", "ALL")).toBe("");
   });
 
   it("unattributed ad spend still counted in total but not per-store", () => {
@@ -604,8 +620,36 @@ describe("J&T Sender → Store Matching", () => {
     expect(matchSenderToStore("CAPSULED OFFICIAL")).toBe("CAPSULED");
   });
 
+  it("FOLIQ sender → FOLIQ", () => {
+    expect(matchSenderToStore("Foliq")).toBe("FOLIQ");
+    expect(matchSenderToStore("FOLIQ OFFICIAL")).toBe("FOLIQ");
+  });
+
+  it("retired brands still normalize so historical parcels stay consistent", () => {
+    expect(matchSenderToStore("Hibi")).toBe("HIBI");
+    expect(matchSenderToStore("Serina")).toBe("SERINA");
+  });
+
   it("unknown sender returns original name (trimmed)", () => {
     expect(matchSenderToStore("  Some Random Seller  ")).toBe("Some Random Seller");
+  });
+});
+
+// ============================================================
+// ACTIVE vs RETIRED STORES
+// ============================================================
+describe("Store roster", () => {
+  it("pickers only offer stores we currently ship for", () => {
+    expect([...ACTIVE_STORES]).toEqual(["I LOVE PATCHES", "CAPSULED", "FOLIQ"]);
+    expect(ACTIVE_STORES).not.toContain("HIBI");
+    expect(ACTIVE_STORES).not.toContain("SERINA");
+  });
+
+  it("retired stores stay recognized so old parcels aren't flagged as unknown", () => {
+    expect(isKnownStore("HIBI")).toBe(true);
+    expect(isKnownStore("SERINA")).toBe(true);
+    expect(isKnownStore("FOLIQ")).toBe(true);
+    expect(isKnownStore("Some Random Seller")).toBe(false);
   });
 });
 
