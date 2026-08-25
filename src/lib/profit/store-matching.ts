@@ -46,6 +46,34 @@ export function isKnownStore(storeName: string | null | undefined): boolean {
 }
 
 /**
+ * J&T redacts the sender name in some exports, leaving the first letters and
+ * asterisks: "I******", "C******". Started appearing in files from May 2026.
+ */
+const MASKED_SENDER_RE = /^([^*]*)\*+$/;
+
+export function isMaskedSenderName(senderName: string): boolean {
+  return MASKED_SENDER_RE.test(senderName.trim());
+}
+
+/**
+ * Recover the store behind a redacted sender name from the letters J&T left
+ * behind. Resolves only when exactly one known store shares that prefix —
+ * a tie means we genuinely can't tell, and guessing would silently file
+ * parcels under the wrong store's RTS rate.
+ */
+function resolveMaskedSender(upperName: string): string {
+  const match = upperName.match(MASKED_SENDER_RE);
+  if (!match) return "";
+  const prefix = match[1].trim();
+  if (!prefix) return ""; // "******" carries no signal at all
+
+  const candidates = (KNOWN_STORES as readonly string[]).filter((store) =>
+    store.startsWith(prefix)
+  );
+  return candidates.length === 1 ? candidates[0] : "";
+}
+
+/**
  * Normalize a J&T sender name to a standard store name.
  * Uses contains-based matching to handle variations like
  * "Ilovepatches", "ILOVEPATCHES", "I Love Patches", etc.
@@ -63,6 +91,10 @@ export function matchSenderToStore(senderName: string): string {
   if (upper.includes("FOLIQ")) return "FOLIQ";
   if (upper.includes("HIBI")) return "HIBI";
   if (upper.includes("SERINA")) return "SERINA";
+
+  // Redacted by J&T — recover it from the surviving prefix. Returns "" when
+  // ambiguous so the caller can fall back to the Shopify order link.
+  if (isMaskedSenderName(upper)) return resolveMaskedSender(upper);
 
   return senderName.trim();
 }

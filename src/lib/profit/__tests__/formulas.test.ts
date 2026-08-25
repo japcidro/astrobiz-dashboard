@@ -19,6 +19,7 @@ import {
   matchAdToStore,
   matchSenderToStore,
   isKnownStore,
+  isMaskedSenderName,
   ACTIVE_STORES,
 } from "../store-matching";
 
@@ -628,6 +629,30 @@ describe("J&T Sender → Store Matching", () => {
   it("retired brands still normalize so historical parcels stay consistent", () => {
     expect(matchSenderToStore("Hibi")).toBe("HIBI");
     expect(matchSenderToStore("Serina")).toBe("SERINA");
+  });
+
+  it("J&T-redacted senders resolve from the surviving prefix", () => {
+    // J&T started masking sender names in exports from May 2026.
+    expect(matchSenderToStore("I******")).toBe("I LOVE PATCHES");
+    expect(matchSenderToStore("C******")).toBe("CAPSULED");
+    expect(matchSenderToStore("F****")).toBe("FOLIQ");
+    expect(matchSenderToStore("I LOVE P*****")).toBe("I LOVE PATCHES");
+  });
+
+  it("an unresolvable mask returns empty so the Shopify link can decide", () => {
+    // No prefix at all — nothing to go on.
+    expect(matchSenderToStore("******")).toBe("");
+    // No known store starts with Z.
+    expect(matchSenderToStore("Z*****")).toBe("");
+  });
+
+  it("isMaskedSenderName only flags names J&T actually redacted", () => {
+    expect(isMaskedSenderName("I******")).toBe(true);
+    expect(isMaskedSenderName("  C****  ")).toBe(true);
+    expect(isMaskedSenderName("I LOVE PATCHES")).toBe(false);
+    expect(isMaskedSenderName("ATE JANE")).toBe(false);
+    // Asterisks in the middle aren't J&T's trailing-redaction format.
+    expect(isMaskedSenderName("I**E PATCHES")).toBe(false);
   });
 
   it("unknown sender returns original name (trimmed)", () => {
