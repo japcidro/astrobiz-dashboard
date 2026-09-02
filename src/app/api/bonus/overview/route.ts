@@ -232,7 +232,7 @@ export async function GET(request: Request) {
   const [tiersRes, currentJt, prevJt, rtsJt, cpp] = await Promise.all([
     supabase
       .from("bonus_tiers")
-      .select("id, parcel_threshold, bonus_amount, label, is_active")
+      .select("id, parcel_threshold, label, is_active")
       .order("parcel_threshold", { ascending: true }),
     fetchJtRows(supabase, period.start, period.end),
     fetchJtRows(supabase, prevPeriod.start, prevPeriod.end),
@@ -251,7 +251,6 @@ export async function GET(request: Request) {
   const tiers: BonusTier[] = (tiersRes.data ?? []).map((r) => ({
     id: r.id as string,
     parcel_threshold: Number(r.parcel_threshold),
-    bonus_amount: Number(r.bonus_amount ?? 0),
     label: (r.label as string | null) ?? null,
     is_active: r.is_active !== false,
   }));

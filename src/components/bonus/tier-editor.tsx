@@ -13,7 +13,6 @@ interface DraftTier {
   key: string;
   label: string;
   parcel_threshold: string;
-  bonus_amount: string;
   is_active: boolean;
 }
 
@@ -22,7 +21,6 @@ function toDraft(tier: BonusTier): DraftTier {
     key: tier.id,
     label: tier.label ?? "",
     parcel_threshold: String(tier.parcel_threshold),
-    bonus_amount: String(tier.bonus_amount),
     is_active: tier.is_active,
   };
 }
@@ -45,7 +43,6 @@ export function TierEditor({ tiers, onSaved }: Props) {
         key: `new-${Date.now()}-${prev.length}`,
         label: `Tier ${prev.length + 1}`,
         parcel_threshold: "",
-        bonus_amount: "",
         is_active: true,
       },
     ]);
@@ -60,7 +57,6 @@ export function TierEditor({ tiers, onSaved }: Props) {
 
     const payload = drafts.map((d) => ({
       parcel_threshold: Number(d.parcel_threshold),
-      bonus_amount: Number(d.bonus_amount),
       label: d.label,
       is_active: d.is_active,
     }));
@@ -68,10 +64,6 @@ export function TierEditor({ tiers, onSaved }: Props) {
     for (const row of payload) {
       if (!Number.isFinite(row.parcel_threshold) || row.parcel_threshold <= 0) {
         setError("Every tier needs a parcel threshold greater than 0.");
-        return;
-      }
-      if (!Number.isFinite(row.bonus_amount) || row.bonus_amount < 0) {
-        setError("Every tier needs a bonus amount of 0 or more.");
         return;
       }
     }
@@ -97,8 +89,9 @@ export function TierEditor({ tiers, onSaved }: Props) {
     <section className="rounded-xl border border-gray-800 bg-gray-950 p-4">
       <h2 className="text-sm font-semibold text-white mb-1">Edit bonus tiers</h2>
       <p className="text-[11px] text-gray-500 mb-4">
-        Threshold is the average parcels/day for the cutoff period. The amount
-        is what each employee receives at that tier.
+        Threshold is the average parcels/day for the cutoff period. Payout
+        amounts are not set here yet — the tracker only shows which tiers the
+        team has hit.
       </p>
 
       <div className="space-y-2">
@@ -123,18 +116,6 @@ export function TierEditor({ tiers, onSaved }: Props) {
               <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-gray-600">
                 /day
               </span>
-            </div>
-            <div className="relative">
-              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-gray-500">
-                ₱
-              </span>
-              <input
-                value={d.bonus_amount}
-                onChange={(e) => update(d.key, { bonus_amount: e.target.value })}
-                inputMode="decimal"
-                placeholder="500"
-                className="w-32 bg-gray-900 border border-gray-800 rounded pl-6 pr-2 py-1.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-gray-600"
-              />
             </div>
             <label className="flex items-center gap-1.5 text-[11px] text-gray-400 cursor-pointer">
               <input

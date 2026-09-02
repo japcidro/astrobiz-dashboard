@@ -170,9 +170,9 @@ export function BonusDashboardClient({ employeeName, isAdmin }: Props) {
             {earned ? (
               <p className="text-sm text-yellow-300 flex items-center gap-1.5 mb-1">
                 <CheckCircle2 size={15} />
-                {firstName}, nasa{" "}
+                {firstName}, na-hit na natin ang{" "}
                 <strong>{earned.label ?? `Tier ${earned.parcel_threshold}`}</strong>{" "}
-                tayo — {peso(earned.bonus_amount, 0)} each
+                — {earned.parcel_threshold}/day average
               </p>
             ) : (
               <p className="text-sm text-gray-400 flex items-center gap-1.5 mb-1">
@@ -186,8 +186,10 @@ export function BonusDashboardClient({ employeeName, isAdmin }: Props) {
                 <div className="flex items-center justify-between text-xs text-gray-500 mb-1.5 mt-3">
                   <span>{earned?.parcel_threshold ?? 0}/day</span>
                   <span className="text-gray-400">
-                    next: {progress.next_tier.parcel_threshold}/day ·{" "}
-                    {peso(progress.next_tier.bonus_amount, 0)}
+                    next:{" "}
+                    {progress.next_tier.label ??
+                      `Tier ${progress.next_tier.parcel_threshold}`}{" "}
+                    · {progress.next_tier.parcel_threshold}/day
                   </span>
                 </div>
                 <div className="h-2.5 rounded-full bg-gray-800 overflow-hidden">
@@ -221,7 +223,7 @@ export function BonusDashboardClient({ employeeName, isAdmin }: Props) {
               <p className="text-xs text-gray-400 mt-3">
                 {tiers.length === 0
                   ? "Walang naka-set na tiers pa."
-                  : "Top tier na — highest bonus is already in reach."}
+                  : "Top tier na — highest tier is already in reach."}
               </p>
             )}
           </div>
@@ -301,7 +303,8 @@ export function BonusDashboardClient({ employeeName, isAdmin }: Props) {
               label="Tier reached"
               value={
                 previous.tier
-                  ? `${previous.tier.label ?? `Tier ${previous.tier.parcel_threshold}`} · ${peso(previous.tier.bonus_amount, 0)}`
+                  ? (previous.tier.label ??
+                    `Tier ${previous.tier.parcel_threshold}`)
                   : "None"
               }
               valueColor={previous.tier ? "text-yellow-300" : "text-gray-500"}

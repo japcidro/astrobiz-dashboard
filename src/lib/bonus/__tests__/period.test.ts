@@ -12,9 +12,9 @@ import { computeTierProgress, tierForAverage } from "../tiers";
 import type { BonusTier } from "../types";
 
 const TIERS: BonusTier[] = [
-  { id: "t1", parcel_threshold: 70, bonus_amount: 500, label: "Tier 1", is_active: true },
-  { id: "t2", parcel_threshold: 100, bonus_amount: 1000, label: "Tier 2", is_active: true },
-  { id: "t3", parcel_threshold: 130, bonus_amount: 1500, label: "Tier 3", is_active: true },
+  { id: "t1", parcel_threshold: 70, label: "Tier 1", is_active: true },
+  { id: "t2", parcel_threshold: 100, label: "Tier 2", is_active: true },
+  { id: "t3", parcel_threshold: 130, label: "Tier 3", is_active: true },
 ];
 
 describe("date helpers", () => {

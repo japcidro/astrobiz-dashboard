@@ -7,7 +7,6 @@ export const dynamic = "force-dynamic";
 type TierRow = {
   id: string;
   parcel_threshold: number;
-  bonus_amount: number | string | null;
   label: string | null;
   is_active: boolean | null;
 };
@@ -16,7 +15,6 @@ function toTier(row: TierRow): BonusTier {
   return {
     id: row.id,
     parcel_threshold: Number(row.parcel_threshold),
-    bonus_amount: Number(row.bonus_amount ?? 0),
     label: row.label,
     is_active: row.is_active !== false,
   };
@@ -32,7 +30,7 @@ export async function GET() {
   const supabase = createServiceClient();
   const { data, error } = await supabase
     .from("bonus_tiers")
-    .select("id, parcel_threshold, bonus_amount, label, is_active")
+    .select("id, parcel_threshold, label, is_active")
     .order("parcel_threshold", { ascending: true });
 
   if (error) {
@@ -67,24 +65,18 @@ export async function PUT(request: Request) {
   const seen = new Set<number>();
   const rows: {
     parcel_threshold: number;
-    bonus_amount: number;
     label: string | null;
     is_active: boolean;
   }[] = [];
 
+  // bonus_amount is intentionally not written here — the payouts are not
+  // announced yet, and the editor only sets thresholds.
   for (const raw of body.tiers as Record<string, unknown>[]) {
     const threshold = Number(raw.parcel_threshold);
-    const amount = Number(raw.bonus_amount);
 
     if (!Number.isFinite(threshold) || threshold <= 0) {
       return Response.json(
         { error: `Invalid parcel threshold: ${String(raw.parcel_threshold)}` },
-        { status: 400 }
-      );
-    }
-    if (!Number.isFinite(amount) || amount < 0) {
-      return Response.json(
-        { error: `Invalid bonus amount for tier ${threshold}` },
         { status: 400 }
       );
     }
@@ -101,7 +93,6 @@ export async function PUT(request: Request) {
 
     rows.push({
       parcel_threshold: Math.round(threshold),
-      bonus_amount: Math.round(amount * 100) / 100,
       label: typeof raw.label === "string" && raw.label.trim() ? raw.label.trim() : null,
       is_active: raw.is_active !== false,
     });
@@ -127,7 +118,7 @@ export async function PUT(request: Request) {
   const { data, error } = await supabase
     .from("bonus_tiers")
     .insert(rows)
-    .select("id, parcel_threshold, bonus_amount, label, is_active");
+    .select("id, parcel_threshold, label, is_active");
 
   if (error) {
     return Response.json({ error: error.message }, { status: 500 });

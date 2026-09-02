@@ -1,9 +1,12 @@
 import type { BonusPeriod } from "./period";
 
+/**
+ * A rung on the ladder. Payout amounts are not announced yet, so a tier is
+ * only a threshold and a name — the dashboard marks it hit or not-yet.
+ */
 export interface BonusTier {
   id: string;
   parcel_threshold: number;
-  bonus_amount: number;
   label: string | null;
   is_active: boolean;
 }

@@ -10,8 +10,11 @@ average parcels/day across the semi-monthly cutoff period (1st–15th,
 - **Migration** `supabase/bonus-tiers-migration.sql` — **NOT yet applied
   to prod, run it in the Supabase SQL Editor**:
   - `bonus_tiers` (parcel_threshold, bonus_amount, label, is_active),
-    unique on threshold. Seeded 70/100/130 with **placeholder payouts**
-    (₱500/₱1000/₱1500) — edit them from the dashboard.
+    unique on threshold. Seeded thresholds 70/100/130 with **no payout
+    amounts** — `bonus_amount` is nullable and left unset until the CEO
+    announces the figures. Idempotent, and ends with
+    `notify pgrst, 'reload schema'` so PostgREST stops answering
+    "Could not find the table 'public.bonus_tiers' in the schema cache".
   - RLS: **read for every signed-in employee**, write admin-only.
 - **Period model** `src/lib/bonus/period.ts` — pure PHT date math for
   semi-monthly cutoffs. Handles 31-day months (16-day second half),
@@ -43,11 +46,13 @@ average parcels/day across the semi-monthly cutoff period (1st–15th,
   bar chart with tier guide lines, previous-cutoff recap, and an
   admin-only inline tier editor.
 - **Decisions locked from planning round**:
-  - One company-wide tier, **same peso amount for every employee**
+  - One company-wide tier, **same payout for every employee** — the
+    amounts are not announced yet, so the tracker shows markers only
   - Tier judged on the **cutoff-period average** (every 15th + EOM)
   - CPP and RTS are **display-only for now** — not gates on the bonus
   - Visible to **all roles**
-- **Known follow-ups**: payout amounts are placeholders; CPP/RTS gates
+- **Known follow-ups**: payout amounts are not set — when they are,
+  fill `bonus_amount` and surface it in the ladder/hero again; CPP/RTS gates
   are not implemented; there is no per-period payout ledger yet (the
   page reads live, it does not archive a closed period's result).
 

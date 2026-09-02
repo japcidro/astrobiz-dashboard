@@ -9,10 +9,6 @@ interface Props {
   currentTierId: string | null;
 }
 
-function peso(value: number): string {
-  return `₱${value.toLocaleString("en-PH", { maximumFractionDigits: 0 })}`;
-}
-
 export function TierLadder({ tiers, average, currentTierId }: Props) {
   const active = tiers
     .filter((t) => t.is_active)
@@ -22,8 +18,8 @@ export function TierLadder({ tiers, average, currentTierId }: Props) {
     <section className="rounded-xl border border-gray-800 bg-gray-950 p-4">
       <h2 className="text-sm font-semibold text-white mb-1">Bonus tiers</h2>
       <p className="text-[11px] text-gray-500 mb-4">
-        Bawat tao sa company gets the amount of the highest tier the cutoff
-        average clears.
+        Ang buong company ang na-hi-hit ng tier — base sa average parcels/day
+        ng cutoff. Hindi pa announced ang amounts.
       </p>
 
       {active.length === 0 ? (
@@ -67,21 +63,18 @@ export function TierLadder({ tiers, average, currentTierId }: Props) {
                     {tier.parcel_threshold} parcels/day average
                   </p>
                 </div>
-                <p
-                  className={`text-sm font-semibold shrink-0 ${
+                {/* Marker only — no payout figure until the amounts are set. */}
+                <span
+                  className={`shrink-0 text-[11px] font-semibold px-2 py-1 rounded-full border ${
                     isCurrent
-                      ? "text-yellow-300"
+                      ? "text-yellow-300 border-yellow-700/60 bg-yellow-950/40"
                       : hit
-                        ? "text-gray-300"
-                        : "text-gray-600"
+                        ? "text-gray-300 border-gray-700 bg-gray-900"
+                        : "text-gray-600 border-gray-800"
                   }`}
                 >
-                  {peso(tier.bonus_amount)}
-                  <span className="text-[10px] font-normal text-gray-600">
-                    {" "}
-                    / person
-                  </span>
-                </p>
+                  {isCurrent ? "Na-hit ✓" : hit ? "Cleared" : "Hindi pa"}
+                </span>
               </li>
             );
           })}
