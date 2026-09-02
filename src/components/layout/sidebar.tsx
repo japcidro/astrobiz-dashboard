@@ -34,6 +34,7 @@ import {
   FileSpreadsheet,
   Clapperboard,
   ShieldCheck,
+  Award,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -74,6 +75,12 @@ const navEntries: NavEntry[] = [
     label: "Tasks",
     href: "/tasks",
     icon: <ClipboardList size={20} />,
+    roles: ["admin", "va", "fulfillment", "marketing"],
+  },
+  {
+    label: "Bonus Tracker",
+    href: "/bonus",
+    icon: <Award size={20} />,
     roles: ["admin", "va", "fulfillment", "marketing"],
   },
   {

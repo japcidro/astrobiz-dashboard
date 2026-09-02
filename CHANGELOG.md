@@ -1,5 +1,56 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-02: Bonus Tracker — parcel-volume bonus dashboard — uncommitted
+
+New main tab visible to **every role** (`/bonus`). Shows the team what
+they are working toward: the company-wide parcel bonus, judged on the
+average parcels/day across the semi-monthly cutoff period (1st–15th,
+16th–EOM), plus the health metrics the CEO wanted alongside it.
+
+- **Migration** `supabase/bonus-tiers-migration.sql` — **NOT yet applied
+  to prod, run it in the Supabase SQL Editor**:
+  - `bonus_tiers` (parcel_threshold, bonus_amount, label, is_active),
+    unique on threshold. Seeded 70/100/130 with **placeholder payouts**
+    (₱500/₱1000/₱1500) — edit them from the dashboard.
+  - RLS: **read for every signed-in employee**, write admin-only.
+- **Period model** `src/lib/bonus/period.ts` — pure PHT date math for
+  semi-monthly cutoffs. Handles 31-day months (16-day second half),
+  February (13-day), and year-boundary rollback. 20 unit tests.
+- **Tier math** `src/lib/bonus/tiers.ts` — highest tier cleared, plus
+  the pace still needed to reach the next one. "Parcels needed" is
+  measured against the FULL period (threshold × days_total), not the
+  days elapsed, because the tier is judged on the period average — a
+  slow first week has to be made up in the days that remain.
+- **`GET /api/bonus/overview`** — any signed-in role. Authenticates the
+  session first, then reads `jt_deliveries` with the service client
+  (that table is admin-only under RLS) and returns **aggregates only**,
+  never per-waybill rows. 5-min cache via `cached_api_data`.
+  - Parcels: J&T rows by `submission_date`, PHT day boundaries, all
+    stores.
+  - **Average CPP (15d)**: read from `/api/profit/daily` over
+    Bearer CRON_SECRET so the number matches Net Profit exactly rather
+    than being a second definition. Weighted (total spend ÷ total
+    orders), not a mean of daily CPPs — a zero-order day would skew it.
+  - **RTS (30d)**: returned ÷ settled (delivered + returned). Parcels
+    still in transit are excluded from the denominator, otherwise a
+    busy shipping week fakes an improving RTS rate.
+- **`GET/PUT /api/bonus/tiers`** — GET for all roles, PUT admin-only.
+  PUT replaces the whole ladder (delete-then-insert) since the editor
+  owns the full list and removing a tier has to actually remove it.
+- **UI** `src/components/bonus/` — hero card (running average, tier
+  held, progress bar, "kailangan pa ng N parcels = M/day"), 4 metric
+  cards (CPP / parcels / RTS / days left), tier ladder, daily-parcel
+  bar chart with tier guide lines, previous-cutoff recap, and an
+  admin-only inline tier editor.
+- **Decisions locked from planning round**:
+  - One company-wide tier, **same peso amount for every employee**
+  - Tier judged on the **cutoff-period average** (every 15th + EOM)
+  - CPP and RTS are **display-only for now** — not gates on the bonus
+  - Visible to **all roles**
+- **Known follow-ups**: payout amounts are placeholders; CPP/RTS gates
+  are not implemented; there is no per-period payout ledger yet (the
+  page reads live, it does not archive a closed period's result).
+
 ## 2026-05-11: VA Dialer foundation (Phase 2, Day 1) — uncommitted
 
 Server-side scaffolding for the upcoming browser softphone. No UI yet —
