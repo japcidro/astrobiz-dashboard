@@ -316,6 +316,27 @@ supabase/
   content-studio-rollback-migration.sql # Drops legacy Content Studio resources
 ```
 
+## Running Migrations
+
+Migrations live in `supabase/*.sql` and are applied with the runner:
+
+```bash
+npm run db:run -- supabase/bonus-tiers-migration.sql   # apply a migration
+npm run db:query -- "select count(*) from bonus_tiers" # ad-hoc check
+```
+
+`scripts/db.mjs` connects with `SUPABASE_DB_URL` from `.env.local` and sends
+the file as one statement batch, so Postgres runs it in a single implicit
+transaction — a migration that fails halfway rolls back whole instead of
+leaving the schema half-applied. The URL holds the database password and is
+never printed.
+
+Write migrations to be **idempotent** (`if not exists`, `drop policy if
+exists`, `on conflict do nothing`) so a re-run is always safe, and end any
+file that creates a table with `notify pgrst, 'reload schema';` — without it
+PostgREST keeps answering "Could not find the table ... in the schema cache"
+after the table already exists.
+
 ## Environment Variables
 
 | Key | Where | Purpose |
@@ -323,6 +344,7 @@ supabase/
 | `NEXT_PUBLIC_SUPABASE_URL` | Vercel + .env.local | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Vercel + .env.local | Supabase anon key |
 | `NEXT_PUBLIC_APP_URL` | Vercel | App URL for OAuth redirects |
+| `SUPABASE_DB_URL` | .env.local only | Postgres URI (Session pooler) used by `npm run db:run`. Never add to Vercel — it is a local admin tool. |
 
 Facebook token + Anthropic API key stored in `app_settings` table (not env vars).
 Shopify OAuth tokens stored in `shopify_stores` table.
