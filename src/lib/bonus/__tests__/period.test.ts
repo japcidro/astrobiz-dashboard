@@ -128,47 +128,44 @@ describe("tierForAverage", () => {
 });
 
 describe("computeTierProgress", () => {
-  it("computes the pace needed against the FULL period, not just elapsed days", () => {
-    // Day 8 of 15, averaging 60/day (480 parcels). Tier 2 = 100/day
-    // needs 1500 for the period, so 1020 more across 7 days ≈ 146/day.
-    const period = getBonusPeriod("2026-09-08");
-    const p = computeTierProgress(60, 480, period, TIERS);
+  it("states the gap to the next tier as a daily pace", () => {
+    const p = computeTierProgress(58, TIERS);
 
     expect(p.current_tier).toBeNull();
     expect(p.next_tier?.id).toBe("t1");
-    expect(p.to_next?.parcels_needed).toBe(70 * 15 - 480); // 570
-    expect(p.to_next?.per_remaining_day).toBeCloseTo(570 / 7, 5);
+    expect(p.to_next?.per_day_gap).toBeCloseTo(12, 5);
   });
 
-  it("reports zero needed when the next tier is already mathematically locked", () => {
-    const period = getBonusPeriod("2026-09-08");
-    // 1200 parcels banked already exceeds 70 × 15 = 1050.
-    const p = computeTierProgress(150, 1200, period, TIERS);
+  it("measures the gap from the average, not from the tier below it", () => {
+    const p = computeTierProgress(85, TIERS);
+    expect(p.current_tier?.id).toBe("t1");
+    expect(p.next_tier?.id).toBe("t2");
+    expect(p.to_next?.per_day_gap).toBeCloseTo(15, 5);
+  });
+
+  it("drops the gap once the top tier is held", () => {
+    const p = computeTierProgress(150, TIERS);
     expect(p.current_tier?.id).toBe("t3");
     expect(p.next_tier).toBeNull();
+    expect(p.to_next).toBeNull();
     expect(p.progress_pct).toBe(100);
   });
 
   it("scales progress between the held tier and the next one", () => {
-    const period = getBonusPeriod("2026-09-08");
-    const p = computeTierProgress(85, 680, period, TIERS);
-    expect(p.current_tier?.id).toBe("t1");
-    expect(p.next_tier?.id).toBe("t2");
+    const p = computeTierProgress(85, TIERS);
     // Halfway from 70 to 100.
     expect(p.progress_pct).toBeCloseTo(50, 5);
   });
 
-  it("drops the pace hint once the cutoff has passed", () => {
-    const period = getBonusPeriod("2026-09-10", "2026-09-25");
-    const p = computeTierProgress(80, 1200, period, TIERS);
-    expect(p.current_tier?.id).toBe("t1");
-    expect(p.next_tier?.id).toBe("t2");
-    expect(p.to_next).toBeNull();
+  it("treats a tier exactly met as cleared, not as the next target", () => {
+    const p = computeTierProgress(100, TIERS);
+    expect(p.current_tier?.id).toBe("t2");
+    expect(p.next_tier?.id).toBe("t3");
+    expect(p.to_next?.per_day_gap).toBeCloseTo(30, 5);
   });
 
   it("returns no tier and no progress when no tiers are configured", () => {
-    const period = getBonusPeriod("2026-09-08");
-    const p = computeTierProgress(200, 1600, period, []);
+    const p = computeTierProgress(200, []);
     expect(p.current_tier).toBeNull();
     expect(p.next_tier).toBeNull();
     expect(p.progress_pct).toBe(0);

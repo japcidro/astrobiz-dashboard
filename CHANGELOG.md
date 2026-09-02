@@ -20,10 +20,18 @@ average parcels/day across the semi-monthly cutoff period (1st–15th,
   semi-monthly cutoffs. Handles 31-day months (16-day second half),
   February (13-day), and year-boundary rollback. 20 unit tests.
 - **Tier math** `src/lib/bonus/tiers.ts` — highest tier cleared, plus
-  the pace still needed to reach the next one. "Parcels needed" is
-  measured against the FULL period (threshold × days_total), not the
-  days elapsed, because the tier is judged on the period average — a
-  slow first week has to be made up in the days that remain.
+  the gap to the next one as a **daily pace** ("12 more parcels/day").
+  A rolling window has no deadline to bank parcels against, so a
+  countdown of parcels would be measuring against a period the headline
+  number is not scoped to.
+- **Headline average is the rolling last 15 days** while the cutoff is
+  still open, switching to the cutoff period's own average on the 15th /
+  end-of-month. On day 2 of a period the cutoff-to-date average is two
+  days of noise; a 15-day window is always a full sample. The cutoff
+  figure stays visible underneath, and is labelled as the one the bonus
+  actually settles on. The pace count is sliced out of the rows already
+  fetched for RTS, so it costs no extra query.
+- **All Bonus Tracker copy is English** — the tab shipped in Taglish.
 - **`GET /api/bonus/overview`** — any signed-in role. Authenticates the
   session first, then reads `jt_deliveries` with the service client
   (that table is admin-only under RLS) and returns **aggregates only**,

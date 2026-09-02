@@ -6,10 +6,17 @@ import type { BonusTier } from "@/lib/bonus/types";
 interface Props {
   tiers: BonusTier[];
   average: number;
+  /** Which window `average` covers, so the markers cannot be misread. */
+  windowLabel: string;
   currentTierId: string | null;
 }
 
-export function TierLadder({ tiers, average, currentTierId }: Props) {
+export function TierLadder({
+  tiers,
+  average,
+  windowLabel,
+  currentTierId,
+}: Props) {
   const active = tiers
     .filter((t) => t.is_active)
     .sort((a, b) => a.parcel_threshold - b.parcel_threshold);
@@ -18,13 +25,13 @@ export function TierLadder({ tiers, average, currentTierId }: Props) {
     <section className="rounded-xl border border-gray-800 bg-gray-950 p-4">
       <h2 className="text-sm font-semibold text-white mb-1">Bonus tiers</h2>
       <p className="text-[11px] text-gray-500 mb-4">
-        Ang buong company ang na-hi-hit ng tier — base sa average parcels/day
-        ng cutoff. Hindi pa announced ang amounts.
+        The whole company clears a tier together, judged on the average
+        parcels/day ({windowLabel}). Payout amounts are not announced yet.
       </p>
 
       {active.length === 0 ? (
         <p className="text-sm text-gray-500 py-6 text-center">
-          Walang naka-set na tiers. An admin can add them with “Edit tiers”.
+          No tiers set yet. An admin can add them with “Edit tiers”.
         </p>
       ) : (
         <ul className="space-y-2">
@@ -73,7 +80,7 @@ export function TierLadder({ tiers, average, currentTierId }: Props) {
                         : "text-gray-600 border-gray-800"
                   }`}
                 >
-                  {isCurrent ? "Na-hit ✓" : hit ? "Cleared" : "Hindi pa"}
+                  {isCurrent ? "Hit ✓" : hit ? "Cleared" : "Not yet"}
                 </span>
               </li>
             );

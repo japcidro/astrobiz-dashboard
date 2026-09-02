@@ -28,7 +28,7 @@ export function ParcelTrend({ daily, average, tiers }: Props) {
       <div className="flex items-baseline justify-between mb-1">
         <h2 className="text-sm font-semibold text-white">Daily parcels</h2>
         <span className="text-[11px] text-gray-500">
-          avg{" "}
+          cutoff avg{" "}
           <strong className="text-gray-300">
             {average.toLocaleString("en-PH", { maximumFractionDigits: 1 })}
           </strong>
@@ -41,7 +41,7 @@ export function ParcelTrend({ daily, average, tiers }: Props) {
 
       {daily.length === 0 ? (
         <p className="text-sm text-gray-500 py-10 text-center">
-          Wala pang parcels sa cutoff na ito.
+          No parcels yet in this cutoff.
         </p>
       ) : (
         <>

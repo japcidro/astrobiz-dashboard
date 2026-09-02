@@ -14,12 +14,24 @@ export interface BonusTier {
 export interface BonusParcelStats {
   /** Parcels shipped inside the period (J&T rows by submission_date). */
   total: number;
-  /** total ÷ days_elapsed — the running pace the tier is judged on. */
+  /** total ÷ days_elapsed — the cutoff-to-date average. */
   average_per_day: number;
   /** Where the period lands if the current pace holds to the cutoff. */
   projected_total: number;
   daily: { date: string; count: number }[];
   best_day: { date: string; count: number } | null;
+  /**
+   * Rolling last-N-days pace. This is the headline figure while the cutoff
+   * is still open: on day 2 of a period the cutoff-to-date average is two
+   * days of noise, while a 15-day window is always a full sample.
+   */
+  pace: {
+    average_per_day: number;
+    total: number;
+    window_days: number;
+    date_from: string;
+    date_to: string;
+  };
 }
 
 export interface BonusCppStats {
@@ -53,21 +65,26 @@ export interface BonusTierProgress {
   /** Progress toward the next tier, 0–100. 100 when the top tier is held. */
   progress_pct: number;
   /**
-   * What it takes to still land the next tier by the cutoff: extra parcels
-   * needed overall, and the per-day pace across the days that remain.
-   * Null when there is no next tier or the period has already closed.
+   * How far off the next tier is, as a daily pace. A rolling window has no
+   * cutoff to count down to, so the honest statement is "X more per day",
+   * not "N more parcels by the 15th". Null when there is no next tier.
    */
-  to_next: {
-    parcels_needed: number;
-    per_remaining_day: number;
-    days_remaining: number;
-  } | null;
+  to_next: { per_day_gap: number } | null;
 }
 
 export interface BonusOverview {
   period: BonusPeriod;
   parcels: BonusParcelStats;
   tiers: BonusTier[];
+  /**
+   * Which average the tier is judged on right now. "pace" is the rolling
+   * window, used while the cutoff is still open; "cutoff" is the period's
+   * own average, which takes over on the 15th / end-of-month because that
+   * is the number the payout is actually settled on.
+   */
+  judged_on: "pace" | "cutoff";
+  /** The average `judged_on` selected — what the ladder is measured against. */
+  judged_average: number;
   progress: BonusTierProgress;
   cpp: BonusCppStats;
   rts: BonusRtsStats;

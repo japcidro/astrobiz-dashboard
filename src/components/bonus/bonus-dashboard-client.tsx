@@ -99,6 +99,11 @@ export function BonusDashboardClient({ employeeName, isAdmin }: Props) {
   const earned = progress.current_tier;
   const firstName = employeeName.split(" ")[0];
 
+  // Until the cutoff day the headline is the rolling window, so every label
+  // around it has to say which number the team is actually looking at.
+  const onPace = data.judged_on === "pace";
+  const pace = parcels.pace;
+
   return (
     <div className="max-w-6xl mx-auto pb-10">
       <header className="mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
@@ -158,26 +163,48 @@ export function BonusDashboardClient({ employeeName, isAdmin }: Props) {
               Average parcels / day
             </p>
             <p className="text-5xl font-bold text-white leading-none">
-              {num(parcels.average_per_day)}
+              {num(data.judged_average)}
             </p>
-            <p className="text-xs text-gray-500 mt-2">
-              {parcels.total.toLocaleString("en-PH")} parcels over{" "}
-              {period.days_elapsed} {period.days_elapsed === 1 ? "day" : "days"}
-            </p>
+            {onPace ? (
+              <>
+                <p className="text-xs text-gray-500 mt-2">
+                  Last {pace.window_days} days ·{" "}
+                  {pace.total.toLocaleString("en-PH")} parcels
+                </p>
+                <p className="text-[11px] text-gray-600 mt-1">
+                  This cutoff so far: {num(parcels.average_per_day)}/day over{" "}
+                  {period.days_elapsed}{" "}
+                  {period.days_elapsed === 1 ? "day" : "days"}
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="text-xs text-gray-500 mt-2">
+                  {parcels.total.toLocaleString("en-PH")} parcels over{" "}
+                  {period.days_elapsed}{" "}
+                  {period.days_elapsed === 1 ? "day" : "days"}
+                </p>
+                <p className="text-[11px] text-yellow-600/80 mt-1">
+                  Cutoff average — this is the figure the bonus settles on.
+                </p>
+              </>
+            )}
           </div>
 
           <div className="flex-1 min-w-0">
             {earned ? (
               <p className="text-sm text-yellow-300 flex items-center gap-1.5 mb-1">
                 <CheckCircle2 size={15} />
-                {firstName}, na-hit na natin ang{" "}
+                {firstName}, we&apos;re at{" "}
                 <strong>{earned.label ?? `Tier ${earned.parcel_threshold}`}</strong>{" "}
-                — {earned.parcel_threshold}/day average
+                — {earned.parcel_threshold}/day cleared
               </p>
             ) : (
               <p className="text-sm text-gray-400 flex items-center gap-1.5 mb-1">
                 <Lock size={14} />
-                Wala pang tier na na-hit sa cutoff na ito.
+                {onPace
+                  ? "No tier hit yet at the current pace."
+                  : "No tier hit for this cutoff."}
               </p>
             )}
 
@@ -200,30 +227,24 @@ export function BonusDashboardClient({ employeeName, isAdmin }: Props) {
                 </div>
                 {progress.to_next && (
                   <p className="text-xs text-gray-400 mt-2.5">
-                    {progress.to_next.parcels_needed > 0 ? (
-                      <>
-                        Kailangan pa ng{" "}
-                        <strong className="text-white">
-                          {progress.to_next.parcels_needed.toLocaleString("en-PH")}
-                        </strong>{" "}
-                        parcels —{" "}
-                        <strong className="text-white">
-                          {num(progress.to_next.per_remaining_day, 0)}/day
-                        </strong>{" "}
-                        sa natitirang {progress.to_next.days_remaining}{" "}
-                        {progress.to_next.days_remaining === 1 ? "araw" : "araw"}.
-                      </>
-                    ) : (
-                      <>Locked in — the next tier is already secured for this cutoff.</>
-                    )}
+                    <strong className="text-white">
+                      {num(Math.ceil(progress.to_next.per_day_gap), 0)} more
+                      parcels/day
+                    </strong>{" "}
+                    to reach{" "}
+                    {progress.next_tier.label ??
+                      `Tier ${progress.next_tier.parcel_threshold}`}
+                    {onPace
+                      ? ` — that is the pace over the last ${pace.window_days} days.`
+                      : "."}
                   </p>
                 )}
               </>
             ) : (
               <p className="text-xs text-gray-400 mt-3">
                 {tiers.length === 0
-                  ? "Walang naka-set na tiers pa."
-                  : "Top tier na — highest tier is already in reach."}
+                  ? "No tiers set yet."
+                  : "Top tier — the highest rung is already cleared."}
               </p>
             )}
           </div>
@@ -281,7 +302,10 @@ export function BonusDashboardClient({ employeeName, isAdmin }: Props) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <TierLadder
           tiers={tiers}
-          average={parcels.average_per_day}
+          average={data.judged_average}
+          windowLabel={
+            onPace ? `last ${pace.window_days} days` : "this cutoff"
+          }
           currentTierId={earned?.id ?? null}
         />
         <ParcelTrend
@@ -314,10 +338,13 @@ export function BonusDashboardClient({ employeeName, isAdmin }: Props) {
       )}
 
       <p className="text-[10px] text-gray-600 mt-6 leading-relaxed">
-        Parcels are counted from the J&amp;T upload by submission date (PHT),
-        across all stores. Average CPP is total ad spend ÷ total orders over the
-        last {cpp.window_days} days, from the same P&amp;L pipeline as Net
-        Profit. RTS rate is returned ÷ settled (delivered + returned) parcels
+        The headline average is the last {pace.window_days} days while the
+        cutoff is still running, and switches to the cutoff period&apos;s own
+        average on the 15th and end-of-month — that second figure is the one
+        the bonus is settled on. Parcels are counted from the J&amp;T upload by
+        submission date (PHT), across all stores. Average CPP is total ad spend
+        ÷ total orders over the last {cpp.window_days} days, from the same
+        P&amp;L pipeline as Net Profit. RTS rate is returned ÷ settled (delivered + returned) parcels
         over the last {rts.window_days} days — parcels still in transit are
         excluded. Data refreshes every 5 minutes; the J&amp;T numbers are only
         as current as the latest upload.

@@ -1,4 +1,3 @@
-import type { BonusPeriod } from "./period";
 import type { BonusTier, BonusTierProgress } from "./types";
 
 /** Sort ascending by threshold and drop anything switched off. */
@@ -23,24 +22,22 @@ export function tierForAverage(
 }
 
 /**
- * Where the company stands against the tier ladder, plus the pace needed
- * to still reach the next rung before the cutoff.
+ * Where the company stands against the tier ladder.
  *
- * The "parcels needed" figure is deliberately computed against the FULL
- * period (threshold × days_total), not against the days already elapsed —
- * the tier is judged on the period average, so a slow first week has to be
- * made up inside the days that are left.
+ * The gap to the next tier is expressed as a daily pace rather than a
+ * countdown of parcels: the headline average is a rolling 15-day window
+ * while the cutoff is open, and a rolling window has no deadline to bank
+ * parcels against — "12 more per day" is both true and directly actionable,
+ * where "1,020 more parcels" would be measuring against a period the
+ * displayed number is not scoped to.
  */
 export function computeTierProgress(
   average: number,
-  periodTotal: number,
-  period: BonusPeriod,
   tiers: BonusTier[]
 ): BonusTierProgress {
   const sorted = activeTiersAscending(tiers);
   const current = tierForAverage(average, sorted);
-  const next =
-    sorted.find((t) => t.parcel_threshold > average) ?? null;
+  const next = sorted.find((t) => t.parcel_threshold > average) ?? null;
 
   if (!next) {
     return {
@@ -58,22 +55,10 @@ export function computeTierProgress(
       ? Math.max(0, Math.min(100, ((average - floor) / span) * 100))
       : 0;
 
-  // Once the cutoff has passed the number is settled — no pace to chase.
-  if (period.days_remaining <= 0) {
-    return { current_tier: current, next_tier: next, progress_pct, to_next: null };
-  }
-
-  const targetTotal = next.parcel_threshold * period.days_total;
-  const parcels_needed = Math.max(0, Math.ceil(targetTotal - periodTotal));
-
   return {
     current_tier: current,
     next_tier: next,
     progress_pct,
-    to_next: {
-      parcels_needed,
-      per_remaining_day: parcels_needed / period.days_remaining,
-      days_remaining: period.days_remaining,
-    },
+    to_next: { per_day_gap: next.parcel_threshold - average },
   };
 }

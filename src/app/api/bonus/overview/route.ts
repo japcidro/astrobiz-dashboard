@@ -25,6 +25,12 @@ export const dynamic = "force-dynamic";
 /** Rolling windows the CEO asked for, alongside the cutoff-period average. */
 const CPP_WINDOW_DAYS = 15;
 const RTS_WINDOW_DAYS = 30;
+/**
+ * The headline "average parcels/day" while a cutoff is still running.
+ * Must stay <= RTS_WINDOW_DAYS: the pace count is sliced out of the rows
+ * already fetched for RTS rather than costing a fifth round trip.
+ */
+const PACE_WINDOW_DAYS = 15;
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -65,7 +71,37 @@ async function fetchJtRows(
   return { rows: data, error };
 }
 
-function buildParcelStats(rows: JtRow[], period: BonusPeriod): BonusParcelStats {
+/**
+ * Parcels per day over the trailing window, counted out of rows that were
+ * already fetched for the RTS stat — one query serves both.
+ *
+ * The divisor is the full window, not the days that happen to have rows: a
+ * zero-parcel Sunday is a real zero and has to drag the pace down, otherwise
+ * a quiet week reads as fast as a busy one.
+ */
+function buildPaceStats(
+  rows: JtRow[],
+  dateFrom: string,
+  dateTo: string
+): BonusParcelStats["pace"] {
+  const total = rows.filter(
+    (r) => r.submission_date && toPhtDateStr(r.submission_date) >= dateFrom
+  ).length;
+
+  return {
+    total,
+    average_per_day: total / PACE_WINDOW_DAYS,
+    window_days: PACE_WINDOW_DAYS,
+    date_from: dateFrom,
+    date_to: dateTo,
+  };
+}
+
+function buildParcelStats(
+  rows: JtRow[],
+  period: BonusPeriod,
+  pace: BonusParcelStats["pace"]
+): BonusParcelStats {
   const counts = new Map<string, number>();
   for (const day of periodDays(period)) counts.set(day, 0);
 
@@ -97,6 +133,7 @@ function buildParcelStats(rows: JtRow[], period: BonusPeriod): BonusParcelStats 
     projected_total: Math.round(average * period.days_total),
     daily,
     best_day: best && best.count > 0 ? best : null,
+    pace,
   };
 }
 
@@ -211,7 +248,9 @@ export async function GET(request: Request) {
   const supabase = createServiceClient();
 
   const today = phtToday();
-  const cacheKey = buildCacheKey("bonus_overview", { day: today });
+  // v2: the payload gained the rolling-pace fields, so entries written by
+  // the previous shape must not be served to a client that now reads them.
+  const cacheKey = buildCacheKey("bonus_overview", { day: today, v: "2" });
 
   if (!forceRefresh) {
     const cached = await getCachedResponse<BonusOverview>(
@@ -228,6 +267,7 @@ export async function GET(request: Request) {
   const prevPeriod = getPreviousBonusPeriod(today);
   const rtsFrom = addDays(today, -(RTS_WINDOW_DAYS - 1));
   const cppFrom = addDays(today, -(CPP_WINDOW_DAYS - 1));
+  const paceFrom = addDays(today, -(PACE_WINDOW_DAYS - 1));
 
   const [tiersRes, currentJt, prevJt, rtsJt, cpp] = await Promise.all([
     supabase
@@ -255,13 +295,21 @@ export async function GET(request: Request) {
     is_active: r.is_active !== false,
   }));
 
-  const parcels = buildParcelStats(currentJt.rows, period);
-  const progress = computeTierProgress(
-    parcels.average_per_day,
-    parcels.total,
+  const parcels = buildParcelStats(
+    currentJt.rows,
     period,
-    tiers
+    buildPaceStats(rtsJt.rows, paceFrom, today)
   );
+
+  // While the cutoff is still open the team is judged on the rolling pace —
+  // early in a period the cutoff-to-date average is one or two days of noise.
+  // On the cutoff day itself it switches to the period's own average, because
+  // that is the number the bonus is actually settled on.
+  const isFinal = period.days_remaining <= 0;
+  const judgedAverage = isFinal
+    ? parcels.average_per_day
+    : parcels.pace.average_per_day;
+  const progress = computeTierProgress(judgedAverage, tiers);
 
   const prevTotal = prevJt.rows.filter((r) => r.submission_date).length;
   const prevAverage =
@@ -271,6 +319,8 @@ export async function GET(request: Request) {
     period,
     parcels,
     tiers,
+    judged_on: isFinal ? "cutoff" : "pace",
+    judged_average: judgedAverage,
     progress,
     cpp,
     rts: buildRtsStats(rtsJt.rows, rtsFrom, today),
