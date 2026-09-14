@@ -32,6 +32,7 @@ interface FormState {
   store_url: string;
   client_id: string;
   client_secret: string;
+  api_token: string;
 }
 
 const emptyForm: FormState = {
@@ -39,7 +40,13 @@ const emptyForm: FormState = {
   store_url: "",
   client_id: "",
   client_secret: "",
+  api_token: "",
 };
+
+// Pasting an Admin API access token connects the store on the spot. OAuth is
+// kept for apps that already exist, but it needs the Shopify app's App URL and
+// redirect URL pointed back here or Shopify refuses the authorize request.
+type ConnectMethod = "token" | "oauth";
 
 export function StoreManager({ stores: initialStores }: Props) {
   const searchParams = useSearchParams();
@@ -50,6 +57,7 @@ export function StoreManager({ stores: initialStores }: Props) {
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
+  const [method, setMethod] = useState<ConnectMethod>("token");
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(shopifyError);
   const [success, setSuccess] = useState<string | null>(shopifySuccess);
@@ -58,6 +66,7 @@ export function StoreManager({ stores: initialStores }: Props) {
 
   const resetForm = () => {
     setForm(emptyForm);
+    setMethod("token");
     setShowAdd(false);
     setEditingId(null);
     setError(null);
@@ -73,15 +82,21 @@ export function StoreManager({ stores: initialStores }: Props) {
     const formData = new FormData();
     formData.set("name", form.name);
     formData.set("store_url", form.store_url);
-    formData.set("client_id", form.client_id);
-    formData.set("client_secret", form.client_secret);
+    if (method === "token") {
+      formData.set("api_token", form.api_token);
+    } else {
+      formData.set("client_id", form.client_id);
+      formData.set("client_secret", form.client_secret);
+    }
 
     startTransition(async () => {
       const result = await addShopifyStore(formData);
       if (result.error) {
         setError(result.error);
+      } else if (result.connected) {
+        // The token was verified against Shopify before saving — nothing left to do.
+        window.location.reload();
       } else if (result.store_id) {
-        // Redirect to Shopify OAuth to get the token
         window.location.href = `/api/shopify/auth?store_id=${result.store_id}`;
       }
     });
@@ -93,6 +108,7 @@ export function StoreManager({ stores: initialStores }: Props) {
     const formData = new FormData();
     formData.set("name", form.name);
     formData.set("store_url", form.store_url);
+    formData.set("api_token", form.api_token);
     formData.set("client_id", form.client_id);
     formData.set("client_secret", form.client_secret);
 
@@ -152,6 +168,14 @@ export function StoreManager({ stores: initialStores }: Props) {
     }
   };
 
+  // Editing keeps whatever credentials are already stored, so blank fields are
+  // fine there; a new store has to arrive with one complete set.
+  const canSubmit =
+    Boolean(editingId) ||
+    (method === "token"
+      ? Boolean(form.api_token)
+      : Boolean(form.client_id && form.client_secret));
+
   const startEdit = (store: ShopifyStore) => {
     setEditingId(store.id);
     setShowAdd(false);
@@ -160,7 +184,9 @@ export function StoreManager({ stores: initialStores }: Props) {
       store_url: store.store_url,
       client_id: store.client_id || "",
       client_secret: "",
+      api_token: "",
     });
+    setMethod(store.client_id ? "oauth" : "token");
     setError(null);
   };
 
@@ -359,49 +385,105 @@ export function StoreManager({ stores: initialStores }: Props) {
               />
             </div>
 
-            <div>
-              <label className="block text-sm text-gray-300 mb-1.5">
-                Client ID
-                <span className="text-gray-500 ml-1">(from Shopify Dev Dashboard → App → Settings)</span>
-              </label>
-              <input
-                type="text"
-                value={form.client_id}
-                onChange={(e) => setForm((f) => ({ ...f, client_id: e.target.value }))}
-                placeholder="5db6a43ec3a87588310cd8b1a8630343"
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
+            <div className="flex gap-2 p-1 bg-gray-800/60 rounded-lg">
+              {(["token", "oauth"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setMethod(m)}
+                  className={`flex-1 text-xs py-1.5 rounded-md transition-colors cursor-pointer ${
+                    method === m
+                      ? "bg-emerald-600 text-white"
+                      : "text-gray-400 hover:text-gray-200"
+                  }`}
+                >
+                  {m === "token" ? "Access token" : "OAuth app"}
+                </button>
+              ))}
             </div>
 
-            <div>
-              <label className="block text-sm text-gray-300 mb-1.5">
-                Client Secret
-                <span className="text-gray-500 ml-1">(starts with shpss_)</span>
-              </label>
-              <input
-                type="password"
-                value={form.client_secret}
-                onChange={(e) => setForm((f) => ({ ...f, client_secret: e.target.value }))}
-                placeholder="shpss_xxxxx..."
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
+            {method === "token" ? (
+              <>
+                <div>
+                  <label className="block text-sm text-gray-300 mb-1.5">
+                    Admin API access token
+                    <span className="text-gray-500 ml-1">(starts with shpat_)</span>
+                  </label>
+                  <input
+                    type="password"
+                    value={form.api_token}
+                    onChange={(e) => setForm((f) => ({ ...f, api_token: e.target.value }))}
+                    placeholder={editingId ? "Leave blank to keep the current token" : "shpat_xxxxx..."}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
 
-            <p className="text-xs text-gray-500">
-              After saving, you&apos;ll be redirected to Shopify to approve the connection.
-              Make sure your Shopify app has this redirect URL configured:
-              <br />
-              <code className="text-gray-400">
-                {typeof window !== "undefined" ? window.location.origin : "https://your-domain.vercel.app"}
-                /api/shopify/auth/callback
-              </code>
-            </p>
+                <p className="text-xs text-gray-500">
+                  In the Shopify admin: <strong className="text-gray-400">Settings → Apps and
+                  sales channels → Develop apps</strong> → your app →{" "}
+                  <strong className="text-gray-400">API credentials</strong> → reveal the Admin
+                  API access token. Give it at least{" "}
+                  <code className="text-gray-400">read_orders</code>,{" "}
+                  <code className="text-gray-400">read_products</code> and{" "}
+                  <code className="text-gray-400">read_fulfillments</code>. Nothing else to
+                  configure — the token is tested against the store before it saves.
+                </p>
+              </>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-sm text-gray-300 mb-1.5">
+                    Client ID
+                    <span className="text-gray-500 ml-1">(from Shopify Dev Dashboard → App → Settings)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={form.client_id}
+                    onChange={(e) => setForm((f) => ({ ...f, client_id: e.target.value }))}
+                    placeholder="5db6a43ec3a87588310cd8b1a8630343"
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-gray-300 mb-1.5">
+                    Client Secret
+                    <span className="text-gray-500 ml-1">(starts with shpss_)</span>
+                  </label>
+                  <input
+                    type="password"
+                    value={form.client_secret}
+                    onChange={(e) => setForm((f) => ({ ...f, client_secret: e.target.value }))}
+                    placeholder="shpss_xxxxx..."
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <p className="text-xs text-gray-500">
+                  After saving, you&apos;ll be redirected to Shopify to approve the connection.
+                  First set <strong className="text-gray-400">both</strong> of these in the
+                  Shopify app&apos;s Configuration — Shopify rejects the authorize request
+                  unless the App URL and the redirect URL share the same host:
+                  <br />
+                  App URL:{" "}
+                  <code className="text-gray-400">
+                    {typeof window !== "undefined" ? window.location.origin : "https://your-domain.vercel.app"}
+                  </code>
+                  <br />
+                  Allowed redirection URL:{" "}
+                  <code className="text-gray-400">
+                    {typeof window !== "undefined" ? window.location.origin : "https://your-domain.vercel.app"}
+                    /api/shopify/auth/callback
+                  </code>
+                </p>
+              </>
+            )}
 
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={editingId ? handleUpdate : handleAdd}
-                disabled={isPending || !form.name || !form.store_url || !form.client_id || !form.client_secret}
+                disabled={isPending || !form.name || !form.store_url || !canSubmit}
                 className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
               >
                 {isPending ? (

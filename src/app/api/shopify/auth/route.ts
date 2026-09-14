@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
+import { resolvePublicAppUrl } from "@/lib/app-url";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -34,7 +35,7 @@ export async function GET(request: Request) {
   }
 
   // Build the Shopify OAuth authorization URL
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || request.headers.get("origin") || "";
+  const appUrl = resolvePublicAppUrl(request);
   const redirectUri = `${appUrl}/api/shopify/auth/callback`;
 
   // Use store_id as the state param so we know which store to update on callback

@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { resolvePublicAppUrl } from "@/lib/app-url";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -9,7 +10,7 @@ export async function GET(request: Request) {
   const storeId = searchParams.get("state"); // we passed store_id as state
   const shop = searchParams.get("shop"); // e.g. "my-store.myshopify.com"
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin;
+  const appUrl = resolvePublicAppUrl(request);
 
   if (!code || !storeId) {
     const url = new URL("/admin/settings", appUrl);

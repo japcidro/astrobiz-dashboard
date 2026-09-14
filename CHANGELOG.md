@@ -1,5 +1,42 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-14: Shopify store connect — connect by access token, no app config — uncommitted
+
+Connecting a new store died on Shopify's `Oauth error invalid_request: The
+redirect_uri and application url must have matching hosts`. Two causes, and a
+third path added so the failure mode stops existing.
+
+- **Host-less redirect_uri** `src/app/api/shopify/auth/route.ts` built the
+  `redirect_uri` from `NEXT_PUBLIC_APP_URL || request.headers.get("origin")`.
+  The connect button navigates with `window.location.href`, and browsers do
+  not send an `Origin` header on a top-level GET, so whenever
+  `NEXT_PUBLIC_APP_URL` is unset the fallback is `null` and the `redirect_uri`
+  collapses to the host-less `/api/shopify/auth/callback`. Shopify then has no
+  host to match the app's App URL against.
+  Fixed by `src/lib/app-url.ts` — `resolvePublicAppUrl(request)`, the same
+  resolution order the briefings already relied on: `NEXT_PUBLIC_APP_URL`,
+  then Vercel's own `VERCEL_PROJECT_PRODUCTION_URL`, then the request host.
+  Step 2 means the redirect is right on Vercel with no env var set at all.
+  `resolveBriefingBaseUrl` delegates to it instead of duplicating the logic.
+- **The app's own App URL** is the other half, and no amount of app code can
+  set it — a freshly created app in the Shopify Dev Dashboard carries a
+  placeholder App URL that will never match this host.
+- **So: connect by Admin API access token instead.** The store form now leads
+  with an "Access token" method — paste the `shpat_…` token from
+  Settings → Apps and sales channels → Develop apps → API credentials and the
+  store is connected, no App URL, no redirect URL, no client secret. OAuth
+  only ever existed to go and fetch one of these tokens, and every Shopify
+  read in the codebase already authenticates with `api_token`. OAuth is kept
+  as the second tab for apps already wired up.
+  `src/lib/shopify/verify-token.ts` tests the token against `shop.json`
+  **before** the insert, so a bad paste is rejected at the form instead of
+  turning into an empty orders table hours later.
+- **Store URL normalizing** `src/lib/shopify/store-url.ts` — the field is
+  filled by copying from a browser, so it arrived as
+  `admin.shopify.com/store/<handle>`, a legacy admin URL with a path, a bare
+  handle, or with a scheme and trailing slash; each silently produced a broken
+  API host. Now folded down to `<handle>.myshopify.com` on save. 9 unit tests.
+
 ## 2026-09-02: Bonus Tracker — parcel-volume bonus dashboard — uncommitted
 
 New main tab visible to **every role** (`/bonus`). Shows the team what
