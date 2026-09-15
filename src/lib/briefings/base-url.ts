@@ -19,7 +19,7 @@ import { resolvePublicAppUrl } from "@/lib/app-url";
 // Resolution order:
 //   1. NEXT_PUBLIC_APP_URL  — user-set, points at the production alias.
 //   2. VERCEL_PROJECT_PRODUCTION_URL  — Vercel-provided in production
-//      (e.g. "astrobiz-dashboard.vercel.app"); always public regardless of
+//      (e.g. "astrobiz.live"); always public regardless of
 //      protection settings.
 //   3. request.url host  — last-resort fallback for local dev / unknown envs.
 export function resolveBriefingBaseUrl(request: Request): string {

@@ -3,7 +3,10 @@
 ## Overview
 Internal employee dashboard for Astrobiz, a Filipino ecommerce business running 4+ Shopify stores with Facebook Ads and J&T Express courier. Built to replace Google Sheets + Apps Script workflows with a unified web app.
 
-**Live URL:** https://astrobiz-dashboard.vercel.app
+**Live URL:** https://astrobiz.live
+(The old `astrobiz-dashboard.vercel.app` name is dead — it 404s with
+`DEPLOYMENT_NOT_FOUND`. Anything that needs the public origin, such as the
+Shopify OAuth redirect_uri, must use astrobiz.live.)
 **Repo:** https://github.com/japcidro/astrobiz-dashboard
 
 ## Tech Stack

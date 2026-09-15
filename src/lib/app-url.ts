@@ -8,7 +8,7 @@
 // Resolution order:
 //   1. NEXT_PUBLIC_APP_URL  — user-set, points at the production alias.
 //   2. VERCEL_PROJECT_PRODUCTION_URL  — Vercel-provided in production
-//      (e.g. "astrobiz-dashboard.vercel.app"); always public regardless of
+//      (e.g. "astrobiz.live"); always public regardless of
 //      Deployment Protection settings.
 //   3. request.url host  — last-resort fallback for local dev / unknown envs.
 export function resolvePublicAppUrl(request: Request): string {

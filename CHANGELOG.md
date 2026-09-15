@@ -1,5 +1,28 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-15: The live URL is astrobiz.live, not the vercel.app name — uncommitted
+
+`astrobiz-dashboard.vercel.app` appeared in PROJECT_CONTEXT as the live URL and
+in TODO as the value for `NEXT_PUBLIC_APP_URL`, and it is dead — it answers 404
+with `x-vercel-error: DEPLOYMENT_NOT_FOUND`. The real origin is
+**https://astrobiz.live**.
+
+This cost a full debugging round on the Shopify connect: the dead name was
+whitelisted in the app's Allowed redirection URLs while the deployment was
+sending its real origin, so Shopify kept answering
+`Oauth error invalid_request: The redirect_uri is not whitelisted` — correctly.
+Probing the public callback route settled it, since it redirects to
+`${appUrl}/admin/settings` and so prints the resolved origin in its Location
+header:
+
+    $ curl -sI https://astrobiz.live/api/shopify/auth/callback
+    location: https://astrobiz.live/admin/settings?shopify_error=Missing+code...
+
+That also confirms `resolvePublicAppUrl` resolves correctly in production.
+Every reference now says astrobiz.live, and PROJECT_CONTEXT records that the
+old name is dead so it doesn't get copied back out of git history.
+
+
 ## 2026-09-14: Shopify store connect — connect by access token, no app config — uncommitted
 
 Connecting a new store died on Shopify's `Oauth error invalid_request: The

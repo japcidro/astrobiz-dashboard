@@ -28,7 +28,7 @@ If not already set, add these — tick all 3 environments (Production / Preview 
       (until a verified domain is added)
 - [ ] `ALERT_RECIPIENTS` = `japcidro@gmail.com`
       (Resend testing mode — only the signup email can receive)
-- [ ] `NEXT_PUBLIC_APP_URL` = `https://astrobiz-dashboard.vercel.app`
+- [ ] `NEXT_PUBLIC_APP_URL` = `https://astrobiz.live`
 
 ### 3. Set this week's employee shifts
 
@@ -41,14 +41,14 @@ If not already set, add these — tick all 3 environments (Production / Preview 
 - [ ] Set your own shift for today (start = 1h ago, end = 8h later)
 - [ ] Don't clock in
 - [ ] Trigger cron manually:
-      `curl -H "Authorization: Bearer $CRON_SECRET" https://astrobiz-dashboard.vercel.app/api/cron/attendance-check`
+      `curl -H "Authorization: Bearer $CRON_SECRET" https://astrobiz.live/api/cron/attendance-check`
 - [ ] Verify: response shows `clockin_reminders: 1`, bell shows badge,
       banner shows red "Not clocked in" with CTA, email arrives in Gmail
 
 ### 5. Smoke-test briefings
 
 - [ ] Trigger morning briefing manually:
-      `curl -H "Authorization: Bearer $CRON_SECRET" https://astrobiz-dashboard.vercel.app/api/cron/briefing-morning`
+      `curl -H "Authorization: Bearer $CRON_SECRET" https://astrobiz.live/api/cron/briefing-morning`
 - [ ] Verify: numbers are non-zero (RLS fix should have resolved this),
       AI summary reads sensibly, email arrives, briefing visible at
       `/admin/briefings`
