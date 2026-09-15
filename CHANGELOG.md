@@ -1,5 +1,31 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-15: NURTELLE ad spend — attribute by ad account name too — uncommitted
+
+NURTELLE's P&L showed real revenue but ₱0.00 Ad Spend, so CPP read ₱0.00.
+
+- **Cause** `matchAdToStore` matched a hardcoded keyword list —
+  I LOVE PATCHES / CAPSULED / FOLIQ — against the **campaign and adset names**
+  only. NURTELLE was never in the list, so every peso it spent fell to
+  `UNATTRIBUTED`.
+- **Account-name fallback** NURTELLE's ads live in an ad account named for the
+  brand, while the campaigns inside it aren't necessarily. `matchAdToStore`
+  now takes an optional third argument, the ad account name, and falls back to
+  it when the campaign and adset name no brand. `/api/profit/daily` asks Meta
+  for `account_name` alongside the existing insight fields to supply it.
+  Campaign naming still wins, so one account running two brands attributes
+  each campaign to the brand it actually advertises, and retired brands are
+  still ignored in the account name just as in the campaign name.
+- NURTELLE joins `ACTIVE_STORES` (store pickers) and `matchSenderToStore`
+  (J&T sender normalizing), the way the other live brands are registered.
+- 3 new tests: account-name fallback, campaign-beats-account precedence, and
+  retired brands staying unattributed via the account name.
+
+**Note:** attribution only runs over ad accounts ticked in Settings →
+Facebook. If NURTELLE's account isn't selected there, no insights are fetched
+for it at all and this change can't help.
+
+
 ## 2026-09-15: The live URL is astrobiz.live, not the vercel.app name — uncommitted
 
 `astrobiz-dashboard.vercel.app` appeared in PROJECT_CONTEXT as the live URL and

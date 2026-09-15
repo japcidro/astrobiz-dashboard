@@ -594,7 +594,28 @@ describe("Ad Spend Store Attribution", () => {
   });
 
   it("unrecognized campaign = empty (unattributed)", () => {
+    expect(matchAdToStore("NURTELLE-NURSERY", "ALL")).toBe("NURTELLE");
     expect(matchAdToStore("RANDOM-CAMPAIGN", "RANDOM-ADSET")).toBe("");
+  });
+
+  it("falls back to the ad account name when the campaign names no brand", () => {
+    // A dedicated account whose campaigns are named generically — without the
+    // account-name fallback this spend is UNATTRIBUTED and the store's CPP
+    // reads zero while it is really spending.
+    expect(matchAdToStore("CBO-TEST-3", "ADSET-1", "NURTELLE ADS")).toBe(
+      "NURTELLE"
+    );
+    expect(matchAdToStore("CBO-TEST-3", "ADSET-1", "")).toBe("");
+  });
+
+  it("prefers the campaign name over the account name", () => {
+    // A correctly named campaign wins, so one account running two brands
+    // still attributes each campaign to the brand it advertises.
+    expect(matchAdToStore("FOLIQ-SCALING", "ALL", "NURTELLE ADS")).toBe("FOLIQ");
+  });
+
+  it("still ignores retired brands in the account name", () => {
+    expect(matchAdToStore("CBO-TEST", "", "HIBI ADS")).toBe("");
   });
 
   it("retired brands are NOT attributed — they have no revenue to offset", () => {
@@ -673,7 +694,7 @@ describe("J&T Sender → Store Matching", () => {
 // ============================================================
 describe("Store roster", () => {
   it("pickers only offer stores we currently ship for", () => {
-    expect([...ACTIVE_STORES]).toEqual(["I LOVE PATCHES", "CAPSULED", "FOLIQ"]);
+    expect([...ACTIVE_STORES]).toEqual(["I LOVE PATCHES", "CAPSULED", "FOLIQ", "NURTELLE"]);
     expect(ACTIVE_STORES).not.toContain("HIBI");
     expect(ACTIVE_STORES).not.toContain("SERINA");
   });

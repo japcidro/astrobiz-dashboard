@@ -1,33 +1,52 @@
 /**
- * Match a Meta Ads campaign/adset name to a store.
- * Checks both campaign and adset names for store keywords.
+ * The store keywords, checked against one blob of text. Order matters —
+ * more specific patterns first.
+ */
+function matchStoreKeyword(text: string): string {
+  const upper = text.toUpperCase();
+
+  if (
+    upper.includes("ILOVEPATCHES") ||
+    upper.includes("I LOVE PATCHES") ||
+    upper.includes("ILP")
+  )
+    return "I LOVE PATCHES";
+  if (upper.includes("CAPSULED")) return "CAPSULED";
+  if (upper.includes("FOLIQ")) return "FOLIQ";
+  if (upper.includes("NURTELLE")) return "NURTELLE";
+
+  return "";
+}
+
+/**
+ * Match a Meta Ads campaign/adset to a store.
+ *
+ * The campaign and adset names are checked first, because they name the brand
+ * being advertised. `accountName` is a fallback for accounts dedicated to one
+ * store, where the brand is in the ad account's name and the campaigns inside
+ * it are named things like "CBO-TEST-3" — without it that spend lands in
+ * UNATTRIBUTED and the store's CPP reads ₱0.00 while it is really spending.
+ * Campaign-level naming still wins, so a correctly named campaign in a
+ * mis-named account is attributed to the brand it actually advertises.
  *
  * Only ACTIVE stores are matched — a revived campaign for a retired brand
  * lands in UNATTRIBUTED rather than creating ad spend with no revenue behind it.
  */
 export function matchAdToStore(
   campaignName: string,
-  adsetName: string
+  adsetName: string,
+  accountName: string = ""
 ): string {
-  const text = (campaignName + " " + adsetName).toUpperCase();
+  const fromCampaign = matchStoreKeyword(`${campaignName} ${adsetName}`);
+  if (fromCampaign) return fromCampaign;
 
-  // Check more specific patterns first
-  if (
-    text.includes("ILOVEPATCHES") ||
-    text.includes("I LOVE PATCHES") ||
-    text.includes("ILP")
-  )
-    return "I LOVE PATCHES";
-  if (text.includes("CAPSULED")) return "CAPSULED";
-  if (text.includes("FOLIQ")) return "FOLIQ";
-
-  return ""; // unattributed
+  return matchStoreKeyword(accountName);
 }
 
 /**
  * Stores we currently ship for. Drives every store picker in the UI.
  */
-export const ACTIVE_STORES = ["I LOVE PATCHES", "CAPSULED", "FOLIQ"] as const;
+export const ACTIVE_STORES = ["I LOVE PATCHES", "CAPSULED", "FOLIQ", "NURTELLE"] as const;
 
 /**
  * Stores we no longer ship for. Kept only so their historical parcels
@@ -89,6 +108,7 @@ export function matchSenderToStore(senderName: string): string {
     return "I LOVE PATCHES";
   if (upper.includes("CAPSULED")) return "CAPSULED";
   if (upper.includes("FOLIQ")) return "FOLIQ";
+  if (upper.includes("NURTELLE")) return "NURTELLE";
   if (upper.includes("HIBI")) return "HIBI";
   if (upper.includes("SERINA")) return "SERINA";
 

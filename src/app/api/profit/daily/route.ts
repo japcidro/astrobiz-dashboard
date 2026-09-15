@@ -221,6 +221,7 @@ async function shopifyFetchOrders(
 // ---------- Facebook insights fetch (daily breakdown) ----------
 
 interface FbDailyInsight {
+  account_name: string;
   campaign_name: string;
   adset_name: string;
   spend: string;
@@ -239,7 +240,7 @@ async function fbFetchInsightsDaily(
     `${FB_API_BASE}/act_${accountId}/insights?` +
     new URLSearchParams({
       access_token: token,
-      fields: "campaign_name,adset_name,spend",
+      fields: "account_name,campaign_name,adset_name,spend",
       level: "campaign",
       time_increment: "1",
       time_range: JSON.stringify({ since, until }),
@@ -537,7 +538,8 @@ export async function GET(request: Request) {
               const dateStr = row.date_start; // already YYYY-MM-DD
               const storeName = matchAdToStore(
                 row.campaign_name || "",
-                row.adset_name || ""
+                row.adset_name || "",
+                row.account_name || ""
               );
 
               // If store filter is active and this ad doesn't match, skip (case-insensitive)
