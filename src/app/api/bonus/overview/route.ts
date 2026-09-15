@@ -5,6 +5,7 @@ import { resolveBriefingBaseUrl } from "@/lib/briefings/base-url";
 import { buildCacheKey, getCachedResponse, setCachedResponse } from "@/lib/data-cache";
 import {
   addDays,
+  daysBetween,
   getBonusPeriod,
   getPreviousBonusPeriod,
   periodDays,
@@ -14,6 +15,7 @@ import {
 import { computeTierProgress, tierForAverage } from "@/lib/bonus/tiers";
 import type {
   BonusCppStats,
+  BonusDataFreshness,
   BonusOverview,
   BonusParcelStats,
   BonusRtsStats,
@@ -31,6 +33,13 @@ const RTS_WINDOW_DAYS = 30;
  * already fetched for RTS rather than costing a fifth round trip.
  */
 const PACE_WINDOW_DAYS = 15;
+
+/**
+ * How far the parcel data may fall behind before the page says so out loud.
+ * Uploading J&T is a near-daily habit, so this matches the 3-day threshold
+ * the admin upload panel already warns at.
+ */
+const STALE_AFTER_DAYS = 3;
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -234,6 +243,56 @@ async function fetchCppStats(
   }
 }
 
+/**
+ * How current the J&T data is: when the last file landed, and which parcel
+ * day the numbers actually reach. Both are cheap — one row each, off an
+ * index — and both are needed: uploading a file of old rows moves the upload
+ * time without moving the data forward.
+ *
+ * "Last uploaded" is read from jt_upload_batches so this page and the admin
+ * upload panel quote the same moment. Batch rows are written best-effort, so
+ * a very recent upload can be missing one; the parcel date below is the
+ * staleness signal that never lies.
+ */
+async function fetchFreshness(
+  supabase: ReturnType<typeof createServiceClient>,
+  today: string
+): Promise<BonusDataFreshness> {
+  const [batch, newest] = await Promise.all([
+    supabase
+      .from("jt_upload_batches")
+      .select("uploaded_at")
+      .order("uploaded_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("jt_deliveries")
+      .select("submission_date")
+      .not("submission_date", "is", null)
+      .order("submission_date", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+
+  const latestParcelDate = newest.data?.submission_date
+    ? toPhtDateStr(newest.data.submission_date)
+    : null;
+
+  // Clamped at zero: a file carrying a submission time a few hours into
+  // tomorrow shouldn't read as "-1 days behind".
+  const daysBehind =
+    latestParcelDate === null
+      ? null
+      : Math.max(0, daysBetween(latestParcelDate, today));
+
+  return {
+    last_upload_at: batch.data?.uploaded_at ?? null,
+    latest_parcel_date: latestParcelDate,
+    days_behind: daysBehind,
+    is_stale: daysBehind !== null && daysBehind > STALE_AFTER_DAYS,
+  };
+}
+
 export async function GET(request: Request) {
   const employee = await getEmployee();
   if (!employee) {
@@ -248,9 +307,9 @@ export async function GET(request: Request) {
   const supabase = createServiceClient();
 
   const today = phtToday();
-  // v2: the payload gained the rolling-pace fields, so entries written by
+  // v3: the payload gained the data-freshness block, so entries written by
   // the previous shape must not be served to a client that now reads them.
-  const cacheKey = buildCacheKey("bonus_overview", { day: today, v: "2" });
+  const cacheKey = buildCacheKey("bonus_overview", { day: today, v: "3" });
 
   if (!forceRefresh) {
     const cached = await getCachedResponse<BonusOverview>(
@@ -269,7 +328,7 @@ export async function GET(request: Request) {
   const cppFrom = addDays(today, -(CPP_WINDOW_DAYS - 1));
   const paceFrom = addDays(today, -(PACE_WINDOW_DAYS - 1));
 
-  const [tiersRes, currentJt, prevJt, rtsJt, cpp] = await Promise.all([
+  const [tiersRes, currentJt, prevJt, rtsJt, cpp, freshness] = await Promise.all([
     supabase
       .from("bonus_tiers")
       .select("id, parcel_threshold, label, is_active")
@@ -278,6 +337,7 @@ export async function GET(request: Request) {
     fetchJtRows(supabase, prevPeriod.start, prevPeriod.end),
     fetchJtRows(supabase, rtsFrom, today),
     fetchCppStats(request, cppFrom, today),
+    fetchFreshness(supabase, today),
   ]);
 
   const jtError = currentJt.error || prevJt.error || rtsJt.error;
@@ -330,6 +390,7 @@ export async function GET(request: Request) {
       average_per_day: prevAverage,
       tier: tierForAverage(prevAverage, tiers),
     },
+    freshness,
     generated_at: new Date().toISOString(),
   };
 

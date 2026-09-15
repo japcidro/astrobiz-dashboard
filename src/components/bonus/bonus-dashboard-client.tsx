@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  AlertCircle,
   Award,
   Calendar,
   CheckCircle2,
+  Clock,
   Lock,
   Package,
   RefreshCw,
@@ -12,7 +14,8 @@ import {
   Settings2,
   Target,
 } from "lucide-react";
-import type { BonusOverview } from "@/lib/bonus/types";
+import type { BonusDataFreshness, BonusOverview } from "@/lib/bonus/types";
+import { formatPhDate, formatPhDateTime, formatAgo } from "@/lib/profit/format-dates";
 import { TierLadder } from "./tier-ladder";
 import { ParcelTrend } from "./parcel-trend";
 import { TierEditor } from "./tier-editor";
@@ -115,6 +118,7 @@ export function BonusDashboardClient({ employeeName, isAdmin }: Props) {
           <p className="text-sm text-gray-500">
             Company-wide parcel bonus for the {period.label} cutoff.
           </p>
+          <DataFreshness freshness={data.freshness} />
         </div>
         <div className="flex items-center gap-2">
           {isAdmin && (
@@ -346,9 +350,60 @@ export function BonusDashboardClient({ employeeName, isAdmin }: Props) {
         ÷ total orders over the last {cpp.window_days} days, from the same
         P&amp;L pipeline as Net Profit. RTS rate is returned ÷ settled (delivered + returned) parcels
         over the last {rts.window_days} days — parcels still in transit are
-        excluded. Data refreshes every 5 minutes; the J&amp;T numbers are only
-        as current as the latest upload.
+        excluded. The J&amp;T numbers are only as current as the latest upload —
+        the badge at the top says which parcel day they reach. This page was
+        refreshed {formatAgo(data.generated_at)}.
       </p>
+    </div>
+  );
+}
+
+/**
+ * Whether the parcel numbers above are actually up to date.
+ *
+ * Measured from the newest parcel in the data, not from the last upload: a
+ * file of old rows moves the upload time without moving the numbers forward.
+ * The upload time is still shown, because "nobody has uploaded since Monday"
+ * and "J&T has not scanned anything since Monday" call for different people.
+ */
+function DataFreshness({ freshness }: { freshness: BonusDataFreshness }) {
+  const { latest_parcel_date, last_upload_at, days_behind, is_stale } = freshness;
+
+  const tone = is_stale
+    ? "border-amber-700/50 bg-amber-950/30 text-amber-300"
+    : "border-gray-800 bg-gray-950 text-gray-400";
+
+  let label: string;
+  if (latest_parcel_date === null) {
+    label = "No parcel data uploaded yet";
+  } else if (days_behind === 0) {
+    label = `Parcel data is current through today, ${formatPhDate(latest_parcel_date)}`;
+  } else {
+    label = `Parcel data runs through ${formatPhDate(latest_parcel_date)} — ${days_behind} ${
+      days_behind === 1 ? "day" : "days"
+    } behind`;
+  }
+
+  return (
+    <div
+      className={`mt-2 inline-flex flex-wrap items-center gap-x-2 gap-y-1 rounded-full border px-3 py-1 text-[11px] ${tone}`}
+      title={
+        last_upload_at
+          ? `Last J&T upload: ${formatPhDateTime(last_upload_at)} (PHT)`
+          : undefined
+      }
+    >
+      {is_stale ? (
+        <AlertCircle size={12} className="shrink-0" />
+      ) : (
+        <Clock size={12} className="shrink-0 text-gray-500" />
+      )}
+      <span>{label}</span>
+      {last_upload_at && (
+        <span className={is_stale ? "text-amber-400/70" : "text-gray-600"}>
+          · last upload {formatPhDateTime(last_upload_at)} ({formatAgo(last_upload_at)})
+        </span>
+      )}
     </div>
   );
 }

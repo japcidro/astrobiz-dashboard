@@ -72,6 +72,25 @@ export interface BonusTierProgress {
   to_next: { per_day_gap: number } | null;
 }
 
+/**
+ * How current the parcel numbers are. The team reads this page but cannot see
+ * the J&T uploader, so without it there is no way to tell a genuinely slow
+ * stretch from a stretch nobody has uploaded yet.
+ */
+export interface BonusDataFreshness {
+  /** When the newest J&T file was uploaded, ISO. Null if none is recorded. */
+  last_upload_at: string | null;
+  /** Newest parcel in the table, as its PHT calendar day (YYYY-MM-DD). */
+  latest_parcel_date: string | null;
+  /**
+   * PHT days between that newest parcel day and today. 0 means the data
+   * already covers today. Null when there are no parcels at all.
+   */
+  days_behind: number | null;
+  /** True once the data has fallen further behind than a normal upload gap. */
+  is_stale: boolean;
+}
+
 export interface BonusOverview {
   period: BonusPeriod;
   parcels: BonusParcelStats;
@@ -94,5 +113,7 @@ export interface BonusOverview {
     average_per_day: number;
     tier: BonusTier | null;
   } | null;
+  /** How up to date the J&T parcel data behind all of the above is. */
+  freshness: BonusDataFreshness;
   generated_at: string;
 }

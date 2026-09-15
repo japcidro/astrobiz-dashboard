@@ -1,5 +1,27 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-15: Bonus Tracker says how current its numbers are — uncommitted
+
+The page quoted parcels-per-day with no way to tell whether the data behind it
+was uploaded this morning or last week. Everyone except an admin reads this
+page and none of them can see the J&T uploader, so a stretch with nothing
+uploaded looked exactly like a slow stretch.
+
+- **`/api/bonus/overview` now returns a `freshness` block**: the newest parcel
+  day in `jt_deliveries` (as a PHT calendar day), how many days behind today
+  that is, whether that crosses the 3-day staleness line the admin upload panel
+  already warns at, and when the newest `jt_upload_batches` row landed. Two
+  single-row index reads, folded into the existing `Promise.all`.
+- **Measured from the newest parcel, not the last upload.** Uploading a file of
+  old rows moves the upload time without moving the numbers forward. The upload
+  time is shown alongside it because "nobody uploaded since Monday" and "J&T
+  scanned nothing since Monday" are different people's problems.
+- **A badge under the page title** reads "Parcel data is current through today,
+  Sep 15, 2026 · last upload Sep 15, 2026, 10:05 PM (2 hours ago)", and turns
+  amber with a warning icon once the data is more than 3 days behind.
+- Cache key bumped to `v3` — the payload shape changed, so entries written by
+  the old shape must not be served to a client that now reads the new field.
+
 ## 2026-09-15: Video review survives a denied Facebook video — uncommitted
 
 Opening a NURTELLE ad in Submitted Videos showed a bare
