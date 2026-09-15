@@ -1,5 +1,44 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-15: NURTELLE across the Marketing tab — uncommitted
+
+Follow-up to the ad-spend fix: make every Marketing surface work for the new
+store. Audited the whole tab rather than patching screen by screen.
+
+**Already store-agnostic — no code changed, and none needed:**
+Create Ad and Bulk Create both read their store list from
+`/api/marketing/store-defaults`, which selects `shopify_stores` where
+`is_active`, so NURTELLE shows up the moment it exists. Same for ad-copy
+presets (keyed by `store_id`), scaling (`store_scaling_campaigns` keyed by
+`store_name`), winners pool, AI analytics comparisons and creative tagging —
+all read `store_name` as data. Fix Rejections gates on `/nurser/i` against the
+campaign name, which is brand-independent (and does not accidentally match
+"NURTELLE").
+
+**The one real gate was `matchAdToStore`**, whose hardcoded keyword list is
+what fills `store_name` in the first place — everything above is downstream of
+it. It gained NURTELLE and the ad account fallback in the previous commit, but
+only `/api/profit/daily` passed the account name. Its other two call sites
+still matched on campaign names alone, so NURTELLE ads would show up
+unattributed on those screens:
+
+- **Ad Performance** `marketing/ads/page.tsx` now passes `rowData.account`,
+  the ad account name, which the row already carried.
+- **Submitted Videos** `/api/marketing/submitted-videos` had only account
+  *ids*, so it now fetches `id,name` from `/me/adaccounts` once per request and
+  passes the matching name through `toSubmittedAd`. A failed lookup resolves
+  to `""`, which degrades to exactly the previous campaign-name behaviour
+  rather than erroring.
+
+Existing stores are untouched: campaign-name matching still wins, and the
+account name is consulted only when the campaign and adset name no brand.
+
+**Still needs configuring (data, not code):** NURTELLE's store ad defaults
+(Page, pixel, URL, CTA, targeting) via the Store picker's "Save current as
+store default", and a `store_scaling_campaigns` row if it should appear in
+Scaling.
+
+
 ## 2026-09-15: NURTELLE ad spend — attribute by ad account name too — uncommitted
 
 NURTELLE's P&L showed real revenue but ₱0.00 Ad Spend, so CPP read ₱0.00.

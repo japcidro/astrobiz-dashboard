@@ -271,7 +271,13 @@ function viewAdFromRow(rowData: Record<string, unknown>): SubmittedAd {
     effective_status: (rowData.status as string) || null,
     is_scheduled: startTime ? new Date(startTime).getTime() > Date.now() : false,
     store_name:
-      matchAdToStore(`${campaignName ?? ""} ${adName}`, adsetName ?? "") || null,
+      matchAdToStore(
+        `${campaignName ?? ""} ${adName}`,
+        adsetName ?? "",
+        // `account` is the ad account's name. Stores whose campaigns aren't
+        // named for the brand are attributed by the account they run in.
+        (rowData.account as string) ?? ""
+      ) || null,
     campaign_name: campaignName,
     adset_name: adsetName,
     reviewed_at: null,

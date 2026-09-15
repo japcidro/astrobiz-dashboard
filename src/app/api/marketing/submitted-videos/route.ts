@@ -93,7 +93,11 @@ async function fetchAccountAds(
   return out;
 }
 
-function toSubmittedAd(ad: RawAd, sinceMs: number): SubmittedAd | null {
+function toSubmittedAd(
+  ad: RawAd,
+  sinceMs: number,
+  accountName: string
+): SubmittedAd | null {
   // Belt-and-suspenders date filter (in case FB ignores `filtering`).
   const createdMs = ad.created_time ? new Date(ad.created_time).getTime() : 0;
   if (createdMs && createdMs < sinceMs) return null;
@@ -110,7 +114,13 @@ function toSubmittedAd(ad: RawAd, sinceMs: number): SubmittedAd | null {
   const startTime = ad.adset?.start_time ?? null;
   const { code, name } = attributeMarketer(ad.name);
   const store =
-    matchAdToStore(`${campaignName ?? ""} ${ad.name}`, adsetName ?? "") || null;
+    matchAdToStore(
+      `${campaignName ?? ""} ${ad.name}`,
+      adsetName ?? "",
+      // Stores whose campaigns aren't named for the brand are attributed by
+      // the ad account they run in.
+      accountName
+    ) || null;
 
   return {
     fb_ad_id: ad.id,
@@ -198,6 +208,23 @@ export async function GET(request: Request) {
     }
   }
 
+  // Ad account names, for attributing ads whose campaign names carry no brand.
+  // One call for every account under the token; misses resolve to "", which
+  // just means attribution falls back to the campaign name as before.
+  const accountNames = new Map<string, string>();
+  try {
+    const res = await fetch(
+      `${FB_API_BASE}/me/adaccounts?fields=id,name&limit=100&access_token=${encodeURIComponent(token)}`,
+      { cache: "no-store" }
+    );
+    const json = await res.json();
+    for (const a of (json.data ?? []) as { id: string; name?: string }[]) {
+      if (a.name) accountNames.set(a.id, a.name);
+    }
+  } catch {
+    // Non-fatal: attribution degrades to campaign-name matching.
+  }
+
   const sinceMs = Date.now() - days * 24 * 60 * 60 * 1000;
   const sinceUnix = Math.floor(sinceMs / 1000);
   const cacheKey = `${accountIds.join(",")}|${days}`;
@@ -213,7 +240,11 @@ export async function GET(request: Request) {
           const raw = await fetchAccountAds(acct, token, sinceUnix);
           return raw
             .map((r) => {
-              const dto = toSubmittedAd(r, sinceMs);
+              const dto = toSubmittedAd(
+                r,
+                sinceMs,
+                accountNames.get(acct) ?? ""
+              );
               if (dto) dto.ad_account_id = acct;
               return dto;
             })
