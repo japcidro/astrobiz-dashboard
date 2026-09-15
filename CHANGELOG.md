@@ -31,6 +31,13 @@ third path added so the failure mode stops existing.
   `src/lib/shopify/verify-token.ts` tests the token against `shop.json`
   **before** the insert, so a bad paste is rejected at the form instead of
   turning into an empty orders table hours later.
+- **Correction to the above:** Shopify has retired admin-created custom apps
+  ("You can no longer create new admin-created custom apps"), so the access
+  token path only covers stores set up before that. Apps made in the Dev
+  Dashboard have no `shpat_` token to copy and must use OAuth — their App URL
+  and redirect URL live under **Versions → Create a version**, not App
+  settings. The token tab's help text says so rather than sending people to a
+  dead end.
 - **Store URL normalizing** `src/lib/shopify/store-url.ts` — the field is
   filled by copying from a browser, so it arrived as
   `admin.shopify.com/store/<handle>`, a legacy admin URL with a path, a bare

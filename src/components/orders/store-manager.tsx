@@ -43,9 +43,11 @@ const emptyForm: FormState = {
   api_token: "",
 };
 
-// Pasting an Admin API access token connects the store on the spot. OAuth is
-// kept for apps that already exist, but it needs the Shopify app's App URL and
-// redirect URL pointed back here or Shopify refuses the authorize request.
+// Pasting an Admin API access token connects the store on the spot, but Shopify
+// has retired admin-created custom apps, so only stores set up before that have
+// a token to paste. Newer apps come from the Dev Dashboard and must go through
+// OAuth — which needs the app version's App URL and redirect URL pointed back
+// here, or Shopify refuses the authorize request.
 type ConnectMethod = "token" | "oauth";
 
 export function StoreManager({ stores: initialStores }: Props) {
@@ -419,14 +421,16 @@ export function StoreManager({ stores: initialStores }: Props) {
                 </div>
 
                 <p className="text-xs text-gray-500">
-                  In the Shopify admin: <strong className="text-gray-400">Settings → Apps and
-                  sales channels → Develop apps</strong> → your app →{" "}
+                  For a store whose app was made <strong className="text-gray-400">before</strong>{" "}
+                  Shopify retired admin-created custom apps: Shopify admin →{" "}
+                  <strong className="text-gray-400">Settings → Apps and sales channels →
+                  Develop apps</strong> → your app →{" "}
                   <strong className="text-gray-400">API credentials</strong> → reveal the Admin
-                  API access token. Give it at least{" "}
-                  <code className="text-gray-400">read_orders</code>,{" "}
-                  <code className="text-gray-400">read_products</code> and{" "}
-                  <code className="text-gray-400">read_fulfillments</code>. Nothing else to
-                  configure — the token is tested against the store before it saves.
+                  API access token. The token is tested against the store before it saves.
+                  <br />
+                  <span className="text-amber-500/80">
+                    New apps can no longer be created there — use the OAuth tab for those.
+                  </span>
                 </p>
               </>
             ) : (
