@@ -1,5 +1,42 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-15: Video review survives a denied Facebook video — uncommitted
+
+Opening a NURTELLE ad in Submitted Videos showed a bare
+`(#10) Application does not have permission for this action` where the player
+should be.
+
+- **The error is Facebook's, and it is real**: the token's user has no role on
+  the ad account or Page that owns the video, so Graph refuses the video node.
+  Nothing in the app can grant that — it's a Business Settings change.
+- **But it shouldn't be a dead end.** The modal already had a thumbnail
+  fallback for videos whose source won't resolve, with a caption pointing at
+  "View on Facebook". It was unreachable: the `error ?` branch came first in
+  the render chain and short-circuited it. Now a failed lookup only shows the
+  hard error when there is no still to fall back on, and otherwise renders the
+  thumbnail with the reason as the caption. The rest of the review screen —
+  results, notes, star, the Facebook links — works throughout.
+- **`describeFbError`** turns the codes that actually come up into an
+  instruction: 10/200/299 name the missing ad-account access, 190 says the
+  token expired. Other codes pass through Facebook's own wording as before.
+
+### Dashboard-wide audit for the new store
+
+Swept every store reference outside Marketing. `store-matching.ts` was the
+only hardcoded gate in the codebase, and it already has NURTELLE. Everything
+else resolves stores at runtime:
+
+- `deriveStore(campaign, storeNames)` takes the list as an argument; both
+  callers (AI analytics compare, Creatives) load it from `shopify_stores`
+  where `is_active`.
+- Call Confirmer boosts `order.store_name` in the transcriber from the order
+  itself — the FOLIQ mentions there are pronunciation notes, not a store list.
+- Scaling detection joins `store_scaling_campaigns` by `store_name`.
+- Pick/pack verify reads `ACTIVE_STORES`, which NURTELLE is now in.
+- The store names in the AI tool registry and prompt files are worked examples
+  for the model, not filters.
+
+
 ## 2026-09-15: NURTELLE across the Marketing tab — uncommitted
 
 Follow-up to the ad-spend fix: make every Marketing surface work for the new

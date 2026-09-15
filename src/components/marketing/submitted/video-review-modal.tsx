@@ -330,6 +330,12 @@ export function VideoReviewModal({
 
   const isVideoProcessing =
     isVideo && media?.status != null && media.status !== "ready";
+
+  // Anything we can show in place of the player. A failed source lookup is
+  // only a dead end when we have no still to fall back on — Facebook denies
+  // the video node for ad accounts the token has no role on, and the review
+  // screen is still useful with the thumbnail and the Facebook links.
+  const poster = ad.image_url || ad.thumbnail_url || media?.thumbnail || null;
   const permalink = media?.permalink ?? null;
 
   return (
@@ -376,7 +382,7 @@ export function VideoReviewModal({
         <div className="bg-black flex items-center justify-center min-h-[300px]">
           {loading ? (
             <Loader2 size={28} className="text-gray-500 animate-spin" />
-          ) : error ? (
+          ) : error && !poster ? (
             <div className="text-center p-8">
               <AlertTriangle size={28} className="mx-auto text-yellow-500 mb-2" />
               <p className="text-gray-300 text-sm">{error}</p>
@@ -396,23 +402,21 @@ export function VideoReviewModal({
               autoPlay
               className="max-h-[60vh] w-full"
             />
-          ) : ad.image_url || ad.thumbnail_url || media?.thumbnail ? (
+          ) : poster ? (
             // Image ad, or a video whose inline source couldn't be resolved —
             // show the thumbnail so there's never a bare error, and point to FB.
             <div className="relative w-full flex items-center justify-center">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={
-                  (ad.image_url || ad.thumbnail_url || media?.thumbnail) as string
-                }
+                src={poster}
                 alt={ad.ad_name}
                 className="max-h-[60vh] w-full object-contain"
               />
               {isVideo && (
                 <div className="absolute bottom-0 inset-x-0 bg-black/70 text-gray-200 text-xs text-center py-2 px-3">
-                  Couldn&apos;t load the video inline — use &ldquo;View on
-                  Facebook&rdquo; or &ldquo;Open in Ads Manager&rdquo; below to
-                  watch.
+                  {error ?? "Couldn't load the video inline."} Use &ldquo;View
+                  on Facebook&rdquo; or &ldquo;Open in Ads Manager&rdquo; below
+                  to watch.
                 </div>
               )}
             </div>

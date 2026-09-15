@@ -7,6 +7,31 @@ export const dynamic = "force-dynamic";
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
 
+// Facebook's own wording for a denied video node is "(#10) Application does
+// not have permission for this action", which says nothing about what to do.
+// The cause is almost always that the connected token's user has no role on
+// the ad account or Page that owns the video — typical right after a new
+// store's ad account is added to the setup. Name that, so the fix is obvious
+// from the screen instead of needing a Graph API lookup.
+function describeFbError(json: unknown, status: number): string {
+  const err = (json as { error?: { code?: number; message?: string; error_user_msg?: string } })
+    ?.error;
+  const code = err?.code;
+
+  if (code === 10 || code === 200 || code === 299) {
+    return "Facebook won't share this video with the connected account. Give the Facebook user behind the token access to this ad account and its Page in Business Settings, then reconnect the token in Settings.";
+  }
+  if (code === 190) {
+    return "The Facebook token has expired. Reconnect it in Settings.";
+  }
+
+  return (
+    err?.error_user_msg ||
+    err?.message ||
+    `Facebook error ${status}`
+  );
+}
+
 // Resolves a playable video URL on-demand.
 //
 // Accepts either ?video_id= (fast path, used by the Submitted Videos grid
@@ -79,11 +104,7 @@ export async function GET(request: Request) {
     );
     const json = await res.json();
     if (!res.ok) {
-      const msg =
-        (json?.error?.error_user_msg as string) ||
-        (json?.error?.message as string) ||
-        `Facebook error ${res.status}`;
-      return Response.json({ error: msg }, { status: 502 });
+      return Response.json({ error: describeFbError(json, res.status) }, { status: 502 });
     }
 
     const statusObj = json?.status as Record<string, unknown> | undefined;
