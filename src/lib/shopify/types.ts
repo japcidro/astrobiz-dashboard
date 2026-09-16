@@ -33,6 +33,7 @@ export interface ShopifyOrder {
   currency: string;
   financial_status: string;
   fulfillment_status: string | null; // null = unfulfilled
+  customer_id: number | null;
   customer_name: string;
   customer_email: string;
   customer_phone: string | null;

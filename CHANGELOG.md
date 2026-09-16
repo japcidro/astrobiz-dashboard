@@ -1,5 +1,58 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-16: Repeat Buyers — who is buying again, and who looks like a reseller — uncommitted
+
+Orders & Parcels answers "what shipped today". Nothing answered "who keeps
+coming back", which is the question that matters now that resellers are buying
+through the same storefronts as consumers.
+
+- **New tab: Orders → Repeat Buyers** (`/admin/repeat-buyers`, admin only —
+  customer spend and contact details are CEO data, not floor data).
+- **Identity is phone first, then email, then Shopify customer id.** PH COD
+  checkouts reuse throwaway emails far more than throwaway numbers, and a
+  number normalized to its last 10 digits matches `09171234567`,
+  `+63 917 123 4567` and `639171234567` as one person. Placeholder emails
+  (`noemail@noemail.com` and friends) are ignored so they can't merge strangers
+  into one fake mega-buyer. An order with none of the three groups with
+  nothing — it can never be mistaken for a repeat.
+- **Grouping crosses stores.** Someone buying I LOVE PATCHES and CAPSULED on
+  the same number is one buyer with two brand badges, which is exactly the
+  pattern a reseller shows.
+- **The table**: orders, units (and units/order), total spent, AOV, average
+  reorder gap, first order, last order, and days since last — coloured against
+  that buyer's own rhythm, so a reseller who has gone two gaps quiet turns red
+  instead of blending in.
+- **The drawer**: contact details with copy buttons, latest shipping address,
+  discount codes used, a product rollup (quantity, quantity-weighted average
+  SRP, revenue), and the full purchase history — every order dated, with each
+  line as `qty × SRP = total` and how many days after the previous order it
+  came.
+- **Reseller candidates** are flagged when a buyer clears any of: 3+ orders in
+  the window, 10+ units, or a single order of 5+ units. The badge names which
+  signal fired, and a filter shows only those buyers.
+- **Cancelled, voided and refunded orders never count** toward orders, units or
+  money — they stay visible in the drawer marked as excluded, and as a `+n✕`
+  next to the order count, because a reseller whose orders keep getting
+  cancelled is its own signal.
+- Windows of 30 / 90 / 180 (default) / 365 days, store filter, minimum 2 / 3 /
+  5 orders, search across name, phone, email, product and SKU, and a CSV export
+  that carries the product mix inline.
+- **Shared order plumbing.** `shopifyFetchOrders`, `isDeadOrder`,
+  `computeAgeLevel` and a new `toShopifyOrder` normalizer moved out of
+  `/api/shopify/orders` into `src/lib/shopify/fetch-orders.ts`, so both screens
+  read the same field set and agree on what "dead" and "COD" mean. Side effect
+  on Orders & Parcels: an order with no customer record now shows the shipping
+  address name instead of "Unknown".
+- `ShopifyOrder` gained `customer_id` — the last-resort grouping key.
+- **Caps**: 15-minute server cache (the window is months long, one new order
+  barely moves it), `maxDuration = 300` because a year across every store is
+  dozens of paginated Shopify calls, and at most 500 buyers in the payload
+  (biggest spenders first) since each one carries its full order history. The
+  summary cards still count every repeat buyer in the window.
+- 14 unit tests in `src/lib/shopify/__tests__/repeat-buyers.test.ts` cover phone
+  normalization, cross-store matching, cancelled-order exclusion, gap and SRP
+  math, and the reseller thresholds.
+
 ## 2026-09-15: Bonus Tracker says how current its numbers are — uncommitted
 
 The page quoted parcels-per-day with no way to tell whether the data behind it

@@ -35,6 +35,7 @@ import {
   Clapperboard,
   ShieldCheck,
   Award,
+  Repeat,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -143,6 +144,12 @@ const navEntries: NavEntry[] = [
         href: "/va/orders",
         icon: <Truck size={18} />,
         roles: ["admin", "va", "fulfillment"],
+      },
+      {
+        label: "Repeat Buyers",
+        href: "/admin/repeat-buyers",
+        icon: <Repeat size={18} />,
+        roles: ["admin"],
       },
     ],
   },

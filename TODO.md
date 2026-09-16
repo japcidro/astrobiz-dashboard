@@ -76,6 +76,29 @@ emails. Other admins + employee reminder emails silently fail.
 
 ---
 
+## Repeat Buyers — follow-ups
+
+The tab ships reading Shopify live on every request. Things worth doing once
+it has been used for a week:
+
+- [ ] **Confirm the reseller thresholds against reality.** They are currently
+      3+ orders / 10+ units / a 5-unit order. Open the tab, sort by units, and
+      see whether the flagged list matches the resellers you actually know.
+      Constants live at the top of `src/lib/shopify/repeat-buyers.ts`.
+- [ ] **Decide whether VAs should see it.** Right now it is admin only, because
+      it exposes customer phone numbers and lifetime spend. If a VA needs to
+      call repeat buyers, add `"va"` to the nav entry and the role check in
+      `/api/shopify/repeat-buyers`.
+- [ ] **Warm it from the cron** if the 365-day window feels slow. The pattern is
+      `/api/cron/refresh-data` — a pre-warmed `cached_api_data` row would make
+      the page open instantly instead of waiting on Shopify.
+- [ ] **RTS-aware totals.** Money currently excludes cancelled/voided/refunded
+      orders, but not parcels J&T returned. Joining `jt_deliveries` would show
+      what each repeat buyer actually paid for versus what was sent back —
+      important before handing anyone reseller pricing.
+
+---
+
 ## AI Analytics — Creative Deconstruction
 
 ### FB token scope upgrade (blocks dark-post video analysis)
