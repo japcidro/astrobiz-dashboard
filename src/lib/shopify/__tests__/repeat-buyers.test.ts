@@ -4,12 +4,45 @@ import {
   buyerKey,
   normalizeEmail,
   normalizePhone,
+  orderOutcome,
+  type OrderParcel,
+  type OrderWithParcels,
 } from "../repeat-buyers";
-import type { ShopifyOrder } from "../types";
 
 const NOW = new Date("2026-09-16T00:00:00+08:00");
 
-function order(overrides: Partial<ShopifyOrder> & { id: number }): ShopifyOrder {
+function parcel(overrides: Partial<OrderParcel> = {}): OrderParcel {
+  return {
+    waybill: "JT0000000000001",
+    classification: "Delivered",
+    is_delivered: true,
+    is_returned: false,
+    signing_time: "2026-09-03T14:00:00+08:00",
+    rts_reason: null,
+    cod_amount: 1000,
+    ...overrides,
+  };
+}
+
+const RETURNED = parcel({
+  classification: "Returned",
+  is_delivered: false,
+  is_returned: true,
+  signing_time: null,
+  rts_reason: "Consignee unreachable",
+});
+
+const IN_TRANSIT = parcel({
+  classification: "In Transit",
+  is_delivered: false,
+  is_returned: false,
+  signing_time: null,
+});
+
+/** Delivered by default — the common case, and what the old tests assumed. */
+function order(
+  overrides: Partial<OrderWithParcels> & { id: number }
+): OrderWithParcels {
   return {
     name: `#${overrides.id}`,
     store_name: "I LOVE PATCHES",
@@ -44,8 +77,10 @@ function order(overrides: Partial<ShopifyOrder> & { id: number }): ShopifyOrder 
         sku: "PP-01",
       },
     ],
-    tracking_number: null,
+    tracking_number: "JT0000000000001",
+    tracking_numbers: ["JT0000000000001"],
     tracking_url: null,
+    parcels: [parcel()],
     tracking_company: null,
     fulfilled_at: null,
     is_cod: true,
@@ -249,7 +284,7 @@ describe("buildRepeatBuyers", () => {
     const buyer = buyers[0];
     expect(buyer.is_reseller_candidate).toBe(true);
     expect(buyer.reseller_reasons).toEqual([
-      "3 orders in window",
+      "3 delivered orders",
       "12 units bought",
       "bulk order of 8 units",
     ]);
@@ -293,5 +328,144 @@ describe("buildRepeatBuyers", () => {
 
     expect(buyers).toHaveLength(0);
     expect(summary.total_buyers).toBe(0);
+  });
+  it("counts only what J&T delivered, not what Shopify accepted", () => {
+    const { buyers, summary } = buildRepeatBuyers(
+      [
+        order({ id: 1 }),
+        order({ id: 2, created_at: "2026-09-05T10:00:00+08:00" }),
+        // Ordered and shipped, but came straight back — never a sale.
+        order({
+          id: 3,
+          created_at: "2026-09-08T10:00:00+08:00",
+          total_price: "1500.00",
+          parcels: [RETURNED],
+        }),
+        // Still out with the courier — not money yet either.
+        order({
+          id: 4,
+          created_at: "2026-09-14T10:00:00+08:00",
+          parcels: [IN_TRANSIT],
+        }),
+      ],
+      { minOrders: 2, windowDays: 180, now: NOW }
+    );
+
+    const buyer = buyers[0];
+    expect(buyer.orders_count).toBe(2);
+    expect(buyer.delivered_count).toBe(2);
+    expect(buyer.rts_count).toBe(1);
+    expect(buyer.in_transit_count).toBe(1);
+    expect(buyer.total_spent).toBe(2000);
+    // 1 of 3 resolved parcels came back.
+    expect(buyer.rts_rate_pct).toBe(33.33);
+    expect(buyer.rts_value).toBe(1500);
+    // Everything stays visible in the drawer, flagged by outcome.
+    expect(buyer.orders).toHaveLength(4);
+    expect(buyer.orders.map((o) => o.outcome)).toEqual([
+      "in_transit",
+      "returned",
+      "delivered",
+      "delivered",
+    ]);
+    expect(summary.delivered_orders).toBe(2);
+    expect(summary.returned_orders).toBe(1);
+    expect(summary.rts_value).toBe(1500);
+  });
+
+  it("drops a buyer whose parcels all came back", () => {
+    const { buyers } = buildRepeatBuyers(
+      [
+        order({ id: 1, parcels: [RETURNED] }),
+        order({
+          id: 2,
+          created_at: "2026-09-10T10:00:00+08:00",
+          parcels: [RETURNED],
+        }),
+      ],
+      { minOrders: 2, windowDays: 180, now: NOW }
+    );
+
+    expect(buyers).toHaveLength(0);
+  });
+
+  it("treats an order with no parcel on file as unverified, not delivered", () => {
+    const orders = [
+      order({ id: 1, tracking_numbers: [], tracking_number: null, parcels: [] }),
+      order({
+        id: 2,
+        created_at: "2026-09-10T10:00:00+08:00",
+        tracking_numbers: [],
+        tracking_number: null,
+        parcels: [],
+      }),
+    ];
+
+    const delivered = buildRepeatBuyers(orders, {
+      minOrders: 2,
+      windowDays: 180,
+      now: NOW,
+    });
+    expect(delivered.buyers).toHaveLength(0);
+    expect(delivered.summary.unverified_orders).toBe(2);
+    expect(delivered.summary.parcel_coverage_pct).toBe(0);
+
+    // "all" mode falls back to the Shopify view for when uploads are behind.
+    const all = buildRepeatBuyers(orders, {
+      minOrders: 2,
+      windowDays: 180,
+      countMode: "all",
+      now: NOW,
+    });
+    expect(all.buyers).toHaveLength(1);
+    expect(all.buyers[0].orders_count).toBe(2);
+    expect(all.buyers[0].delivered_count).toBe(0);
+  });
+
+  it("counts a split shipment as delivered when any box landed", () => {
+    const split = order({
+      id: 1,
+      tracking_numbers: ["JT-A", "JT-B"],
+      parcels: [
+        parcel({ waybill: "JT-A" }),
+        parcel({
+          waybill: "JT-B",
+          classification: "Returned",
+          is_delivered: false,
+          is_returned: true,
+        }),
+      ],
+    });
+
+    expect(orderOutcome(split)).toBe("delivered");
+  });
+
+  it("reports parcel coverage over shippable orders only", () => {
+    const { summary } = buildRepeatBuyers(
+      [
+        order({ id: 1 }),
+        order({ id: 2, created_at: "2026-09-05T10:00:00+08:00" }),
+        order({
+          id: 3,
+          created_at: "2026-09-08T10:00:00+08:00",
+          tracking_numbers: [],
+          parcels: [],
+        }),
+        // Cancelled before it ever shipped — not a coverage gap.
+        order({
+          id: 4,
+          created_at: "2026-09-09T10:00:00+08:00",
+          is_dead: true,
+          tracking_numbers: [],
+          parcels: [],
+        }),
+      ],
+      { minOrders: 2, windowDays: 180, now: NOW }
+    );
+
+    expect(summary.cancelled_orders).toBe(1);
+    expect(summary.unverified_orders).toBe(1);
+    // 3 shippable, 2 with parcels.
+    expect(summary.parcel_coverage_pct).toBe(66.67);
   });
 });

@@ -1,12 +1,20 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { RefreshCw, Search, Download, Store } from "lucide-react";
+import { RefreshCw, Search, Download, Store, Truck, AlertTriangle } from "lucide-react";
 import {
+  type CountMode,
   type RepeatBuyer,
   type RepeatBuyerSort,
   type RepeatBuyersSummary,
 } from "@/lib/shopify/repeat-buyers";
+
+interface ParcelFreshness {
+  last_upload_at: string | null;
+  latest_parcel_date: string | null;
+  days_behind: number | null;
+  is_stale: boolean;
+}
 import { RepeatBuyersSummaryCards } from "@/components/orders/repeat-buyers-summary-cards";
 import { RepeatBuyersTable } from "@/components/orders/repeat-buyers-table";
 import { RepeatBuyerDetailPanel } from "@/components/orders/repeat-buyer-detail-panel";
@@ -27,6 +35,7 @@ const MIN_ORDER_OPTIONS = [
 const defaultSummary: RepeatBuyersSummary = {
   window_days: 180,
   min_orders: 2,
+  count_mode: "delivered",
   total_buyers: 0,
   repeat_buyers: 0,
   repeat_rate_pct: 0,
@@ -40,6 +49,14 @@ const defaultSummary: RepeatBuyersSummary = {
   avg_orders_per_repeat_buyer: 0,
   avg_repeat_buyer_value: 0,
   avg_days_between_orders: null,
+  delivered_orders: 0,
+  returned_orders: 0,
+  in_transit_orders: 0,
+  unverified_orders: 0,
+  cancelled_orders: 0,
+  parcel_coverage_pct: 0,
+  rts_rate_pct: null,
+  rts_value: 0,
 };
 
 function csvCell(value: string | number | null): string {
@@ -57,6 +74,8 @@ export default function RepeatBuyersPage() {
   const [windowDays, setWindowDays] = useState(180);
   const [minOrders, setMinOrders] = useState(2);
   const [storeFilter, setStoreFilter] = useState("ALL");
+  const [countMode, setCountMode] = useState<CountMode>("delivered");
+  const [freshness, setFreshness] = useState<ParcelFreshness | null>(null);
   const [resellersOnly, setResellersOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [sortKey, setSortKey] = useState<RepeatBuyerSort>("total_spent");
@@ -73,6 +92,7 @@ export default function RepeatBuyersPage() {
           window: String(windowDays),
           min_orders: String(minOrders),
           store: storeFilter,
+          count_mode: countMode,
         });
         if (forceRefresh) params.set("refresh", "1");
 
@@ -83,6 +103,7 @@ export default function RepeatBuyersPage() {
         setBuyers(json.buyers || []);
         setSummary(json.summary || defaultSummary);
         setTruncated(Boolean(json.truncated));
+        setFreshness(json.freshness ?? null);
         if (json.stores) setStores(json.stores);
         if (json.warnings?.length > 0) {
           setError(`Warning: ${json.warnings.join("; ")}`);
@@ -93,7 +114,7 @@ export default function RepeatBuyersPage() {
         setLoading(false);
       }
     },
-    [windowDays, minOrders, storeFilter]
+    [windowDays, minOrders, storeFilter, countMode]
   );
 
   useEffect(() => {
@@ -163,7 +184,12 @@ export default function RepeatBuyersPage() {
       "Email",
       "Stores",
       "Province",
-      "Orders",
+      "Delivered Orders",
+      "RTS",
+      "RTS Rate %",
+      "Value Returned",
+      "In Transit",
+      "No Parcel",
       "Cancelled",
       "Units",
       "Total Spent",
@@ -186,7 +212,12 @@ export default function RepeatBuyersPage() {
       b.emails.join(" / "),
       b.stores.join(" / "),
       b.province,
-      b.orders_count,
+      b.delivered_count,
+      b.rts_count,
+      b.rts_rate_pct,
+      b.rts_value,
+      b.in_transit_count,
+      b.unverified_count,
       b.cancelled_count,
       b.total_units,
       b.total_spent,
@@ -225,9 +256,9 @@ export default function RepeatBuyersPage() {
         <div>
           <h1 className="text-2xl font-bold text-white">Repeat Buyers</h1>
           <p className="text-gray-400 mt-1">
-            Customers who ordered more than once — matched by phone, then email,
-            across all {stores.length || ""} store
-            {stores.length !== 1 ? "s" : ""}
+            {countMode === "delivered"
+              ? "Customers J&T delivered to more than once — a Shopify order only counts once the parcel lands"
+              : "Customers who placed more than one Shopify order — includes parcels that never landed"}
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -254,6 +285,45 @@ export default function RepeatBuyersPage() {
         <div className="mb-4 p-3 bg-red-900/30 border border-red-700/50 rounded-xl text-red-300 text-sm">
           {error}
         </div>
+      )}
+
+      {/* Where the numbers come from */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <div className="inline-flex rounded-lg bg-gray-800 p-0.5">
+          {(
+            [
+              { mode: "delivered" as CountMode, label: "Delivered (J&T)" },
+              { mode: "all" as CountMode, label: "All Shopify orders" },
+            ]
+          ).map((opt) => (
+            <button
+              key={opt.mode}
+              onClick={() => setCountMode(opt.mode)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer ${
+                countMode === opt.mode
+                  ? "bg-white text-gray-900"
+                  : "text-gray-400 hover:text-white"
+              }`}
+            >
+              {opt.mode === "delivered" && <Truck size={14} />}
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-gray-500">
+          {countMode === "delivered"
+            ? "Only parcels J&T handed over count as purchases. Returns, in-transit and cancelled orders stay visible but earn nothing."
+            : "Counting every live Shopify order — use this when the J&T upload is behind, not to judge a reseller."}
+        </p>
+      </div>
+
+      {/* Parcel data coverage — a stale upload reads as "nobody is buying" */}
+      {!loading && countMode === "delivered" && (
+        <ParcelCoverageNote
+          summary={summary}
+          freshness={freshness}
+          onSwitchMode={() => setCountMode("all")}
+        />
       )}
 
       {/* Window presets */}
@@ -347,7 +417,9 @@ export default function RepeatBuyersPage() {
         <>
           <p className="text-xs text-gray-500 mb-2">
             Showing {filteredAndSorted.length} of {buyers.length} repeat buyers.
-            Money and counts exclude cancelled, voided and refunded orders.
+            {countMode === "delivered"
+              ? " Money and counts come from parcels J&T delivered — returns, in-transit and cancelled orders are excluded."
+              : " Money and counts exclude cancelled, voided and refunded orders, but include parcels that may still come back."}
             {truncated && (
               <span className="text-yellow-500">
                 {" "}
@@ -372,6 +444,80 @@ export default function RepeatBuyersPage() {
           onClose={() => setSelectedBuyer(null)}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * The delivered view is only as complete as the J&T upload behind it. A file
+ * that hasn't landed makes recent orders look like nobody bought anything, so
+ * say how far the parcel data reaches before anyone reads the list as truth.
+ */
+function ParcelCoverageNote({
+  summary,
+  freshness,
+  onSwitchMode,
+}: {
+  summary: RepeatBuyersSummary;
+  freshness: ParcelFreshness | null;
+  onSwitchMode: () => void;
+}) {
+  const gap = summary.unverified_orders;
+  const stale = freshness?.is_stale ?? false;
+  if (gap === 0 && !stale) return null;
+
+  const parcelDate = freshness?.latest_parcel_date
+    ? new Date(`${freshness.latest_parcel_date}T00:00:00+08:00`).toLocaleDateString(
+        "en-US",
+        { month: "short", day: "numeric", year: "numeric" }
+      )
+    : null;
+
+  return (
+    <div
+      className={`mb-4 p-3 rounded-xl border text-sm flex items-start gap-3 ${
+        stale
+          ? "bg-yellow-900/20 border-yellow-700/50 text-yellow-300"
+          : "bg-gray-800/50 border-gray-700/50 text-gray-400"
+      }`}
+    >
+      <AlertTriangle
+        size={16}
+        className={`shrink-0 mt-0.5 ${stale ? "text-yellow-400" : "text-gray-500"}`}
+      />
+      <div>
+        <p>
+          {summary.parcel_coverage_pct}% of shipped orders in this window have a
+          J&T parcel on file
+          {gap > 0 && (
+            <>
+              {" "}
+              — {gap.toLocaleString("en-PH")} have none, so they are not counted
+              as purchases
+            </>
+          )}
+          .
+          {parcelDate && (
+            <>
+              {" "}
+              Parcel data reaches {parcelDate}
+              {freshness?.days_behind ? ` (${freshness.days_behind}d behind)` : ""}.
+            </>
+          )}
+        </p>
+        {stale && (
+          <p className="text-xs mt-1 text-yellow-300/80">
+            Upload the latest J&T file on the J&T Dashboard, or{" "}
+            <button
+              onClick={onSwitchMode}
+              className="underline underline-offset-2 cursor-pointer"
+            >
+              switch to all Shopify orders
+            </button>{" "}
+            to see the shape in the meantime.
+          </p>
+        )}
+      </div>
     </div>
   );
 }

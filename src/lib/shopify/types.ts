@@ -45,6 +45,9 @@ export interface ShopifyOrder {
   age_level: "normal" | "warning" | "danger";
   line_items: ShopifyOrderLineItem[];
   tracking_number: string | null;
+  // Every waybill on the order — a split shipment has more than one, and the
+  // J&T join needs all of them, not just the first fulfillment's.
+  tracking_numbers: string[];
   tracking_url: string | null;
   tracking_company: string | null;
   fulfilled_at: string | null;

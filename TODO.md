@@ -92,10 +92,13 @@ it has been used for a week:
 - [ ] **Warm it from the cron** if the 365-day window feels slow. The pattern is
       `/api/cron/refresh-data` — a pre-warmed `cached_api_data` row would make
       the page open instantly instead of waiting on Shopify.
-- [ ] **RTS-aware totals.** Money currently excludes cancelled/voided/refunded
-      orders, but not parcels J&T returned. Joining `jt_deliveries` would show
-      what each repeat buyer actually paid for versus what was sent back —
-      important before handing anyone reseller pricing.
+- [x] ~~RTS-aware totals~~ — done. Delivered parcels are now the default count,
+      with per-buyer RTS rate and value.
+- [ ] **Check the parcel coverage number on the live tab.** The delivered view
+      is only as good as the waybill link. If the banner reports low coverage,
+      run `POST /api/admin/jt-backfill-shopify-link` and re-check — and if it
+      stays low, the gap is orders fulfilled without a tracking number, which
+      is a pick-pack process fix, not a dashboard one.
 
 ---
 

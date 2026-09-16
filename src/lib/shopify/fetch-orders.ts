@@ -198,6 +198,13 @@ export function toShopifyOrder(
       sku: li.sku || null,
     })),
     tracking_number: raw.fulfillments?.[0]?.tracking_number || null,
+    tracking_numbers: Array.from(
+      new Set(
+        (raw.fulfillments || [])
+          .map((f) => (f.tracking_number || "").trim().toUpperCase())
+          .filter(Boolean)
+      )
+    ),
     tracking_url: raw.fulfillments?.[0]?.tracking_url || null,
     tracking_company: raw.fulfillments?.[0]?.tracking_company || null,
     fulfilled_at: raw.fulfillments?.[0]?.created_at || null,

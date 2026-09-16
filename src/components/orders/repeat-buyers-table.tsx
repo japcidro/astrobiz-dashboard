@@ -16,7 +16,18 @@ const COLUMNS: {
   title?: string;
 }[] = [
   { key: "customer_name", label: "Customer" },
-  { key: "orders_count", label: "Orders", align: "right" },
+  {
+    key: "orders_count",
+    label: "Delivered",
+    align: "right",
+    title: "Orders J&T actually handed over — the only ones counted",
+  },
+  {
+    key: "rts_count",
+    label: "RTS",
+    align: "right",
+    title: "Parcels returned to sender, with this buyer's return rate",
+  },
   { key: "total_units", label: "Units", align: "right" },
   { key: "total_spent", label: "Total Spent", align: "right" },
   { key: "avg_order_value", label: "AOV", align: "right" },
@@ -46,6 +57,23 @@ export function formatShortDate(iso: string) {
     day: "numeric",
     year: "2-digit",
   });
+}
+
+// Orders that haven't resolved yet: still moving, not yet uploaded, or killed
+// in Shopify. Shown as a hint next to the delivered count, never counted.
+function pendingCount(buyer: RepeatBuyer): number {
+  return (
+    buyer.in_transit_count + buyer.unverified_count + buyer.cancelled_count
+  );
+}
+
+// A fifth of parcels coming back is the line where a reseller stops paying for
+// itself once shipping is counted.
+function rtsTone(rate: number | null): string {
+  if (rate === null) return "text-gray-300";
+  if (rate >= 35) return "text-red-400 font-medium";
+  if (rate >= 20) return "text-yellow-400";
+  return "text-gray-300";
 }
 
 // Green while the buyer is still inside their own rhythm, amber once they have
@@ -158,12 +186,30 @@ export function RepeatBuyersTable({
 
                 <td className="px-4 py-3 text-right text-white font-medium">
                   {buyer.orders_count}
-                  {buyer.cancelled_count > 0 && (
+                  {pendingCount(buyer) > 0 && (
                     <span
-                      className="text-xs text-red-400 ml-1"
-                      title={`${buyer.cancelled_count} cancelled / voided / refunded, excluded from totals`}
+                      className="text-xs text-gray-500 ml-1"
+                      title={`${buyer.in_transit_count} in transit, ${buyer.unverified_count} with no parcel on file, ${buyer.cancelled_count} cancelled — none counted`}
                     >
-                      +{buyer.cancelled_count}✕
+                      +{pendingCount(buyer)}?
+                    </span>
+                  )}
+                </td>
+
+                <td className="px-4 py-3 text-right">
+                  {buyer.rts_count === 0 ? (
+                    <span className="text-gray-600">—</span>
+                  ) : (
+                    <span
+                      className={rtsTone(buyer.rts_rate_pct)}
+                      title={`${formatCurrency(buyer.rts_value)} worth of parcels came back`}
+                    >
+                      {buyer.rts_count}
+                      {buyer.rts_rate_pct !== null && (
+                        <span className="text-xs ml-1">
+                          ({buyer.rts_rate_pct}%)
+                        </span>
+                      )}
                     </span>
                   )}
                 </td>

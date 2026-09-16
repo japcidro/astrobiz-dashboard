@@ -1,5 +1,48 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-16: Repeat Buyers counts delivered parcels, not Shopify orders — uncommitted
+
+A Shopify order is not a sale. On COD it is a promise — the money only exists
+once J&T hands the parcel over and someone pays. An order that was cancelled,
+or shipped and returned to sender, looked identical to a real purchase in the
+first cut of this tab, which meant the reseller list could be full of people
+who never paid for anything.
+
+- **Delivered is now the default count.** Each Shopify order is joined to its
+  J&T parcels by waybill (`fulfillments[].tracking_number` = `jt_deliveries.waybill`,
+  the same key `/api/profit/daily` and the pick-pack link already use) and
+  resolved to one outcome: delivered, returned, in transit, cancelled, or
+  unverified. Only **delivered** feeds orders, units, revenue, AOV, reorder gap
+  and the reseller thresholds.
+- **Shopify still supplies what J&T does not carry** — phone number, SKU, and
+  the SRP actually charged. J&T supplies the truth about whether the purchase
+  happened. A split shipment counts as delivered when any box landed; the box
+  that came back still shows in the buyer's RTS value.
+- **RTS is now a first-class number.** New table column (count + rate, amber at
+  20%, red at 35%), a summary card with the peso value sent back, and per-buyer
+  `rts_rate_pct` / `rts_value` in the drawer and the CSV. A buyer with 8
+  delivered and 6 returned is not the reseller you want, and the list now says
+  so instead of showing 14 orders.
+- **Every order stays visible in the drawer**, badged by outcome with its
+  waybills, the signing time when it landed, and J&T's RTS reason when it
+  didn't. Non-delivered orders are marked "not counted" rather than hidden.
+- **"All Shopify orders" mode** is one toggle away, for when the J&T upload is
+  behind and you need to see the shape anyway. It is explicitly not the mode
+  for judging a reseller, and the page says so.
+- **Coverage and freshness are stated, not assumed.** A banner reports what
+  share of shipped orders have a parcel on file, how many don't, and which day
+  the parcel data reaches — turning amber past the same 3-day staleness line
+  the Bonus Tracker and the upload panel use. Without it, a week-old upload
+  reads as "nobody is buying again".
+- Parcels are read as one indexed `submission_date` range scan reaching 7 days
+  before the window (pick-pack lag is 1-3 days), drained through `fetchAllRows`
+  so PostgREST's 1000-row cap can't silently truncate them. It runs in parallel
+  with the Shopify fetch.
+- `ShopifyOrder` gained `tracking_numbers` — every waybill on the order, not
+  just the first fulfillment's, so split shipments join correctly.
+- 19 unit tests now cover the outcome resolution, RTS rates, split shipments,
+  coverage math and both count modes.
+
 ## 2026-09-16: Repeat Buyers — who is buying again, and who looks like a reseller — uncommitted
 
 Orders & Parcels answers "what shipped today". Nothing answered "who keeps

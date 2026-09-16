@@ -12,7 +12,39 @@ import {
   Store,
   Tag,
 } from "lucide-react";
-import type { RepeatBuyer } from "@/lib/shopify/repeat-buyers";
+import type { DeliveryOutcome, RepeatBuyer } from "@/lib/shopify/repeat-buyers";
+
+// What became of one order, said plainly. Only "delivered" is money.
+const OUTCOME_STYLES: Record<
+  DeliveryOutcome,
+  { label: string; badge: string; card: string }
+> = {
+  delivered: {
+    label: "Delivered",
+    badge: "bg-green-900/30 text-green-400",
+    card: "border-gray-700/50 bg-gray-800/40",
+  },
+  returned: {
+    label: "Returned to sender — not counted",
+    badge: "bg-red-900/30 text-red-400",
+    card: "border-red-900/40 bg-red-950/10",
+  },
+  in_transit: {
+    label: "In transit — not counted yet",
+    badge: "bg-blue-900/30 text-blue-400",
+    card: "border-blue-900/40 bg-blue-950/10",
+  },
+  cancelled: {
+    label: "Cancelled — not counted",
+    badge: "bg-gray-700/50 text-gray-400",
+    card: "border-gray-800 bg-gray-900/40",
+  },
+  unverified: {
+    label: "No J&T parcel on file",
+    badge: "bg-yellow-900/30 text-yellow-400",
+    card: "border-yellow-900/30 bg-yellow-950/10",
+  },
+};
 
 interface Props {
   buyer: RepeatBuyer;
@@ -104,8 +136,8 @@ export function RepeatBuyerDetailPanel({ buyer, onClose }: Props) {
               )}
             </div>
             <p className="text-sm text-gray-400 mt-0.5">
-              {buyer.orders_count} orders · {buyer.total_units} units ·{" "}
-              {formatCurrency(buyer.total_spent)}
+              {buyer.delivered_count} delivered · {buyer.total_units} units ·{" "}
+              {formatCurrency(buyer.total_spent)} paid
             </p>
             {buyer.reseller_reasons.length > 0 && (
               <p className="text-xs text-purple-300/80 mt-1">
@@ -140,6 +172,19 @@ export function RepeatBuyerDetailPanel({ buyer, onClose }: Props) {
             <Stat
               label="COD / Prepaid"
               value={`${buyer.cod_count} / ${buyer.prepaid_count}`}
+            />
+            <Stat
+              label="RTS rate"
+              value={
+                buyer.rts_rate_pct === null
+                  ? "—"
+                  : `${buyer.rts_rate_pct}% (${buyer.rts_count})`
+              }
+            />
+            <Stat label="Value returned" value={formatCurrency(buyer.rts_value)} />
+            <Stat
+              label="Unresolved"
+              value={`${buyer.in_transit_count + buyer.unverified_count}`}
             />
             <Stat
               label="Lifetime orders"
@@ -259,11 +304,7 @@ export function RepeatBuyerDetailPanel({ buyer, onClose }: Props) {
               {buyer.orders.map((order) => (
                 <div
                   key={`${order.store_name}-${order.id}`}
-                  className={`border rounded-lg p-3 ${
-                    order.is_dead
-                      ? "border-red-900/40 bg-red-950/10"
-                      : "border-gray-700/50 bg-gray-800/40"
-                  }`}
+                  className={`border rounded-lg p-3 ${OUTCOME_STYLES[order.outcome].card}`}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -277,21 +318,36 @@ export function RepeatBuyerDetailPanel({ buyer, onClose }: Props) {
                             COD
                           </span>
                         )}
-                        {order.is_dead && (
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-900/30 text-red-400">
-                            Cancelled — not counted
-                          </span>
-                        )}
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${OUTCOME_STYLES[order.outcome].badge}`}
+                        >
+                          {OUTCOME_STYLES[order.outcome].label}
+                        </span>
                       </div>
                       <p className="text-xs text-gray-400 mt-0.5">
                         {formatDate(order.created_at)}
                         {order.days_since_previous !== null && (
                           <span className="text-gray-600">
                             {" "}
-                            · {order.days_since_previous}d after previous order
+                            · {order.days_since_previous}d after previous
                           </span>
                         )}
                       </p>
+                      {order.signed_at && (
+                        <p className="text-xs text-green-400/70 mt-0.5">
+                          Received {formatDate(order.signed_at)}
+                        </p>
+                      )}
+                      {order.rts_reason && (
+                        <p className="text-xs text-red-400/80 mt-0.5">
+                          RTS: {order.rts_reason}
+                        </p>
+                      )}
+                      {order.waybills.length > 0 && (
+                        <p className="text-[10px] text-gray-600 mt-0.5 font-mono">
+                          {order.waybills.join(" · ")}
+                        </p>
+                      )}
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-white font-bold whitespace-nowrap">
