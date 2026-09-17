@@ -35,7 +35,12 @@ import {
   type BulkPromoteSubject,
 } from "@/components/marketing/promote-bulk-to-scaling-modal";
 
-const DATE_PRESETS: { label: string; value: DatePreset }[] = [
+// The page's filter vocabulary: the Facebook presets the buttons expose,
+// plus "custom" — not an FB date_preset, it maps to the API's
+// date_from/date_to (time_range) params instead.
+type DateFilter = DatePreset | "custom";
+
+const DATE_PRESETS: { label: string; value: DateFilter }[] = [
   { label: "Today", value: "today" },
   { label: "Yesterday", value: "yesterday" },
   { label: "Last 7 Days", value: "last_7d" },
@@ -43,7 +48,22 @@ const DATE_PRESETS: { label: string; value: DatePreset }[] = [
   { label: "Last 30 Days", value: "last_30d" },
   { label: "This Month", value: "this_month" },
   { label: "Last Month", value: "last_month" },
+  { label: "Custom", value: "custom" },
 ];
+
+// FB insight windows for these accounts are PHT (+08:00), so the pickers
+// must agree with the dates the numbers are bucketed by — a browser in any
+// other timezone would otherwise offer a "today" the accounts haven't
+// reached, and FB returns an empty window for it.
+function phtDate(daysAgo = 0): string {
+  const d = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(d);
+}
 
 interface AdRow {
   account: string;
@@ -291,7 +311,16 @@ function viewAdFromRow(rowData: Record<string, unknown>): SubmittedAd {
 }
 
 export default function AdsPage() {
-  const [datePreset, setDatePreset] = useState<DatePreset>("today");
+  const [datePreset, setDatePreset] = useState<DateFilter>("today");
+  // Draft values of the custom pickers. Editing them does NOT fetch: an
+  // uncached range costs a full multi-account Facebook walk (the warm-cache
+  // cron only covers the presets), so the user applies the range explicitly.
+  const [customFrom, setCustomFrom] = useState(() => phtDate(6));
+  const [customTo, setCustomTo] = useState(() => phtDate(0));
+  const [appliedRange, setAppliedRange] = useState<{
+    from: string;
+    to: string;
+  } | null>(null);
   const [allRows, setAllRows] = useState<AdRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -357,7 +386,36 @@ export default function AdsPage() {
     throttledRefresh: boolean;
   } | null>(null);
 
+  const isCustom = datePreset === "custom";
+  const todayPht = useMemo(() => phtDate(0), []);
+
+  const customRangeError = useMemo(() => {
+    if (!isCustom) return null;
+    if (!customFrom || !customTo) return "Pick a start and an end date.";
+    // YYYY-MM-DD sorts lexicographically, so plain string compares are safe
+    // and sidestep the browser-timezone trap of parsing these as Dates.
+    if (customFrom > customTo) return "Start date is after the end date.";
+    if (customTo > todayPht) return "End date is in the future (PHT).";
+    return null;
+  }, [isCustom, customFrom, customTo, todayPht]);
+
+  const rangePending =
+    isCustom &&
+    !customRangeError &&
+    (appliedRange?.from !== customFrom || appliedRange?.to !== customTo);
+
+  const applyCustomRange = () => {
+    if (customRangeError) return;
+    setAppliedRange({ from: customFrom, to: customTo });
+  };
+
   const fetchData = useCallback(async (forceRefresh = false) => {
+    // Custom is selected but nothing applied yet — keep showing whatever is
+    // on screen rather than firing a half-specified window at Facebook.
+    if (isCustom && !appliedRange) {
+      setLoading(false);
+      return;
+    }
     // If we already have data, show "updating" instead of full loading
     if (allRows.length > 0) {
       setUpdating(true);
@@ -366,7 +424,19 @@ export default function AdsPage() {
     }
     setError(null);
     try {
-      const url = `/api/facebook/all-ads?date_preset=${datePreset}&account=${filterAccount}&include_zero_spend=1`;
+      // A custom window goes out as date_from/date_to — the route turns
+      // those into an FB time_range and keys its cache on them.
+      const params = new URLSearchParams({
+        account: filterAccount,
+        include_zero_spend: "1",
+      });
+      if (isCustom && appliedRange) {
+        params.set("date_from", appliedRange.from);
+        params.set("date_to", appliedRange.to);
+      } else {
+        params.set("date_preset", datePreset);
+      }
+      const url = `/api/facebook/all-ads?${params.toString()}`;
       const result = await cachedFetch<Record<string, unknown>>(url, { forceRefresh, ttl: 10 * 60 * 1000 });
       const json = result.data;
       const rows = json.data as typeof allRows;
@@ -411,7 +481,7 @@ export default function AdsPage() {
       setLoading(false);
       setUpdating(false);
     }
-  }, [datePreset, filterAccount]);
+  }, [datePreset, filterAccount, isCustom, appliedRange]);
 
   useEffect(() => {
     fetchData();
@@ -439,14 +509,14 @@ export default function AdsPage() {
     setDrillLevel("campaign");
     setSelectedCampaign(null);
     setSelectedAdset(null);
-  }, [datePreset, filterAccount]);
+  }, [datePreset, appliedRange, filterAccount]);
 
   // Clear bulk selection whenever the user leaves adset drill or the
   // scope shifts (different campaign, account, or date range).
   useEffect(() => {
     setSelectedAdsetIds(new Set());
     setSelectionAnchor(null);
-  }, [drillLevel, selectedCampaign, filterAccount, datePreset]);
+  }, [drillLevel, selectedCampaign, filterAccount, datePreset, appliedRange]);
 
   // Lazy-load FB creative preview links when drilled to ad level.
   // /all-ads no longer returns creative{} (too slow, was causing
@@ -1156,6 +1226,94 @@ export default function AdsPage() {
     );
   };
 
+  // Health rollup for an aggregated row, rendered in the count column.
+  // These used to be a row of chips next to the name, which squeezed long
+  // campaign names down to nothing. The count column has the room and the
+  // "Ad Sets" / "Ads" header already frames the numbers.
+  const renderRollupCell = (agg: AggRow, entityId: string) => {
+    const total = agg.count ?? 0;
+    const active = agg.active_count;
+    const unknown = agg.unknown_count;
+    const disapproved = agg.disapproved_count ?? 0;
+    const issues = agg.issues_count ?? 0;
+    // aggregate() groups the raw ad rows, so count/active_count are ad
+    // counts at every drill level (the "Ad Sets" header notwithstanding).
+    const childLabel = "ads";
+    const scaling = (
+      drillLevel === "campaign"
+        ? scalingRollup.byCampaign
+        : scalingRollup.byAdset
+    ).get(entityId);
+
+    let countText = `${total}`;
+    let countClass = "text-gray-400";
+    let countTitle = `${total} ${childLabel}`;
+    if (agg.scheduled) {
+      countClass = "text-blue-400";
+      countTitle = "Start date is in the future";
+    } else if (unknown === total) {
+      countText = `${total} ?`;
+      countTitle = "FB structure fetch incomplete — refresh to retry";
+    } else if (active === 0) {
+      countText = `0/${total}`;
+      countClass = "text-gray-500";
+      countTitle = `All ${total} ${childLabel} are off`;
+    } else if (active < total) {
+      countText = `${active}/${total}`;
+      countClass = "text-yellow-500";
+      countTitle = `${active} of ${total} ${childLabel} ON`;
+    } else {
+      countClass = "text-green-500";
+      countTitle = `All ${total} ${childLabel} ON`;
+    }
+
+    return (
+      <td className="px-3 py-2.5 text-right whitespace-nowrap">
+        <span className="inline-flex items-center justify-end gap-1.5">
+          {disapproved > 0 && (
+            <span
+              className="text-[10px] font-semibold px-1 py-0.5 rounded bg-red-900/60 text-red-200 ring-1 ring-red-500/60"
+              title={`${disapproved} ad${
+                disapproved === 1 ? "" : "s"
+              } DISAPPROVED by Facebook ad review — drill in to fix.`}
+            >
+              ⛔ {disapproved}
+            </span>
+          )}
+          {issues > 0 && (
+            <span
+              className="text-[10px] font-semibold px-1 py-0.5 rounded bg-red-900/40 text-red-300"
+              title={`${issues} ad${
+                issues === 1 ? "" : "s"
+              } in WITH_ISSUES / billing — delivery may be paused.`}
+            >
+              ⚠ {issues}
+            </span>
+          )}
+          {scaling && scaling.scaled > 0 && (
+            <span
+              className="text-[10px] px-1 py-0.5 rounded bg-orange-600/20 text-orange-300 font-medium"
+              title={`${scaling.scaled} of ${scaling.total} ads already have a creative live in a scaling campaign`}
+            >
+              ↑ {scaling.scaled}
+            </span>
+          )}
+          {agg.scheduled && (
+            <span
+              className="text-[10px] px-1 py-0.5 rounded bg-blue-900/30 text-blue-400"
+              title="Start date is in the future"
+            >
+              SCHEDULED
+            </span>
+          )}
+          <span className={countClass} title={countTitle}>
+            {countText}
+          </span>
+        </span>
+      </td>
+    );
+  };
+
   // Toggle switch component
   const ToggleSwitch = ({
     entityId,
@@ -1327,6 +1485,58 @@ export default function AdsPage() {
           </button>
         ))}
       </div>
+
+      {/* Custom date range. Applied explicitly — see the note on the
+          customFrom/customTo state. */}
+      {isCustom && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <input
+            type="date"
+            aria-label="Start date"
+            value={customFrom}
+            max={todayPht}
+            onChange={(e) => setCustomFrom(e.target.value)}
+            className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500 [color-scheme:dark]"
+          />
+          <span className="text-gray-400 text-sm">to</span>
+          <input
+            type="date"
+            aria-label="End date"
+            value={customTo}
+            min={customFrom || undefined}
+            max={todayPht}
+            onChange={(e) => setCustomTo(e.target.value)}
+            className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500 [color-scheme:dark]"
+          />
+          <button
+            onClick={applyCustomRange}
+            disabled={!rangePending || loading || updating}
+            title={
+              rangePending
+                ? "Load this range"
+                : "This range is already loaded — use Refresh to re-pull it"
+            }
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+              !rangePending || loading || updating
+                ? "bg-gray-800 text-gray-500 cursor-not-allowed"
+                : "bg-white text-gray-900 cursor-pointer"
+            }`}
+          >
+            {updating ? "Loading…" : "Apply"}
+          </button>
+          {customRangeError ? (
+            <span className="text-xs text-red-400">{customRangeError}</span>
+          ) : rangePending ? (
+            <span className="text-xs text-yellow-500">
+              Not applied yet — hit Apply.
+            </span>
+          ) : appliedRange ? (
+            <span className="text-xs text-gray-500">
+              Showing {appliedRange.from} → {appliedRange.to} (PHT)
+            </span>
+          ) : null}
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex items-center gap-5 mb-4 flex-wrap">
@@ -1724,7 +1934,9 @@ export default function AdsPage() {
                     className="px-3 py-8 text-center text-gray-500"
                   >
                     <p>No ad data found for this period.</p>
-                    {(datePreset === "today" || datePreset === "yesterday") && (
+                    {(datePreset === "today" ||
+                      datePreset === "yesterday" ||
+                      (isCustom && appliedRange?.to === todayPht)) && (
                       <p className="text-xs mt-2 text-gray-600">
                         FB Insights API has a 1-3 hour delay. Try &quot;Last 7
                         Days&quot; for more reliable data.
@@ -1792,109 +2004,22 @@ export default function AdsPage() {
                           />
                         </td>
                       )}
-                      {/* Name + Status indicator + Budget badge */}
-                      <td className="px-3 py-2.5 text-left whitespace-nowrap max-w-[350px]">
+                      {/* Name (+ budget control). Status / disapproval /
+                          scaling indicators live in the count column so the
+                          name never gets squeezed off the row. */}
+                      <td className="px-3 py-2.5 text-left whitespace-nowrap max-w-[420px]">
                         <span className="text-gray-200 flex items-center gap-1.5">
-                          <span className="truncate">{name}</span>
+                          <span className="truncate" title={name}>
+                            {name}
+                          </span>
                           {isClickable && (
                             <ChevronRight
                               size={14}
                               className="text-gray-600 flex-shrink-0"
                             />
                           )}
-                          {drillLevel !== "ad" && (() => {
-                            const agg = rowData as unknown as AggRow;
-                            const disapproved = agg.disapproved_count ?? 0;
-                            if (disapproved > 0) {
-                              return (
-                                <span
-                                  className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-red-900/60 text-red-200 ring-1 ring-red-500/60 flex-shrink-0"
-                                  title={`${disapproved} ad${
-                                    disapproved === 1 ? "" : "s"
-                                  } DISAPPROVED by Facebook ad review — drill in to fix.`}
-                                >
-                                  ⛔ {disapproved} DISAPPROVED
-                                </span>
-                              );
-                            }
-                            return null;
-                          })()}
-                          {drillLevel !== "ad" && (() => {
-                            const agg = rowData as unknown as AggRow;
-                            const issues = agg.issues_count ?? 0;
-                            if (issues > 0) {
-                              return (
-                                <span
-                                  className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-red-900/40 text-red-300 flex-shrink-0"
-                                  title={`${issues} ad${
-                                    issues === 1 ? "" : "s"
-                                  } in WITH_ISSUES / billing — delivery may be paused.`}
-                                >
-                                  ⚠ {issues} ISSUES
-                                </span>
-                              );
-                            }
-                            return null;
-                          })()}
-                          {drillLevel !== "ad" && (() => {
-                            const agg = rowData as unknown as AggRow;
-                            const active = agg.active_count;
-                            const unknown = agg.unknown_count;
-                            const total = agg.count;
-                            const scheduled = agg.scheduled;
-                            if (scheduled) {
-                              return (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/30 text-blue-400 flex-shrink-0" title="Start date is in the future">
-                                  SCHEDULED
-                                </span>
-                              );
-                            }
-                            if (unknown === total) {
-                              return (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700/50 text-gray-400 flex-shrink-0" title="FB structure fetch incomplete — refresh to retry">
-                                  {total} ?
-                                </span>
-                              );
-                            }
-                            if (active === 0) {
-                              return (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700/50 text-gray-500 flex-shrink-0">
-                                  ALL OFF
-                                </span>
-                              );
-                            }
-                            if (active < total) {
-                              return (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-900/30 text-yellow-500 flex-shrink-0">
-                                  {active}/{total} ON
-                                </span>
-                              );
-                            }
-                            return (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-900/30 text-green-500 flex-shrink-0">
-                                {total} ON
-                              </span>
-                            );
-                          })()}
                           {drillLevel !== "ad" &&
                             renderBudgetBadge(entityId, name)}
-                          {drillLevel !== "ad" &&
-                            (() => {
-                              const map =
-                                drillLevel === "campaign"
-                                  ? scalingRollup.byCampaign
-                                  : scalingRollup.byAdset;
-                              const stat = map.get(entityId);
-                              if (!stat || stat.scaled === 0) return null;
-                              return (
-                                <span
-                                  title={`${stat.scaled} of ${stat.total} ads already have a creative live in a scaling campaign`}
-                                  className="text-[10px] px-1.5 py-0.5 rounded bg-orange-600/20 text-orange-300 font-medium flex-shrink-0"
-                                >
-                                  ↑ {stat.scaled}/{stat.total} SCALED
-                                </span>
-                              );
-                            })()}
                         </span>
                       </td>
                       {/* Status (ad level) */}
@@ -1957,12 +2082,12 @@ export default function AdsPage() {
                           </div>
                         </td>
                       )}
-                      {/* Count (aggregated levels) */}
-                      {drillLevel !== "ad" && (
-                        <td className="px-3 py-2.5 text-right whitespace-nowrap text-gray-400">
-                          {(rowData.count as number) ?? 0}
-                        </td>
-                      )}
+                      {/* Count + health indicators (aggregated levels) */}
+                      {drillLevel !== "ad" &&
+                        renderRollupCell(
+                          rowData as unknown as AggRow,
+                          entityId
+                        )}
                       {/* Preview link (ad level) */}
                       {drillLevel === "ad" && (
                         <td className="px-3 py-2.5 text-center whitespace-nowrap">

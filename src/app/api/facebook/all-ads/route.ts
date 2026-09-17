@@ -68,6 +68,19 @@ const INSIGHTS_FIELDS = [
   "ctr",
 ].join(",");
 
+// Insight windows for these accounts are PHT, so "is this range still
+// running today?" has to be answered in PHT, not in the server's UTC.
+function phtToday(): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
 const ACCOUNT_STATUS_MAP: Record<number, string> = {
   1: "ACTIVE",
   2: "DISABLED",
@@ -212,6 +225,29 @@ export async function GET(request: Request) {
   // arbitrary historical dates (e.g. two Mondays ago) that no preset covers.
   const dateFrom = searchParams.get("date_from");
   const dateTo = searchParams.get("date_to");
+  // Both must be well-formed YYYY-MM-DD and in order. A malformed pair
+  // would otherwise reach FB as a bad time_range and, worse, mint a junk
+  // cache key that never gets reused.
+  if ((dateFrom || dateTo) && !(dateFrom && dateTo)) {
+    return Response.json(
+      { error: "date_from and date_to must be given together." },
+      { status: 400 }
+    );
+  }
+  if (dateFrom && dateTo) {
+    if (!ISO_DATE.test(dateFrom) || !ISO_DATE.test(dateTo)) {
+      return Response.json(
+        { error: "date_from / date_to must be YYYY-MM-DD." },
+        { status: 400 }
+      );
+    }
+    if (dateFrom > dateTo) {
+      return Response.json(
+        { error: "date_from is after date_to." },
+        { status: 400 }
+      );
+    }
+  }
   const useTimeRange = Boolean(dateFrom && dateTo);
   const insightsDateParam: { date_preset: string } | { time_range: string } = useTimeRange
     ? { time_range: JSON.stringify({ since: dateFrom, until: dateTo }) }
@@ -568,8 +604,12 @@ export async function GET(request: Request) {
         // Manager) but FB returns null for it on last_7d. Patch the hole
         // by fetching today's insights for the same account and merging
         // any missing ads into insightsData.
-        const shouldMergeToday =
-          !useTimeRange && datePreset !== "today" && datePreset !== "yesterday";
+        // Same hole applies to an explicit range that is still running
+        // today: an ad created today can be missing from the window
+        // aggregation while showing up cleanly in the `today` window.
+        const shouldMergeToday = useTimeRange
+          ? dateTo === phtToday() && dateFrom !== dateTo
+          : datePreset !== "today" && datePreset !== "yesterday";
         if (shouldMergeToday) {
           // Shared with the `today` preset and with the other multi-day
           // windows in the same cron run — this used to be a fresh paginated

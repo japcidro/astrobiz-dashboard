@@ -1,5 +1,32 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-17: Ad Performance — readable names, and a real date range
+
+Two things on `/marketing/ads`.
+
+- **The campaign name was losing its own column.** Up to five chips —
+  `DISAPPROVED`, `ISSUES`, `N/M ON`, the budget, `↑ N/M SCALED` — sat in the
+  name cell as `flex-shrink-0` siblings of a truncating name inside a 350px
+  cell. On a campaign with 431 ads the chips took the whole width and the name
+  rendered as nothing at all. The health indicators moved to the count column,
+  which was right-aligned and near-empty, and shrank to `⛔ 1 · ⚠ 1 · ↑ 62`
+  next to the count itself; the count now carries the on/off state as colour
+  (`14/431` yellow for partial, green when all on, grey when all off) instead
+  of a separate chip. Same tooltips, same information, and the name gets the
+  column back.
+- **Custom date range.** The seven presets are whatever Facebook happens to
+  name, which is no help when you want "the 3rd to the 11th". A `Custom` chip
+  now opens two date pickers bounded by today in PHT — the timezone the
+  insight windows are actually bucketed by. The range is applied with a button
+  rather than on every keystroke: the warm-cache cron only covers the presets,
+  so an unseen range costs a full multi-account Facebook walk, and that should
+  happen once when the user is done choosing, not once per edit. `/all-ads`
+  already spoke `date_from`/`date_to` (briefings use it to backfill history);
+  it now validates the pair, and extends the today-merge — the patch that
+  rescues ads created today from a multi-day window's aggregation — to any
+  explicit range that is still running today.
+
+
 ## 2026-09-17: "User request limit reached" — the rate-limit defenses were never running
 
 Ad Performance stopped loading after NURTELLE joined as a third ad account.
