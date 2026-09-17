@@ -1,5 +1,70 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-17: "User request limit reached" — the rate-limit defenses were never running
+
+Ad Performance stopped loading after NURTELLE joined as a third ad account.
+The account was not the cause; it was the straw. Every guard built to keep us
+under Facebook's call budget was already inert, so the dashboard had been
+paying full price for every page view and two accounts' worth of calls just
+happened to fit under the ceiling.
+
+Four failures, each of which alone would have been survivable.
+
+- **The warm cache was never read. Not once.** `/api/facebook/all-ads` keyed
+  its cache on `include_zero_spend`. The cron warmed `zero=0`; the ads page,
+  the creatives page and the winners pool all request `include_zero_spend=1`
+  and read `zero=1`. So the half-hourly cron spent a full multi-account walk
+  six times an hour writing an entry nothing ever read, and every page view
+  missed and re-walked all three accounts live. The key no longer carries
+  `zero`: one entry stores the superset and `shapeForZeroSpend` trims it per
+  caller. The two variants always cost identical Facebook calls — only the
+  response differed — so there was never a reason to fetch them separately.
+- **RLS was silently denying every write the protections depended on.**
+  `cached_api_data` is admin-only, and `fb_rate_limit_state` / `fb_refresh_state`
+  grant `SELECT` with no `INSERT`. The route did all of it through the caller's
+  session client and swallowed the errors. Consequences: a marketing-role user
+  cold-fetched Facebook on every single page load; the 429 backoff never
+  recorded a block, so nothing ever backed off; and the manual-refresh throttle
+  never stored a timestamp, so Refresh was effectively unthrottled and every
+  click was another full walk. These tables are shared infrastructure, not
+  caller data — they now go through the service client in both `/all-ads` and
+  `/accounts`. Authorization still happens where it did, at the top of the
+  route. `app_settings` stays on the session client; its RLS already covers
+  both roles.
+- **The structure cache lived in a `Map` on a serverless function.** Instances
+  don't share process memory and cold starts wipe it, so the campaigns, adsets
+  and ads fetches it was meant to prevent ran anyway — roughly fifteen
+  paginated pages per account, since `?refresh=1` skipped the cache outright
+  and the cron always passes it. It is in Supabase now, keyed per account for
+  30 minutes. Structure is identical across date presets, so one cron run
+  fetches it once instead of six times per account. A human pressing Refresh
+  still bypasses it and gets live on/off statuses.
+- **Today's rows were fetched five times over.** Every multi-day window patches
+  itself with today's insights to catch ads FB omits from wide windows. Four of
+  the six warmed presets do this, each with its own paginated fetch of the same
+  rows. They now share one 20-minute entry, seeded by the `today` preset.
+
+Two changes to what the dashboard is willing to spend:
+
+- **A plain page view no longer refreshes.** If nothing fresh is cached it
+  serves the cron's last payload flagged stale, up to 12 hours old, rather than
+  spending a three-account walk on someone opening a tab. Only `?refresh=1` and
+  the cron go to Facebook. The freshness window also moved from 30 minutes to
+  45 — it used to equal the cron interval exactly, so any view landing in the
+  gap between runs fell through to a live fetch.
+- **The cron stops walking wide windows every half hour.** `today` and
+  `yesterday` still refresh every run; `last_7d`, `last_14d`, `last_30d` and
+  `this_month` warm hourly. They barely move between two runs.
+
+Also: the cron re-cached each response under a second key (`ads:…`) that
+nothing read — a multi-megabyte write per preset, now dropped — and it counted
+a rate-limited refresh as a success. That is why the cache sat 18 hours stale
+while every run reported `ok`; a stale or rate-limited response is now recorded
+as an error.
+
+Cache key bumped to `ads_v3`, so the first load after deploy is a live fetch
+per preset. `refresh-scaling-detection` reads the new prefix.
+
 ## 2026-09-17: The new store's Page was invisible, and its videos wouldn't play — uncommitted
 
 Two complaints after NURTELLE was added: ad videos not viewable in Ad

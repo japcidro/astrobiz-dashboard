@@ -172,7 +172,7 @@ export async function GET(request: Request) {
   const { data: adsCache } = await supabase
     .from("cached_api_data")
     .select("response_data, refreshed_at")
-    .like("cache_key", "ads_v2:%account=ALL%date_preset=today%")
+    .like("cache_key", "ads_v3:%account=ALL%date_preset=today%")
     .order("refreshed_at", { ascending: false })
     .limit(1)
     .maybeSingle();

@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { getEmployee } from "@/lib/supabase/get-employee";
 import {
   buildCacheKey,
@@ -45,6 +46,14 @@ export async function GET(request: Request) {
 
   const supabase = await createClient();
 
+  // Same split as /all-ads: the cache and the rate-limit state are shared
+  // infrastructure, and cached_api_data's RLS is admin-only while
+  // fb_rate_limit_state grants no INSERT. Reading them through the session
+  // client made every marketing-role request miss the cache and re-walk
+  // /me/adaccounts. app_settings stays on the session client — its RLS
+  // already covers both roles.
+  const db = createServiceClient();
+
   if (!token) {
     const { data: tokenSetting } = await supabase
       .from("app_settings")
@@ -89,7 +98,7 @@ export async function GET(request: Request) {
   // app there's a single Business Manager system token).
   if (!forceRefresh) {
     const cached = await getCachedResponse<{ accounts: AccountRow[] }>(
-      supabase,
+      db,
       cacheKey,
       ACCOUNTS_CACHE_MAX_AGE_MS
     );
@@ -107,10 +116,10 @@ export async function GET(request: Request) {
   }
 
   // Preflight: don't burn rate budget if FB already told us we're blocked.
-  const blockedUntil = await getBlockedUntil(supabase);
+  const blockedUntil = await getBlockedUntil(db);
   if (blockedUntil) {
     // Try to serve any stale cache rather than erroring out.
-    const { data: staleRow } = await supabase
+    const { data: staleRow } = await db
       .from("cached_api_data")
       .select("response_data, refreshed_at")
       .eq("cache_key", cacheKey)
@@ -144,7 +153,7 @@ export async function GET(request: Request) {
     const res = await fbFetchWithLimits(
       `${FB_API_BASE}/me/adaccounts?fields=id,name,account_id,account_status&limit=100&access_token=${encodeURIComponent(token)}`,
       { cache: "no-store" },
-      supabase
+      db
     );
 
     const data = await res.json();
@@ -170,7 +179,7 @@ export async function GET(request: Request) {
 
     // Cache the FULL list (pre-filter) so different users with different
     // selected-account settings can all share the cache.
-    await setCachedResponse(supabase, "fb_accounts", cacheKey, {
+    await setCachedResponse(db, "fb_accounts", cacheKey, {
       accounts: allAccounts,
     });
 

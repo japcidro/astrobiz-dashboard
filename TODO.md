@@ -10,6 +10,12 @@ of letting them drift in chat.
 ### 1. Run pending Supabase migrations
 Order matters — copy each file's full SQL into Supabase SQL Editor and Run.
 
+- [ ] `supabase/ads-cache-v3-seed-migration.sql` **— run this one first, right
+      after the deploy that fixes the Facebook rate limiting.**
+      Copies the existing ads cache onto its new `ads_v3` keys and clears the
+      dead entries. Without it the first Ad Performance load after deploy finds
+      an empty cache and goes to Facebook cold, which is the exact thing that
+      was returning "User request limit reached". Safe to re-run.
 - [ ] `supabase/admin-alerts-migration.sql`
       Tables: `admin_alerts`, `inventory_snapshots`. RPC: `insert_admin_alert`.
       Powers the bell icon + `/admin/notifications` + decision feed.

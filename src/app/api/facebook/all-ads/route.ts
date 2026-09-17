@@ -9,6 +9,7 @@ import {
   recordRateLimit,
   getBlockedUntil,
 } from "@/lib/facebook/rate-limit";
+import { shapeForZeroSpend } from "@/lib/facebook/ads-payload";
 import type { DatePreset } from "@/lib/facebook/types";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -16,9 +17,28 @@ export const dynamic = "force-dynamic";
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
 
-// Structure cache for campaigns/adsets/ads statuses — rarely changes
-const structureCache = new Map<string, { data: unknown; timestamp: number }>();
-const STRUCTURE_CACHE_TTL = 30 * 60 * 1000; // 30 minutes for structure
+// Per-account structure (campaigns/adsets/ads) lives in Supabase, not in
+// process memory. The old in-memory Map never actually prevented a fetch:
+// serverless instances don't share it and a cold start wipes it, so every
+// request re-paginated ~7k ads across every account. That is what exhausted
+// the user-level Graph budget once a third ad account joined.
+const STRUCTURE_CACHE_TTL = 30 * 60 * 1000;
+
+// Today's insights get patched into every multi-day window (see the merge
+// below). One cron run walks six presets, four of which trigger that patch,
+// so without a shared cache the same rows were fetched five times over.
+const TODAY_INSIGHTS_TTL = 20 * 60 * 1000;
+
+// How old a cached ads payload may be and still count as fresh. Must exceed
+// the warm-cache cron's 30-minute interval — when the two were equal, any
+// page load landing in the gap between cron runs fell through to a cold
+// multi-account refresh.
+const ADS_CACHE_MAX_AGE_MS = 45 * 60 * 1000;
+
+// Past that, we still serve the cached payload (flagged stale) rather than
+// spend a full refresh on a plain page view. Only ?refresh=1 and the cron
+// are allowed to go to Facebook.
+const STALE_SERVE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
 // Manual-refresh throttle. If the last successful refresh for this
 // scope happened less than THROTTLE_MS ago, a new ?refresh=1 request
@@ -63,7 +83,7 @@ async function _fbFetchAllImpl<T>(
   url: string,
   token: string | undefined,
   params: Record<string, string> | undefined,
-  supabase: SupabaseClient,
+  db: SupabaseClient,
   timeoutMs = 7000
 ): Promise<T[]> {
   const allData: T[] = [];
@@ -93,7 +113,7 @@ async function _fbFetchAllImpl<T>(
     if (usageHeader) {
       const { maxUsagePct } = parseUsageHeader(usageHeader);
       if (maxUsagePct !== null) {
-        void recordRateLimit(supabase, { usagePct: maxUsagePct });
+        void recordRateLimit(db, { usagePct: maxUsagePct });
       }
     }
 
@@ -103,7 +123,7 @@ async function _fbFetchAllImpl<T>(
       const blockedUntil = waitSeconds
         ? new Date(Date.now() + waitSeconds * 1000)
         : null;
-      await recordRateLimit(supabase, {
+      await recordRateLimit(db, {
         is429: true,
         blockedUntil,
         message: message ?? "Facebook rate limit (429)",
@@ -122,7 +142,7 @@ async function _fbFetchAllImpl<T>(
         const blockedUntil = waitSeconds
           ? new Date(Date.now() + waitSeconds * 1000)
           : null;
-        await recordRateLimit(supabase, {
+        await recordRateLimit(db, {
           is429: true,
           blockedUntil,
           message: message ?? "Facebook rate limit",
@@ -155,6 +175,13 @@ interface AccountInfo {
   status_label: string;
   is_active: boolean;
 }
+
+// Raw shapes of the three structure fetches. Module-scoped because the
+// persisted structure cache is typed against them.
+type CampaignRaw = { id: string; name?: string; effective_status: string; daily_budget?: string; lifetime_budget?: string; updated_time?: string };
+type AdsetRaw = { id: string; name?: string; effective_status: string; campaign_id: string; daily_budget?: string; lifetime_budget?: string; updated_time?: string; start_time?: string; created_time?: string };
+type AdRaw = { id: string; name?: string; effective_status: string; adset_id: string; updated_time?: string; created_time?: string };
+type StructureTriple = [CampaignRaw[], AdsetRaw[], AdRaw[]];
 
 export async function GET(request: Request) {
   // Allow cron jobs to bypass auth using CRON_SECRET
@@ -192,7 +219,20 @@ export async function GET(request: Request) {
 
   // Cron invocations have no user session — use service client so
   // RLS on app_settings doesn't silently return empty FB token.
-  const supabase = isCron ? createServiceClient() : await createClient();
+  // The cache and the rate-limit bookkeeping are shared infrastructure, not
+  // the caller's own data, so they go through the service client. Reading
+  // them with the session client meant RLS quietly denied every one:
+  // cached_api_data is admin-only (a marketing user's page load therefore
+  // cold-fetched Facebook every single time), and fb_refresh_state /
+  // fb_rate_limit_state grant SELECT but no INSERT, so the manual-refresh
+  // throttle and the 429 backoff recorded nothing and never engaged. Every
+  // failure was swallowed, so the protections looked present and were inert.
+  // Authorization already happened above; this widens no one's access.
+  const db = createServiceClient();
+
+  // Session client — only for app_settings, which is the caller's own read
+  // (RLS there already grants both admin and marketing).
+  const supabase = isCron ? db : await createClient();
 
   // Local binding so we don't have to thread `supabase` through every
   // call site — the FB rate-limit telemetry needs it.
@@ -201,15 +241,15 @@ export async function GET(request: Request) {
     token?: string,
     params?: Record<string, string>,
     timeoutMs?: number
-  ) => _fbFetchAllImpl<T>(url, token, params, supabase, timeoutMs ?? 7000);
+  ) => _fbFetchAllImpl<T>(url, token, params, db, timeoutMs ?? 7000);
 
   // Manual-refresh throttle. If the dashboard hits this with ?refresh=1
   // but a successful refresh ran < 5 min ago, downgrade to a normal
   // cache read. Cron callers (isCron) bypass throttling.
-  const cacheScope = `ads:${useTimeRange ? `range:${dateFrom}:${dateTo}` : datePreset}:${accountFilter}:${includeZeroSpend ? "1" : "0"}`;
+  const cacheScope = `ads:${useTimeRange ? `range:${dateFrom}:${dateTo}` : datePreset}:${accountFilter}`;
   let throttledRefresh = false;
   if (forceRefresh && !isCron) {
-    const { data: refreshState } = await supabase
+    const { data: refreshState } = await db
       .from("fb_refresh_state")
       .select("refreshed_at")
       .eq("scope", cacheScope)
@@ -223,23 +263,50 @@ export async function GET(request: Request) {
   }
   const effectiveForceRefresh = forceRefresh && !throttledRefresh;
 
-  // Check Supabase cache first
-  // v2 bumps the cache namespace — payload shape gained `name` fields and
-  // (optionally) zero-activity ad rows, so old cache entries would be stale.
-  const cacheKey = buildCacheKey("ads_v2", {
+  // Check Supabase cache first.
+  // v3 drops `zero` from the key: the entry now always stores the superset
+  // (zero-activity ads included) and shapeForZeroSpend trims it per caller.
+  // Under v2 the key carried zero=0/1, the cron warmed zero=0 and every
+  // dashboard asked for zero=1, so the warm cache was never read once.
+  const cacheKey = buildCacheKey("ads_v3", {
     date_preset: useTimeRange ? `range:${dateFrom}:${dateTo}` : datePreset,
     account: accountFilter,
-    zero: includeZeroSpend ? "1" : "0",
   });
 
   if (!effectiveForceRefresh) {
-    const cached = await getCachedResponse(supabase, cacheKey);
+    const cached = await getCachedResponse(db, cacheKey, ADS_CACHE_MAX_AGE_MS);
     if (cached) {
       return Response.json({
-        ...(cached.data as Record<string, unknown>),
+        ...shapeForZeroSpend(cached.data as Record<string, unknown>, includeZeroSpend),
         role: employeeRole,
         refreshed_at: cached.refreshed_at,
         from_cache: true,
+        throttled_refresh: throttledRefresh,
+      });
+    }
+
+    // Nothing fresh. A plain page view must not trigger a full multi-account
+    // refresh — warming the cache is the cron's job. Serve what the cron last
+    // wrote, flagged stale, and only fall through to Facebook when the cache
+    // is missing or older than STALE_SERVE_MAX_AGE_MS.
+    const { data: staleRow } = await db
+      .from("cached_api_data")
+      .select("response_data, refreshed_at")
+      .eq("cache_key", cacheKey)
+      .maybeSingle();
+    if (
+      staleRow &&
+      Date.now() - new Date(staleRow.refreshed_at).getTime() < STALE_SERVE_MAX_AGE_MS
+    ) {
+      return Response.json({
+        ...shapeForZeroSpend(
+          staleRow.response_data as Record<string, unknown>,
+          includeZeroSpend
+        ),
+        role: employeeRole,
+        refreshed_at: staleRow.refreshed_at,
+        from_cache: true,
+        stale: true,
         throttled_refresh: throttledRefresh,
       });
     }
@@ -247,16 +314,19 @@ export async function GET(request: Request) {
 
   // Preflight: if FB told us we're blocked, refuse new calls and serve
   // any stale cache instead. Keeps the dashboard alive during a 429.
-  const blockedUntil = await getBlockedUntil(supabase);
+  const blockedUntil = await getBlockedUntil(db);
   if (blockedUntil) {
-    const { data: staleRow } = await supabase
+    const { data: staleRow } = await db
       .from("cached_api_data")
       .select("response_data, refreshed_at")
       .eq("cache_key", cacheKey)
       .maybeSingle();
     if (staleRow) {
       return Response.json({
-        ...(staleRow.response_data as Record<string, unknown>),
+        ...shapeForZeroSpend(
+          staleRow.response_data as Record<string, unknown>,
+          includeZeroSpend
+        ),
         role: employeeRole,
         refreshed_at: staleRow.refreshed_at,
         from_cache: true,
@@ -371,6 +441,10 @@ export async function GET(request: Request) {
       reach: number;
       impressions: number;
       ctr: number;
+      // True only for rows synthesized from the structure fetch because the
+      // ad had no activity in the window. Lets one cached payload serve both
+      // include_zero_spend=1 and =0 callers — see shapeForZeroSpend.
+      zero_activity: boolean;
       preview_url: string | null;
       thumbnail_url: string | null;
       updated_time: string | null;        // ad's own updated_time
@@ -389,17 +463,22 @@ export async function GET(request: Request) {
       targetAccounts.map(async (account) => {
         accountStatusMap[account.account_id] = account;
 
-        // Check structure cache for this account (campaigns/adsets/ads don't change per date)
-        // v2 key forces re-fetch since we now request `name` too — old cache
-        // entries lack names and would render blank rows for zero-activity ads.
-        const structKey = `structure_v2:${account.id}`;
-        const cachedStruct = structureCache.get(structKey);
-        const hasStructCache = !effectiveForceRefresh && cachedStruct && Date.now() - cachedStruct.timestamp < STRUCTURE_CACHE_TTL;
-
-        // Only fetch insights fresh — structure from cache if available
-        type CampaignRaw = { id: string; name?: string; effective_status: string; daily_budget?: string; lifetime_budget?: string; updated_time?: string };
-        type AdsetRaw = { id: string; name?: string; effective_status: string; campaign_id: string; daily_budget?: string; lifetime_budget?: string; updated_time?: string; start_time?: string; created_time?: string };
-        type AdRaw = { id: string; name?: string; effective_status: string; adset_id: string; updated_time?: string; created_time?: string };
+        // Structure (campaigns/adsets/ads) is identical for every date preset,
+        // so it is cached per account in Supabase rather than per request.
+        // A human pressing Refresh wants fresh on/off statuses and skips it;
+        // the cron reuses it, which is where the savings are — one cron run
+        // walks six presets, and re-paginating every ad six times per account
+        // was the bulk of our Graph API call budget.
+        const structKey = `fb_structure_v3:${account.id}`;
+        const cachedStruct =
+          !effectiveForceRefresh || isCron
+            ? await getCachedResponse<StructureTriple>(
+                db,
+                structKey,
+                STRUCTURE_CACHE_TTL
+              ).catch(() => null)
+            : null;
+        const hasStructCache = Boolean(cachedStruct && cachedStruct.data[2]?.length);
 
         // Helper: log + swallow per-account errors EXCEPT RateLimitedError,
         // which must bubble so the outer handler serves stale cache instead
@@ -415,7 +494,7 @@ export async function GET(request: Request) {
 
         const [campaignsRaw, adsetsRaw, adsRaw, insightsData] = hasStructCache
           ? [
-              ...(cachedStruct.data as [CampaignRaw[], AdsetRaw[], AdRaw[]]),
+              ...(cachedStruct as { data: StructureTriple }).data,
               await fbFetchAll<Record<string, unknown>>(
                 `/${account.id}/insights`, token,
                 { fields: INSIGHTS_FIELDS, ...insightsDateParam, level: "ad", limit: "500" }
@@ -462,10 +541,23 @@ export async function GET(request: Request) {
         // Save structure to cache (campaigns/adsets/ads — not insights)
         // Only cache if we actually got ad data — otherwise all statuses would show "OFF"
         if (!hasStructCache && adsRaw.length > 0) {
-          structureCache.set(structKey, {
-            data: [campaignsRaw, adsetsRaw, adsRaw],
-            timestamp: Date.now(),
-          });
+          void setCachedResponse(db, "fb_structure", structKey, [
+            campaignsRaw,
+            adsetsRaw,
+            adsRaw,
+          ]).catch(() => {});
+        }
+
+        // Multi-day windows below patch themselves with today's rows. Seed
+        // that cache from the `today` preset so a cron run fetches them once
+        // per account instead of once per window.
+        if (!useTimeRange && datePreset === "today" && insightsData.length > 0) {
+          void setCachedResponse(
+            db,
+            "fb_structure",
+            `fb_insights_today_v1:${account.id}`,
+            insightsData
+          ).catch(() => {});
         }
 
         // FB Insights quirk: brand-new ads created today are often missing
@@ -479,16 +571,34 @@ export async function GET(request: Request) {
         const shouldMergeToday =
           !useTimeRange && datePreset !== "today" && datePreset !== "yesterday";
         if (shouldMergeToday) {
-          const todayInsights = await fbFetchAll<Record<string, unknown>>(
-            `/${account.id}/insights`,
-            token,
-            {
-              fields: INSIGHTS_FIELDS,
-              date_preset: "today",
-              level: "ad",
-              limit: "500",
-            }
-          ).catch(swallow("today-merge", [] as Array<Record<string, unknown>>));
+          // Shared with the `today` preset and with the other multi-day
+          // windows in the same cron run — this used to be a fresh paginated
+          // fetch per window, four times an hour, per account.
+          const todayKey = `fb_insights_today_v1:${account.id}`;
+          const cachedToday = await getCachedResponse<Array<Record<string, unknown>>>(
+            db,
+            todayKey,
+            TODAY_INSIGHTS_TTL
+          ).catch(() => null);
+
+          const todayInsights =
+            cachedToday?.data ??
+            (await fbFetchAll<Record<string, unknown>>(
+              `/${account.id}/insights`,
+              token,
+              {
+                fields: INSIGHTS_FIELDS,
+                date_preset: "today",
+                level: "ad",
+                limit: "500",
+              }
+            ).catch(swallow("today-merge", [] as Array<Record<string, unknown>>)));
+
+          if (!cachedToday && todayInsights.length > 0) {
+            void setCachedResponse(db, "fb_structure", todayKey, todayInsights).catch(
+              () => {}
+            );
+          }
 
           const seenAdIds = new Set<string>();
           for (const row of insightsData) {
@@ -635,6 +745,7 @@ export async function GET(request: Request) {
             reach: parseInt((row.reach as string) || "0"),
             impressions: parseInt((row.impressions as string) || "0"),
             ctr: parseFloat((row.ctr as string) || "0"),
+            zero_activity: false,
             preview_url: adPreview[adId]?.url || null,
             thumbnail_url: adPreview[adId]?.thumbnail || null,
             updated_time: adUpdated[adId] || null,
@@ -649,7 +760,9 @@ export async function GET(request: Request) {
         // FB's /insights endpoint excludes ads that had no spend/impressions
         // in the window, so without this step the table would only show
         // "today's spenders". Structure fetches above already have every ad.
-        if (includeZeroSpend) {
+        // Built unconditionally: the merge costs no extra FB calls, and
+        // caching the superset is what lets one warm entry serve every caller.
+        {
           const seenAdIds = new Set<string>();
           for (const row of insightsData) {
             const id = row.ad_id as string;
@@ -682,6 +795,7 @@ export async function GET(request: Request) {
               reach: 0,
               impressions: 0,
               ctr: 0,
+              zero_activity: true,
               preview_url: null,
               thumbnail_url: null,
               updated_time: adUpdated[a.id] || null,
@@ -742,9 +856,9 @@ export async function GET(request: Request) {
     const allUnknown = allRows.length > 0 && allRows.every((r) => r.status === "UNKNOWN");
     const refreshedAt = new Date().toISOString();
     if (!allUnknown) {
-      setCachedResponse(supabase, "ads", cacheKey, responseData).catch(() => {});
+      setCachedResponse(db, "ads", cacheKey, responseData).catch(() => {});
       // Track last successful refresh so the 5-min manual throttle works.
-      void supabase
+      void db
         .from("fb_refresh_state")
         .upsert(
           {
@@ -757,18 +871,28 @@ export async function GET(request: Request) {
         );
     }
 
-    return Response.json({ ...responseData, role: employeeRole, refreshed_at: refreshedAt });
+    return Response.json({
+      ...shapeForZeroSpend(
+        responseData as unknown as Record<string, unknown>,
+        includeZeroSpend
+      ),
+      role: employeeRole,
+      refreshed_at: refreshedAt,
+    });
   } catch (e) {
     if (e instanceof RateLimitedError) {
       // Serve any stale cache rather than letting the dashboard go blank.
-      const { data: staleRow } = await supabase
+      const { data: staleRow } = await db
         .from("cached_api_data")
         .select("response_data, refreshed_at")
         .eq("cache_key", cacheKey)
         .maybeSingle();
       if (staleRow) {
         return Response.json({
-          ...(staleRow.response_data as Record<string, unknown>),
+          ...shapeForZeroSpend(
+            staleRow.response_data as Record<string, unknown>,
+            includeZeroSpend
+          ),
           role: employeeRole,
           refreshed_at: staleRow.refreshed_at,
           from_cache: true,

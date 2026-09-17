@@ -11,14 +11,12 @@ const PNL_DATE_FILTERS = ["today", "yesterday", "last_7d", "this_month", "last_3
 // A previous version used "last_7_days"/"last_30_days" (with underscores)
 // which silently warmed cache keys the UI never reads — every dashboard
 // view stayed days stale. Keep these aligned with the UI list.
-const ADS_DATE_PRESETS = [
-  "today",
-  "yesterday",
-  "last_7d",
-  "last_14d",
-  "last_30d",
-  "this_month",
-];
+// Split by how fast the window actually moves. Today and yesterday are what
+// the team watches minute to minute; the rolling windows barely shift between
+// two half-hourly runs, and walking all six every time was most of our
+// Facebook call budget. The wide ones warm once an hour instead.
+const ADS_FREQUENT_PRESETS = ["today", "yesterday"];
+const ADS_HOURLY_PRESETS = ["last_7d", "last_14d", "last_30d", "this_month"];
 
 export async function GET(request: Request) {
   // Verify cron secret
@@ -82,7 +80,15 @@ export async function GET(request: Request) {
   }
 
   // --- 2. Refresh FB Ads data ---
-  for (const datePreset of ADS_DATE_PRESETS) {
+  // This cron fires on the hour and on the half hour; only the :00 run pays
+  // for the wide rolling windows.
+  const onTheHour = new Date().getUTCMinutes() < 30;
+  const adsPresets = [
+    ...ADS_FREQUENT_PRESETS,
+    ...(onTheHour ? ADS_HOURLY_PRESETS : []),
+  ];
+
+  for (const datePreset of adsPresets) {
     try {
       const params = new URLSearchParams({
         date_preset: datePreset,
@@ -90,21 +96,28 @@ export async function GET(request: Request) {
         refresh: "1",
       });
 
+      // /all-ads writes its own cache entry under the key the dashboard
+      // reads. Re-caching the response here only ever wrote a second key
+      // ("ads:…") that nothing read — a multi-megabyte write per preset for
+      // nothing — so the response is now just checked, not stored.
       const res = await fetch(`${baseUrl}/api/facebook/all-ads?${params}`, {
         headers: cronAuth,
         cache: "no-store",
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        const cacheKey = buildCacheKey("ads", {
-          date_preset: datePreset,
-          account: "ALL",
-        });
-        await setCachedResponse(supabase, "ads", cacheKey, data);
-        results.push(`ads:ALL:${datePreset}`);
-      } else {
+      if (!res.ok) {
         errors.push(`ads:ALL:${datePreset} (${res.status})`);
+        continue;
+      }
+
+      // A rate-limited refresh still answers 200 with the previous payload
+      // marked stale. Counting that as a success hid the outage: the cache
+      // sat 18 hours old while every run reported "ok".
+      const data = (await res.json()) as { rate_limited?: boolean; stale?: boolean };
+      if (data.rate_limited || data.stale) {
+        errors.push(`ads:ALL:${datePreset} (rate-limited, served stale)`);
+      } else {
+        results.push(`ads:ALL:${datePreset}`);
       }
     } catch (err) {
       errors.push(`ads:ALL:${datePreset}: ${err instanceof Error ? err.message : "unknown"}`);
