@@ -756,6 +756,11 @@ export async function POST(request: Request) {
       // new creative of our own, explicitly opted OUT — pointed at the
       // source's existing page post where there is one, so the copy
       // inherits its likes, comments and shares rather than starting cold.
+      // Whatever the fallback below hits on its own way down. Falling
+      // through to the original /copies error and saying nothing about the
+      // second attempt is how the same screenshot came back four times:
+      // indistinguishable from the fallback never having run.
+      let fallbackError: string | null = null;
       const errorTitle = String(copyJson?.error?.error_user_title ?? "");
       const enhancementsRefused = /standard enhancements/i.test(
         `${errorTitle} ${msg}`
@@ -792,44 +797,74 @@ export async function POST(request: Request) {
                 "source creative has neither a post id nor an object_story_spec to rebuild from"
               );
             }
-            const creativeParams = new URLSearchParams({
-              name: `${sourceName} — scaling copy`,
-              degrees_of_freedom_spec: JSON.stringify({
-                creative_features_spec: {
-                  standard_enhancements: { enroll_status: "OPT_OUT" },
-                },
-              }),
-            });
-            if (storyId) {
-              creativeParams.set("object_story_id", storyId);
-            } else {
-              creativeParams.set(
-                "object_story_spec",
-                JSON.stringify(storySpec)
-              );
-            }
             const urlTags = adRead?.creative?.url_tags as string | undefined;
-            if (urlTags) creativeParams.set("url_tags", urlTags);
 
-            const creativeRes = await fetch(
-              `${FB_API_BASE}/act_${acctNoPrefix}/adcreatives?access_token=${encodeURIComponent(token)}`,
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/x-www-form-urlencoded",
-                },
-                body: creativeParams.toString(),
+            // Two ways to say "no enhancements", because accounts differ on
+            // which they accept. Explicit OPT_OUT first: on an account with
+            // Advantage+ creative defaulted on, a new creative can be
+            // auto-enrolled unless it says otherwise. A bare creative built
+            // from an existing post carries no enhancements of its own, so
+            // it is the fallback's fallback.
+            const buildCreative = async (optOut: boolean) => {
+              const creativeParams = new URLSearchParams({
+                name: `${sourceName} — scaling copy`,
+              });
+              if (optOut) {
+                creativeParams.set(
+                  "degrees_of_freedom_spec",
+                  JSON.stringify({
+                    creative_features_spec: {
+                      standard_enhancements: { enroll_status: "OPT_OUT" },
+                    },
+                  })
+                );
               }
-            );
-            const creativeJson = await creativeRes.json();
-            if (!creativeRes.ok || !creativeJson?.id) {
-              throw new Error(
-                creativeJson?.error?.error_user_msg ??
-                  creativeJson?.error?.message ??
-                  "creative rebuild failed"
+              if (storyId) {
+                creativeParams.set("object_story_id", storyId);
+              } else {
+                creativeParams.set(
+                  "object_story_spec",
+                  JSON.stringify(storySpec)
+                );
+              }
+              if (urlTags) creativeParams.set("url_tags", urlTags);
+
+              const creativeRes = await fetch(
+                `${FB_API_BASE}/act_${acctNoPrefix}/adcreatives?access_token=${encodeURIComponent(token)}`,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/x-www-form-urlencoded",
+                  },
+                  body: creativeParams.toString(),
+                }
               );
+              const creativeJson = await creativeRes.json();
+              if (!creativeRes.ok || !creativeJson?.id) {
+                return {
+                  id: null as string | null,
+                  error:
+                    creativeJson?.error?.error_user_msg ??
+                    creativeJson?.error?.message ??
+                    `adcreatives ${creativeRes.status}`,
+                };
+              }
+              return { id: String(creativeJson.id), error: null };
+            };
+
+            const optedOut = await buildCreative(true);
+            let rebuilt = optedOut;
+            if (!rebuilt.id) {
+              const plain = await buildCreative(false);
+              if (plain.id) {
+                rebuilt = plain;
+              } else {
+                throw new Error(
+                  `could not rebuild the creative — with enhancements opted out: ${optedOut.error}; without the opt-out: ${plain.error}`
+                );
+              }
             }
-            creativeId = String(creativeJson.id);
+            creativeId = rebuilt.id ?? undefined;
           }
 
           const finalName = body.name_suffix?.trim()
@@ -859,6 +894,10 @@ export async function POST(request: Request) {
           );
           const createJson = await createRes.json();
           if (!createRes.ok) {
+            fallbackError =
+              createJson?.error?.error_user_msg ??
+              createJson?.error?.message ??
+              `ads create ${createRes.status}`;
             console.error(
               "[scaling/promote] recreate fallback also failed",
               {
@@ -900,6 +939,10 @@ export async function POST(request: Request) {
             });
           }
         } catch (fallbackErr) {
+          fallbackError =
+            fallbackErr instanceof Error
+              ? fallbackErr.message
+              : "rebuild failed";
           console.error(
             "[scaling/promote] recreate fallback exception",
             fallbackErr
@@ -942,7 +985,7 @@ export async function POST(request: Request) {
         probe("me/permissions"),
         probe(
           adId,
-          "id,name,status,effective_status,configured_status,issues_info,account_id,adset{id,name,status,effective_status,campaign{id,name,objective,special_ad_categories,special_ad_category,buying_type,status,effective_status}}"
+          "id,name,status,effective_status,configured_status,issues_info,account_id,creative{id,degrees_of_freedom_spec,effective_object_story_id},adset{id,name,status,effective_status,optimization_goal,billing_event,promoted_object,campaign{id,name,objective,special_ad_categories,special_ad_category,buying_type,status,effective_status}}"
         ),
         sourceAccountId
           ? probe(
@@ -975,9 +1018,66 @@ export async function POST(request: Request) {
 
       console.error("[scaling/promote] diagnostic probe", diag);
 
+      // The source ad runs today with the settings it has, so when a copy
+      // of it is refused, the destination is what changed. Read both sides
+      // and say which — an "Invalid parameter" with nothing attached is
+      // what sent this round-trip four times.
+      let mismatch = "";
+      if (enhancementsRefused) {
+        const destAdset = (targetAdset ?? {}) as Record<string, unknown>;
+        const destCampaign = (targetCampaign ?? {}) as Record<string, unknown>;
+        const sourceAdset = ((sourceAd as Record<string, unknown>)?.adset ??
+          {}) as Record<string, unknown>;
+        const sourceCampaign = (sourceAdset?.campaign ?? {}) as Record<
+          string,
+          unknown
+        >;
+        const bits: string[] = [];
+        if (
+          sourceCampaign.objective &&
+          destCampaign.objective &&
+          sourceCampaign.objective !== destCampaign.objective
+        ) {
+          bits.push(
+            `the ad runs under a ${sourceCampaign.objective} campaign and the destination is ${destCampaign.objective}`
+          );
+        }
+        if (
+          sourceAdset.optimization_goal &&
+          destAdset.optimization_goal &&
+          sourceAdset.optimization_goal !== destAdset.optimization_goal
+        ) {
+          bits.push(
+            `its ad set optimises for ${sourceAdset.optimization_goal} and the destination for ${destAdset.optimization_goal}`
+          );
+        }
+        const srcCats = cleanCategories(
+          sourceCampaign.special_ad_categories
+        ).join(", ");
+        const dstCats = cleanCategories(
+          destCampaign.special_ad_categories
+        ).join(", ");
+        if (srcCats !== dstCats) {
+          bits.push(
+            `special ad categories differ (${srcCats || "none"} vs ${dstCats || "none"})`
+          );
+        }
+        if (bits.length > 0) {
+          mismatch = ` The destination doesn't match the ad: ${bits.join("; ")}.`;
+        }
+      }
+
+      const headline = userTitle ? `${userTitle}: ${msg}` : msg;
       return Response.json(
         {
-          error: userTitle ? `${userTitle}: ${msg}` : msg,
+          error:
+            headline +
+            mismatch +
+            (fallbackError
+              ? ` Rebuilding the ad without enhancements also failed: ${fallbackError}`
+              : enhancementsRefused
+                ? " (No rebuild was attempted — this build predates that fallback.)"
+                : ""),
           fb_code: copyJson?.error?.code,
           fb_subcode: copyJson?.error?.error_subcode,
           fb_user_msg: copyJson?.error?.error_user_msg,
