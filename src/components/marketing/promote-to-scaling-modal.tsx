@@ -465,7 +465,7 @@ export function PromoteToScalingModal({
                     : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500"
                 }`}
               >
-                Existing adset
+                Into an ad set that exists
               </button>
               <button
                 type="button"
@@ -477,7 +477,7 @@ export function PromoteToScalingModal({
                     : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500"
                 }`}
               >
-                + New adset
+                Into a new ad set
               </button>
             </div>
           )}
@@ -529,7 +529,7 @@ export function PromoteToScalingModal({
             <div className="space-y-3">
               <div>
                 <label className="block text-xs text-gray-400 mb-1.5">
-                  Template adset (targeting + budget gets cloned)
+                  Copy its targeting &amp; budget from
                   {campaignChoice.kind === "new" && (
                     <span className="text-gray-600">
                       {" "}
@@ -567,7 +567,7 @@ export function PromoteToScalingModal({
               </div>
               <div>
                 <label className="block text-xs text-gray-400 mb-1.5">
-                  New adset name{" "}
+                  Name for the new ad set{" "}
                   <span className="text-gray-500">(min 3 chars)</span>
                 </label>
                 <input
@@ -579,9 +579,10 @@ export function PromoteToScalingModal({
                   className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500"
                 />
                 <p className="text-[11px] text-gray-500 mt-1">
-                  The new adset will start PAUSED regardless of the setting
-                  below. The ad itself respects the &quot;After copy&quot;
-                  choice.
+                  The new ad set is a copy of the one above, made inside the
+                  target campaign. It starts PAUSED whatever you choose
+                  below, so you can set its budget before it spends; the ad
+                  itself follows the &quot;After copy&quot; choice.
                 </p>
               </div>
             </div>

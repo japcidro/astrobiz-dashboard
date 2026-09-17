@@ -395,14 +395,14 @@ export function PromoteBulkToScalingModal({
     if (campaignBlocker) return campaignBlocker;
     if (loadingAdsets) return null;
     if (destCounts.active === 0)
-      return "Every ad is set to Skip — pick a destination for at least one.";
+      return "Every ad is set to skip — pick a destination for at least one.";
     if (
       (destCounts.newShared > 0 || destCounts.new > 0) &&
       !templateAdsetId
     )
-      return "Pick a source adset (Copy targeting & budget from) first.";
+      return "Pick the ad set new ad sets should copy their targeting & budget from.";
     if (destCounts.newShared > 0 && sharedNewName.trim().length < 3)
-      return "Type a New adset name (min 3 characters).";
+      return "Name the shared ad set above (min 3 characters).";
     return null;
   })();
 
@@ -636,43 +636,112 @@ export function PromoteBulkToScalingModal({
             </div>
           )}
 
+          {/* Template adset — cloned for any "New adset" / "New per ad" row */}
+          {destinationReady && (
+            <div>
+              <label className="block text-xs text-gray-400 mb-1.5">
+                New ad sets copy their targeting &amp; budget from{" "}
+                <span className="text-gray-600">
+                  (auto-picked — Meta can&apos;t make a blank ad set)
+                </span>
+              </label>
+              {loadingAdsets ? (
+                <div className="flex items-center gap-2 text-xs text-gray-500 py-2">
+                  <Loader2 size={12} className="animate-spin" />
+                  Loading adsets…
+                </div>
+              ) : adsets.length === 0 ? (
+                <div className="text-xs text-yellow-400 p-2 bg-yellow-900/20 border border-yellow-700/40 rounded-lg">
+                  No adsets in that campaign, so there is nothing to clone.
+                  Pick another campaign above, or create an ad set in Ads
+                  Manager first — Meta has no way to make a blank one.
+                </div>
+              ) : (
+                <select
+                  value={templateAdsetId}
+                  onChange={(e) => setTemplateAdsetId(e.target.value)}
+                  disabled={submitting || done}
+                  className={`w-full bg-gray-800 border text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500 ${
+                    !templateAdsetId &&
+                    (sharedNewName.trim().length >= 3 ||
+                      destCounts.new > 0 ||
+                      destCounts.newShared > 0)
+                      ? "border-orange-500 ring-1 ring-orange-500/40"
+                      : "border-gray-700"
+                  }`}
+                >
+                  <option value="">— Pick a source adset —</option>
+                  {adsets.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.name}
+                      {pausedTag(a.effective_status)}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <p className="text-[11px] text-gray-500 mt-1">
+                Every new ad set below is a copy of this one, made inside the
+                target campaign and starting PAUSED. This ad set itself is
+                not touched or moved.
+              </p>
+            </div>
+          )}
+
+          {/* New adset name — only used by rows set to "→ New adset". Lets
+              the user create ONE custom-named adset and drop the chosen ads
+              into it, instead of one auto-named adset per ad. */}
+          {destinationReady && adsets.length > 0 && (
+            <div>
+              <label className="block text-xs text-gray-400 mb-1.5">
+                Name for the shared ad set{" "}
+                <span className="text-gray-600">
+                  (only used by ads you send to &quot;one shared ad set&quot;)
+                </span>
+              </label>
+              <input
+                type="text"
+                value={sharedNewName}
+                onChange={(e) => setSharedNewName(e.target.value)}
+                disabled={submitting || done}
+                placeholder="e.g. SCALING — JUNE WINNERS"
+                className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500"
+              />
+              <p className="text-[11px] text-gray-500 mt-1">
+                One ad set with this name is created, and every ad you send
+                to it lands inside — so the ads learn together on one budget.
+                It starts PAUSED so you can set that budget before it spends;
+                the ads themselves follow the &quot;After copy&quot; choice
+                at the bottom.
+              </p>
+            </div>
+          )}
+
           {/* Quick-apply + subjects */}
           <div className="bg-gray-800/40 border border-gray-700/50 rounded-lg overflow-hidden">
             {destinationReady && !submitting && !done && (
               <div className="flex items-center flex-wrap gap-2 px-2 py-1.5 border-b border-gray-700/40 bg-gray-900/30 text-[11px] text-gray-400">
-                <span className="text-gray-500">Set all to:</span>
+                <span className="text-gray-500">Put every ad:</span>
                 <button
                   type="button"
                   onClick={() => setAllDest({ kind: "new-shared" })}
-                  disabled={!templateAdsetId || sharedNewName.trim().length < 3}
-                  title={
-                    !templateAdsetId
-                      ? "Pick a template below first"
-                      : sharedNewName.trim().length < 3
-                        ? "Type a name for the new adset below first"
-                        : "Put every ad into one new adset"
-                  }
-                  className="px-2 py-0.5 rounded border border-gray-700 bg-gray-800 text-gray-300 hover:border-gray-500 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="All three ads learn together in one ad set, on one budget"
+                  className="px-2 py-0.5 rounded border border-gray-700 bg-gray-800 text-gray-300 hover:border-gray-500 cursor-pointer"
                 >
-                  → New adset
+                  in one shared ad set
                 </button>
                 <button
                   type="button"
                   onClick={() => setAllDest({ kind: "new" })}
-                  disabled={!templateAdsetId}
-                  title={
-                    templateAdsetId
-                      ? "Clone template — one new adset per ad, named after its source"
-                      : "Pick a template below first"
-                  }
-                  className="px-2 py-0.5 rounded border border-gray-700 bg-gray-800 text-gray-300 hover:border-gray-500 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="One ad set each, named after the ad set it came from — kill or scale them individually"
+                  className="px-2 py-0.5 rounded border border-gray-700 bg-gray-800 text-gray-300 hover:border-gray-500 cursor-pointer"
                 >
-                  + New per ad
+                  in its own ad set
                 </button>
                 {adsetsAreDestinations && (
                   <select
                     value=""
                     disabled={adsets.length === 0}
+                    title="Put every ad into one ad set that already exists"
                     onChange={(e) => {
                       const v = e.target.value;
                       if (!v) return;
@@ -680,7 +749,7 @@ export function PromoteBulkToScalingModal({
                     }}
                     className="bg-gray-800 border border-gray-700 text-gray-300 text-[11px] rounded px-2 py-0.5 max-w-[180px] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    <option value="">an existing adset…</option>
+                    <option value="">in an ad set that exists…</option>
                     {adsets.map((a) => (
                       <option key={a.id} value={a.id}>
                         {a.name}
@@ -694,7 +763,7 @@ export function PromoteBulkToScalingModal({
                   onClick={() => setAllDest({ kind: "skip" })}
                   className="px-2 py-0.5 rounded border border-gray-700 bg-gray-800 text-gray-300 hover:border-gray-500 cursor-pointer"
                 >
-                  Skip all
+                  nowhere (skip all)
                 </button>
                 <span className="ml-auto text-gray-500">
                   {destCounts.active}/{subjects.length} active
@@ -778,38 +847,35 @@ export function PromoteBulkToScalingModal({
                           className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-[11px] rounded px-2 py-1 focus:ring-orange-500 focus:border-orange-500 disabled:opacity-50"
                         >
                           <option value="">— Pick destination —</option>
-                          <option
-                            value="new-shared"
-                            disabled={
-                              !templateAdsetId ||
-                              sharedNewName.trim().length < 3
-                            }
-                          >
-                            {!templateAdsetId
-                              ? "→ New adset — pick a source adset below first"
-                              : sharedNewName.trim().length < 3
-                                ? "→ New adset — type a name below first"
-                                : `→ ${sharedNewName.trim()} (new)`}
+                          {/* Both new-ad-set options stay selectable even
+                              when the name or template above is missing:
+                              the footer names what is missing, which is
+                              more use than an option greyed out for a
+                              reason the user has to go hunting for. */}
+                          <option value="new-shared">
+                            {sharedNewName.trim().length >= 3
+                              ? `Into one shared new ad set: "${sharedNewName.trim()}"`
+                              : "Into one shared new ad set (name it above)"}
                           </option>
-                          <option value="new" disabled={!templateAdsetId}>
-                            {templateAdsetId
-                              ? "+ New per ad (named after source)"
-                              : "+ New per ad — pick a source adset below first"}
+                          <option value="new">
+                            {`Into its own new ad set: "${(s.adset_name || s.ad_name).trim()}"`}
                           </option>
                           {adsetsAreDestinations && adsets.length > 0 && (
-                            <optgroup label="Existing adsets">
+                            <optgroup label="Into an ad set that already exists">
                               {adsets.map((a) => (
                                 <option
                                   key={a.id}
                                   value={`existing:${a.id}`}
                                 >
-                                  → {a.name}
+                                  {a.name}
                                   {pausedTag(a.effective_status)}
                                 </option>
                               ))}
                             </optgroup>
                           )}
-                          <option value="skip">Skip this ad</option>
+                          <option value="skip">
+                            Don&apos;t copy this ad
+                          </option>
                         </select>
                       )}
                     </div>
@@ -818,86 +884,6 @@ export function PromoteBulkToScalingModal({
               })}
             </div>
           </div>
-
-          {/* Template adset — cloned for any "New adset" / "New per ad" row */}
-          {destinationReady && (
-            <div>
-              <label className="block text-xs text-gray-400 mb-1.5">
-                Copy targeting &amp; budget from{" "}
-                <span className="text-gray-600">
-                  (auto-picked — Meta can&apos;t make a blank adset)
-                </span>
-              </label>
-              {loadingAdsets ? (
-                <div className="flex items-center gap-2 text-xs text-gray-500 py-2">
-                  <Loader2 size={12} className="animate-spin" />
-                  Loading adsets…
-                </div>
-              ) : adsets.length === 0 ? (
-                <div className="text-xs text-yellow-400 p-2 bg-yellow-900/20 border border-yellow-700/40 rounded-lg">
-                  No adsets in that campaign, so there is nothing to clone.
-                  Pick another campaign above, or create an ad set in Ads
-                  Manager first — Meta has no way to make a blank one.
-                </div>
-              ) : (
-                <select
-                  value={templateAdsetId}
-                  onChange={(e) => setTemplateAdsetId(e.target.value)}
-                  disabled={submitting || done}
-                  className={`w-full bg-gray-800 border text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500 ${
-                    !templateAdsetId &&
-                    (sharedNewName.trim().length >= 3 ||
-                      destCounts.new > 0 ||
-                      destCounts.newShared > 0)
-                      ? "border-orange-500 ring-1 ring-orange-500/40"
-                      : "border-gray-700"
-                  }`}
-                >
-                  <option value="">— Pick a source adset —</option>
-                  {adsets.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                      {pausedTag(a.effective_status)}
-                    </option>
-                  ))}
-                </select>
-              )}
-              <p className="text-[11px] text-gray-500 mt-1">
-                You still get a brand-new, separate adset — this just gives it
-                a starting targeting/budget, and it is created inside the
-                target campaign above. The original is untouched.
-              </p>
-            </div>
-          )}
-
-          {/* New adset name — only used by rows set to "→ New adset". Lets
-              the user create ONE custom-named adset and drop the chosen ads
-              into it, instead of one auto-named adset per ad. */}
-          {destinationReady && adsets.length > 0 && (
-            <div>
-              <label className="block text-xs text-gray-400 mb-1.5">
-                New adset name{" "}
-                <span className="text-gray-600">
-                  (one shared adset for every &quot;→ New adset&quot; row)
-                </span>
-              </label>
-              <input
-                type="text"
-                value={sharedNewName}
-                onChange={(e) => setSharedNewName(e.target.value)}
-                disabled={submitting || done}
-                placeholder="e.g. SCALING — JUNE WINNERS"
-                className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500"
-              />
-              <p className="text-[11px] text-gray-500 mt-1">
-                A brand-new adset with this name is created in the target
-                campaign (starts PAUSED so you can set its budget/targeting
-                first). Every ad set to &quot;→ New adset&quot; lands inside
-                it; the ads themselves respect the &quot;After copy&quot;
-                choice below.
-              </p>
-            </div>
-          )}
 
           {/* Status option */}
           <div>

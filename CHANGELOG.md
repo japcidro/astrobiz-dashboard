@@ -1,5 +1,36 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-18: Say what the destination options actually do
+
+"→ New adset", "+ New per ad (named after source)", and a third option
+greyed out with "type a name below first" — pointing at a field the user
+had to scroll past the ad list to find. Three ways of saying "ad set" and
+none of them saying what happens to the ad.
+
+The options now describe the outcome, in the same words in both places:
+
+- **Into one shared new ad set: "NAME"** — every ad sent here lands in the
+  same new ad set, learning together on one budget.
+- **Into its own new ad set: "AUTISTIC"** — one ad set per ad, named after
+  the ad set it came from, quoting that name in the option itself rather
+  than calling it "source".
+- **Don't copy this ad**, and existing ad sets grouped under "Into an ad set
+  that already exists".
+
+The quick-apply row reads as a sentence — "Put every ad: in one shared ad
+set · in its own ad set · in an ad set that exists… · nowhere (skip all)".
+
+Neither new-ad-set option is greyed out any more. Disabling them hid the
+choice behind a prerequisite whose explanation was elsewhere on screen;
+they stay selectable and the footer names what is still missing, which it
+already did for every other blocker.
+
+The fields those options depend on — which ad set to copy targeting and
+budget from, and the shared ad set's name — moved above the ad list, so the
+modal reads in the order it is filled: where it goes, how the ad sets are
+made, which ad goes where, paused or active. Nothing says "below first" any
+more, because nothing is below.
+
 ## 2026-09-18: A store with no scaling campaign can still promote
 
 Nurtelle is new. It has no scaling campaign, so it has no row in
