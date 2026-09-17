@@ -75,6 +75,10 @@ interface RowResult {
   status: RowStatus;
   error?: string;
   copied_ad_id?: string | null;
+  // Meta refused to carry the source creative's Advantage+ standard
+  // enhancements into the destination, so the copy was rebuilt with them
+  // off. The copy is live and correct, just not byte-identical.
+  enhancements_opted_out?: boolean;
 }
 
 // Per-ad destination choice.
@@ -406,6 +410,11 @@ export function PromoteBulkToScalingModal({
     return null;
   })();
 
+  const anyEnhancementsOff = useMemo(
+    () => [...results.values()].some((r) => r.enhancements_opted_out),
+    [results]
+  );
+
   const tally = useMemo(() => {
     let succeeded = 0;
     let failed = 0;
@@ -520,6 +529,7 @@ export function PromoteBulkToScalingModal({
           updateRow(subject.ad_id, {
             status: "success",
             copied_ad_id: json.copied_ad_id ?? null,
+            enhancements_opted_out: !!json.enhancements_opted_out,
           });
         }
       } catch (e) {
@@ -861,7 +871,9 @@ export function PromoteBulkToScalingModal({
                         ) : r.status === "success" ? (
                           <span className="inline-flex items-center gap-1 text-[11px] text-emerald-400">
                             <CheckCircle2 size={12} />
-                            Done
+                            {r.enhancements_opted_out
+                              ? "Done — enhancements off"
+                              : "Done"}
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-[11px] text-red-400">
@@ -965,6 +977,14 @@ export function PromoteBulkToScalingModal({
                   </span>
                 )}
               </div>
+              {anyEnhancementsOff && (
+                <p className="text-[11px] text-gray-400 mt-1.5">
+                  Facebook would not carry Advantage+ standard enhancements
+                  into the new ad set, so those copies were rebuilt with
+                  enhancements switched off. They point at the original
+                  post, so the likes and comments come with them.
+                </p>
+              )}
               {tally.failed > 0 && (
                 <button
                   type="button"

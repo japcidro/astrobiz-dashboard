@@ -1,5 +1,35 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-18: "Creative should not include standard enhancements"
+
+The real reason the Nurtelle promotes were failing, now that the error is
+readable. Every ad came back with the same one.
+
+The source creatives have Advantage+ **standard enhancements** opted in.
+Meta will not carry a creative holding them into the destination ad set,
+`/copies` has no parameter to turn them off, and the creative belongs to
+the original ad as much as to the copy, so editing it in place would change
+the ad that is currently running. Three ways in, all closed.
+
+So the copy is built by hand instead, the same route the existing code
+already takes when `/copies` returns "Application does not have the
+capability": read the source ad, create a new creative explicitly opted
+**OUT** of standard enhancements, and `POST /act_{}/ads` with it.
+
+That new creative points at the source ad's **existing page post**
+(`effective_object_story_id`) wherever it has one, rather than rebuilding
+the post from its spec. Same post, so the scaled ad inherits the original's
+likes, comments and shares instead of starting from zero — which for an ad
+you are scaling *because* it works is worth more than the enhancements
+being lost.
+
+The copy is genuinely different from its original, so it says so: the row
+reads "Done — enhancements off", with a line under the tally explaining
+why and noting the social proof came along. The single-ad toast says the
+same. Turning standard enhancements off on the source ad in Ads Manager
+and promoting again avoids the rebuild entirely, if an exact copy matters
+more.
+
 ## 2026-09-18: Clearing out the campaigns a failed promote left behind
 
 Admin → Settings → Scaling Campaigns gains an **Empty campaigns** panel.

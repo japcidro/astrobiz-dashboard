@@ -45,6 +45,7 @@ interface Props {
     copied_ad_id: string | null;
     status: "PAUSED" | "ACTIVE";
     campaign_name: string | null;
+    enhancements_opted_out: boolean;
   }) => void;
 }
 
@@ -307,6 +308,7 @@ export function PromoteToScalingModal({
         copied_ad_id: json.copied_ad_id ?? null,
         status: statusOption,
         campaign_name: (json.target_campaign_name as string) ?? null,
+        enhancements_opted_out: !!json.enhancements_opted_out,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Promote failed");

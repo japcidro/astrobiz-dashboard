@@ -2275,17 +2275,24 @@ export default function AdsPage() {
         <PromoteToScalingModal
           subject={promoteSubject}
           onClose={() => setPromoteSubject(null)}
-          onSuccess={({ status, campaign_name }) => {
+          onSuccess={({ status, campaign_name, enhancements_opted_out }) => {
             setPromoteSubject(null);
             // The destination is a choice now, so the toast has to name it
             // — "copied to scaling" would be a lie half the time.
             const where = campaign_name
               ? `to ${campaign_name}`
               : "to the scaling campaign";
+            // Facebook refuses to carry Advantage+ standard enhancements
+            // into some ad sets; the copy is rebuilt without them, which is
+            // a real difference from the original and worth saying.
+            const caveat = enhancements_opted_out
+              ? " Advantage+ enhancements are off on the copy."
+              : "";
             setPromoteToast(
-              status === "ACTIVE"
+              (status === "ACTIVE"
                 ? `Ad copied ${where} (ACTIVE).`
-                : `Ad copied ${where} (PAUSED — review in Ads Manager).`
+                : `Ad copied ${where} (PAUSED — review in Ads Manager).`) +
+                caveat
             );
             // Refresh ads + detection so the orange chip appears.
             fetchData(true);

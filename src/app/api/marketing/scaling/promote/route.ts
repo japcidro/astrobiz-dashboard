@@ -737,16 +737,33 @@ export async function POST(request: Request) {
         fb_error: copyJson?.error,
       });
 
-      // Fallback path: when /copies returns code 3 ("Application does
-      // not have the capability"), Meta is blocking that endpoint
-      // specifically even though the token has ads_management. Bypass
-      // /copies by reading the source ad's creative_id and creating a
-      // fresh ad in the target adset with POST /act_{}/ads. Same end
-      // result, different — and more permissive — endpoint.
-      if (copyJson?.error?.code === 3 && sourceAccountId) {
+      // Fallback path, for two failures that /copies cannot be talked out
+      // of:
+      //
+      //   code 3 — "Application does not have the capability". Meta is
+      //   blocking the endpoint itself even though the token has
+      //   ads_management.
+      //
+      //   "Creative should not include standard enhancements" — the source
+      //   creative has Advantage+ standard enhancements opted in, and the
+      //   ad set it is being copied into will not take a creative carrying
+      //   them. /copies has no way to turn them off, and the creative is
+      //   shared with the original ad, so it cannot be edited in place
+      //   either.
+      //
+      // Both are answered the same way: build the ad directly with
+      // POST /act_{}/ads instead. For the enhancements case that means a
+      // new creative of our own, explicitly opted OUT — pointed at the
+      // source's existing page post where there is one, so the copy
+      // inherits its likes, comments and shares rather than starting cold.
+      const errorTitle = String(copyJson?.error?.error_user_title ?? "");
+      const enhancementsRefused = /standard enhancements/i.test(
+        `${errorTitle} ${msg}`
+      );
+      if ((copyJson?.error?.code === 3 || enhancementsRefused) && sourceAccountId) {
         try {
           const adReadRes = await fetch(
-            `${FB_API_BASE}/${adId}?fields=name,creative{id},tracking_specs&access_token=${encodeURIComponent(token)}`,
+            `${FB_API_BASE}/${adId}?fields=name,tracking_specs,creative{id,object_story_spec,effective_object_story_id,url_tags}&access_token=${encodeURIComponent(token)}`,
             { cache: "no-store" }
           );
           const adRead = await adReadRes.json();
@@ -754,14 +771,70 @@ export async function POST(request: Request) {
             throw new Error(adRead?.error?.message ?? "ad read failed");
           }
           const sourceName = (adRead?.name as string) ?? `Copy of ${adId}`;
-          const creativeId = adRead?.creative?.id as string | undefined;
+          let creativeId = adRead?.creative?.id as string | undefined;
           if (!creativeId) {
             throw new Error("source ad has no creative id");
           }
+          const acctNoPrefix = sourceAccountId.replace(/^act_/, "");
+
+          if (enhancementsRefused) {
+            // Rebuild the creative with enhancements off. The existing
+            // post id is the better source when there is one: same post,
+            // so the scaled ad keeps the original's social proof.
+            const storyId = adRead?.creative?.effective_object_story_id as
+              | string
+              | undefined;
+            const storySpec = adRead?.creative?.object_story_spec as
+              | Record<string, unknown>
+              | undefined;
+            if (!storyId && !storySpec) {
+              throw new Error(
+                "source creative has neither a post id nor an object_story_spec to rebuild from"
+              );
+            }
+            const creativeParams = new URLSearchParams({
+              name: `${sourceName} — scaling copy`,
+              degrees_of_freedom_spec: JSON.stringify({
+                creative_features_spec: {
+                  standard_enhancements: { enroll_status: "OPT_OUT" },
+                },
+              }),
+            });
+            if (storyId) {
+              creativeParams.set("object_story_id", storyId);
+            } else {
+              creativeParams.set(
+                "object_story_spec",
+                JSON.stringify(storySpec)
+              );
+            }
+            const urlTags = adRead?.creative?.url_tags as string | undefined;
+            if (urlTags) creativeParams.set("url_tags", urlTags);
+
+            const creativeRes = await fetch(
+              `${FB_API_BASE}/act_${acctNoPrefix}/adcreatives?access_token=${encodeURIComponent(token)}`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: creativeParams.toString(),
+              }
+            );
+            const creativeJson = await creativeRes.json();
+            if (!creativeRes.ok || !creativeJson?.id) {
+              throw new Error(
+                creativeJson?.error?.error_user_msg ??
+                  creativeJson?.error?.message ??
+                  "creative rebuild failed"
+              );
+            }
+            creativeId = String(creativeJson.id);
+          }
+
           const finalName = body.name_suffix?.trim()
             ? `${sourceName} ${body.name_suffix.trim()}`
             : sourceName;
-          const acctNoPrefix = sourceAccountId.replace(/^act_/, "");
           const createParams = new URLSearchParams({
             name: finalName,
             adset_id: targetAdsetId,
@@ -797,7 +870,7 @@ export async function POST(request: Request) {
           } else {
             copiedAdId = (createJson?.id as string | null) ?? null;
             console.info(
-              `[scaling/promote] recreate fallback succeeded: source=${adId} new_ad=${copiedAdId}`
+              `[scaling/promote] recreate fallback succeeded: source=${adId} new_ad=${copiedAdId} enhancements_opted_out=${enhancementsRefused}`
             );
             if (intoScalingCampaign) {
               await markSourceAdScaledInCache(supabase, {
@@ -819,6 +892,11 @@ export async function POST(request: Request) {
               target_campaign_name: targetCampaignName,
               created_campaign_id: createdCampaignId,
               used_fallback: true,
+              // The copy is not byte-identical to the original: its
+              // creative has Advantage+ standard enhancements switched off,
+              // because Meta would not carry them into this ad set. Worth
+              // saying out loud rather than leaving to be noticed.
+              enhancements_opted_out: enhancementsRefused,
             });
           }
         } catch (fallbackErr) {
