@@ -20,8 +20,11 @@ export interface FbPageAccess {
   id: string;
   name: string;
   sources: string[];
+  tasks: string[];
   /** A Page token is what Graph demands before it will hand over an MP4. */
   can_play_video: boolean;
+  /** ADVERTISE or MANAGE — without one, ad creation on this Page fails. */
+  can_advertise: boolean | null;
   reason: string | null;
 }
 
@@ -36,6 +39,8 @@ export interface FbAccessReport {
   ad_accounts: { id: string; name: string }[];
   pages: FbPageAccess[];
   page_warnings: string[];
+  /** How many Pages each Graph edge returned — shows which edge is empty. */
+  page_source_counts: Record<string, number>;
   /** Plain-language conclusions, most actionable first. */
   findings: string[];
 }
@@ -116,11 +121,18 @@ export async function GET() {
   const pages: FbPageAccess[] = await Promise.all(
     pageLookup.pages.map(async (p) => {
       const { ok, reason } = await canMintPageToken(p.id, token);
+      const tasks = p.tasks ?? [];
       return {
         id: p.id,
         name: p.name,
         sources: p.sources,
+        tasks,
         can_play_video: ok,
+        // No edge reported tasks for this Page — unknown, not "missing".
+        can_advertise:
+          tasks.length === 0
+            ? null
+            : tasks.includes("ADVERTISE") || tasks.includes("MANAGE"),
         reason,
       };
     })
@@ -145,6 +157,13 @@ export async function GET() {
       `${noVideo.length} Page${noVideo.length === 1 ? "" : "s"} cannot produce a Page token, so ad videos on ${noVideo.length === 1 ? "it" : "them"} will not play: ${noVideo
         .map((p) => p.name)
         .join(", ")}. Give the token's Facebook user a role on ${noVideo.length === 1 ? "that Page" : "those Pages"} in Business Settings → Pages → Add People.`
+    );
+  }
+
+  const cannotAdvertise = pages.filter((p) => p.can_advertise === false);
+  if (cannotAdvertise.length > 0) {
+    findings.push(
+      `${cannotAdvertise.map((p) => p.name).join(", ")} can be listed but the token has no ADVERTISE task on ${cannotAdvertise.length === 1 ? "it" : "them"} — creating an ad on ${cannotAdvertise.length === 1 ? "that Page" : "those Pages"} will fail. Grant the Advertise task in Business Settings → Pages.`
     );
   }
 
@@ -177,6 +196,7 @@ export async function GET() {
     ad_accounts: accountsRes?.data ?? [],
     pages,
     page_warnings: pageLookup.warnings,
+    page_source_counts: pageLookup.counts,
     findings,
   };
 

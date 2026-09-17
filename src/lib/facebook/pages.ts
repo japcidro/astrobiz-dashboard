@@ -6,8 +6,10 @@ const FB_API_BASE = "https://graph.facebook.com/v21.0";
 // all of these and merge, never just the first one that answers.
 export const PAGE_SOURCES = {
   ME_ACCOUNTS: "/me/accounts",
+  ASSIGNED: "system user assigned_pages",
   OWNED: "business owned_pages",
   CLIENT: "business client_pages",
+  PROMOTE: "ad account promote_pages",
 } as const;
 
 export interface FbPage {
@@ -16,6 +18,9 @@ export interface FbPage {
   picture?: { data?: { url?: string } };
   /** Which Graph edges returned this Page. Useful when one of them is empty. */
   sources: string[];
+  /** Page-level tasks granted to the token, when the edge reports them.
+   *  Without ADVERTISE/MANAGE an ad cannot actually be created on the Page. */
+  tasks?: string[];
 }
 
 export interface PageLookupResult {
@@ -73,16 +78,91 @@ async function graphList<T>(
   return { data: out, error: null };
 }
 
-type RawPage = { id?: string; name?: string; picture?: { data?: { url?: string } } };
+type RawPage = {
+  id?: string;
+  name?: string;
+  picture?: { data?: { url?: string } };
+  tasks?: string[];
+};
+
+const PAGE_FIELDS = "id,name,picture{url},tasks";
 
 /**
- * Every Facebook Page this token can see, merged across all three edges.
+ * Every business this token belongs to or can administer.
  *
- * The previous version asked `/me/accounts` and only fell back to the business
- * edges when that returned *zero* Pages. That works right up until the day a
- * new brand's Page is added to Business Manager without giving the token's
- * user a Page role: `/me/accounts` still returns the older Pages, so the
- * fallback never fires and the new Page is invisible forever.
+ * Three discovery paths, because which one answers depends on what kind of
+ * token is connected — and picking only one is how a whole business goes
+ * missing:
+ *
+ *  - `/me/businesses` is a **User** edge. A System User token gets an empty
+ *    list back, with no error, so nothing downstream ever runs.
+ *  - `/me?fields=business` is the System User's own owning business.
+ *  - Ad accounts carry a `business` too, which catches anything the first two
+ *    miss and costs nothing — the accounts are already being listed.
+ */
+async function discoverBusinesses(
+  token: string
+): Promise<{ businesses: Map<string, string>; warnings: string[] }> {
+  const businesses = new Map<string, string>();
+  const warnings: string[] = [];
+
+  const add = (id?: string | null, name?: string | null) => {
+    if (!id) return;
+    if (!businesses.has(id) || (name && businesses.get(id) === id)) {
+      businesses.set(id, name || id);
+    }
+  };
+
+  // User tokens.
+  const viaUser = await graphList<{ id?: string; name?: string }>(
+    "/me/businesses?fields=id,name",
+    token
+  );
+  for (const b of viaUser.data) add(b.id, b.name);
+  if (viaUser.error) warnings.push(`/me/businesses: ${viaUser.error}`);
+
+  // System User tokens — the node carries its owning business directly.
+  try {
+    const res = await fetch(
+      `${FB_API_BASE}/me?fields=business&access_token=${encodeURIComponent(token)}`,
+      { cache: "no-store" }
+    );
+    const json = (await res.json()) as {
+      business?: { id?: string; name?: string };
+      error?: { message?: string };
+    };
+    if (json.error) warnings.push(`/me?fields=business: ${json.error.message}`);
+    add(json.business?.id, json.business?.name);
+  } catch (err) {
+    warnings.push(
+      `/me?fields=business: ${err instanceof Error ? err.message : "request failed"}`
+    );
+  }
+
+  // Whatever the ad accounts belong to — belt and braces.
+  const viaAccounts = await graphList<{
+    id?: string;
+    business?: { id?: string; name?: string };
+  }>("/me/adaccounts?fields=business", token);
+  for (const a of viaAccounts.data) add(a.business?.id, a.business?.name);
+  if (viaAccounts.error) {
+    warnings.push(`/me/adaccounts: ${viaAccounts.error}`);
+  }
+
+  return { businesses, warnings };
+}
+
+/**
+ * Every Facebook Page this token can see, merged across every edge Meta
+ * exposes.
+ *
+ * Two earlier versions each missed Pages for a different reason. The first
+ * asked `/me/accounts` and only fell back to the business edges when that
+ * returned *zero* Pages — so a new brand's Page stayed invisible as long as
+ * any older Page answered. The second always asked the business edges, but
+ * discovered businesses through `/me/businesses`, which a System User token
+ * answers with an empty list. Both failed silently, which is why this now
+ * reads every edge and reports what each one returned.
  */
 export async function fetchAllFbPages(token: string): Promise<PageLookupResult> {
   const byId = new Map<string, FbPage>();
@@ -97,9 +177,12 @@ export async function fetchAllFbPages(token: string): Promise<PageLookupResult> 
       const existing = byId.get(row.id);
       if (existing) {
         if (!existing.sources.includes(source)) existing.sources.push(source);
-        // Keep whichever copy carries a picture.
         if (!existing.picture?.data?.url && row.picture?.data?.url) {
           existing.picture = row.picture;
+        }
+        // Tasks are only reported by some edges — keep the fullest answer.
+        if (row.tasks?.length && (row.tasks.length > (existing.tasks?.length ?? 0))) {
+          existing.tasks = row.tasks;
         }
       } else {
         byId.set(row.id, {
@@ -107,49 +190,72 @@ export async function fetchAllFbPages(token: string): Promise<PageLookupResult> 
           name: row.name || "(unnamed page)",
           picture: row.picture,
           sources: [source],
+          tasks: row.tasks,
         });
       }
     }
-    counts[source] = added;
+    counts[source] = (counts[source] ?? 0) + added;
   };
 
-  // 1. Pages the token's user personally has a role on.
-  const mine = await graphList<RawPage>(
-    "/me/accounts?fields=id,name,picture{url}",
-    token
-  );
+  // 1. Pages the token's identity has a direct role on.
+  //    /me/accounts answers for User tokens; assigned_pages for System Users.
+  const [mine, assigned] = await Promise.all([
+    graphList<RawPage>(`/me/accounts?fields=${PAGE_FIELDS}`, token),
+    graphList<RawPage>(`/me/assigned_pages?fields=${PAGE_FIELDS}`, token),
+  ]);
   absorb(mine.data, PAGE_SOURCES.ME_ACCOUNTS);
-  if (mine.error) {
-    warnings.push(`${PAGE_SOURCES.ME_ACCOUNTS}: ${mine.error}`);
+  if (mine.error) warnings.push(`${PAGE_SOURCES.ME_ACCOUNTS}: ${mine.error}`);
+  absorb(assigned.data, PAGE_SOURCES.ASSIGNED);
+  if (assigned.error) {
+    warnings.push(`${PAGE_SOURCES.ASSIGNED}: ${assigned.error}`);
   }
 
-  // 2. Pages held by every business the token can see — owned and client.
-  //    Needs business_management; without it this whole branch is skipped and
-  //    the warning says so rather than failing quietly.
-  const businesses = await graphList<{ id?: string; name?: string }>(
-    "/me/businesses?fields=id,name",
+  // 2. Everything the businesses hold, owned and client.
+  const { businesses, warnings: bizWarnings } = await discoverBusinesses(token);
+  warnings.push(...bizWarnings);
+
+  await Promise.all(
+    Array.from(businesses.entries()).flatMap(([bizId, bizName]) =>
+      (
+        [
+          ["owned_pages", PAGE_SOURCES.OWNED],
+          ["client_pages", PAGE_SOURCES.CLIENT],
+        ] as const
+      ).map(async ([edge, source]) => {
+        const res = await graphList<RawPage>(
+          `/${bizId}/${edge}?fields=${PAGE_FIELDS}`,
+          token
+        );
+        absorb(res.data, source);
+        if (res.error) warnings.push(`${bizName} ${edge}: ${res.error}`);
+      })
+    )
+  );
+
+  // 3. Pages each ad account is allowed to promote. This is the closest edge
+  //    to the question Create Ad actually asks, and it catches Pages shared
+  //    into an account without being owned by a business the token can read.
+  const accounts = await graphList<{ id?: string; name?: string }>(
+    "/me/adaccounts?fields=id,name",
     token
   );
-  if (businesses.error) {
-    warnings.push(`/me/businesses: ${businesses.error}`);
-  }
+  if (accounts.error) warnings.push(`/me/adaccounts: ${accounts.error}`);
 
-  for (const biz of businesses.data) {
-    if (!biz.id) continue;
-    for (const [edge, source] of [
-      ["owned_pages", PAGE_SOURCES.OWNED],
-      ["client_pages", PAGE_SOURCES.CLIENT],
-    ] as const) {
+  await Promise.all(
+    accounts.data.map(async (acct) => {
+      if (!acct.id) return;
       const res = await graphList<RawPage>(
-        `/${biz.id}/${edge}?fields=id,name,picture{url}`,
+        `/${acct.id}/promote_pages?fields=${PAGE_FIELDS}`,
         token
       );
-      absorb(res.data, source);
-      if (res.error) {
-        warnings.push(`${biz.name || biz.id} ${edge}: ${res.error}`);
+      absorb(res.data, PAGE_SOURCES.PROMOTE);
+      // A single account refusing this edge is normal and not worth shouting
+      // about — only report it when nothing else found any Page at all.
+      if (res.error && byId.size === 0) {
+        warnings.push(`${acct.name || acct.id} promote_pages: ${res.error}`);
       }
-    }
-  }
+    })
+  );
 
   const pages = Array.from(byId.values()).sort((a, b) =>
     a.name.localeCompare(b.name)

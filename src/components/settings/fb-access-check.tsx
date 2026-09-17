@@ -157,6 +157,17 @@ export function FbAccessCheck() {
                       <p className="text-[10px] text-gray-600 mt-0.5">
                         via {p.sources.join(", ")}
                       </p>
+                      {p.tasks.length > 0 && (
+                        <p className="text-[10px] text-gray-600 mt-0.5">
+                          tasks: {p.tasks.join(", ").toLowerCase()}
+                        </p>
+                      )}
+                      {p.can_advertise === false && (
+                        <p className="text-xs text-yellow-400/80 mt-1">
+                          No ADVERTISE task — creating an ad on this Page will
+                          fail.
+                        </p>
+                      )}
                       {!p.can_play_video && p.reason && (
                         <p className="text-xs text-yellow-400/80 mt-1">{p.reason}</p>
                       )}
@@ -180,6 +191,24 @@ export function FbAccessCheck() {
                 ))}
               </div>
             )}
+            {Object.keys(report.page_source_counts).length > 0 && (
+              <div className="flex items-center gap-1 flex-wrap mt-2">
+                {Object.entries(report.page_source_counts).map(([src, n]) => (
+                  <span
+                    key={src}
+                    title={`${src} returned ${n} Page${n === 1 ? "" : "s"}`}
+                    className={`px-1.5 py-0.5 rounded text-[10px] ${
+                      n > 0
+                        ? "bg-gray-700/50 text-gray-400"
+                        : "bg-gray-800 text-gray-600"
+                    }`}
+                  >
+                    {src}: {n}
+                  </span>
+                ))}
+              </div>
+            )}
+
             {report.page_warnings.length > 0 && (
               <ul className="mt-2 space-y-1">
                 {report.page_warnings.map((w, i) => (
