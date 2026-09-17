@@ -491,8 +491,16 @@ export function PromoteBulkToScalingModal({
         // before the ad set clone, and reports its id when that clone is
         // what broke. Without this, every remaining row would create
         // another empty campaign chasing the same error.
+        // Claim whatever this call created, success or failure. The
+        // campaign and ad set are built before the ad is copied and they
+        // outlive a failed copy — if the next ad doesn't hear about them
+        // it builds its own, which is how three ads left three identical
+        // campaigns behind.
         if (json.created_campaign_id) {
           createdCampaignId = json.created_campaign_id as string;
+        }
+        if (creatingShared && json.created_adset_id) {
+          sharedAdsetId = json.created_adset_id as string;
         }
         if (!res.ok) {
           const message = json.error || `Promote failed (${res.status})`;
@@ -509,19 +517,28 @@ export function PromoteBulkToScalingModal({
             break;
           }
         } else {
-          if (creatingShared && json.created_adset_id) {
-            sharedAdsetId = json.created_adset_id as string;
-          }
           updateRow(subject.ad_id, {
             status: "success",
             copied_ad_id: json.copied_ad_id ?? null,
           });
         }
       } catch (e) {
-        updateRow(subject.ad_id, {
-          status: "failed",
-          error: e instanceof Error ? e.message : "Promote failed",
-        });
+        const message = e instanceof Error ? e.message : "Promote failed";
+        updateRow(subject.ad_id, { status: "failed", error: message });
+        // The request never came back, so we cannot know whether it
+        // created a campaign before dying. Carrying on would risk a second
+        // one with the same name; stopping risks nothing.
+        if (campaignChoice.kind === "new" && !createdCampaignId) {
+          setError(
+            `${message} — stopped here. The request didn't come back, so it's ` +
+              `unclear whether the campaign was created. Check Ads Manager ` +
+              `before retrying.`
+          );
+          for (const later of subjects.slice(i + 1)) {
+            updateRow(later.ad_id, { status: "skipped" });
+          }
+          break;
+        }
       }
     }
 

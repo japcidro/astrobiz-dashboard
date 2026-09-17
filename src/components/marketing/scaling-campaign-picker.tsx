@@ -101,6 +101,14 @@ export function ScalingCampaignPicker({
   // Everything except the mapped campaign, which gets its own first option.
   const others = campaigns.filter((c) => c.id !== configured?.id);
 
+  // Meta is happy to hold ten campaigns with identical names, and a run
+  // that half-failed is the usual way people end up with them. Say so
+  // before another one is made, and name how many are already there.
+  const draftName = draft.name.trim().toLowerCase();
+  const sameName = draftName
+    ? campaigns.filter((c) => c.name.trim().toLowerCase() === draftName)
+    : [];
+
   return (
     <div className="space-y-3">
       <div>
@@ -165,8 +173,22 @@ export function ScalingCampaignPicker({
               }
               disabled={disabled}
               placeholder="e.g. CBO — SEPT WINNERS"
-              className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500"
+              className={`w-full bg-gray-800 border text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500 ${
+                sameName.length > 0
+                  ? "border-yellow-600/70"
+                  : "border-gray-700"
+              }`}
             />
+            {sameName.length > 0 && (
+              <p className="text-[11px] text-yellow-400 mt-1">
+                {sameName.length === 1
+                  ? "A campaign with this name already exists in this ad account"
+                  : `${sameName.length} campaigns with this name already exist in this ad account`}
+                . Creating another leaves you with{" "}
+                {sameName.length + 1} — pick it from the list above instead if
+                you meant to reuse it.
+              </p>
+            )}
           </div>
           <div className="flex gap-3">
             <div className="flex-1">

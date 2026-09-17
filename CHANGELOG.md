@@ -1,5 +1,39 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-18: One failed batch, three identical campaigns
+
+Promoting three ads into a new campaign left three campaigns called
+NURTELLE-SCALING behind. The bulk run is built to create the campaign once
+— the first ad creates it, the response hands back `created_campaign_id`,
+every ad after that joins it by id — and that worked for the two failure
+paths it was written against. It did not work for the one that actually
+fired.
+
+The campaign and the ad set are created *before* the ad is copied, and they
+survive a failed copy. But the ad-copy failure response — the long one with
+the Facebook diagnostic probe attached — never carried `created_campaign_id`
+or `created_adset_id`. So each ad reported failure, the next ad saw no
+campaign to join, and built its own. Three ads, three campaigns, three
+ad sets, no ads.
+
+Every exit after something is created now reports what it created: the
+ad-copy failure, the diagnostic path, and the outer catch. The modal claims
+those ids from failures as well as successes, for the shared ad set as well
+as the campaign.
+
+A thrown request is the one case that still can't be reasoned about — it
+may have created a campaign before dying — so the run stops there instead
+of guessing, and says to check Ads Manager before retrying.
+
+Nothing created this way was ever going to spend: a cloned ad set is always
+created PAUSED and only the *ad* honours "Activate immediately", so an
+orphan campaign holds a paused ad set and, when the copy failed, no ads.
+Clutter, not spend. Still worth not making.
+
+And because Meta will happily hold ten campaigns with the same name, the
+new-campaign name field now says when one already exists in that ad account
+— and how many — with a nudge to pick it from the list above instead.
+
 ## 2026-09-18: When a promote fails, say why — and stop repeating it
 
 Three ads into a new campaign, three red "Failed" badges, and the reason

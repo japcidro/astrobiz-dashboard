@@ -904,6 +904,14 @@ export async function POST(request: Request) {
           fb_subcode: copyJson?.error?.error_subcode,
           fb_user_msg: copyJson?.error?.error_user_msg,
           fb_trace: copyJson?.error?.fbtrace_id,
+          // The campaign and ad set were created BEFORE the ad copy was
+          // attempted, and they survive this failure. A bulk run has to
+          // hear about them or the next ad builds its own — which is how
+          // one batch of three ads left three identical campaigns behind.
+          created_campaign_id: createdCampaignId,
+          created_adset_id: createdAdsetId,
+          target_campaign_id: targetCampaignId,
+          target_adset_id: targetAdsetId,
           diag,
         },
         { status: 502 }
@@ -916,6 +924,10 @@ export async function POST(request: Request) {
     return Response.json(
       {
         error: `Promote call failed: ${err instanceof Error ? err.message : "unknown"}`,
+        created_campaign_id: createdCampaignId,
+        created_adset_id: createdAdsetId,
+        target_campaign_id: targetCampaignId,
+        target_adset_id: targetAdsetId,
       },
       { status: 502 }
     );
