@@ -20,15 +20,19 @@ function cleanCategories(raw: unknown): string[] {
 }
 
 // Every campaign a promoted ad could land in, for the "Target campaign" step
-// of the promote modals. Scoped to the ad account the store's scaling
-// campaign lives in — Meta's /copies API cannot cross ad accounts, so a
-// campaign anywhere else is not a destination we could honour.
+// of the promote modals. Scoped to one ad account — Meta's /copies API
+// cannot cross ad accounts, so a campaign anywhere else is not a destination
+// we could honour.
 //
-// `configured` carries the mapped scaling campaign's objective and special
-// ad categories: a brand-new campaign copies them so the ad set we clone
-// into it stays compatible with the one it was cloned from.
-//
-// Query: /api/marketing/scaling/campaigns?store=CAPSULED
+// Query: ?store=CAPSULED     — the account that store's scaling campaign
+//                              lives in, and `configured` describes that
+//                              campaign: its objective and special ad
+//                              categories, which a brand-new campaign copies
+//                              so a cloned ad set stays compatible with it.
+// Query: ?account_id=act_123 — any ad account, for a store with no scaling
+//                              campaign mapped yet. `configured` comes back
+//                              null: there is no default destination, so the
+//                              caller has to name a campaign or create one.
 export async function GET(request: Request) {
   const employee = await getEmployee();
   if (!employee) {
@@ -38,9 +42,14 @@ export async function GET(request: Request) {
     return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const store = new URL(request.url).searchParams.get("store");
-  if (!store) {
-    return Response.json({ error: "store required" }, { status: 400 });
+  const { searchParams } = new URL(request.url);
+  const store = searchParams.get("store");
+  const requestedAccount = (searchParams.get("account_id") ?? "").trim();
+  if (!store && !requestedAccount) {
+    return Response.json(
+      { error: "store or account_id required" },
+      { status: 400 }
+    );
   }
 
   const supabase = await createClient();
@@ -50,11 +59,13 @@ export async function GET(request: Request) {
       .select("value")
       .eq("key", "fb_access_token")
       .single(),
-    supabase
-      .from("store_scaling_campaigns")
-      .select("*")
-      .eq("store_name", store)
-      .maybeSingle(),
+    store
+      ? supabase
+          .from("store_scaling_campaigns")
+          .select("*")
+          .eq("store_name", store)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
   const token = (tokenRow?.value as string | undefined) ?? "";
@@ -64,14 +75,16 @@ export async function GET(request: Request) {
       { status: 400 }
     );
   }
-  if (!scalingRow) {
+  if (store && !scalingRow) {
     return Response.json(
       { error: `No scaling campaign mapped for store "${store}"` },
       { status: 404 }
     );
   }
 
-  const accountId = acctPrefix(String(scalingRow.account_id));
+  const accountId = acctPrefix(
+    String(scalingRow?.account_id ?? requestedAccount)
+  );
 
   // The account's campaigns and the mapped one's own settings are
   // independent reads — the mapped campaign may well be missing from the
@@ -80,6 +93,7 @@ export async function GET(request: Request) {
   const [{ campaigns, error }, configured] = await Promise.all([
     fetchCampaigns(accountId, token),
     (async () => {
+      if (!scalingRow) return null;
       try {
         const res = await fetch(
           `${FB_API_BASE}/${scalingRow.campaign_id}?fields=id,name,objective,special_ad_categories,buying_type&access_token=${encodeURIComponent(token)}`,
@@ -106,14 +120,17 @@ export async function GET(request: Request) {
 
   return Response.json({
     account_id: accountId,
-    // Falls back to the mapping's own columns so the picker can always name
-    // the configured campaign, even when Graph would not tell us about it.
-    configured: configured ?? {
-      id: String(scalingRow.campaign_id),
-      name: String(scalingRow.campaign_name),
-      objective: null,
-      special_ad_categories: [],
-    },
+    // With a mapping, fall back to its own columns so the picker can always
+    // name the configured campaign even when Graph would not tell us about
+    // it. Without one, there is no default destination to offer.
+    configured: scalingRow
+      ? (configured ?? {
+          id: String(scalingRow.campaign_id),
+          name: String(scalingRow.campaign_name),
+          objective: null,
+          special_ad_categories: [],
+        })
+      : null,
     campaigns,
     warning: error,
   });

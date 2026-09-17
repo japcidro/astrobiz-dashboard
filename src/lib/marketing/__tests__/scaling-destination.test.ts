@@ -5,9 +5,11 @@ import {
   campaignPayload,
   defaultObjective,
   destinationCampaignId,
+  initialChoice,
   parseChoice,
   resolveStore,
   serializeChoice,
+  singleAccountId,
   type CampaignChoice,
   type ConfiguredScalingCampaign,
 } from "../scaling-destination";
@@ -28,6 +30,7 @@ const draft = {
 describe("choice round-trip", () => {
   it("survives the <select> value it is stored as", () => {
     const cases: CampaignChoice[] = [
+      { kind: "unset" },
       { kind: "configured" },
       { kind: "new" },
       { kind: "existing", id: "120999" },
@@ -37,9 +40,25 @@ describe("choice round-trip", () => {
     }
   });
 
-  it("falls back to the mapped campaign on anything unrecognised", () => {
-    expect(parseChoice("")).toEqual({ kind: "configured" });
-    expect(parseChoice("garbage")).toEqual({ kind: "configured" });
+  // Unrecognised must land on "unset", never on "configured": an ad
+  // account with no mapped scaling campaign has no configured campaign to
+  // fall back to, and silently claiming one would submit against a
+  // campaign that doesn't exist.
+  it("falls back to unset on anything unrecognised", () => {
+    expect(parseChoice("")).toEqual({ kind: "unset" });
+    expect(parseChoice("garbage")).toEqual({ kind: "unset" });
+  });
+});
+
+describe("initialChoice", () => {
+  it("opens on the mapped campaign when there is one", () => {
+    expect(initialChoice(configured)).toEqual({ kind: "configured" });
+  });
+
+  // The Nurtelle case: a store new enough that its first scaling campaign
+  // does not exist yet. Nothing to default to, so the user must choose.
+  it("opens on nothing when the ad account has no mapped campaign", () => {
+    expect(initialChoice(null)).toEqual({ kind: "unset" });
   });
 });
 
@@ -64,6 +83,12 @@ describe("destinationCampaignId", () => {
 });
 
 describe("campaignBlockReason", () => {
+  it("blocks until an unmapped account's campaign is chosen", () => {
+    expect(campaignBlockReason({ kind: "unset" }, EMPTY_NEW_CAMPAIGN)).toMatch(
+      /pick a target campaign/i
+    );
+  });
+
   it("never blocks a campaign that already exists", () => {
     expect(campaignBlockReason({ kind: "configured" }, EMPTY_NEW_CAMPAIGN))
       .toBeNull();
@@ -248,5 +273,21 @@ describe("resolveStore", () => {
     expect(
       resolveStore({ accountIds: ["act_999"], campaignName: "NVP-1", configs })
     ).toBeNull();
+  });
+});
+
+describe("singleAccountId", () => {
+  it("names the one account a set of ads shares", () => {
+    expect(singleAccountId(["act_111", "act_111", "111"])).toBe("act_111");
+  });
+
+  // Meta's /copies cannot leave an ad account, so a mixed set has no single
+  // destination and the modal has to ask instead of guessing.
+  it("is null when the ads span several accounts", () => {
+    expect(singleAccountId(["act_111", "act_222"])).toBeNull();
+  });
+
+  it("is null when the ads carry no account at all", () => {
+    expect(singleAccountId([null, undefined, ""])).toBeNull();
   });
 });

@@ -9,13 +9,17 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import {
+  CAMPAIGN_OBJECTIVES,
   EMPTY_NEW_CAMPAIGN,
   ScalingCampaignPicker,
   campaignBlockReason,
   campaignPayload,
   defaultObjective,
   destinationCampaignId,
+  initialChoice,
   resolveStore,
+  sameAccount,
+  singleAccountId,
   useScalingCampaigns,
   type CampaignChoice,
   type NewCampaignDraft,
@@ -67,6 +71,15 @@ export function PromoteToScalingModal({
   const [configs, setConfigs] = useState<StoreConfig[]>([]);
   const [loadingConfig, setLoadingConfig] = useState(true);
 
+  // Meta's /copies never leaves an ad account, so the ad itself names the
+  // only account its copy could land in. That, not the store mapping, is
+  // what the destination hangs off — a store too new to have a scaling
+  // campaign has no mapping to offer.
+  const sourceAccountId = useMemo(
+    () => singleAccountId([subject.account_id]),
+    [subject.account_id]
+  );
+
   const [selectedStore, setSelectedStore] = useState<string>(
     subject.suggested_store ?? ""
   );
@@ -84,9 +97,9 @@ export function PromoteToScalingModal({
     configured,
     loading: loadingCampaigns,
     error: campaignsError,
-  } = useScalingCampaigns(selectedStore);
+  } = useScalingCampaigns(selectedStore, sourceAccountId);
   const [campaignChoice, setCampaignChoice] = useState<CampaignChoice>({
-    kind: "configured",
+    kind: "unset",
   });
   const [newCampaign, setNewCampaign] =
     useState<NewCampaignDraft>(EMPTY_NEW_CAMPAIGN);
@@ -135,20 +148,29 @@ export function PromoteToScalingModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadAdsets = useCallback(async (store: string, campaignId: string) => {
+  const loadAdsets = useCallback(
+    async (args: {
+      store: string;
+      accountId: string | null;
+      campaignId: string;
+    }) => {
     setLoadingAdsets(true);
     setAdsets([]);
     setSelectedAdsetId("");
     setTemplateAdsetId("");
     setError(null);
     try {
-      // No campaign id means the campaign list never arrived — the route
-      // then falls back to the store's mapped scaling campaign, which is
-      // the destination we're defaulting to anyway.
+      // A store resolves its own campaign server-side, so a missing
+      // campaign id there just means the campaign list never arrived and
+      // the mapped one — the default anyway — stands in. With no store,
+      // the ad account plus an explicit campaign carry it instead.
+      const query = args.store
+        ? `store=${encodeURIComponent(args.store)}`
+        : `account_id=${encodeURIComponent(args.accountId ?? "")}`;
       const res = await fetch(
-        `/api/marketing/scaling/adsets?store=${encodeURIComponent(store)}` +
-          (campaignId
-            ? `&campaign_id=${encodeURIComponent(campaignId)}`
+        `/api/marketing/scaling/adsets?${query}` +
+          (args.campaignId
+            ? `&campaign_id=${encodeURIComponent(args.campaignId)}`
             : "")
       );
       const json = await res.json();
@@ -168,9 +190,8 @@ export function PromoteToScalingModal({
   // A fresh store means a fresh ad account: every campaign-level choice
   // made against the old one is meaningless now.
   useEffect(() => {
-    if (!configured) return;
-    setCampaignChoice({ kind: "configured" });
-    setTemplateCampaignId(configured.id);
+    setCampaignChoice(initialChoice(configured));
+    setTemplateCampaignId(configured?.id ?? "");
     setNewCampaign((d) => ({ ...d, objective: defaultObjective(configured) }));
   }, [configured]);
 
@@ -182,27 +203,60 @@ export function PromoteToScalingModal({
       : destinationCampaignId(campaignChoice, configured);
 
   useEffect(() => {
-    if (!selectedStore) return;
-    // Nothing to list yet for a new campaign until a template is named.
-    if (campaignChoice.kind === "new" && !adsetCampaignId) return;
-    loadAdsets(selectedStore, adsetCampaignId ?? "");
-  }, [selectedStore, campaignChoice.kind, adsetCampaignId, loadAdsets]);
+    const campaignId = adsetCampaignId ?? "";
+    // Nothing to list until a campaign is settled — either named here, or
+    // supplied by a store's mapping server-side.
+    if (!campaignId && !selectedStore) {
+      setAdsets([]);
+      setTemplateAdsetId("");
+      return;
+    }
+    if (!selectedStore && !sourceAccountId) return;
+    loadAdsets({
+      store: selectedStore,
+      accountId: sourceAccountId,
+      campaignId,
+    });
+  }, [selectedStore, sourceAccountId, adsetCampaignId, loadAdsets]);
+
+  // A cloned ad set has to be legal inside the campaign it lands in, and
+  // the objective is what decides that: a purchase-optimised ad set cannot
+  // live under an awareness campaign. So a new campaign's objective follows
+  // whichever campaign its first ad set is being cloned from — for a store
+  // with no scaling campaign mapped, that is the only signal there is.
+  useEffect(() => {
+    if (campaignChoice.kind !== "new" || !templateCampaignId) return;
+    const template = campaigns.find((c) => c.id === templateCampaignId);
+    const objective = template?.objective ?? "";
+    if (!CAMPAIGN_OBJECTIVES.some((o) => o.value === objective)) return;
+    setNewCampaign((d) =>
+      d.objective === objective ? d : { ...d, objective }
+    );
+  }, [campaignChoice.kind, templateCampaignId, campaigns]);
 
   // Nothing to drop into inside a campaign being created this second.
   useEffect(() => {
     if (campaignChoice.kind === "new") setMode("new");
   }, [campaignChoice.kind]);
 
-  const availableStores = useMemo(
-    () => configs.map((c) => c.store_name).sort((a, b) => a.localeCompare(b)),
-    [configs]
-  );
+  // A store mapped to a different ad account is not a destination — Meta
+  // would refuse the copy — so once the ad names its account, only the
+  // stores inside it are offered.
+  const availableStores = useMemo(() => {
+    const rows = sourceAccountId
+      ? configs.filter((c) => sameAccount(c.account_id, sourceAccountId))
+      : configs;
+    return rows.map((c) => c.store_name).sort((a, b) => a.localeCompare(b));
+  }, [configs, sourceAccountId]);
+
+  // Enough to go on: either a mapped store, or the ad's own ad account.
+  const destinationReady = !!selectedStore || !!sourceAccountId;
 
   const campaignBlocker = campaignBlockReason(campaignChoice, newCampaign);
 
   const canSubmit = (() => {
-    if (submitting || loadingAdsets || loadingCampaigns || !selectedStore)
-      return false;
+    if (submitting || loadingAdsets || loadingCampaigns) return false;
+    if (!selectedStore && !sourceAccountId) return false;
     if (campaignBlocker) return false;
     if (mode === "existing") return !!selectedAdsetId;
     return !!templateAdsetId && newAdsetName.trim().length >= 3;
@@ -221,8 +275,10 @@ export function PromoteToScalingModal({
     try {
       const payload: Record<string, unknown> = {
         ad_id: subject.ad_id,
-        target_store: selectedStore,
         status_option: statusOption,
+        // Only when a store maps to this ad account. Without one the
+        // destination campaign carries the whole answer.
+        ...(selectedStore ? { target_store: selectedStore } : {}),
         ...campaignPayload(campaignChoice, newCampaign),
       };
       if (mode === "existing") {
@@ -316,7 +372,9 @@ export function PromoteToScalingModal({
             </div>
           </div>
 
-          {/* Store picker */}
+          {/* Store picker — optional. It names a mapped scaling campaign to
+              default to; without one the campaign picker carries the whole
+              answer. */}
           <div>
             <label className="block text-xs text-gray-400 mb-1.5">
               Target store
@@ -327,9 +385,20 @@ export function PromoteToScalingModal({
                 Loading configured stores…
               </div>
             ) : availableStores.length === 0 ? (
-              <div className="text-xs text-yellow-400 p-2 bg-yellow-900/20 border border-yellow-700/40 rounded-lg">
-                No scaling campaigns mapped. Go to Admin → Settings →
-                Scaling Campaigns to configure first.
+              <div className="text-xs text-gray-400 p-2 bg-gray-800/60 border border-gray-700/50 rounded-lg">
+                {sourceAccountId ? (
+                  <>
+                    No scaling campaign is mapped for this ad account yet —
+                    pick a campaign below, or create one. Map it in Admin →
+                    Settings → Scaling Campaigns afterwards and the ↑ SCALED
+                    badge starts working for this store.
+                  </>
+                ) : (
+                  <>
+                    No scaling campaigns mapped. Go to Admin → Settings →
+                    Scaling Campaigns to configure first.
+                  </>
+                )}
               </div>
             ) : (
               <select
@@ -338,7 +407,11 @@ export function PromoteToScalingModal({
                 disabled={submitting}
                 className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500"
               >
-                <option value="">— Pick store —</option>
+                <option value="">
+                  {sourceAccountId
+                    ? "— None — choose a campaign below —"
+                    : "— Pick store —"}
+                </option>
                 {availableStores.map((s) => {
                   const cfg = configs.find((c) => c.store_name === s);
                   return (
@@ -352,7 +425,7 @@ export function PromoteToScalingModal({
           </div>
 
           {/* Campaign picker */}
-          {availableStores.length > 0 && (
+          {destinationReady && (
             <ScalingCampaignPicker
               choice={campaignChoice}
               onChoiceChange={setCampaignChoice}
@@ -362,7 +435,7 @@ export function PromoteToScalingModal({
               configured={configured}
               loading={loadingCampaigns}
               disabled={submitting}
-              storeChosen={!!selectedStore}
+              storeChosen={destinationReady}
               templateCampaignId={templateCampaignId}
               onTemplateCampaignChange={setTemplateCampaignId}
             />
@@ -370,13 +443,12 @@ export function PromoteToScalingModal({
 
           {campaignsError && (
             <div className="text-xs text-yellow-400 p-2 bg-yellow-900/20 border border-yellow-700/40 rounded-lg">
-              {campaignsError} — only the mapped scaling campaign is
-              available as a destination.
+              Could not list this ad account&apos;s campaigns: {campaignsError}
             </div>
           )}
 
           {/* Mode toggle */}
-          {selectedStore && (
+          {destinationReady && (
             <div className="flex gap-2">
               <button
                 type="button"
@@ -411,7 +483,7 @@ export function PromoteToScalingModal({
           )}
 
           {/* Existing-adset picker */}
-          {selectedStore && mode === "existing" && (
+          {destinationReady && mode === "existing" && (
             <div>
               <label className="block text-xs text-gray-400 mb-1.5">
                 Target adset{" "}
@@ -453,7 +525,7 @@ export function PromoteToScalingModal({
           )}
 
           {/* New-adset flow */}
-          {selectedStore && mode === "new" && (
+          {destinationReady && mode === "new" && (
             <div className="space-y-3">
               <div>
                 <label className="block text-xs text-gray-400 mb-1.5">

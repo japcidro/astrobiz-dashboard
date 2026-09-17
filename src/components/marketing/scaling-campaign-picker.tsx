@@ -17,22 +17,23 @@ import {
 // turns into — lives in lib/marketing/scaling-destination.ts; this file is
 // the fetch and the form.
 
-export function useScalingCampaigns(store: string) {
+export function useScalingCampaigns(store: string, accountId?: string | null) {
   const [campaigns, setCampaigns] = useState<ScalingCampaignRef[]>([]);
   const [configured, setConfigured] =
     useState<ConfiguredScalingCampaign | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (s: string) => {
+  // A store names its mapped scaling campaign and the account around it.
+  // With no store — an ad account whose store has no scaling campaign yet
+  // — the account alone still lists every campaign an ad could land in.
+  const load = useCallback(async (query: string) => {
     setLoading(true);
     setError(null);
     setCampaigns([]);
     setConfigured(null);
     try {
-      const res = await fetch(
-        `/api/marketing/scaling/campaigns?store=${encodeURIComponent(s)}`
-      );
+      const res = await fetch(`/api/marketing/scaling/campaigns?${query}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to load campaigns");
       setCampaigns((json.campaigns as ScalingCampaignRef[]) ?? []);
@@ -47,8 +48,12 @@ export function useScalingCampaigns(store: string) {
   }, []);
 
   useEffect(() => {
-    if (store) load(store);
-  }, [store, load]);
+    if (store) {
+      load(`store=${encodeURIComponent(store)}`);
+    } else if (accountId) {
+      load(`account_id=${encodeURIComponent(accountId)}`);
+    }
+  }, [store, accountId, load]);
 
   return { campaigns, configured, loading, error };
 }
@@ -124,11 +129,13 @@ export function ScalingCampaignPicker({
             disabled={disabled}
             className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500 disabled:opacity-50"
           >
-            <option value="configured">
-              {configured
-                ? `${configured.name} (scaling campaign)`
-                : "Scaling campaign"}
-            </option>
+            {configured ? (
+              <option value="configured">
+                {configured.name} (scaling campaign)
+              </option>
+            ) : (
+              <option value="">— Pick a campaign —</option>
+            )}
             {others.length > 0 && (
               <optgroup label="Other campaigns in this ad account">
                 {others.map((c) => (
@@ -203,10 +210,11 @@ export function ScalingCampaignPicker({
           </div>
           <p className="text-[11px] text-gray-500">
             The objective must match the ad set you clone below, or Meta
-            refuses the clone — it is pre-filled from the scaling campaign.
-            Leave the budget blank to keep budgets at the ad set level; set
-            it and the campaign runs on CBO, which Meta will not accept if
-            the ad set you clone carries its own budget.
+            refuses the clone — it follows the campaign you clone from, so
+            change that first and the objective follows. Leave the budget
+            blank to keep budgets at the ad set level; set it and the
+            campaign runs on CBO, which Meta will not accept if the ad set
+            you clone carries its own budget.
           </p>
           <div>
             <label className="block text-xs text-gray-400 mb-1.5">
@@ -218,6 +226,9 @@ export function ScalingCampaignPicker({
               disabled={disabled}
               className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500"
             >
+              {!templateCampaignId && (
+                <option value="">— Pick a campaign to clone from —</option>
+              )}
               {configured && (
                 <option value={configured.id}>
                   {configured.name} (scaling campaign)

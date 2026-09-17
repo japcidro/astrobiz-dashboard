@@ -28,10 +28,23 @@ export interface ConfiguredScalingCampaign {
 // "configured" is the store's mapped scaling campaign — kept as its own
 // kind rather than an id so the default survives a slow or failed campaign
 // list: the mapping itself comes from /scaling/config, separately.
+//
+// "unset" is where an ad account with no mapped scaling campaign starts: a
+// store new enough that its first scaling campaign hasn't been created yet
+// has no default to fall back on, so the user must name a campaign or make
+// one. Every other kind is an answer; this one is the absence of one.
 export type CampaignChoice =
+  | { kind: "unset" }
   | { kind: "configured" }
   | { kind: "existing"; id: string }
   | { kind: "new" };
+
+/** Where the picker starts: the mapped campaign if there is one. */
+export function initialChoice(
+  configured: ConfiguredScalingCampaign | null
+): CampaignChoice {
+  return configured ? { kind: "configured" } : { kind: "unset" };
+}
 
 export interface NewCampaignDraft {
   name: string;
@@ -64,17 +77,19 @@ export function defaultObjective(
 }
 
 export function serializeChoice(c: CampaignChoice): string {
+  if (c.kind === "unset") return "";
   if (c.kind === "configured") return "configured";
   if (c.kind === "new") return "new";
   return `existing:${c.id}`;
 }
 
 export function parseChoice(v: string): CampaignChoice {
+  if (v === "configured") return { kind: "configured" };
   if (v === "new") return { kind: "new" };
   if (v.startsWith("existing:")) {
     return { kind: "existing", id: v.slice("existing:".length) };
   }
-  return { kind: "configured" };
+  return { kind: "unset" };
 }
 
 /** The campaign the ads end up in — null while it doesn't exist yet. */
@@ -82,7 +97,7 @@ export function destinationCampaignId(
   choice: CampaignChoice,
   configured: ConfiguredScalingCampaign | null
 ): string | null {
-  if (choice.kind === "new") return null;
+  if (choice.kind === "new" || choice.kind === "unset") return null;
   if (choice.kind === "existing") return choice.id;
   return configured?.id ?? null;
 }
@@ -92,6 +107,9 @@ export function campaignBlockReason(
   choice: CampaignChoice,
   draft: NewCampaignDraft
 ): string | null {
+  if (choice.kind === "unset") {
+    return "Pick a target campaign, or create a new one.";
+  }
   if (choice.kind !== "new") return null;
   if (draft.name.trim().length < 3) {
     return "Type a campaign name (min 3 characters).";
@@ -136,6 +154,9 @@ export function campaignPayload(
   if (choice.kind === "existing") {
     return { target_campaign_id: choice.id };
   }
+  // "configured" says nothing: the endpoint falls back to the store's
+  // mapped campaign. "unset" is not submittable — campaignBlockReason
+  // stops it long before here.
   return {};
 }
 
@@ -159,8 +180,30 @@ export interface StoreAccountRef {
   account_id: string;
 }
 
-function normalizeAccountId(v: string | null | undefined): string {
+export function normalizeAccountId(v: string | null | undefined): string {
   return (v ?? "").toString().replace(/^act_/, "").trim();
+}
+
+export function sameAccount(
+  a: string | null | undefined,
+  b: string | null | undefined
+): boolean {
+  const na = normalizeAccountId(a);
+  return na.length > 0 && na === normalizeAccountId(b);
+}
+
+/**
+ * The one ad account a set of ads shares, `act_`-prefixed, or null when they
+ * span several — in which case no single promote run could copy them all
+ * anyway, Meta's /copies being unable to leave an ad account.
+ */
+export function singleAccountId(
+  ids: Array<string | null | undefined>
+): string | null {
+  const accounts = new Set(
+    ids.map(normalizeAccountId).filter((a) => a.length > 0)
+  );
+  return accounts.size === 1 ? `act_${[...accounts][0]}` : null;
 }
 
 function normalizeName(s: string): string {

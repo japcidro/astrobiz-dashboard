@@ -1,5 +1,45 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-18: A store with no scaling campaign can still promote
+
+Nurtelle is new. It has no scaling campaign, so it has no row in
+store_scaling_campaigns, so it was not in the store dropdown — and the store
+dropdown gated everything. Three NVP ads selected, three stores offered,
+none of them Nurtelle's, "Pick a target store first" in the footer and no
+way past it. The one thing that would have fixed it, creating a campaign,
+sat behind the very gate that was blocking. A store could only promote once
+it already had the thing promoting was supposed to create.
+
+The store mapping is no longer a prerequisite anywhere in the flow. What
+actually constrains a promote is the ad account — Meta's /copies cannot
+leave one — and the source ad has always known its own. So:
+
+- **`target_store` is optional on `/api/marketing/scaling/promote`.** With
+  a store it behaves exactly as before: the mapped campaign is the default
+  destination. Without one, the ad's own ad account is the destination
+  account and `target_campaign_id` or `new_campaign` carries the rest. The
+  cross-account guard now only applies where a mapping exists, because
+  without one the destination *is* the source's account.
+- **`/scaling/campaigns` and `/scaling/adsets` take `account_id`** as an
+  alternative to `store`, so an unmapped account can still list what it has.
+  `configured` comes back null there: no default destination, so the picker
+  opens on "— Pick a campaign —" rather than silently claiming one.
+- **The modals hang off the ad account.** The store row is still there, now
+  optional, and lists only stores inside the ads' own ad account — a store
+  mapped elsewhere was never a destination Meta would accept. When no store
+  maps to the account it says so, and points at Admin → Settings for
+  afterwards, when the ↑ SCALED badge becomes worth wiring up.
+- **A new campaign's objective follows the campaign its first ad set is
+  cloned from.** A purchase-optimised ad set cannot live under an awareness
+  campaign, and with no scaling campaign to model, the clone source is the
+  only signal available. The server keeps the same rule as a backstop,
+  falling back to the source ad's own campaign, and refuses to inherit a
+  legacy objective Graph reports but will not create.
+
+The promote itself is unchanged: same /copies call, same PAUSED-by-default
+ad sets, same badge rule — an ad copied outside a mapped scaling campaign
+is not marked scaled.
+
 ## 2026-09-18: The campaign step was hidden behind a store nobody had picked
 
 Shipping the campaign picker changed nothing on screen, because it only

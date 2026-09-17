@@ -13,12 +13,15 @@ function normalizeAcct(v: string | null | undefined): string {
 // for picking a drop-in destination and for picking the template an ad set
 // clone copies its targeting and budget from.
 //
-// Query: /api/marketing/scaling/adsets?store=CAPSULED
-//   → the store's configured scaling campaign.
-// Query: /api/marketing/scaling/adsets?store=CAPSULED&campaign_id=123
-//   → any other campaign, as long as it lives in the same ad account as
-//     that store's scaling campaign. Meta's /copies cannot cross ad
-//     accounts, so anything outside it could never be a destination.
+// Query: ?store=CAPSULED                  — the store's scaling campaign.
+// Query: ?store=CAPSULED&campaign_id=123   — any other campaign in the same
+//   ad account as that store's scaling campaign.
+// Query: ?account_id=act_1&campaign_id=123 — for a store with no scaling
+//   campaign mapped yet: any campaign in the ad account the ads are in.
+//
+// Either way the campaign must live in the named ad account. Meta's /copies
+// cannot cross ad accounts, so anything outside it could never be a
+// destination.
 export async function GET(request: Request) {
   const employee = await getEmployee();
   if (!employee) {
@@ -30,9 +33,19 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const store = searchParams.get("store");
+  const requestedAccount = (searchParams.get("account_id") ?? "").trim();
   const requestedCampaignId = (searchParams.get("campaign_id") ?? "").trim();
-  if (!store) {
-    return Response.json({ error: "store required" }, { status: 400 });
+  if (!store && !requestedAccount) {
+    return Response.json(
+      { error: "store or account_id required" },
+      { status: 400 }
+    );
+  }
+  if (!store && !requestedCampaignId) {
+    return Response.json(
+      { error: "campaign_id required when no store is given" },
+      { status: 400 }
+    );
   }
 
   const supabase = await createClient();
@@ -42,11 +55,13 @@ export async function GET(request: Request) {
       .select("value")
       .eq("key", "fb_access_token")
       .single(),
-    supabase
-      .from("store_scaling_campaigns")
-      .select("*")
-      .eq("store_name", store)
-      .maybeSingle(),
+    store
+      ? supabase
+          .from("store_scaling_campaigns")
+          .select("*")
+          .eq("store_name", store)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
   const token = (tokenRow?.value as string | undefined) ?? "";
@@ -56,15 +71,16 @@ export async function GET(request: Request) {
       { status: 400 }
     );
   }
-  if (!scalingRow) {
+  if (store && !scalingRow) {
     return Response.json(
       { error: `No scaling campaign mapped for store "${store}"` },
       { status: 404 }
     );
   }
 
-  let campaignId = String(scalingRow.campaign_id);
-  let campaignName = String(scalingRow.campaign_name);
+  const accountId = String(scalingRow?.account_id ?? requestedAccount);
+  let campaignId = scalingRow ? String(scalingRow.campaign_id) : "";
+  let campaignName = scalingRow ? String(scalingRow.campaign_name) : "";
 
   if (requestedCampaignId && requestedCampaignId !== campaignId) {
     try {
@@ -77,12 +93,13 @@ export async function GET(request: Request) {
         throw new Error(json?.error?.message ?? "campaign lookup failed");
       }
       if (
-        normalizeAcct(json.account_id as string) !==
-        normalizeAcct(scalingRow.account_id as string)
+        normalizeAcct(json.account_id as string) !== normalizeAcct(accountId)
       ) {
         return Response.json(
           {
-            error: `Campaign ${requestedCampaignId} is not in the same ad account as the "${store}" scaling campaign.`,
+            error: store
+              ? `Campaign ${requestedCampaignId} is not in the same ad account as the "${store}" scaling campaign.`
+              : `Campaign ${requestedCampaignId} is not in ad account ${accountId}.`,
           },
           { status: 400 }
         );
@@ -131,7 +148,7 @@ export async function GET(request: Request) {
       campaign: {
         id: campaignId,
         name: campaignName,
-        account_id: scalingRow.account_id,
+        account_id: accountId,
       },
       adsets,
     });

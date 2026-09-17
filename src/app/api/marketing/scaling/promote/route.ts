@@ -142,12 +142,15 @@ export async function POST(request: Request) {
   const statusOption =
     body.status_option === "ACTIVE" ? "ACTIVE" : "PAUSED";
 
-  if (!adId || !targetStore) {
-    return Response.json(
-      { error: "ad_id and target_store are required" },
-      { status: 400 }
-    );
+  if (!adId) {
+    return Response.json({ error: "ad_id is required" }, { status: 400 });
   }
+  // target_store is optional. It names a mapped scaling campaign to use as
+  // the default destination — a store too new to have one (no row in
+  // store_scaling_campaigns) can still promote, by naming a campaign in the
+  // source ad's own ad account or asking for a new one. Requiring the
+  // mapping was what left a brand-new store with an empty dropdown and no
+  // way through the modal at all.
   if (requestedCampaignId && newCampaignReq) {
     return Response.json(
       {
@@ -221,18 +224,21 @@ export async function POST(request: Request) {
 
   const supabase = await createClient();
 
-  // Look up FB token + the store's configured scaling campaign.
+  // Look up FB token +, when a store was named, its configured scaling
+  // campaign.
   const [{ data: tokenRow }, { data: scalingRow }] = await Promise.all([
     supabase
       .from("app_settings")
       .select("value")
       .eq("key", "fb_access_token")
       .single(),
-    supabase
-      .from("store_scaling_campaigns")
-      .select("*")
-      .eq("store_name", targetStore)
-      .maybeSingle(),
+    targetStore
+      ? supabase
+          .from("store_scaling_campaigns")
+          .select("*")
+          .eq("store_name", targetStore)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
   ]);
 
   const token = (tokenRow?.value as string | undefined) ?? "";
@@ -242,10 +248,19 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
-  if (!scalingRow) {
+  if (targetStore && !scalingRow) {
     return Response.json(
       {
         error: `No scaling campaign mapped for store "${targetStore}". Set it in Admin → Settings.`,
+      },
+      { status: 400 }
+    );
+  }
+  if (!scalingRow && !requestedCampaignId && !newCampaignReq) {
+    return Response.json(
+      {
+        error:
+          "No mapped scaling campaign to fall back on — name a target_campaign_id or pass new_campaign",
       },
       { status: 400 }
     );
@@ -280,6 +295,7 @@ export async function POST(request: Request) {
   // scalingRow.account_id is stored without the "act_" prefix; FB's
   // ad.account_id field returns it raw too. normalizeAcct() handles both.
   if (
+    scalingRow &&
     sourceAccountId &&
     normalizeAcct(sourceAccountId) !== normalizeAcct(scalingRow.account_id)
   ) {
@@ -305,9 +321,21 @@ export async function POST(request: Request) {
   // always did. A caller can instead name any other campaign in the same
   // ad account, or ask for a brand-new one to be created first.
   // ---------------------------------------------------------------------
-  const scalingAccountId = String(scalingRow.account_id);
-  let targetCampaignId = String(scalingRow.campaign_id);
-  let targetCampaignName = String(scalingRow.campaign_name);
+  // Meta's /copies cannot leave an ad account, so the destination account
+  // is decided for us: the mapped campaign's when there is one, and
+  // otherwise the source ad's own — which is the same account either way,
+  // the guard above having just proved it.
+  const scalingAccountId = String(
+    scalingRow?.account_id ?? sourceAccountId ?? ""
+  );
+  if (!scalingAccountId) {
+    return Response.json(
+      { error: "Could not determine which ad account to copy into" },
+      { status: 502 }
+    );
+  }
+  let targetCampaignId = scalingRow ? String(scalingRow.campaign_id) : "";
+  let targetCampaignName = scalingRow ? String(scalingRow.campaign_name) : "";
   let createdCampaignId: string | null = null;
 
   if (requestedCampaignId && requestedCampaignId !== targetCampaignId) {
@@ -357,12 +385,22 @@ export async function POST(request: Request) {
       ? cleanCategories(newCampaignReq.special_ad_categories)
       : null;
     if (!objective || categories === null) {
+      // The mapped scaling campaign is the best model when there is one.
+      // With no mapping — a store whose first scaling campaign this is —
+      // the source ad's own campaign is the next best: whatever the ad
+      // runs under today is something the ad is compatible with.
+      const modelCampaign = scalingRow
+        ? `${scalingRow.campaign_id}`
+        : `${adId}?fields=campaign{objective,special_ad_categories}`;
       try {
         const res = await fetch(
-          `${FB_API_BASE}/${scalingRow.campaign_id}?fields=objective,special_ad_categories&access_token=${encodeURIComponent(token)}`,
+          scalingRow
+            ? `${FB_API_BASE}/${modelCampaign}?fields=objective,special_ad_categories&access_token=${encodeURIComponent(token)}`
+            : `${FB_API_BASE}/${modelCampaign}&access_token=${encodeURIComponent(token)}`,
           { cache: "no-store" }
         );
-        const json = await res.json();
+        const raw = await res.json();
+        const json = scalingRow ? raw : (raw?.campaign ?? {});
         if (res.ok) {
           if (!objective && typeof json.objective === "string") {
             objective = json.objective;
@@ -375,7 +413,11 @@ export async function POST(request: Request) {
         // Defaults below cover it.
       }
     }
-    if (!objective) objective = "OUTCOME_SALES";
+    if (!objective || !CAMPAIGN_OBJECTIVES.has(objective)) {
+      // Graph still reports CONVERSIONS / LINK_CLICKS on older campaigns
+      // and refuses to create one with them.
+      objective = "OUTCOME_SALES";
+    }
     if (categories === null) categories = [];
 
     try {
@@ -431,7 +473,8 @@ export async function POST(request: Request) {
     }
   }
 
-  const intoScalingCampaign = targetCampaignId === String(scalingRow.campaign_id);
+  const intoScalingCampaign =
+    !!scalingRow && targetCampaignId === String(scalingRow.campaign_id);
 
   // If creating a new adset: clone a template, rename it, and use its id as
   // the target. The template only has to live in the same ad account as the
@@ -704,7 +747,7 @@ export async function POST(request: Request) {
                 sourceAccountId,
                 copiedAdId,
                 scalingCampaignId: targetCampaignId,
-                scalingStoreName: scalingRow.store_name as string,
+                scalingStoreName: scalingRow!.store_name as string,
               });
             }
             // Skip the diagnostic+error path below by returning early.
@@ -833,7 +876,7 @@ export async function POST(request: Request) {
       sourceAccountId,
       copiedAdId,
       scalingCampaignId: targetCampaignId,
-      scalingStoreName: scalingRow.store_name as string,
+      scalingStoreName: scalingRow!.store_name as string,
     });
   }
 
