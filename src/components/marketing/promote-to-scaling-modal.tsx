@@ -15,6 +15,7 @@ import {
   campaignPayload,
   defaultObjective,
   destinationCampaignId,
+  resolveStore,
   useScalingCampaigns,
   type CampaignChoice,
   type NewCampaignDraft,
@@ -23,6 +24,10 @@ import {
 export interface PromoteSubject {
   ad_id: string;
   ad_name: string;
+  // Ad account the source ad lives in. Decides the target store on its
+  // own — Meta cannot copy across ad accounts, so the source's account is
+  // the only one a copy could land in.
+  account_id?: string | null;
   thumbnail_url?: string | null;
   campaign_name?: string | null;
   // Pre-derived store (from campaign name). Caller usually knows this.
@@ -52,26 +57,6 @@ interface StoreConfig {
   campaign_id: string;
   campaign_name: string;
   account_id: string;
-}
-
-function normalize(s: string): string {
-  return (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function deriveStoreFromCampaign(
-  campaign: string | null | undefined,
-  stores: string[]
-): string | null {
-  const nc = normalize(campaign ?? "");
-  if (!nc) return null;
-  let best: { name: string; len: number } | null = null;
-  for (const s of stores) {
-    const k = normalize(s);
-    if (k && nc.includes(k) && (!best || k.length > best.len)) {
-      best = { name: s, len: k.length };
-    }
-  }
-  return best?.name ?? null;
 }
 
 export function PromoteToScalingModal({
@@ -134,13 +119,13 @@ export function PromoteToScalingModal({
       setConfigs(json.rows ?? []);
 
       if (!selectedStore) {
-        const stores = (json.rows ?? []).map((c) => c.store_name);
-        // Prefer an explicit suggestion; else derive from campaign name.
-        let store: string | null = subject.suggested_store ?? null;
-        if (!store && subject.campaign_name) {
-          store = deriveStoreFromCampaign(subject.campaign_name, stores);
-        }
-        if (store && stores.includes(store)) setSelectedStore(store);
+        const store = resolveStore({
+          suggested: subject.suggested_store,
+          accountIds: [subject.account_id],
+          campaignName: subject.campaign_name,
+          configs: json.rows ?? [],
+        });
+        if (store) setSelectedStore(store);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load config");
@@ -367,7 +352,7 @@ export function PromoteToScalingModal({
           </div>
 
           {/* Campaign picker */}
-          {selectedStore && (
+          {availableStores.length > 0 && (
             <ScalingCampaignPicker
               choice={campaignChoice}
               onChoiceChange={setCampaignChoice}
@@ -377,6 +362,7 @@ export function PromoteToScalingModal({
               configured={configured}
               loading={loadingCampaigns}
               disabled={submitting}
+              storeChosen={!!selectedStore}
               templateCampaignId={templateCampaignId}
               onTemplateCampaignChange={setTemplateCampaignId}
             />

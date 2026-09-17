@@ -1,5 +1,34 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-18: The campaign step was hidden behind a store nobody had picked
+
+Shipping the campaign picker changed nothing on screen, because it only
+rendered once a target store was chosen — and the store was almost never
+chosen for you. The only derivation was matching a store name inside the
+campaign name, which works for `CBO-CAPSULED` and fails for every campaign
+named after a product instead of a store, which is most of them. Open the
+bulk modal on a batch of `NVP-…` ads and you got the same "— Pick store —"
+dropdown and the same "Pick a target store first" as before, with the whole
+campaign step invisible behind it.
+
+The store picker's real job is to name an ad account, and the source ad
+already knows its own: Meta cannot copy across ad accounts, so the account
+the ad lives in is the only one a copy could land in. Both modals now take
+the source ad's `account_id` and resolve the store from it — an explicit
+suggestion wins, then the ad account, then the old campaign-name match.
+It declines to guess when the selection spans several ad accounts (no single
+run could copy those anyway) or when one account maps to two stores.
+
+The campaign picker also stops hiding. With no store resolved it renders
+disabled, reading "Pick a target store first, then the campaign", so the
+step is visible as a step rather than as nothing at all.
+
+One ordering hazard came with it: Ad Performance refreshes in the
+background and hands the open modal a new `subjects` array for the same
+ads. Re-deriving on that would reset the store, and resetting the store
+clears every per-ad destination already chosen — so derivation is keyed off
+the ad accounts themselves and runs once per modal.
+
 ## 2026-09-17: Promote to scaling can choose a campaign, not just an ad set
 
 Promote had one destination and never said so. Picking a store resolved the

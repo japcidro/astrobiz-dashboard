@@ -6,6 +6,7 @@ import {
   defaultObjective,
   destinationCampaignId,
   parseChoice,
+  resolveStore,
   serializeChoice,
   type CampaignChoice,
   type ConfiguredScalingCampaign,
@@ -159,5 +160,93 @@ describe("defaultObjective", () => {
       "OUTCOME_SALES"
     );
     expect(defaultObjective(null)).toBe("OUTCOME_SALES");
+  });
+});
+
+describe("resolveStore", () => {
+  const configs = [
+    { store_name: "CAPSULED", account_id: "act_111" },
+    { store_name: "FOLIQ", account_id: "act_222" },
+    { store_name: "I Love Patches", account_id: "act_333" },
+  ];
+
+  // The case that made the whole campaign step unreachable: ads named after
+  // the product, never the store, so name matching found nothing and the
+  // modal opened on "— Pick store —" with everything else hidden behind it.
+  it("names the store from the ad account when the campaign name can't", () => {
+    expect(
+      resolveStore({
+        accountIds: ["act_222", "act_222"],
+        campaignName: "NVP-082526LIN1",
+        configs,
+      })
+    ).toBe("FOLIQ");
+  });
+
+  it("does not care about the act_ prefix on either side", () => {
+    expect(resolveStore({ accountIds: ["111"], configs })).toBe("CAPSULED");
+    expect(
+      resolveStore({
+        accountIds: ["act_444"],
+        configs: [{ store_name: "CAPSULED", account_id: "444" }],
+      })
+    ).toBe("CAPSULED");
+  });
+
+  // Meta's /copies cannot cross ad accounts, so a mixed selection has no
+  // single answer — better to ask than to guess one and fail per ad.
+  it("declines to guess when the ads span several ad accounts", () => {
+    expect(
+      resolveStore({ accountIds: ["act_111", "act_222"], configs })
+    ).toBeNull();
+  });
+
+  it("declines to guess when one account maps to two stores", () => {
+    expect(
+      resolveStore({
+        accountIds: ["act_111"],
+        configs: [
+          { store_name: "CAPSULED", account_id: "act_111" },
+          { store_name: "CAPSULED PH", account_id: "act_111" },
+        ],
+      })
+    ).toBeNull();
+  });
+
+  it("still falls back to the store name inside the campaign name", () => {
+    expect(
+      resolveStore({
+        accountIds: [null, undefined],
+        campaignName: "CBO-CAPSULED — SEPT",
+        configs,
+      })
+    ).toBe("CAPSULED");
+  });
+
+  it("prefers the caller's own suggestion over both", () => {
+    expect(
+      resolveStore({
+        suggested: "FOLIQ",
+        accountIds: ["act_111"],
+        campaignName: "CBO-CAPSULED",
+        configs,
+      })
+    ).toBe("FOLIQ");
+  });
+
+  it("ignores a suggestion no store mapping knows about", () => {
+    expect(
+      resolveStore({
+        suggested: "DELETED STORE",
+        accountIds: ["act_111"],
+        configs,
+      })
+    ).toBe("CAPSULED");
+  });
+
+  it("is null when nothing identifies a store", () => {
+    expect(
+      resolveStore({ accountIds: ["act_999"], campaignName: "NVP-1", configs })
+    ).toBeNull();
   });
 });

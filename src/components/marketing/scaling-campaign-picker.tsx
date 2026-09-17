@@ -70,6 +70,10 @@ interface PickerProps {
   configured: ConfiguredScalingCampaign | null;
   loading: boolean;
   disabled?: boolean;
+  // False until a target store names an ad account. The picker still
+  // renders — hiding it until then is how the whole campaign step stayed
+  // invisible behind a store nobody had picked yet.
+  storeChosen: boolean;
   // Only shown for a brand-new campaign, which has no ad sets of its own to
   // clone from: which existing campaign the template ad set comes from.
   templateCampaignId: string;
@@ -85,6 +89,7 @@ export function ScalingCampaignPicker({
   configured,
   loading,
   disabled = false,
+  storeChosen,
   templateCampaignId,
   onTemplateCampaignChange,
 }: PickerProps) {
@@ -97,7 +102,17 @@ export function ScalingCampaignPicker({
         <label className="block text-xs text-gray-400 mb-1.5">
           Target campaign
         </label>
-        {loading ? (
+        {!storeChosen ? (
+          <select
+            disabled
+            value=""
+            className="w-full bg-gray-800 border border-gray-700 text-gray-500 text-sm rounded-lg px-3 py-2 opacity-60"
+          >
+            <option value="">
+              — Pick a target store first, then the campaign —
+            </option>
+          </select>
+        ) : loading ? (
           <div className="flex items-center gap-2 text-xs text-gray-500 py-2">
             <Loader2 size={12} className="animate-spin" />
             Loading campaigns in this ad account…

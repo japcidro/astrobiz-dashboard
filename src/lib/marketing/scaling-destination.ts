@@ -138,3 +138,93 @@ export function campaignPayload(
   }
   return {};
 }
+
+// ---------------------------------------------------------------------------
+// Which store the promote modals open on.
+//
+// The store picker's real job is to name an ad account: Meta's /copies cannot
+// cross ad accounts, so the source ad's own account already decides it. When
+// that account maps to exactly one store, nobody should have to pick anything
+// — and until they do, the entire campaign/ad set half of the modal is
+// hidden behind the gate.
+//
+// Matching the store name inside the campaign name was the only derivation
+// there used to be, and it fails for every campaign named after a product
+// instead of a store ("NVP-082526LIN1" contains no store name), which is most
+// of them.
+// ---------------------------------------------------------------------------
+
+export interface StoreAccountRef {
+  store_name: string;
+  account_id: string;
+}
+
+function normalizeAccountId(v: string | null | undefined): string {
+  return (v ?? "").toString().replace(/^act_/, "").trim();
+}
+
+function normalizeName(s: string): string {
+  return (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * The store whose scaling campaign lives in the same ad account as the ads
+ * being promoted. Null when the ads span several accounts (no single run
+ * could copy them anyway) or when the account maps to more than one store.
+ */
+export function deriveStoreFromAccount(
+  accountIds: Array<string | null | undefined>,
+  configs: StoreAccountRef[]
+): string | null {
+  const accounts = new Set(
+    accountIds.map(normalizeAccountId).filter((a) => a.length > 0)
+  );
+  if (accounts.size !== 1) return null;
+  const account = [...accounts][0];
+
+  const matches = new Set(
+    configs
+      .filter((c) => normalizeAccountId(c.account_id) === account)
+      .map((c) => c.store_name)
+  );
+  return matches.size === 1 ? [...matches][0] : null;
+}
+
+/** Longest store name appearing inside the campaign name, if any. */
+export function deriveStoreFromCampaign(
+  campaign: string | null | undefined,
+  stores: string[]
+): string | null {
+  const nc = normalizeName(campaign ?? "");
+  if (!nc) return null;
+  let best: { name: string; len: number } | null = null;
+  for (const s of stores) {
+    const k = normalizeName(s);
+    if (k && nc.includes(k) && (!best || k.length > best.len)) {
+      best = { name: s, len: k.length };
+    }
+  }
+  return best?.name ?? null;
+}
+
+/**
+ * The store to open on: the ad account decides it when it can, the campaign
+ * name is the fallback, and an explicit suggestion from the caller wins over
+ * both. Null means the user genuinely has to choose.
+ */
+export function resolveStore(opts: {
+  suggested?: string | null;
+  accountIds?: Array<string | null | undefined>;
+  campaignName?: string | null;
+  configs: StoreAccountRef[];
+}): string | null {
+  const stores = opts.configs.map((c) => c.store_name);
+  const known = (s: string | null) =>
+    s && stores.includes(s) ? s : null;
+
+  return (
+    known(opts.suggested ?? null) ??
+    known(deriveStoreFromAccount(opts.accountIds ?? [], opts.configs)) ??
+    known(deriveStoreFromCampaign(opts.campaignName, stores))
+  );
+}

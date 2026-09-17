@@ -1038,6 +1038,7 @@ export default function AdsPage() {
         ad_id: entry.ad.ad_id,
         ad_name: entry.ad.ad,
         adset_name: entry.ad.adset,
+        account_id: entry.ad.account_id,
         thumbnail_url: entry.ad.thumbnail_url,
         already_scaled: entry.already_scaled,
       });
@@ -2156,6 +2157,8 @@ export default function AdsPage() {
                                     setPromoteSubject({
                                       ad_id: rowData.ad_id as string,
                                       ad_name: rowData.ad as string,
+                                      account_id:
+                                        (rowData.account_id as string) ?? null,
                                       thumbnail_url:
                                         (rowData.thumbnail_url as
                                           | string

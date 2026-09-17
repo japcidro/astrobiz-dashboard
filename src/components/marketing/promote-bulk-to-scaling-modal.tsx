@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   X,
   TrendingUp,
@@ -17,6 +17,7 @@ import {
   campaignPayload,
   defaultObjective,
   destinationCampaignId,
+  resolveStore,
   useScalingCampaigns,
   type CampaignChoice,
   type NewCampaignDraft,
@@ -28,6 +29,10 @@ export interface BulkPromoteSubject {
   // Source adset name — reused as the new scaling adset name when
   // cloning per ad, so scaling traceability mirrors the testing adset.
   adset_name: string;
+  // Ad account the source ad lives in. Decides the target store on its
+  // own — Meta cannot copy across ad accounts, so the source's account is
+  // the only one a copy could land in.
+  account_id?: string | null;
   thumbnail_url?: string | null;
   // True when this ad already has a scaling copy. Selecting it is still
   // allowed (e.g. user wants a fresh copy in a different adset) but we
@@ -108,26 +113,6 @@ function pausedTag(effective_status: string): string {
   return effective_status.includes("PAUSED") ? " (paused)" : "";
 }
 
-function normalize(s: string): string {
-  return (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-function deriveStoreFromCampaign(
-  campaign: string | null | undefined,
-  stores: string[]
-): string | null {
-  const nc = normalize(campaign ?? "");
-  if (!nc) return null;
-  let best: { name: string; len: number } | null = null;
-  for (const s of stores) {
-    const k = normalize(s);
-    if (k && nc.includes(k) && (!best || k.length > best.len)) {
-      best = { name: s, len: k.length };
-    }
-  }
-  return best?.name ?? null;
-}
-
 export function PromoteBulkToScalingModal({
   subjects,
   campaign_name,
@@ -168,6 +153,17 @@ export function PromoteBulkToScalingModal({
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<Map<string, RowResult>>(new Map());
 
+  // Ad Performance refreshes in the background, which hands this modal a
+  // new `subjects` array for the same ads. Key the derivation off the
+  // accounts themselves, and run it once: re-deriving mid-flow would reset
+  // the store, and resetting the store clears every per-ad destination the
+  // user has already chosen.
+  const accountKey = useMemo(
+    () => subjects.map((s) => s.account_id ?? "").join(","),
+    [subjects]
+  );
+  const storeDerived = useRef(false);
+
   const loadConfigs = useCallback(async () => {
     setLoadingConfig(true);
     try {
@@ -178,15 +174,21 @@ export function PromoteBulkToScalingModal({
       }
       const json = (await res.json()) as { rows: StoreConfig[] };
       setConfigs(json.rows ?? []);
-      const stores = (json.rows ?? []).map((c) => c.store_name);
-      const derived = deriveStoreFromCampaign(campaign_name, stores);
-      if (derived && stores.includes(derived)) setSelectedStore(derived);
+      if (!storeDerived.current) {
+        storeDerived.current = true;
+        const derived = resolveStore({
+          accountIds: accountKey.split(","),
+          campaignName: campaign_name,
+          configs: json.rows ?? [],
+        });
+        if (derived) setSelectedStore(derived);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load config");
     } finally {
       setLoadingConfig(false);
     }
-  }, [campaign_name]);
+  }, [campaign_name, accountKey]);
 
   const loadAdsets = useCallback(async (store: string, campaignId: string) => {
     setLoadingAdsets(true);
@@ -536,7 +538,7 @@ export function PromoteBulkToScalingModal({
 
           {/* Campaign picker — what the per-ad destinations below are
               relative to, so it has to be settled first. */}
-          {selectedStore && (
+          {availableStores.length > 0 && (
             <ScalingCampaignPicker
               choice={campaignChoice}
               onChoiceChange={setCampaignChoice}
@@ -546,6 +548,7 @@ export function PromoteBulkToScalingModal({
               configured={configured}
               loading={loadingCampaigns}
               disabled={submitting || done}
+              storeChosen={!!selectedStore}
               templateCampaignId={templateCampaignId}
               onTemplateCampaignChange={setTemplateCampaignId}
             />
