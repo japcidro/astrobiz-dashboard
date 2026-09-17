@@ -38,14 +38,18 @@ export async function GET(request: Request) {
   const cookie = request.headers.get("cookie") ?? "";
 
   const sevenDayRes = await fetch(
-    `${baseUrl}/api/facebook/all-ads?date_preset=last_7_days&account=ALL`,
+    // last_7d, not last_7_days — the latter is not a v21.0 preset and
+    // Facebook rejects the call outright.
+    `${baseUrl}/api/facebook/all-ads?date_preset=last_7d&account=ALL`,
     { headers: { cookie }, cache: "no-store" }
   );
   if (!sevenDayRes.ok) {
     return Response.json({ queue: [], autopilot_last_24h: [] });
   }
-  const sevenDayData = (await sevenDayRes.json()) as { ads?: AdRow[] };
-  const ads = sevenDayData.ads ?? [];
+  // Rows come back under `data`; `ads` was always undefined, which left the
+  // action queue permanently empty.
+  const sevenDayData = (await sevenDayRes.json()) as { data?: AdRow[] };
+  const ads = sevenDayData.data ?? [];
 
   const queue: QueueItem[] = [];
 

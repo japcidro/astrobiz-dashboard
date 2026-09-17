@@ -16,12 +16,20 @@ interface CampaignInfo {
   id: string;
   name: string;
   status: string;
+  effective_status: string;
 }
 
 interface AdsetInfo {
   id: string;
   name: string;
   status: string;
+  effective_status: string;
+}
+
+// Paused is a normal thing to add an ad to, but you should know before you do.
+function statusSuffix(effectiveStatus: string): string {
+  if (effectiveStatus === "ACTIVE") return "";
+  return ` — ${effectiveStatus.replace(/_/g, " ").toLowerCase()}`;
 }
 
 interface StepModeSelectProps {
@@ -50,6 +58,8 @@ export function StepModeSelect({
   const [adsets, setAdsets] = useState<AdsetInfo[]>([]);
   const [loadingCampaigns, setLoadingCampaigns] = useState(false);
   const [loadingAdsets, setLoadingAdsets] = useState(false);
+  const [campaignsError, setCampaignsError] = useState<string | null>(null);
+  const [adsetsError, setAdsetsError] = useState<string | null>(null);
 
   // Auto-select first active account if none selected
   useEffect(() => {
@@ -59,59 +69,73 @@ export function StepModeSelect({
     }
   }, [accounts, adAccountId, onUpdate]);
 
-  // Fetch campaigns when account is selected and mode is existing
+  // Campaigns come from the campaigns edge, not from ad insights. A campaign
+  // that hasn't spent yet is still a campaign you can add an ad to.
   useEffect(() => {
     if (!adAccountId || mode === "new") return;
+    let cancelled = false;
     setLoadingCampaigns(true);
+    setCampaignsError(null);
     import("@/lib/client-cache").then(({ cachedFetch }) =>
-    cachedFetch<Record<string, unknown>>(`/api/facebook/all-ads?date_preset=last_30d&account=${adAccountId}`, { ttl: 10 * 60 * 1000 })
-      .then(({ data: json }) => {
-        if (json.data) {
-          // Extract unique campaigns from ad data
-          const campaignMap = new Map<string, CampaignInfo>();
-          for (const row of json.data as Array<Record<string, string>>) {
-            if (!campaignMap.has(row.campaign_id)) {
-              campaignMap.set(row.campaign_id, {
-                id: row.campaign_id,
-                name: row.campaign,
-                status: row.status,
-              });
-            }
+      cachedFetch<Record<string, unknown>>(
+        `/api/facebook/create/campaigns?account_id=${adAccountId}`,
+        { ttl: 5 * 60 * 1000 }
+      )
+        .then(({ data: json }) => {
+          if (cancelled) return;
+          if (json.error) {
+            setCampaignsError(json.error as string);
+            setCampaigns([]);
+            return;
           }
-          setCampaigns(Array.from(campaignMap.values()));
-        }
-      })
-      .finally(() => setLoadingCampaigns(false))
+          setCampaigns((json.data as CampaignInfo[]) ?? []);
+        })
+        .catch((e: Error) => {
+          if (!cancelled) setCampaignsError(e.message);
+        })
+        .finally(() => {
+          if (!cancelled) setLoadingCampaigns(false);
+        })
     );
+    return () => {
+      cancelled = true;
+    };
   }, [adAccountId, mode]);
 
-  // Fetch adsets when campaign is selected
+  // Ad sets load as soon as a campaign is picked. The previous guard waited
+  // for mode === "existing_adset", which only happens once an ad set is
+  // chosen — from a list that therefore never loaded. Nothing ever appeared
+  // but "Create new ad set".
   useEffect(() => {
-    if (!existingCampaignId || mode !== "existing_adset") return;
+    if (!existingCampaignId || mode === "new") return;
+    let cancelled = false;
     setLoadingAdsets(true);
+    setAdsetsError(null);
     import("@/lib/client-cache").then(({ cachedFetch }) =>
-    cachedFetch<Record<string, unknown>>(`/api/facebook/all-ads?date_preset=last_30d&account=${adAccountId}`, { ttl: 10 * 60 * 1000 })
-      .then(({ data: json }) => {
-        if (json.data) {
-          const adsetMap = new Map<string, AdsetInfo>();
-          for (const row of json.data as Array<Record<string, string>>) {
-            if (
-              row.campaign_id === existingCampaignId &&
-              !adsetMap.has(row.adset_id)
-            ) {
-              adsetMap.set(row.adset_id, {
-                id: row.adset_id,
-                name: row.adset,
-                status: row.status,
-              });
-            }
+      cachedFetch<Record<string, unknown>>(
+        `/api/facebook/create/adsets?campaign_id=${existingCampaignId}`,
+        { ttl: 5 * 60 * 1000 }
+      )
+        .then(({ data: json }) => {
+          if (cancelled) return;
+          if (json.error) {
+            setAdsetsError(json.error as string);
+            setAdsets([]);
+            return;
           }
-          setAdsets(Array.from(adsetMap.values()));
-        }
-      })
-      .finally(() => setLoadingAdsets(false))
+          setAdsets((json.data as AdsetInfo[]) ?? []);
+        })
+        .catch((e: Error) => {
+          if (!cancelled) setAdsetsError(e.message);
+        })
+        .finally(() => {
+          if (!cancelled) setLoadingAdsets(false);
+        })
     );
-  }, [existingCampaignId, adAccountId, mode]);
+    return () => {
+      cancelled = true;
+    };
+  }, [existingCampaignId, mode]);
 
   return (
     <div>
@@ -229,13 +253,21 @@ export function StepModeSelect({
                 }}
                 className="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <option value="">Select campaign...</option>
+                <option value="">
+                  {campaigns.length === 0
+                    ? "No campaigns in this ad account"
+                    : "Select campaign..."}
+                </option>
                 {campaigns.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
+                    {statusSuffix(c.effective_status)}
                   </option>
                 ))}
               </select>
+            )}
+            {campaignsError && (
+              <p className="text-xs text-red-400 mt-1.5">{campaignsError}</p>
             )}
           </div>
 
@@ -266,9 +298,20 @@ export function StepModeSelect({
                   {adsets.map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.name}
+                      {statusSuffix(a.effective_status)}
                     </option>
                   ))}
                 </select>
+              )}
+              {adsetsError ? (
+                <p className="text-xs text-red-400 mt-1.5">{adsetsError}</p>
+              ) : (
+                !loadingAdsets &&
+                adsets.length === 0 && (
+                  <p className="text-xs text-gray-500 mt-1.5">
+                    This campaign has no ad sets yet — a new one will be created.
+                  </p>
+                )
               )}
             </div>
           )}

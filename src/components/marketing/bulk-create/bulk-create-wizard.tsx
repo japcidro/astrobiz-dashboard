@@ -223,31 +223,31 @@ export function BulkCreateWizard() {
   }, []);
 
   // ─── Fetch campaigns when account selected + existing mode ───
+  // Read from the campaigns edge, not the ads insights payload: a campaign
+  // with no spend in the window is still one you can bulk-add ads to.
   useEffect(() => {
     if (!adAccountId || mode !== "existing_campaign") return;
+    let cancelled = false;
     setLoadingCampaigns(true);
     setCampaigns([]);
     setExistingCampaignId(null);
 
     import("@/lib/client-cache").then(({ cachedFetch }) =>
-    cachedFetch<Record<string, unknown>>(`/api/facebook/all-ads?date_preset=last_30d&account=${adAccountId}`, { ttl: 10 * 60 * 1000 })
-      .then(({ data: json }) => {
-        if (json.data) {
-          const campaignMap = new Map<string, CampaignInfo>();
-          for (const row of json.data as Array<Record<string, string>>) {
-            if (!campaignMap.has(row.campaign_id)) {
-              campaignMap.set(row.campaign_id, {
-                id: row.campaign_id,
-                name: row.campaign,
-                status: row.status,
-              });
-            }
-          }
-          setCampaigns(Array.from(campaignMap.values()));
-        }
-      })
-      .finally(() => setLoadingCampaigns(false))
+      cachedFetch<Record<string, unknown>>(
+        `/api/facebook/create/campaigns?account_id=${adAccountId}`,
+        { ttl: 5 * 60 * 1000 }
+      )
+        .then(({ data: json }) => {
+          if (cancelled) return;
+          setCampaigns((json.data as CampaignInfo[]) ?? []);
+        })
+        .finally(() => {
+          if (!cancelled) setLoadingCampaigns(false);
+        })
     );
+    return () => {
+      cancelled = true;
+    };
   }, [adAccountId, mode]);
 
   // ─── Store defaults handlers ───

@@ -28,7 +28,10 @@ export async function detectNewWinners(
   cronSecret: string
 ): Promise<number> {
   const params = new URLSearchParams({
-    date_preset: "last_7_days",
+    // "last_7_days" is not a v21.0 preset — Facebook rejects it. The valid
+    // spelling is last_7d, and getting it wrong meant this rule never saw a
+    // single ad.
+    date_preset: "last_7d",
     account: "ALL",
   });
 
@@ -41,8 +44,10 @@ export async function detectNewWinners(
     return 0;
   }
 
-  const payload = (await res.json()) as { ads?: AdRow[] };
-  const ads = payload.ads ?? [];
+  // all-ads returns its rows under `data`. Reading `ads` yielded an empty
+  // array every run, so no new_winner alert has ever fired.
+  const payload = (await res.json()) as { data?: AdRow[] };
+  const ads = payload.data ?? [];
   if (ads.length === 0) return 0;
 
   let alertCount = 0;
