@@ -7,6 +7,7 @@ import { StoreManager } from "@/components/orders/store-manager";
 import { TeamManager } from "@/components/settings/team-manager";
 import { AiKeyManager } from "@/components/settings/ai-key-manager";
 import { ScalingCampaignsManager } from "@/components/settings/scaling-campaigns-manager";
+import { EmptyCampaignsCleanup } from "@/components/settings/empty-campaigns-cleanup";
 import type { ShopifyStore } from "@/lib/shopify/types";
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
@@ -162,6 +163,9 @@ export default async function SettingsPage() {
             .filter((s) => s.is_active !== false)
             .map((s) => s.name)}
         />
+        <div className="mt-6">
+          <EmptyCampaignsCleanup />
+        </div>
       </div>
 
       <div className="mt-10 space-y-6">

@@ -1,5 +1,39 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-18: Clearing out the campaigns a failed promote left behind
+
+Admin → Settings → Scaling Campaigns gains an **Empty campaigns** panel.
+Scan the ad accounts, see what is safe to remove, archive or delete it
+without leaving the dashboard.
+
+Removing an ad campaign is not something to offer on trust, so it is gated
+on evidence rather than on intent. A campaign is listed only when it could
+not possibly be doing anything:
+
+- no ads in it at all,
+- never spent, and never delivered an impression — spend can round to zero,
+  impressions cannot,
+- every ad set paused (CAMPAIGN_PAUSED and ADSET_PAUSED count as paused),
+- not already archived or deleted,
+- and never the campaign a store scales into.
+
+Anything failing one of those is not shown and cannot be removed through
+this endpoint, whatever the client asks for. The rule lives in one module
+that both the listing and the action import, and the action re-reads the
+campaign from Graph and re-applies it immediately before touching anything
+— a list a few minutes old is not evidence that a campaign is still empty.
+Both routes are admin-only, which is stricter than the marketing-and-admin
+access the rest of the promote flow uses.
+
+**Archive** is offered first and is what the wording steers towards: it
+leaves every dropdown and Ads Manager's default view, and comes back if it
+turns out to be wanted. **Delete** is there too, in red, behind its own
+confirmation that says plainly that nobody can undo it.
+
+Scanning is one expanded Graph read per ad account — ads, ad sets and
+lifetime insights come back with the campaigns rather than as a call each —
+but it is still a heavy read, so it runs on the button and not on page load.
+
 ## 2026-09-18: One failed batch, three identical campaigns
 
 Promoting three ads into a new campaign left three campaigns called
