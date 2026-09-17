@@ -1,5 +1,32 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-17: Ad copy without a made-up ceiling, and bulk into an existing ad set
+
+Two things the ad builders got wrong in opposite directions.
+
+- **Create Ad was counting down to limits that are not real.** The three copy
+  fields showed `n/125`, `n/40` and `n/30` and turned yellow past them. Those
+  are Facebook's *truncation preview* thresholds, not field limits — a longer
+  primary text is accepted and shown in full when the viewer taps "See more",
+  and long-form copy is exactly what half the winning ads use. Bulk Create
+  never had the counters, so the same copy pasted into the two screens got two
+  different verdicts. Create Ad now shows a plain neutral character count and
+  nothing is ever marked as too long. Nothing was ever truncated or blocked on
+  submit — the limit only existed as a warning that made people rewrite good
+  copy.
+- **Bulk Create could not add ads to an ad set that already exists.** Its mode
+  toggle offered New Campaign and Existing Campaign only, and every row always
+  built a fresh ad set — so topping up a proven, already-learning ad set with
+  five new creatives meant running the single Create Ad wizard five times. A
+  third mode, **Existing Ad Set**, picks a campaign, then an ad set under it
+  (paused ones listed with their status, like the single wizard), and puts
+  every row in it. In that mode Section B collapses to a note — an existing ad
+  set brings its own budget, schedule and targeting, and sending a template
+  would only invite a rejection — and the per-row "Adset Name" column
+  disappears, since there is no ad set left to name. The server already spoke
+  `existing_adset`; only the bulk screen never offered it.
+
+
 ## 2026-09-17: Ad Performance — readable names, and a real date range
 
 Two things on `/marketing/ads`.

@@ -36,6 +36,9 @@ interface AdRowsTableProps {
   // Enables per-field Preset picker (ad name / primary text / headline /
   // description). Null disables the picker with a hint to select a store.
   shopifyStoreId?: string | null;
+  // False when every ad is going into one ad set the user already picked —
+  // there is no per-row ad set to name.
+  showAdsetName?: boolean;
   onUpdateRow: (id: string, updates: Partial<BulkAdRow>) => void;
   onAddRow: () => void;
   onRemoveRow: (id: string) => void;
@@ -204,6 +207,7 @@ export function AdRowsTable({
   rows,
   adAccountId,
   shopifyStoreId,
+  showAdsetName = true,
   onUpdateRow,
   onAddRow,
   onRemoveRow,
@@ -338,7 +342,9 @@ export function AdRowsTable({
           <thead>
             <tr className="border-b border-gray-700 bg-gray-800/80 text-gray-400 text-xs uppercase tracking-wide">
               <th className="px-2 py-2 w-8">#</th>
-              <th className="px-2 py-2 w-44">Adset Name</th>
+              {showAdsetName && (
+                <th className="px-2 py-2 w-44">Adset Name</th>
+              )}
               <th className="px-2 py-2 w-36">Ad Name</th>
               <th className="px-2 py-2 w-36">Creative</th>
               <th className="px-2 py-2">Primary Text</th>
@@ -359,19 +365,21 @@ export function AdRowsTable({
                 </td>
 
                 {/* Adset Name */}
-                <td className="px-2 py-1.5 bg-gray-800/50">
-                  <input
-                    type="text"
-                    value={row.adset_name}
-                    placeholder={`Adset ${idx + 1}`}
-                    onChange={(e) =>
-                      onUpdateRow(row.id, { adset_name: e.target.value })
-                    }
-                    className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
-                      !row.adset_name.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
-                    }`}
-                  />
-                </td>
+                {showAdsetName && (
+                  <td className="px-2 py-1.5 bg-gray-800/50">
+                    <input
+                      type="text"
+                      value={row.adset_name}
+                      placeholder={`Adset ${idx + 1}`}
+                      onChange={(e) =>
+                        onUpdateRow(row.id, { adset_name: e.target.value })
+                      }
+                      className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
+                        !row.adset_name.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
+                      }`}
+                    />
+                  </td>
+                )}
 
                 {/* Ad Name */}
                 <td className="px-2 py-1.5 bg-gray-800/50">

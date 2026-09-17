@@ -99,14 +99,8 @@ export function StepAd({
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <label className="text-sm text-gray-400">Primary Text</label>
-            <span
-              className={`text-xs ${
-                data.primary_text.length > 125
-                  ? "text-yellow-400"
-                  : "text-gray-600"
-              }`}
-            >
-              {data.primary_text.length}/125
+            <span className="text-xs text-gray-600">
+              {data.primary_text.length} characters
             </span>
           </div>
           <textarea
@@ -122,14 +116,8 @@ export function StepAd({
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <label className="text-sm text-gray-400">Headline</label>
-            <span
-              className={`text-xs ${
-                data.headline.length > 40
-                  ? "text-yellow-400"
-                  : "text-gray-600"
-              }`}
-            >
-              {data.headline.length}/40
+            <span className="text-xs text-gray-600">
+              {data.headline.length} characters
             </span>
           </div>
           <input
@@ -145,14 +133,8 @@ export function StepAd({
         <div>
           <div className="flex items-center justify-between mb-1.5">
             <label className="text-sm text-gray-400">Description</label>
-            <span
-              className={`text-xs ${
-                data.description.length > 30
-                  ? "text-yellow-400"
-                  : "text-gray-600"
-              }`}
-            >
-              {data.description.length}/30
+            <span className="text-xs text-gray-600">
+              {data.description.length} characters
             </span>
           </div>
           <input

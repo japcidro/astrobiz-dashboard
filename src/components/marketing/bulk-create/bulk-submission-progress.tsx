@@ -22,8 +22,9 @@ export interface BulkAdRow {
 interface BulkSubmissionProgressProps {
   rows: BulkAdRow[];
   adAccountId: string;
-  mode: "new" | "existing_campaign";
+  mode: "new" | "existing_campaign" | "existing_adset";
   existingCampaignId: string | null;
+  existingAdsetId: string | null;
   campaign: CampaignFormData;
   adsetTemplate: AdSetFormData;
   pageId: string;
@@ -45,6 +46,7 @@ export function BulkSubmissionProgress({
   adAccountId,
   mode,
   existingCampaignId,
+  existingAdsetId,
   campaign,
   adsetTemplate,
   pageId,
@@ -85,6 +87,7 @@ export function BulkSubmissionProgress({
     async (targetRows: BulkAdRow[]) => {
       setIsRunning(true);
       let fbCampaignId: string | null = existingCampaignId ?? null;
+      const usingExistingAdset = mode === "existing_adset";
 
       for (let i = 0; i < targetRows.length; i++) {
         const row = targetRows[i];
@@ -94,13 +97,18 @@ export function BulkSubmissionProgress({
         onUpdateRowStatus(row.id, "submitting");
 
         try {
-          const effectiveMode = isFirstEver ? "new" : "existing_campaign";
+          const effectiveMode = usingExistingAdset
+            ? "existing_adset"
+            : isFirstEver
+            ? "new"
+            : "existing_campaign";
           const effectiveCampaignId = isFirstEver ? null : fbCampaignId;
           const effectiveCampaignData = isFirstEver ? campaign : null;
-          const rowAdsetData = buildAdSetData(
-            row,
-            rows.findIndex((r) => r.id === row.id)
-          );
+          // An existing ad set brings its own budget, schedule and targeting —
+          // sending a template would only invite Facebook to reject it.
+          const rowAdsetData = usingExistingAdset
+            ? null
+            : buildAdSetData(row, rows.findIndex((r) => r.id === row.id));
           const rowAdData = buildAdData(row);
 
           // If a store is selected, create an ad_draft first so the
@@ -116,7 +124,7 @@ export function BulkSubmissionProgress({
                 name: row.ad_name || row.adset_name || "Bulk Ad",
                 mode: effectiveMode,
                 existing_campaign_id: effectiveCampaignId,
-                existing_adset_id: null,
+                existing_adset_id: usingExistingAdset ? existingAdsetId : null,
                 campaign_data: effectiveCampaignData,
                 adset_data: rowAdsetData,
                 ad_data: rowAdData,
@@ -138,7 +146,7 @@ export function BulkSubmissionProgress({
             ad_account_id: adAccountId,
             mode: effectiveMode,
             existing_campaign_id: effectiveCampaignId,
-            existing_adset_id: null,
+            existing_adset_id: usingExistingAdset ? existingAdsetId : null,
             campaign_data: effectiveCampaignData,
             adset_data: rowAdsetData,
             ad_data: rowAdData,
@@ -179,6 +187,7 @@ export function BulkSubmissionProgress({
       adAccountId,
       mode,
       existingCampaignId,
+      existingAdsetId,
       campaign,
       adsetTemplate,
       pageId,
