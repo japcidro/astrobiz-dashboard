@@ -85,7 +85,35 @@ type RawPage = {
   tasks?: string[];
 };
 
+// `tasks` is not a valid field on every Page-bearing edge — promote_pages in
+// particular rejects it. Graph answers an unknown field with a 400 for the
+// WHOLE request, so asking for it everywhere would zero out an entire edge and
+// hide real Pages: the exact failure this module exists to prevent. Ask for it
+// anyway, and fall back to the fields every edge agrees on.
 const PAGE_FIELDS = "id,name,picture{url},tasks";
+const PAGE_FIELDS_SAFE = "id,name,picture{url}";
+
+/**
+ * Read a Page edge, retrying without the optional fields if Graph rejects
+ * them. An edge must never come back empty just because one field was wrong.
+ */
+async function listPages(
+  edgePath: string,
+  token: string
+): Promise<{ data: RawPage[]; error: string | null }> {
+  const full = await graphList<RawPage>(
+    `${edgePath}?fields=${PAGE_FIELDS}`,
+    token
+  );
+  if (!full.error || full.data.length > 0) return full;
+
+  const safe = await graphList<RawPage>(
+    `${edgePath}?fields=${PAGE_FIELDS_SAFE}`,
+    token
+  );
+  // Only surface the original complaint if the retry failed too.
+  return safe.error ? { data: safe.data, error: full.error } : safe;
+}
 
 /**
  * Every business this token belongs to or can administer.
@@ -200,8 +228,8 @@ export async function fetchAllFbPages(token: string): Promise<PageLookupResult> 
   // 1. Pages the token's identity has a direct role on.
   //    /me/accounts answers for User tokens; assigned_pages for System Users.
   const [mine, assigned] = await Promise.all([
-    graphList<RawPage>(`/me/accounts?fields=${PAGE_FIELDS}`, token),
-    graphList<RawPage>(`/me/assigned_pages?fields=${PAGE_FIELDS}`, token),
+    listPages("/me/accounts", token),
+    listPages("/me/assigned_pages", token),
   ]);
   absorb(mine.data, PAGE_SOURCES.ME_ACCOUNTS);
   if (mine.error) warnings.push(`${PAGE_SOURCES.ME_ACCOUNTS}: ${mine.error}`);
@@ -222,10 +250,7 @@ export async function fetchAllFbPages(token: string): Promise<PageLookupResult> 
           ["client_pages", PAGE_SOURCES.CLIENT],
         ] as const
       ).map(async ([edge, source]) => {
-        const res = await graphList<RawPage>(
-          `/${bizId}/${edge}?fields=${PAGE_FIELDS}`,
-          token
-        );
+        const res = await listPages(`/${bizId}/${edge}`, token);
         absorb(res.data, source);
         if (res.error) warnings.push(`${bizName} ${edge}: ${res.error}`);
       })
@@ -244,10 +269,7 @@ export async function fetchAllFbPages(token: string): Promise<PageLookupResult> 
   await Promise.all(
     accounts.data.map(async (acct) => {
       if (!acct.id) return;
-      const res = await graphList<RawPage>(
-        `/${acct.id}/promote_pages?fields=${PAGE_FIELDS}`,
-        token
-      );
+      const res = await listPages(`/${acct.id}/promote_pages`, token);
       absorb(res.data, PAGE_SOURCES.PROMOTE);
       // A single account refusing this edge is normal and not worth shouting
       // about — only report it when nothing else found any Page at all.
