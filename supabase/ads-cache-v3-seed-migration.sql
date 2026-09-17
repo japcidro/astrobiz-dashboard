@@ -20,6 +20,10 @@
 -- 1. Seed v3 from the superset entries -----------------------------------------
 -- buildCacheKey sorts params alphabetically, so `zero` is always the suffix:
 --   ads_v2:account=ALL&date_preset=today&zero=1  ->  ads_v3:account=ALL&date_preset=today
+--
+-- zero=1 goes first because it holds every ad. `on conflict do nothing` here
+-- also protects any v3 entry the deployed code has already written — those are
+-- newer and correctly flagged, so they must win over anything seeded.
 insert into cached_api_data (cache_type, cache_key, response_data, refreshed_at)
 select
   'ads',
@@ -30,12 +34,30 @@ from cached_api_data
 where cache_key like 'ads\_v2:%zero=1'
 on conflict (cache_key) do nothing;
 
--- Rows seeded this way predate the `zero_activity` flag, so a caller that asks
--- for spenders only (the AI agent, briefings) sees the full list until the
--- cron next rewrites the entry. Self-corrects within the hour.
+-- Then the zero=0 entries, for windows the pass above did not cover. Almost all
+-- of these are the briefings' historical `range:` backfills — one per past day,
+-- built from windows Facebook would charge a full walk to rebuild. Dropping
+-- them unseeded would have handed that bill straight back to us the next time a
+-- briefing looked at an old date.
+insert into cached_api_data (cache_type, cache_key, response_data, refreshed_at)
+select
+  'ads',
+  replace(replace(cache_key, 'ads_v2:', 'ads_v3:'), '&zero=0', ''),
+  response_data,
+  refreshed_at
+from cached_api_data
+where cache_key like 'ads\_v2:%zero=0'
+on conflict (cache_key) do nothing;
+
+-- Seeded rows predate the `zero_activity` flag, and an unflagged row is treated
+-- as real activity. For the briefings' range entries that is exactly right —
+-- they were built without zero-spend ads in the first place. For a preset
+-- entry seeded from zero=0 the dashboard sees spenders only until the cron
+-- rewrites it, which is within the hour.
 
 -- 2. Drop the superseded entries ------------------------------------------------
--- v2 keys are no longer read by anything.
+-- Safe now: every v2 key was copied to its v3 name above (or lost to a conflict
+-- with a newer v3 entry, which is the outcome we want).
 delete from cached_api_data where cache_key like 'ads\_v2:%';
 
 -- The old refresh-data cron re-cached each response under a second key that no
@@ -50,7 +72,13 @@ delete from cached_api_data where cache_key like 'ads:%';
 update fb_rate_limit_state set blocked_until = null where id = 1;
 
 -- 4. What got seeded ------------------------------------------------------------
-select cache_key, refreshed_at, jsonb_array_length(response_data -> 'data') as rows
+select
+  case when cache_key like '%date\_preset=range:%' then 'range (briefings)'
+       else 'preset (dashboard)' end as kind,
+  count(*) as entries,
+  pg_size_pretty(sum(pg_column_size(response_data))::bigint) as total_size,
+  min(refreshed_at) as oldest,
+  max(refreshed_at) as newest
 from cached_api_data
 where cache_key like 'ads\_v3:%'
-order by cache_key;
+group by 1 order by 1;
