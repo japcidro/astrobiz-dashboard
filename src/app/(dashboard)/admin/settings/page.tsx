@@ -2,6 +2,7 @@ import { getEmployee } from "@/lib/supabase/get-employee";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { TokenManager } from "@/components/marketing/token-manager";
+import { FbAccessCheck } from "@/components/settings/fb-access-check";
 import { StoreManager } from "@/components/orders/store-manager";
 import { TeamManager } from "@/components/settings/team-manager";
 import { AiKeyManager } from "@/components/settings/ai-key-manager";
@@ -134,6 +135,10 @@ export default async function SettingsPage() {
         fetchError={fetchError}
         selectedAccountIds={selectedAccountIds}
       />
+
+      <div className="mt-4">
+        <FbAccessCheck />
+      </div>
 
       <div className="mt-10">
         <h2 className="text-lg font-semibold text-white mb-1">Shopify Stores</h2>

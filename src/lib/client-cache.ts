@@ -22,7 +22,9 @@ const DEFAULT_TTL = 5 * 60 * 1000; // 5 minutes
 // keys stay orphaned but unused — sessionStorage is tab-scoped so they're
 // cleaned up when the tab closes anyway.
 //   v2 (2026-04-23): added campaign_status + adset_status to all-ads rows
-const STORAGE_KEY = "astrobiz_cache_v2";
+//   v3 (2026-09-17): /api/facebook/create/pages now merges the business Page
+//     edges, so a cached list from before the fix is missing whole Pages
+const STORAGE_KEY = "astrobiz_cache_v3";
 
 // Restore cache from sessionStorage on load
 function restoreCache() {

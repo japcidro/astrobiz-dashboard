@@ -105,6 +105,10 @@ it has been used for a week:
 ## AI Analytics — Creative Deconstruction
 
 ### FB token scope upgrade (blocks dark-post video analysis)
+> **Start here:** Settings → Facebook Ads → **Access Check** now answers this
+> in one click — it lists every Page with a Video OK / No video verdict and
+> names the missing scopes. Run it before working through the steps below.
+
 - **Symptom**: Video resolver reaches the video ID but
   `/{video_id}?fields=source` returns null, so Gemini can't see the video.
   Error surfaced as "Video ... exists but Facebook returned no source URL"

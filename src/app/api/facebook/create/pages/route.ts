@@ -1,9 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
+import { fetchAllFbPages } from "@/lib/facebook/pages";
 
 export const dynamic = "force-dynamic";
-
-const FB_API_BASE = "https://graph.facebook.com/v21.0";
 
 export async function GET() {
   const employee = await getEmployee();
@@ -25,60 +24,24 @@ export async function GET() {
     return Response.json({ error: "Token not configured" }, { status: 400 });
   }
 
-  const token = tokenSetting.value;
-
   try {
-    // Try /me/accounts first (works for User tokens and System Users with page assignments)
-    const params = new URLSearchParams({
-      access_token: token,
-      fields: "id,name,picture{url}",
-      limit: "100",
-    });
+    const { pages, warnings, counts } = await fetchAllFbPages(
+      tokenSetting.value as string
+    );
 
-    const res = await fetch(`${FB_API_BASE}/me/accounts?${params}`, {
-      cache: "no-store",
-    });
-
-    let pages: Array<{ id: string; name: string; picture?: { data?: { url?: string } } }> = [];
-
-    if (res.ok) {
-      const json = await res.json();
-      pages = json.data || [];
-    }
-
-    // If no pages found, try via Business Manager (owned_pages)
-    if (pages.length === 0) {
-      // Get business ID from /me
-      const meRes = await fetch(
-        `${FB_API_BASE}/me?${new URLSearchParams({ access_token: token, fields: "business" })}`,
-        { cache: "no-store" }
+    // Only a total blackout is an error. A partial read still lists Pages, and
+    // saying so beats hiding the ones that did come back.
+    if (pages.length === 0 && warnings.length > 0) {
+      return Response.json(
+        {
+          error: `Facebook returned no Pages. ${warnings.join("; ")}`,
+          warnings,
+        },
+        { status: 502 }
       );
-
-      if (meRes.ok) {
-        const meJson = await meRes.json();
-        const businessId = meJson.business?.id;
-
-        if (businessId) {
-          const bizParams = new URLSearchParams({
-            access_token: token,
-            fields: "id,name,picture{url}",
-            limit: "100",
-          });
-
-          const bizRes = await fetch(
-            `${FB_API_BASE}/${businessId}/owned_pages?${bizParams}`,
-            { cache: "no-store" }
-          );
-
-          if (bizRes.ok) {
-            const bizJson = await bizRes.json();
-            pages = bizJson.data || [];
-          }
-        }
-      }
     }
 
-    return Response.json({ data: pages });
+    return Response.json({ data: pages, warnings, counts });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Failed to fetch pages";
     return Response.json({ error: message }, { status: 500 });

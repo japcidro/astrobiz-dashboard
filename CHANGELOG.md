@@ -1,5 +1,52 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-17: The new store's Page was invisible, and its videos wouldn't play — uncommitted
+
+Two complaints after NURTELLE was added: ad videos not viewable in Ad
+Performance, and NURTELLE missing from the Facebook Page list in Create Ad and
+Bulk Create. They look unrelated. They are the same thing seen from two
+screens — the connected token cannot reach that Page — plus one real bug that
+guaranteed the Page could never appear even once that is fixed.
+
+- **The bug: `/api/facebook/create/pages` only ever asked `/me/accounts`.** The
+  Business Manager fallback was written as `if (pages.length === 0)`, so it
+  fired only when the token could see *no* Pages at all. With four older Pages
+  answering, the fallback never ran — a Page added to the business without
+  giving the token's user a Page role was invisible forever, no matter what was
+  fixed on Meta's side. It now merges **all three** edges — `/me/accounts`,
+  every business's `owned_pages`, and `client_pages` — dedupes by id, and
+  records which edge each Page came from.
+- **It also paginates now.** The old call took the first 100 and never followed
+  `paging.next`, and swallowed edge errors into an empty list. A dead edge no
+  longer hides the Pages the others returned; it comes back as a warning
+  alongside them.
+- **New: Settings → Facebook Ads → Access Check.** One button that answers what
+  the token can actually reach: validity, type, expiry, the scopes it holds and
+  the ones it is missing (each named with what breaks without it), the
+  businesses and ad accounts it sees, and every Page with a **Video OK / No
+  video** verdict.
+- **That verdict is the real test for the video symptom.** Graph returns
+  `source: null` on `/{video_id}` for every token except a Page token, so the
+  check asks each Page for `?fields=access_token`. A Page that lists fine but
+  cannot mint one shows ads and plays no video — exactly the reported symptom,
+  and previously invisible without curling `/api/admin/video-trace` with an ad
+  id in hand.
+- The findings are written as instructions, not codes: "N Pages cannot produce
+  a Page token, so ad videos on them will not play: NURTELLE. Give the token's
+  Facebook user a role on those Pages in Business Settings → Pages → Add
+  People."
+- Client cache key bumped to `v3` — the Page list is cached for 10 minutes in
+  `sessionStorage`, so without this an open tab would keep showing the
+  pre-fix list with the new Page still missing.
+- `src/lib/facebook/pages.ts` holds the merged lookup and the Page-token probe,
+  shared by the Create Ad endpoint and the access check so they can never
+  disagree about which Pages exist.
+
+**What this does not fix:** if the token's user genuinely has no role on the
+NURTELLE Page, the videos still will not play. No code can grant that — it is a
+Business Settings change. The Access Check now names it precisely instead of
+leaving it to be guessed.
+
 ## 2026-09-16: Repeat Buyers counts delivered parcels, not Shopify orders — uncommitted
 
 A Shopify order is not a sale. On COD it is a promise — the money only exists
