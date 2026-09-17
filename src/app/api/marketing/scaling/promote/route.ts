@@ -377,30 +377,31 @@ export async function POST(request: Request) {
     const campaignName = newCampaignReq.name.trim();
 
     // Objective and special ad categories have to match what the cloned ad
-    // set expects, or Meta rejects the clone. When the caller doesn't say,
-    // copy them off the configured scaling campaign — the ad set almost
-    // always comes from there.
+    // set expects, or Meta rejects the clone with a message that names
+    // neither. The template ad set's own campaign is the model that
+    // matters: the new campaign has to be somewhere that ad set can
+    // legally live, and nothing else in the request tells us that.
     let objective = newCampaignReq.objective ?? "";
     let categories = newCampaignReq.special_ad_categories
       ? cleanCategories(newCampaignReq.special_ad_categories)
       : null;
     if (!objective || categories === null) {
-      // The mapped scaling campaign is the best model when there is one.
-      // With no mapping — a store whose first scaling campaign this is —
-      // the source ad's own campaign is the next best: whatever the ad
-      // runs under today is something the ad is compatible with.
-      const modelCampaign = scalingRow
-        ? `${scalingRow.campaign_id}`
-        : `${adId}?fields=campaign{objective,special_ad_categories}`;
+      // In order of how well each answers "what can hold this ad set":
+      // the template's campaign, then the mapped scaling campaign, then
+      // the source ad's own campaign.
+      const modelUrl = newAdsetReq
+        ? `${FB_API_BASE}/${newAdsetReq.template_adset_id}?fields=campaign{objective,special_ad_categories}`
+        : scalingRow
+          ? `${FB_API_BASE}/${scalingRow.campaign_id}?fields=objective,special_ad_categories`
+          : `${FB_API_BASE}/${adId}?fields=campaign{objective,special_ad_categories}`;
+      const nested = !!newAdsetReq || !scalingRow;
       try {
         const res = await fetch(
-          scalingRow
-            ? `${FB_API_BASE}/${modelCampaign}?fields=objective,special_ad_categories&access_token=${encodeURIComponent(token)}`
-            : `${FB_API_BASE}/${modelCampaign}&access_token=${encodeURIComponent(token)}`,
+          `${modelUrl}&access_token=${encodeURIComponent(token)}`,
           { cache: "no-store" }
         );
         const raw = await res.json();
-        const json = scalingRow ? raw : (raw?.campaign ?? {});
+        const json = nested ? (raw?.campaign ?? {}) : raw;
         if (res.ok) {
           if (!objective && typeof json.objective === "string") {
             objective = json.objective;
@@ -455,8 +456,14 @@ export async function POST(request: Request) {
           createJson?.error?.error_user_msg ??
           createJson?.error?.message ??
           `FB campaign create ${createRes.status}`;
+        console.error("[scaling/promote] campaign create failed", {
+          account: acctPrefix(scalingAccountId),
+          objective,
+          categories,
+          fb_error: createJson?.error,
+        });
         return Response.json(
-          { error: `Campaign create failed: ${msg}` },
+          { error: `Campaign create failed: ${msg}`, setup_failed: true },
           { status: 502 }
         );
       }
@@ -467,6 +474,7 @@ export async function POST(request: Request) {
       return Response.json(
         {
           error: `Campaign create failed: ${err instanceof Error ? err.message : "unknown"}`,
+          setup_failed: true,
         },
         { status: 502 }
       );
@@ -544,12 +552,60 @@ export async function POST(request: Request) {
       const copyJson = await copyRes.json();
       if (!copyRes.ok) {
         const msg =
+          copyJson?.error?.error_user_msg ??
           copyJson?.error?.message ??
-          copyJson?.error_user_msg ??
           `FB adset /copies ${copyRes.status}`;
+        // Meta rejects a cross-campaign copy whose objective or special ad
+        // category doesn't match, and says so in neither the message nor a
+        // subcode. Read both campaigns and name the mismatch ourselves —
+        // otherwise this is an unsearchable "Invalid parameter".
+        let hint = "";
+        if (templateCampaignId && templateCampaignId !== targetCampaignId) {
+          const readCampaign = async (id: string) => {
+            try {
+              const r = await fetch(
+                `${FB_API_BASE}/${id}?fields=name,objective,special_ad_categories&access_token=${encodeURIComponent(token)}`,
+                { cache: "no-store" }
+              );
+              return r.ok ? await r.json() : null;
+            } catch {
+              return null;
+            }
+          };
+          const [from, to] = await Promise.all([
+            readCampaign(templateCampaignId),
+            readCampaign(targetCampaignId),
+          ]);
+          if (from?.objective && to?.objective && from.objective !== to.objective) {
+            hint =
+              ` — the ad set you cloned lives under a ${from.objective} campaign` +
+              ` but "${to.name ?? targetCampaignId}" is ${to.objective}, and Meta` +
+              ` cannot move an ad set between campaigns with different objectives.`;
+          } else {
+            const fc = cleanCategories(from?.special_ad_categories).join(", ");
+            const tc = cleanCategories(to?.special_ad_categories).join(", ");
+            if (fc !== tc) {
+              hint =
+                ` — special ad categories differ (${fc || "none"} vs ${tc || "none"}),` +
+                ` which Meta will not allow an ad set to cross.`;
+            }
+          }
+        }
+        console.error("[scaling/promote] adset clone failed", {
+          template_adset_id: templateId,
+          template_campaign_id: templateCampaignId,
+          target_campaign_id: targetCampaignId,
+          created_campaign_id: createdCampaignId,
+          fb_error: copyJson?.error,
+        });
         return Response.json(
           {
-            error: `Adset clone failed: ${msg}`,
+            error:
+              `Ad set clone failed: ${msg}${hint}` +
+              (createdCampaignId
+                ? ` (campaign "${targetCampaignName}" was created and is still empty — reuse or delete it in Ads Manager.)`
+                : ""),
+            setup_failed: true,
             // A campaign created moments ago now has no ad set in it. Hand
             // its id back so the caller can retry into it rather than
             // creating a second empty campaign.
@@ -563,7 +619,8 @@ export async function POST(request: Request) {
       if (!createdAdsetId) {
         return Response.json(
           {
-            error: "Adset clone returned no id",
+            error: "Ad set clone returned no id",
+            setup_failed: true,
             created_campaign_id: createdCampaignId,
             target_campaign_id: targetCampaignId,
           },
@@ -573,7 +630,8 @@ export async function POST(request: Request) {
     } catch (err) {
       return Response.json(
         {
-          error: `Adset clone failed: ${err instanceof Error ? err.message : "unknown"}`,
+          error: `Ad set clone failed: ${err instanceof Error ? err.message : "unknown"}`,
+          setup_failed: true,
           created_campaign_id: createdCampaignId,
           target_campaign_id: targetCampaignId,
         },

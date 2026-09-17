@@ -1,5 +1,38 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-18: When a promote fails, say why — and stop repeating it
+
+Three ads into a new campaign, three red "Failed" badges, and the reason
+only readable by hovering one of them. The error was there the whole time,
+in a `title` attribute.
+
+- **The error prints under the ad name**, wrapped, in red, in place of the
+  "from ADSET" line. A failed row is the one row anyone needs to read.
+  "Copy the error messages" puts all of them on the clipboard.
+- **A failure that will repeat stops the run.** Creating the campaign and
+  cloning the first ad set is the same work for every ad in the batch, so
+  when it fails for the first ad it fails identically for the rest. The
+  route marks those `setup_failed`; the modal shows the message once, marks
+  the remaining ads skipped, and stops — instead of spending two more API
+  calls proving the same point.
+
+And the most likely reason it was failing at all: **a new campaign was
+modelled on the wrong campaign.** Its objective and special ad categories
+came from the store's mapped scaling campaign, or — for a store with no
+mapping — from the source ad's own campaign. Neither is the one that
+matters. The ad set being cloned into the new campaign has to be able to
+live there, and Meta refuses to move an ad set between campaigns whose
+objectives differ, so the model has to be the *template ad set's* campaign.
+It is now, ahead of both older guesses.
+
+When Meta refuses anyway, it does so with "Invalid parameter" and no
+subcode. The route now reads both campaigns and names the mismatch itself —
+"the ad set you cloned lives under a OUTCOME_LEADS campaign but X is
+OUTCOME_SALES, and Meta cannot move an ad set between campaigns with
+different objectives" — and, when a campaign was created before the clone
+failed, says it is sitting there empty rather than leaving it to be found
+later in Ads Manager.
+
 ## 2026-09-18: Say what the destination options actually do
 
 "→ New adset", "+ New per ad (named after source)", and a third option

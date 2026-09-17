@@ -439,7 +439,8 @@ export function PromoteBulkToScalingModal({
     let sharedAdsetId: string | null = null;
     let createdCampaignId: string | null = null;
 
-    for (const subject of subjects) {
+    for (let i = 0; i < subjects.length; i++) {
+      const subject = subjects[i];
       const dest = getDest(subject.ad_id);
       if (dest.kind === "skip" || dest.kind === "unset") {
         updateRow(subject.ad_id, { status: "skipped" });
@@ -494,10 +495,19 @@ export function PromoteBulkToScalingModal({
           createdCampaignId = json.created_campaign_id as string;
         }
         if (!res.ok) {
-          updateRow(subject.ad_id, {
-            status: "failed",
-            error: json.error || `Promote failed (${res.status})`,
-          });
+          const message = json.error || `Promote failed (${res.status})`;
+          updateRow(subject.ad_id, { status: "failed", error: message });
+          // Creating the campaign or cloning the ad set is the same work
+          // for every ad in the run: if it just failed, it will fail
+          // identically for the rest. Stop, say so once, and don't spend
+          // another two calls proving it.
+          if (json.setup_failed) {
+            setError(message);
+            for (const later of subjects.slice(i + 1)) {
+              updateRow(later.ad_id, { status: "skipped" });
+            }
+            break;
+          }
         } else {
           if (creatingShared && json.created_adset_id) {
             sharedAdsetId = json.created_adset_id as string;
@@ -803,9 +813,17 @@ export function PromoteBulkToScalingModal({
                           </span>
                         )}
                       </p>
-                      <p className="text-[11px] text-gray-500 truncate">
-                        from {s.adset_name}
-                      </p>
+                      {r?.status === "failed" && r.error ? (
+                        // Readable, not hidden behind a hover: a failed
+                        // promote is the one row anybody needs to read.
+                        <p className="text-[11px] text-red-400 mt-0.5 whitespace-pre-wrap break-words">
+                          {r.error}
+                        </p>
+                      ) : (
+                        <p className="text-[11px] text-gray-500 truncate">
+                          from {s.adset_name}
+                        </p>
+                      )}
                     </div>
                     <div className="flex-shrink-0 w-56 text-right">
                       {showStatus ? (
@@ -829,10 +847,7 @@ export function PromoteBulkToScalingModal({
                             Done
                           </span>
                         ) : (
-                          <span
-                            className="inline-flex items-center gap-1 text-[11px] text-red-400"
-                            title={r.error}
-                          >
+                          <span className="inline-flex items-center gap-1 text-[11px] text-red-400">
                             <XCircle size={12} />
                             Failed
                           </span>
@@ -934,9 +949,23 @@ export function PromoteBulkToScalingModal({
                 )}
               </div>
               {tally.failed > 0 && (
-                <p className="text-[11px] text-gray-500 mt-1">
-                  Hover the Failed badge on each row to see the error message.
-                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const lines = subjects
+                      .map((s) => {
+                        const r = results.get(s.ad_id);
+                        return r?.status === "failed"
+                          ? `${s.ad_name}: ${r.error ?? "unknown error"}`
+                          : null;
+                      })
+                      .filter(Boolean);
+                    navigator.clipboard?.writeText(lines.join("\n"));
+                  }}
+                  className="text-[11px] text-gray-400 underline mt-1 cursor-pointer hover:text-white"
+                >
+                  Copy the error messages
+                </button>
               )}
             </div>
           )}
