@@ -14,6 +14,15 @@ Two things on `/marketing/ads`.
   (`14/431` yellow for partial, green when all on, grey when all off) instead
   of a separate chip. Same tooltips, same information, and the name gets the
   column back.
+
+  Then that compression went too far the other way: `↑ 1` sitting beside a
+  bare `1` in the same cell is two numbers and no sentence, and nobody should
+  have to decode their own dashboard. Final shape gives each thing a column
+  of its own — **Flags**, **Budget**, then the count. Flags spells out what is
+  wrong in words (`⛔ 1 REJECTED`, `⚠ 1 ISSUE`, `SCHEDULED`, `↑ 1 SCALED`) and
+  is **blank on a healthy row**, so scanning hundreds of ad sets the eye only
+  catches the ones that want attention. The count is one number pair,
+  `live/total`, coloured to say the same thing twice.
 - **Custom date range.** The seven presets are whatever Facebook happens to
   name, which is no help when you want "the 3rd to the 11th". A `Custom` chip
   now opens two date pickers bounded by today in PHT — the timezone the

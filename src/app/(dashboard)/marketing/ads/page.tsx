@@ -1196,120 +1196,134 @@ export default function AdsPage() {
   ]);
   const isToggleable = (status: string) => TOGGLEABLE_STATUSES.has(status);
 
-  const renderBudgetBadge = (entityId: string, name: string) => {
+  // Budget cell (aggregated levels). Its own column, so budgets line up
+  // down the page and the name keeps its width.
+  const renderBudgetCell = (entityId: string, name: string) => {
     const budget = budgets[entityId];
-    if (!budget) return null;
-    const amount = budget.daily_budget ?? budget.lifetime_budget;
-    if (amount == null) return null;
-    const type = budget.daily_budget != null ? "daily" : "lifetime";
+    const amount = budget?.daily_budget ?? budget?.lifetime_budget ?? null;
+    if (!budget || amount == null) {
+      return (
+        <td className="px-3 py-2.5 text-right whitespace-nowrap text-gray-700">
+          —
+        </td>
+      );
+    }
+    const isDaily = budget.daily_budget != null;
 
     return (
-      <span className="inline-flex items-center gap-1 text-[10px] text-gray-400 ml-2">
-        <span className="bg-gray-700/70 px-1.5 py-0.5 rounded">
-          {fmt(amount)}/{type === "daily" ? "day" : "total"}
+      <td className="px-3 py-2.5 text-right whitespace-nowrap">
+        <span className="inline-flex items-center gap-1 text-xs text-gray-300">
+          {fmt(amount)}
+          <span className="text-gray-500">/{isDaily ? "day" : "total"}</span>
+          {isAdmin && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setEditingBudget({ id: entityId, name, current: budget });
+                setBudgetValue(amount.toString());
+                setActionError(null);
+              }}
+              className="text-gray-600 hover:text-white transition-colors cursor-pointer"
+              title="Edit budget"
+            >
+              <Pencil size={11} />
+            </button>
+          )}
         </span>
-        {isAdmin && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setEditingBudget({ id: entityId, name, current: budget });
-              setBudgetValue(amount.toString());
-              setActionError(null);
-            }}
-            className="text-gray-500 hover:text-white transition-colors cursor-pointer"
-            title="Edit budget"
-          >
-            <Pencil size={11} />
-          </button>
-        )}
-      </span>
+      </td>
     );
   };
 
-  // Health rollup for an aggregated row, rendered in the count column.
-  // These used to be a row of chips next to the name, which squeezed long
-  // campaign names down to nothing. The count column has the room and the
-  // "Ad Sets" / "Ads" header already frames the numbers.
-  const renderRollupCell = (agg: AggRow, entityId: string) => {
-    const total = agg.count ?? 0;
-    const active = agg.active_count;
-    const unknown = agg.unknown_count;
+  // Flags cell (aggregated levels). Deliberately empty on a healthy row:
+  // scanning hundreds of rows, the eye should only catch the ones that want
+  // attention. Words, not symbols — an icon-and-number chip next to another
+  // number turned out to be unreadable at a glance.
+  const renderFlagsCell = (agg: AggRow, entityId: string) => {
     const disapproved = agg.disapproved_count ?? 0;
     const issues = agg.issues_count ?? 0;
-    // aggregate() groups the raw ad rows, so count/active_count are ad
-    // counts at every drill level (the "Ad Sets" header notwithstanding).
-    const childLabel = "ads";
     const scaling = (
       drillLevel === "campaign"
         ? scalingRollup.byCampaign
         : scalingRollup.byAdset
     ).get(entityId);
 
-    let countText = `${total}`;
-    let countClass = "text-gray-400";
-    let countTitle = `${total} ${childLabel}`;
-    if (agg.scheduled) {
-      countClass = "text-blue-400";
-      countTitle = "Start date is in the future";
-    } else if (unknown === total) {
-      countText = `${total} ?`;
-      countTitle = "FB structure fetch incomplete — refresh to retry";
-    } else if (active === 0) {
-      countText = `0/${total}`;
-      countClass = "text-gray-500";
-      countTitle = `All ${total} ${childLabel} are off`;
-    } else if (active < total) {
-      countText = `${active}/${total}`;
-      countClass = "text-yellow-500";
-      countTitle = `${active} of ${total} ${childLabel} ON`;
-    } else {
-      countClass = "text-green-500";
-      countTitle = `All ${total} ${childLabel} ON`;
-    }
-
     return (
-      <td className="px-3 py-2.5 text-right whitespace-nowrap">
-        <span className="inline-flex items-center justify-end gap-1.5">
+      <td className="px-3 py-2.5 text-left whitespace-nowrap">
+        <span className="inline-flex items-center gap-1.5">
           {disapproved > 0 && (
             <span
-              className="text-[10px] font-semibold px-1 py-0.5 rounded bg-red-900/60 text-red-200 ring-1 ring-red-500/60"
+              className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-red-900/60 text-red-200 ring-1 ring-red-500/60"
               title={`${disapproved} ad${
                 disapproved === 1 ? "" : "s"
               } DISAPPROVED by Facebook ad review — drill in to fix.`}
             >
-              ⛔ {disapproved}
+              ⛔ {disapproved} REJECTED
             </span>
           )}
           {issues > 0 && (
             <span
-              className="text-[10px] font-semibold px-1 py-0.5 rounded bg-red-900/40 text-red-300"
+              className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-300"
               title={`${issues} ad${
                 issues === 1 ? "" : "s"
               } in WITH_ISSUES / billing — delivery may be paused.`}
             >
-              ⚠ {issues}
-            </span>
-          )}
-          {scaling && scaling.scaled > 0 && (
-            <span
-              className="text-[10px] px-1 py-0.5 rounded bg-orange-600/20 text-orange-300 font-medium"
-              title={`${scaling.scaled} of ${scaling.total} ads already have a creative live in a scaling campaign`}
-            >
-              ↑ {scaling.scaled}
+              ⚠ {issues} ISSUE{issues === 1 ? "" : "S"}
             </span>
           )}
           {agg.scheduled && (
             <span
-              className="text-[10px] px-1 py-0.5 rounded bg-blue-900/30 text-blue-400"
+              className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-blue-900/30 text-blue-400"
               title="Start date is in the future"
             >
               SCHEDULED
             </span>
           )}
-          <span className={countClass} title={countTitle}>
-            {countText}
-          </span>
+          {scaling && scaling.scaled > 0 && (
+            <span
+              className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-orange-600/20 text-orange-300"
+              title={`${scaling.scaled} of ${scaling.total} ads already have a creative live in a scaling campaign`}
+            >
+              ↑ {scaling.scaled} SCALED
+            </span>
+          )}
         </span>
+      </td>
+    );
+  };
+
+  // Count cell (aggregated levels). One number pair under an "Ads" /
+  // "Ad Sets" header: how many are live out of how many exist. Colour says
+  // the same thing again so the state reads without doing the arithmetic.
+  const renderCountCell = (agg: AggRow) => {
+    const total = agg.count ?? 0;
+    const active = agg.active_count;
+    const unknown = agg.unknown_count;
+
+    let text = `${total}`;
+    let cls = "text-gray-400";
+    let title = `${total} ads`;
+    if (unknown === total) {
+      text = `${total} ?`;
+      title = "FB structure fetch incomplete — refresh to retry";
+    } else if (active === 0) {
+      text = `0/${total}`;
+      cls = "text-gray-500";
+      title = `None of the ${total} ads are live`;
+    } else if (active < total) {
+      text = `${active}/${total}`;
+      cls = "text-yellow-500";
+      title = `${active} of ${total} ads live`;
+    } else {
+      cls = "text-green-500";
+      title = total === 1 ? "Its 1 ad is live" : `All ${total} ads are live`;
+    }
+
+    return (
+      <td
+        className={`px-3 py-2.5 text-right whitespace-nowrap ${cls}`}
+        title={title}
+      >
+        {text}
       </td>
     );
   };
@@ -1822,6 +1836,18 @@ export default function AdsPage() {
                     </span>
                   </th>
                 )}
+                {/* Flags + Budget columns (aggregated levels). Flags is
+                    blank unless a row needs attention. */}
+                {drillLevel !== "ad" && (
+                  <th className="px-3 py-3 font-medium text-gray-400 whitespace-nowrap text-left">
+                    Flags
+                  </th>
+                )}
+                {drillLevel !== "ad" && (
+                  <th className="px-3 py-3 font-medium text-gray-400 whitespace-nowrap text-right">
+                    Budget
+                  </th>
+                )}
                 {/* Count column for aggregated levels */}
                 {drillLevel !== "ad" && (
                   <th
@@ -1915,7 +1941,8 @@ export default function AdsPage() {
                       className="px-3 py-3"
                       colSpan={
                       METRIC_COLS.length +
-                      (isAdmin ? 4 : 3) +
+                      (drillLevel === "ad" ? 5 : 6) +
+                      (isAdmin ? 1 : 0) +
                       (drillLevel === "adset" ? 1 : 0)
                     }
                     >
@@ -1928,7 +1955,8 @@ export default function AdsPage() {
                   <td
                     colSpan={
                       METRIC_COLS.length +
-                      (isAdmin ? 4 : 3) +
+                      (drillLevel === "ad" ? 5 : 6) +
+                      (isAdmin ? 1 : 0) +
                       (drillLevel === "adset" ? 1 : 0)
                     }
                     className="px-3 py-8 text-center text-gray-500"
@@ -2004,9 +2032,9 @@ export default function AdsPage() {
                           />
                         </td>
                       )}
-                      {/* Name (+ budget control). Status / disapproval /
-                          scaling indicators live in the count column so the
-                          name never gets squeezed off the row. */}
+                      {/* Name. Nothing else lives here — flags, budget and
+                          counts each have their own column so a long name is
+                          never squeezed off the row. */}
                       <td className="px-3 py-2.5 text-left whitespace-nowrap max-w-[420px]">
                         <span className="text-gray-200 flex items-center gap-1.5">
                           <span className="truncate" title={name}>
@@ -2018,10 +2046,12 @@ export default function AdsPage() {
                               className="text-gray-600 flex-shrink-0"
                             />
                           )}
-                          {drillLevel !== "ad" &&
-                            renderBudgetBadge(entityId, name)}
                         </span>
                       </td>
+                      {/* Flags + Budget (aggregated levels) */}
+                      {drillLevel !== "ad" &&
+                        renderFlagsCell(rowData as unknown as AggRow, entityId)}
+                      {drillLevel !== "ad" && renderBudgetCell(entityId, name)}
                       {/* Status (ad level) */}
                       {drillLevel === "ad" && (
                         <td className="px-3 py-2.5 text-left whitespace-nowrap">
@@ -2082,12 +2112,9 @@ export default function AdsPage() {
                           </div>
                         </td>
                       )}
-                      {/* Count + health indicators (aggregated levels) */}
+                      {/* Live / total count (aggregated levels) */}
                       {drillLevel !== "ad" &&
-                        renderRollupCell(
-                          rowData as unknown as AggRow,
-                          entityId
-                        )}
+                        renderCountCell(rowData as unknown as AggRow)}
                       {/* Preview link (ad level) */}
                       {drillLevel === "ad" && (
                         <td className="px-3 py-2.5 text-center whitespace-nowrap">
