@@ -10,6 +10,17 @@ import {
   Circle,
   XCircle,
 } from "lucide-react";
+import {
+  EMPTY_NEW_CAMPAIGN,
+  ScalingCampaignPicker,
+  campaignBlockReason,
+  campaignPayload,
+  defaultObjective,
+  destinationCampaignId,
+  useScalingCampaigns,
+  type CampaignChoice,
+  type NewCampaignDraft,
+} from "./scaling-campaign-picker";
 
 export interface BulkPromoteSubject {
   ad_id: string;
@@ -127,6 +138,18 @@ export function PromoteBulkToScalingModal({
   const [loadingConfig, setLoadingConfig] = useState(true);
 
   const [selectedStore, setSelectedStore] = useState<string>("");
+  const {
+    campaigns,
+    configured,
+    loading: loadingCampaigns,
+    error: campaignsError,
+  } = useScalingCampaigns(selectedStore);
+  const [campaignChoice, setCampaignChoice] = useState<CampaignChoice>({
+    kind: "configured",
+  });
+  const [newCampaign, setNewCampaign] =
+    useState<NewCampaignDraft>(EMPTY_NEW_CAMPAIGN);
+  const [templateCampaignId, setTemplateCampaignId] = useState("");
   const [adsets, setAdsets] = useState<Adset[]>([]);
   const [loadingAdsets, setLoadingAdsets] = useState(false);
   const [templateAdsetId, setTemplateAdsetId] = useState<string>("");
@@ -165,7 +188,7 @@ export function PromoteBulkToScalingModal({
     }
   }, [campaign_name]);
 
-  const loadAdsets = useCallback(async (store: string) => {
+  const loadAdsets = useCallback(async (store: string, campaignId: string) => {
     setLoadingAdsets(true);
     setAdsets([]);
     setTemplateAdsetId("");
@@ -175,8 +198,14 @@ export function PromoteBulkToScalingModal({
     setDestinations(new Map());
     setError(null);
     try {
+      // No campaign id means the campaign list never arrived — the route
+      // then falls back to the store's mapped scaling campaign, which is
+      // the destination we're defaulting to anyway.
       const res = await fetch(
-        `/api/marketing/scaling/adsets?store=${encodeURIComponent(store)}`
+        `/api/marketing/scaling/adsets?store=${encodeURIComponent(store)}` +
+          (campaignId
+            ? `&campaign_id=${encodeURIComponent(campaignId)}`
+            : "")
       );
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to load adsets");
@@ -201,9 +230,39 @@ export function PromoteBulkToScalingModal({
     loadConfigs();
   }, [loadConfigs]);
 
+  // A fresh store means a fresh ad account: every campaign-level choice
+  // made against the old one is meaningless now.
   useEffect(() => {
-    if (selectedStore) loadAdsets(selectedStore);
-  }, [selectedStore, loadAdsets]);
+    if (!configured) return;
+    setCampaignChoice({ kind: "configured" });
+    setTemplateCampaignId(configured.id);
+    setNewCampaign((d) => ({ ...d, objective: defaultObjective(configured) }));
+  }, [configured]);
+
+  // A campaign that doesn't exist yet has no ad sets — list the template
+  // campaign's instead, which is what the clones will be modelled on. In
+  // that case they are templates only, never drop-in destinations.
+  const destCampaignId = destinationCampaignId(campaignChoice, configured);
+  const adsetCampaignId =
+    campaignChoice.kind === "new" ? templateCampaignId : destCampaignId;
+  const adsetsAreDestinations = campaignChoice.kind !== "new";
+
+  useEffect(() => {
+    if (!selectedStore) return;
+    // Nothing to list yet for a new campaign until a template is named.
+    if (campaignChoice.kind === "new" && !adsetCampaignId) return;
+    loadAdsets(selectedStore, adsetCampaignId ?? "");
+  }, [selectedStore, campaignChoice.kind, adsetCampaignId, loadAdsets]);
+
+  // Changing the destination campaign invalidates every per-row ad set
+  // choice — an id from the old campaign is not a destination in the new
+  // one. loadAdsets clears the map too, but only when the ad set list
+  // itself changes: switching the mapped campaign to "new campaign" keeps
+  // the same list (it becomes the template source) while making every
+  // "existing ad set" row unsubmittable.
+  useEffect(() => {
+    setDestinations(new Map());
+  }, [campaignChoice]);
 
   const availableStores = useMemo(
     () => configs.map((c) => c.store_name).sort((a, b) => a.localeCompare(b)),
@@ -255,8 +314,12 @@ export function PromoteBulkToScalingModal({
     };
   }, [subjects, destinations]);
 
+  const campaignBlocker = campaignBlockReason(campaignChoice, newCampaign);
+
   const canSubmit = (() => {
-    if (submitting || done || loadingAdsets || !selectedStore) return false;
+    if (submitting || done || loadingAdsets || loadingCampaigns) return false;
+    if (!selectedStore) return false;
+    if (campaignBlocker) return false;
     if (destCounts.active === 0) return false;
     if (destCounts.new > 0 && !templateAdsetId) return false;
     if (destCounts.newShared > 0 && (!templateAdsetId || sharedNewName.trim().length < 3))
@@ -270,6 +333,7 @@ export function PromoteBulkToScalingModal({
   const blockReason = (() => {
     if (submitting || done) return null;
     if (!selectedStore) return "Pick a target store first.";
+    if (campaignBlocker) return campaignBlocker;
     if (loadingAdsets) return null;
     if (destCounts.active === 0)
       return "Every ad is set to Skip — pick a destination for at least one.";
@@ -309,8 +373,12 @@ export function PromoteBulkToScalingModal({
 
     // The single shared adset is created lazily on the first "new-shared"
     // row, then its id is reused for every subsequent one so all those ads
-    // land in the SAME new adset instead of one adset per ad.
+    // land in the SAME new adset instead of one adset per ad. A new
+    // campaign works the same way: the first row that needs it creates it,
+    // everything after targets it by id — otherwise a 12-ad run would end
+    // up as 12 identically-named campaigns.
     let sharedAdsetId: string | null = null;
+    let createdCampaignId: string | null = null;
 
     for (const subject of subjects) {
       const dest = getDest(subject.ad_id);
@@ -327,6 +395,7 @@ export function PromoteBulkToScalingModal({
           ad_id: subject.ad_id,
           target_store: selectedStore,
           status_option: statusOption,
+          ...campaignPayload(campaignChoice, newCampaign, createdCampaignId),
         };
         if (dest.kind === "existing") {
           payload.target_adset_id = dest.adsetId;
@@ -356,6 +425,13 @@ export function PromoteBulkToScalingModal({
           body: JSON.stringify(payload),
         });
         const json = await res.json();
+        // Claim the campaign even from a failure: the route creates it
+        // before the ad set clone, and reports its id when that clone is
+        // what broke. Without this, every remaining row would create
+        // another empty campaign chasing the same error.
+        if (json.created_campaign_id) {
+          createdCampaignId = json.created_campaign_id as string;
+        }
         if (!res.ok) {
           updateRow(subject.ad_id, {
             status: "failed",
@@ -408,7 +484,7 @@ export function PromoteBulkToScalingModal({
                 {subjects.length === 1 ? "ad" : "ads"} to scaling
               </h2>
               <p className="text-xs text-gray-400 mt-0.5 truncate">
-                Copies each ad into the scaling campaign. One API call per ad.
+                Copies each ad into the campaign you pick. One API call per ad.
               </p>
             </div>
           </div>
@@ -423,6 +499,65 @@ export function PromoteBulkToScalingModal({
 
         {/* Body */}
         <div className="p-5 space-y-4">
+          {/* Target store */}
+          <div>
+            <label className="block text-xs text-gray-400 mb-1.5">
+              Target store
+            </label>
+            {loadingConfig ? (
+              <div className="flex items-center gap-2 text-xs text-gray-500 py-2">
+                <Loader2 size={12} className="animate-spin" />
+                Loading configured stores…
+              </div>
+            ) : availableStores.length === 0 ? (
+              <div className="text-xs text-yellow-400 p-2 bg-yellow-900/20 border border-yellow-700/40 rounded-lg">
+                No scaling campaigns mapped. Go to Admin → Settings → Scaling
+                Campaigns to configure first.
+              </div>
+            ) : (
+              <select
+                value={selectedStore}
+                onChange={(e) => setSelectedStore(e.target.value)}
+                disabled={submitting || done}
+                className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500"
+              >
+                <option value="">— Pick store —</option>
+                {availableStores.map((s) => {
+                  const cfg = configs.find((c) => c.store_name === s);
+                  return (
+                    <option key={s} value={s}>
+                      {s} → {cfg?.campaign_name ?? ""}
+                    </option>
+                  );
+                })}
+              </select>
+            )}
+          </div>
+
+          {/* Campaign picker — what the per-ad destinations below are
+              relative to, so it has to be settled first. */}
+          {selectedStore && (
+            <ScalingCampaignPicker
+              choice={campaignChoice}
+              onChoiceChange={setCampaignChoice}
+              draft={newCampaign}
+              onDraftChange={setNewCampaign}
+              campaigns={campaigns}
+              configured={configured}
+              loading={loadingCampaigns}
+              disabled={submitting || done}
+              templateCampaignId={templateCampaignId}
+              onTemplateCampaignChange={setTemplateCampaignId}
+            />
+          )}
+
+          {campaignsError && (
+            <div className="text-xs text-yellow-400 p-2 bg-yellow-900/20 border border-yellow-700/40 rounded-lg">
+              {campaignsError} — only the mapped scaling campaign is
+              available as a destination.
+            </div>
+          )}
+
           {/* Quick-apply + subjects */}
           <div className="bg-gray-800/40 border border-gray-700/50 rounded-lg overflow-hidden">
             {selectedStore && !submitting && !done && (
@@ -456,24 +591,26 @@ export function PromoteBulkToScalingModal({
                 >
                   + New per ad
                 </button>
-                <select
-                  value=""
-                  disabled={adsets.length === 0}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (!v) return;
-                    setAllDest({ kind: "existing", adsetId: v });
-                  }}
-                  className="bg-gray-800 border border-gray-700 text-gray-300 text-[11px] rounded px-2 py-0.5 max-w-[180px] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <option value="">an existing adset…</option>
-                  {adsets.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                      {pausedTag(a.effective_status)}
-                    </option>
-                  ))}
-                </select>
+                {adsetsAreDestinations && (
+                  <select
+                    value=""
+                    disabled={adsets.length === 0}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (!v) return;
+                      setAllDest({ kind: "existing", adsetId: v });
+                    }}
+                    className="bg-gray-800 border border-gray-700 text-gray-300 text-[11px] rounded px-2 py-0.5 max-w-[180px] cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <option value="">an existing adset…</option>
+                    {adsets.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                        {pausedTag(a.effective_status)}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <button
                   type="button"
                   onClick={() => setAllDest({ kind: "skip" })}
@@ -581,7 +718,7 @@ export function PromoteBulkToScalingModal({
                               ? "+ New per ad (named after source)"
                               : "+ New per ad — pick a source adset below first"}
                           </option>
-                          {adsets.length > 0 && (
+                          {adsetsAreDestinations && adsets.length > 0 && (
                             <optgroup label="Existing adsets">
                               {adsets.map((a) => (
                                 <option
@@ -604,41 +741,6 @@ export function PromoteBulkToScalingModal({
             </div>
           </div>
 
-          {/* Target store */}
-          <div>
-            <label className="block text-xs text-gray-400 mb-1.5">
-              Target store
-            </label>
-            {loadingConfig ? (
-              <div className="flex items-center gap-2 text-xs text-gray-500 py-2">
-                <Loader2 size={12} className="animate-spin" />
-                Loading configured stores…
-              </div>
-            ) : availableStores.length === 0 ? (
-              <div className="text-xs text-yellow-400 p-2 bg-yellow-900/20 border border-yellow-700/40 rounded-lg">
-                No scaling campaigns mapped. Go to Admin → Settings → Scaling
-                Campaigns to configure first.
-              </div>
-            ) : (
-              <select
-                value={selectedStore}
-                onChange={(e) => setSelectedStore(e.target.value)}
-                disabled={submitting || done}
-                className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500"
-              >
-                <option value="">— Pick store —</option>
-                {availableStores.map((s) => {
-                  const cfg = configs.find((c) => c.store_name === s);
-                  return (
-                    <option key={s} value={s}>
-                      {s} → {cfg?.campaign_name ?? ""}
-                    </option>
-                  );
-                })}
-              </select>
-            )}
-          </div>
-
           {/* Template adset — cloned for any "New adset" / "New per ad" row */}
           {selectedStore && (
             <div>
@@ -651,13 +753,13 @@ export function PromoteBulkToScalingModal({
               {loadingAdsets ? (
                 <div className="flex items-center gap-2 text-xs text-gray-500 py-2">
                   <Loader2 size={12} className="animate-spin" />
-                  Loading adsets from scaling campaign…
+                  Loading adsets…
                 </div>
               ) : adsets.length === 0 ? (
                 <div className="text-xs text-yellow-400 p-2 bg-yellow-900/20 border border-yellow-700/40 rounded-lg">
-                  No adsets in scaling campaign yet. &quot;+ New&quot; is
-                  unavailable until one exists — drop ads into existing
-                  adsets instead, or create one in Ads Manager first.
+                  No adsets in that campaign, so there is nothing to clone.
+                  Pick another campaign above, or create an ad set in Ads
+                  Manager first — Meta has no way to make a blank one.
                 </div>
               ) : (
                 <select
@@ -684,7 +786,8 @@ export function PromoteBulkToScalingModal({
               )}
               <p className="text-[11px] text-gray-500 mt-1">
                 You still get a brand-new, separate adset — this just gives it
-                a starting targeting/budget. The original is untouched.
+                a starting targeting/budget, and it is created inside the
+                target campaign above. The original is untouched.
               </p>
             </div>
           )}
@@ -709,7 +812,7 @@ export function PromoteBulkToScalingModal({
                 className="w-full bg-gray-800 border border-gray-700 text-gray-200 text-sm rounded-lg px-3 py-2 focus:ring-orange-500 focus:border-orange-500"
               />
               <p className="text-[11px] text-gray-500 mt-1">
-                A brand-new adset with this name is created in the scaling
+                A brand-new adset with this name is created in the target
                 campaign (starts PAUSED so you can set its budget/targeting
                 first). Every ad set to &quot;→ New adset&quot; lands inside
                 it; the ads themselves respect the &quot;After copy&quot;

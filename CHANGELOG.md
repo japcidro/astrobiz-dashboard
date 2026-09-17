@@ -1,5 +1,65 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-17: Promote to scaling can choose a campaign, not just an ad set
+
+Promote had one destination and never said so. Picking a store resolved the
+campaign mapped to it in Admin → Settings, and the only question left was
+which ad set inside that one campaign. Landing a winner anywhere else — a
+second CBO, a fresh campaign for a new angle — meant leaving the dashboard
+and duplicating it by hand in Ads Manager, which is precisely the trip the
+promote button exists to save.
+
+The destination is now two decisions, campaign then ad set, in that order.
+
+- **Target campaign** sits under Target store in both promote modals. It
+  opens on the store's scaling campaign, so the existing path is unchanged
+  and still two clicks; below it sit every other campaign in the same ad
+  account, and **+ Create a new campaign…**. In the bulk modal the store and
+  campaign pickers moved *above* the ad list — they were underneath it,
+  which asked people to choose a per-ad destination before the thing those
+  destinations belong to had been chosen.
+- **A new campaign** takes a name, an objective and an optional daily budget
+  (set it and the campaign runs on CBO; leave it blank and budgets stay at
+  the ad set level). The objective is pre-filled from the scaling campaign
+  because it has to match the ad set being cloned into it or Meta rejects
+  the clone — and it is pre-filled from our own list, never from whatever
+  legacy objective Graph reports, since Meta still *reports* `CONVERSIONS`
+  on old campaigns while refusing to *create* one with it.
+- **The first ad set in a new campaign is a clone**, because Meta cannot
+  create a blank one. A "Clone the first ad set from" picker chooses which
+  campaign's ad sets to model it on, defaulting to the scaling campaign;
+  the copy goes into the new campaign via `campaign_id` on Meta's ad set
+  `/copies`.
+- **A bulk run creates the campaign once.** The first ad creates it, the
+  response hands back `created_campaign_id`, and every ad after that joins
+  it by id — otherwise promoting twelve ads would have left twelve
+  identically-named campaigns. The id is claimed even from a *failed* row,
+  since the route creates the campaign before cloning the ad set and reports
+  it when that clone is what broke; without that, every remaining row would
+  have created another empty campaign chasing the same error.
+- **The ad set choices follow the campaign.** Switching campaigns clears
+  every per-row ad set pick — an id from the old campaign is not a
+  destination in the new one — and while a campaign is still being created,
+  "existing ad set" disappears entirely: the ad sets on screen are the
+  template's, not destinations.
+
+Server side, `/api/marketing/scaling/promote` takes `target_campaign_id` or
+`new_campaign` and falls back to the mapped campaign when given neither, so
+every existing caller is unaffected. Two guards changed shape: the target
+ad set is now verified against the *destination* campaign rather than the
+scaling one, and a template ad set only has to share an ad account with the
+destination instead of sharing its campaign — cloning across campaigns is
+the whole mechanism by which a new campaign gets its first ad set. Meta's
+hard rule that `/copies` cannot cross ad accounts is still enforced, now on
+the chosen campaign too. `/api/marketing/scaling/adsets` takes a
+`campaign_id`, and a new `/api/marketing/scaling/campaigns` lists what a
+store's ad account can offer.
+
+One deliberate restraint: the "↑ SCALED" badge is still only written for
+ads copied into the mapped scaling campaign. An ad promoted into some other
+campaign is not scaled, and claiming otherwise would only be un-claimed by
+the next detection cron half an hour later.
+
 ## 2026-09-17: Ad copy without a made-up ceiling, and bulk into an existing ad set
 
 Two things the ad builders got wrong in opposite directions.

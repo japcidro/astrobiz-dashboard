@@ -5,10 +5,20 @@ export const dynamic = "force-dynamic";
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
 
-// Lists adsets inside a specific scaling campaign. Used by the
-// "Promote to scaling" modal so the user can pick a destination.
+function normalizeAcct(v: string | null | undefined): string {
+  return (v ?? "").toString().replace(/^act_/, "").trim();
+}
+
+// Lists adsets inside a campaign the promote modals can target. Used both
+// for picking a drop-in destination and for picking the template an ad set
+// clone copies its targeting and budget from.
+//
 // Query: /api/marketing/scaling/adsets?store=CAPSULED
-//   → resolves the store's scaling campaign and lists its adsets.
+//   → the store's configured scaling campaign.
+// Query: /api/marketing/scaling/adsets?store=CAPSULED&campaign_id=123
+//   → any other campaign, as long as it lives in the same ad account as
+//     that store's scaling campaign. Meta's /copies cannot cross ad
+//     accounts, so anything outside it could never be a destination.
 export async function GET(request: Request) {
   const employee = await getEmployee();
   if (!employee) {
@@ -20,6 +30,7 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url);
   const store = searchParams.get("store");
+  const requestedCampaignId = (searchParams.get("campaign_id") ?? "").trim();
   if (!store) {
     return Response.json({ error: "store required" }, { status: 400 });
   }
@@ -52,9 +63,45 @@ export async function GET(request: Request) {
     );
   }
 
+  let campaignId = String(scalingRow.campaign_id);
+  let campaignName = String(scalingRow.campaign_name);
+
+  if (requestedCampaignId && requestedCampaignId !== campaignId) {
+    try {
+      const res = await fetch(
+        `${FB_API_BASE}/${requestedCampaignId}?fields=id,name,account_id&access_token=${encodeURIComponent(token)}`,
+        { cache: "no-store" }
+      );
+      const json = await res.json();
+      if (!res.ok) {
+        throw new Error(json?.error?.message ?? "campaign lookup failed");
+      }
+      if (
+        normalizeAcct(json.account_id as string) !==
+        normalizeAcct(scalingRow.account_id as string)
+      ) {
+        return Response.json(
+          {
+            error: `Campaign ${requestedCampaignId} is not in the same ad account as the "${store}" scaling campaign.`,
+          },
+          { status: 400 }
+        );
+      }
+      campaignId = String(json.id);
+      campaignName = (json.name as string) ?? campaignId;
+    } catch (err) {
+      return Response.json(
+        {
+          error: `Could not read campaign: ${err instanceof Error ? err.message : "unknown"}`,
+        },
+        { status: 502 }
+      );
+    }
+  }
+
   try {
     const res = await fetch(
-      `${FB_API_BASE}/${scalingRow.campaign_id}/adsets?fields=id,name,effective_status,daily_budget,lifetime_budget&limit=200&access_token=${encodeURIComponent(token)}`,
+      `${FB_API_BASE}/${campaignId}/adsets?fields=id,name,effective_status,daily_budget,lifetime_budget&limit=200&access_token=${encodeURIComponent(token)}`,
       { cache: "no-store" }
     );
     const json = await res.json();
@@ -82,8 +129,8 @@ export async function GET(request: Request) {
 
     return Response.json({
       campaign: {
-        id: scalingRow.campaign_id,
-        name: scalingRow.campaign_name,
+        id: campaignId,
+        name: campaignName,
         account_id: scalingRow.account_id,
       },
       adsets,

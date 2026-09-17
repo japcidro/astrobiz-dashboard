@@ -8,6 +8,17 @@ import {
   AlertCircle,
   CheckCircle2,
 } from "lucide-react";
+import {
+  EMPTY_NEW_CAMPAIGN,
+  ScalingCampaignPicker,
+  campaignBlockReason,
+  campaignPayload,
+  defaultObjective,
+  destinationCampaignId,
+  useScalingCampaigns,
+  type CampaignChoice,
+  type NewCampaignDraft,
+} from "./scaling-campaign-picker";
 
 export interface PromoteSubject {
   ad_id: string;
@@ -24,6 +35,7 @@ interface Props {
   onSuccess: (result: {
     copied_ad_id: string | null;
     status: "PAUSED" | "ACTIVE";
+    campaign_name: string | null;
   }) => void;
 }
 
@@ -80,9 +92,23 @@ export function PromoteToScalingModal({
     "PAUSED"
   );
 
+  // Destination campaign: the mapped scaling campaign (default), another
+  // campaign in the same ad account, or one created on submit.
+  const {
+    campaigns,
+    configured,
+    loading: loadingCampaigns,
+    error: campaignsError,
+  } = useScalingCampaigns(selectedStore);
+  const [campaignChoice, setCampaignChoice] = useState<CampaignChoice>({
+    kind: "configured",
+  });
+  const [newCampaign, setNewCampaign] =
+    useState<NewCampaignDraft>(EMPTY_NEW_CAMPAIGN);
+  const [templateCampaignId, setTemplateCampaignId] = useState("");
+
   // "Existing" = drop ad into a chosen adset.
-  // "New"      = clone a template adset in the scaling campaign, rename it,
-  //              then drop the ad in there.
+  // "New"      = clone a template adset, rename it, then drop the ad in.
   const [mode, setMode] = useState<"existing" | "new">("existing");
   const [newAdsetName, setNewAdsetName] = useState("");
   const [templateAdsetId, setTemplateAdsetId] = useState("");
@@ -124,14 +150,21 @@ export function PromoteToScalingModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadAdsets = useCallback(async (store: string) => {
+  const loadAdsets = useCallback(async (store: string, campaignId: string) => {
     setLoadingAdsets(true);
     setAdsets([]);
     setSelectedAdsetId("");
+    setTemplateAdsetId("");
     setError(null);
     try {
+      // No campaign id means the campaign list never arrived — the route
+      // then falls back to the store's mapped scaling campaign, which is
+      // the destination we're defaulting to anyway.
       const res = await fetch(
-        `/api/marketing/scaling/adsets?store=${encodeURIComponent(store)}`
+        `/api/marketing/scaling/adsets?store=${encodeURIComponent(store)}` +
+          (campaignId
+            ? `&campaign_id=${encodeURIComponent(campaignId)}`
+            : "")
       );
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to load adsets");
@@ -147,19 +180,45 @@ export function PromoteToScalingModal({
     loadConfigs();
   }, [loadConfigs]);
 
+  // A fresh store means a fresh ad account: every campaign-level choice
+  // made against the old one is meaningless now.
   useEffect(() => {
-    if (selectedStore) {
-      loadAdsets(selectedStore);
-    }
-  }, [selectedStore, loadAdsets]);
+    if (!configured) return;
+    setCampaignChoice({ kind: "configured" });
+    setTemplateCampaignId(configured.id);
+    setNewCampaign((d) => ({ ...d, objective: defaultObjective(configured) }));
+  }, [configured]);
+
+  // A campaign that doesn't exist yet has no ad sets — list the template
+  // campaign's instead, which is what the clone will be modelled on.
+  const adsetCampaignId =
+    campaignChoice.kind === "new"
+      ? templateCampaignId
+      : destinationCampaignId(campaignChoice, configured);
+
+  useEffect(() => {
+    if (!selectedStore) return;
+    // Nothing to list yet for a new campaign until a template is named.
+    if (campaignChoice.kind === "new" && !adsetCampaignId) return;
+    loadAdsets(selectedStore, adsetCampaignId ?? "");
+  }, [selectedStore, campaignChoice.kind, adsetCampaignId, loadAdsets]);
+
+  // Nothing to drop into inside a campaign being created this second.
+  useEffect(() => {
+    if (campaignChoice.kind === "new") setMode("new");
+  }, [campaignChoice.kind]);
 
   const availableStores = useMemo(
     () => configs.map((c) => c.store_name).sort((a, b) => a.localeCompare(b)),
     [configs]
   );
 
+  const campaignBlocker = campaignBlockReason(campaignChoice, newCampaign);
+
   const canSubmit = (() => {
-    if (submitting || loadingAdsets || !selectedStore) return false;
+    if (submitting || loadingAdsets || loadingCampaigns || !selectedStore)
+      return false;
+    if (campaignBlocker) return false;
     if (mode === "existing") return !!selectedAdsetId;
     return !!templateAdsetId && newAdsetName.trim().length >= 3;
   })();
@@ -179,6 +238,7 @@ export function PromoteToScalingModal({
         ad_id: subject.ad_id,
         target_store: selectedStore,
         status_option: statusOption,
+        ...campaignPayload(campaignChoice, newCampaign),
       };
       if (mode === "existing") {
         payload.target_adset_id = selectedAdsetId;
@@ -205,6 +265,7 @@ export function PromoteToScalingModal({
       onSuccess({
         copied_ad_id: json.copied_ad_id ?? null,
         status: statusOption,
+        campaign_name: (json.target_campaign_name as string) ?? null,
       });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Promote failed");
@@ -231,7 +292,7 @@ export function PromoteToScalingModal({
                 Promote to scaling
               </h2>
               <p className="text-xs text-gray-400 mt-0.5 truncate">
-                Duplicates this ad into the scaling campaign&apos;s adset.
+                Duplicates this ad into the campaign and ad set you pick.
               </p>
             </div>
           </div>
@@ -305,14 +366,42 @@ export function PromoteToScalingModal({
             )}
           </div>
 
+          {/* Campaign picker */}
+          {selectedStore && (
+            <ScalingCampaignPicker
+              choice={campaignChoice}
+              onChoiceChange={setCampaignChoice}
+              draft={newCampaign}
+              onDraftChange={setNewCampaign}
+              campaigns={campaigns}
+              configured={configured}
+              loading={loadingCampaigns}
+              disabled={submitting}
+              templateCampaignId={templateCampaignId}
+              onTemplateCampaignChange={setTemplateCampaignId}
+            />
+          )}
+
+          {campaignsError && (
+            <div className="text-xs text-yellow-400 p-2 bg-yellow-900/20 border border-yellow-700/40 rounded-lg">
+              {campaignsError} — only the mapped scaling campaign is
+              available as a destination.
+            </div>
+          )}
+
           {/* Mode toggle */}
           {selectedStore && (
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => setMode("existing")}
-                disabled={submitting}
-                className={`flex-1 text-xs px-3 py-2 rounded-lg border transition-colors cursor-pointer ${
+                disabled={submitting || campaignChoice.kind === "new"}
+                title={
+                  campaignChoice.kind === "new"
+                    ? "A campaign being created has no ad sets yet"
+                    : undefined
+                }
+                className={`flex-1 text-xs px-3 py-2 rounded-lg border transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed ${
                   mode === "existing"
                     ? "bg-gray-700 border-gray-500 text-white"
                     : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500"
@@ -351,11 +440,11 @@ export function PromoteToScalingModal({
               {loadingAdsets ? (
                 <div className="flex items-center gap-2 text-xs text-gray-500 py-2">
                   <Loader2 size={12} className="animate-spin" />
-                  Loading adsets from scaling campaign…
+                  Loading adsets…
                 </div>
               ) : adsets.length === 0 ? (
                 <div className="text-xs text-yellow-400 p-2 bg-yellow-900/20 border border-yellow-700/40 rounded-lg">
-                  No adsets in scaling campaign. Switch to &quot;+ New adset&quot;
+                  No adsets in this campaign. Switch to &quot;+ New adset&quot;
                   to clone one into place.
                 </div>
               ) : (
@@ -383,17 +472,23 @@ export function PromoteToScalingModal({
               <div>
                 <label className="block text-xs text-gray-400 mb-1.5">
                   Template adset (targeting + budget gets cloned)
+                  {campaignChoice.kind === "new" && (
+                    <span className="text-gray-600">
+                      {" "}
+                      — from the campaign chosen above
+                    </span>
+                  )}
                 </label>
                 {loadingAdsets ? (
                   <div className="flex items-center gap-2 text-xs text-gray-500 py-2">
                     <Loader2 size={12} className="animate-spin" />
-                    Loading adsets from scaling campaign…
+                    Loading adsets…
                   </div>
                 ) : adsets.length === 0 ? (
                   <div className="text-xs text-yellow-400 p-2 bg-yellow-900/20 border border-yellow-700/40 rounded-lg">
-                    No adsets yet. Create one manually in Ads Manager first
-                    — the dashboard clones an existing one to save the
-                    targeting/budget setup.
+                    No adsets in that campaign. Pick another one to clone
+                    from, or create an ad set in Ads Manager first — Meta
+                    has no way to make a blank one.
                   </div>
                 ) : (
                   <select
@@ -525,6 +620,12 @@ export function PromoteToScalingModal({
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-2 p-4 border-t border-gray-700">
+          {campaignBlocker && (
+            <p className="mr-auto text-[11px] text-orange-300/90 flex items-start gap-1 max-w-[55%]">
+              <AlertCircle size={12} className="mt-0.5 flex-shrink-0" />
+              {campaignBlocker}
+            </p>
+          )}
           <button
             onClick={onClose}
             disabled={submitting}
