@@ -36,6 +36,7 @@ import {
   ShieldCheck,
   Award,
   Repeat,
+  AudioLines,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -280,6 +281,12 @@ const navEntries: NavEntry[] = [
         label: "Ad Deconstructor",
         href: "/marketing/deconstructor",
         icon: <Sparkles size={18} />,
+        roles: ["admin", "marketing"],
+      },
+      {
+        label: "Transcriber",
+        href: "/marketing/transcriber",
+        icon: <AudioLines size={18} />,
         roles: ["admin", "marketing"],
       },
       {

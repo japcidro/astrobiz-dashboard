@@ -1,5 +1,39 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-21: Transcriber — drop in videos, get the transcript and the sound
+
+Marketing → **Transcriber**. Drag in mp4s (mov and webm too), press one
+button, and each one comes back with a timestamped verbatim transcript, a
+read on the tone of voice, and a breakdown of the music.
+
+The transcript stays in the language it was spoken in — Taglish is left as
+Taglish, never translated — with speaker labels and non-speech events
+marked inline. A clean, timestamp-free copy sits underneath it for pasting
+straight into a script.
+
+The voice analysis profiles every speaker separately: tone adjectives,
+emotional arc with timestamps, pace in words per minute, pitch, energy,
+timbre, accent, delivery style, how it was recorded, and a one-line casting
+note for reproducing that voice. The music analysis is written for a music
+supervisor rather than a marketer — genre and subgenre, mood, instrument by
+instrument, tempo, key, groove, arrangement over time, vocals, production
+era, how the bed sits against the VO, what it resembles, and a search phrase
+for finding an equivalent track. Sound design cues and a beat-by-beat audio
+timeline come with it.
+
+Several files run at once, two in flight at a time, each with its own
+progress and its own failure — one bad video does not take the batch down.
+Results copy as Markdown individually or download as one file.
+
+The bytes never pass through the dashboard. The server mints a Gemini File
+API upload session and hands back only the session URL, so the browser PUTs
+the video straight to Google: no 4.5MB serverless body cap, no API key in
+the client, 500MB per file. If something on the network blocks that
+cross-origin upload, small files fall back to relaying through us and the
+error says what happened. The uploaded file is deleted once the analysis
+comes back.
+
+
 ## 2026-09-18: "Creative should not include standard enhancements"
 
 The real reason the Nurtelle promotes were failing, now that the error is
