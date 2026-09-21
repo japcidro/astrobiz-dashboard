@@ -49,62 +49,87 @@ interface UploadedRef {
   mimeType: string;
 }
 
-// fetch() gives no upload progress, and a 200MB video with a dead progress bar
-// looks frozen — hence XHR.
-function putToGemini(
-  uploadUrl: string,
+// Vercel caps a request body at 4.5MB, and Gemini wants every non-final chunk
+// to be a multiple of 256KB. 4MB satisfies both with room for headers.
+const CHUNK_BYTES = 4 * 1024 * 1024;
+
+// A failing request does not always answer in JSON — Vercel's own 413 page is
+// plain text, which is how a rejected upload used to surface as "Unexpected
+// token 'R'". Read the body once and only then decide how to read it.
+async function readResponse(res: Response): Promise<Record<string, unknown>> {
+  const text = await res.text();
+  let json: Record<string, unknown> | null = null;
+  try {
+    json = JSON.parse(text) as Record<string, unknown>;
+  } catch {
+    /* not JSON — handled below */
+  }
+  if (!res.ok) {
+    const message =
+      (json?.error as string | undefined) ||
+      (text.trim()
+        ? `${res.status}: ${text.trim().slice(0, 140)}`
+        : `Request failed (${res.status})`);
+    throw new Error(message);
+  }
+  if (!json) throw new Error("The server returned an unreadable response");
+  return json;
+}
+
+// Slices the video and relays it through our own API one chunk at a time.
+// Same-origin, so nothing here depends on the browser being allowed to talk to
+// Google directly, and no single request comes near the body limit.
+async function uploadChunked(
   file: File,
   onProgress: (pct: number) => void,
   signal: AbortSignal
 ): Promise<UploadedRef> {
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", uploadUrl, true);
-    xhr.setRequestHeader("X-Goog-Upload-Offset", "0");
-    xhr.setRequestHeader("X-Goog-Upload-Command", "upload, finalize");
+  const session = await readResponse(
+    await fetch("/api/marketing/transcriber/upload-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: file.name,
+        mimeType: file.type || "video/mp4",
+        sizeBytes: file.size,
+      }),
+      signal,
+    })
+  );
 
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
-    };
-    xhr.onerror = () => reject(new Error("BLOCKED"));
-    xhr.onabort = () => reject(new Error("Cancelled"));
-    xhr.onload = () => {
-      if (xhr.status < 200 || xhr.status >= 300) {
-        reject(new Error(`Upload failed (${xhr.status})`));
-        return;
-      }
-      try {
-        const uploaded = JSON.parse(xhr.responseText)?.file;
-        if (!uploaded?.uri || !uploaded?.name) throw new Error("no uri");
-        resolve({
-          fileUri: uploaded.uri,
-          fileName: uploaded.name,
-          mimeType: uploaded.mimeType ?? "video/mp4",
-        });
-      } catch {
-        reject(new Error("Gemini returned an unreadable upload response"));
-      }
-    };
+  const uploadUrl = session.uploadUrl as string;
+  let offset = 0;
 
-    signal.addEventListener("abort", () => xhr.abort(), { once: true });
-    xhr.send(file);
-  });
-}
+  while (offset < file.size) {
+    const end = Math.min(offset + CHUNK_BYTES, file.size);
+    const isLast = end === file.size;
 
-async function uploadViaProxy(
-  file: File,
-  signal: AbortSignal
-): Promise<UploadedRef> {
-  const form = new FormData();
-  form.append("file", file);
-  const res = await fetch("/api/marketing/transcriber/proxy-upload", {
-    method: "POST",
-    body: form,
-    signal,
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json?.error ?? "Upload failed");
-  return json as UploadedRef;
+    const res = await fetch("/api/marketing/transcriber/upload-chunk", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "x-upload-url": uploadUrl,
+        "x-upload-offset": String(offset),
+        "x-upload-last": isLast ? "1" : "0",
+      },
+      body: file.slice(offset, end),
+      signal,
+    });
+    const json = await readResponse(res);
+
+    offset = end;
+    onProgress(Math.round((offset / file.size) * 100));
+
+    if (json.done) {
+      return {
+        fileUri: json.fileUri as string,
+        fileName: json.fileName as string,
+        mimeType: json.mimeType as string,
+      };
+    }
+  }
+
+  throw new Error("Upload ended without a finalised file");
 }
 
 /* ------------------------------------------------------------------ *
@@ -536,52 +561,29 @@ export function TranscriberClient() {
     async (job: Job, signal: AbortSignal) => {
       patch(job.id, { status: "uploading", progress: 0, error: null });
 
-      // 1. Mint an upload session, then push the bytes straight to Gemini.
-      let uploaded: UploadedRef;
-      const sessionRes = await fetch("/api/marketing/transcriber/upload-url", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: job.file.name,
-          mimeType: job.file.type || "video/mp4",
-          sizeBytes: job.file.size,
-        }),
-        signal,
-      });
-      const sessionJson = await sessionRes.json();
-      if (!sessionRes.ok) throw new Error(sessionJson?.error ?? "Upload refused");
-
-      try {
-        uploaded = await putToGemini(
-          sessionJson.uploadUrl,
-          job.file,
-          (pct) => patch(job.id, { progress: pct }),
-          signal
-        );
-      } catch (err) {
-        // "BLOCKED" means the browser never reached Google — an extension, a
-        // network policy, or no connection. Small files can go via our server.
-        if (!(err instanceof Error) || err.message !== "BLOCKED") throw err;
-        patch(job.id, { progress: 0 });
-        uploaded = await uploadViaProxy(job.file, signal);
-      }
+      // 1. Relay the video to Gemini a chunk at a time.
+      const uploaded = await uploadChunked(
+        job.file,
+        (pct) => patch(job.id, { progress: pct }),
+        signal
+      );
 
       // 2. Gemini pre-processes, then transcribes and analyses.
       patch(job.id, { status: "analyzing", progress: 100 });
-      const res = await fetch("/api/marketing/transcriber/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(uploaded),
-        signal,
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json?.error ?? "Transcription failed");
+      const json = await readResponse(
+        await fetch("/api/marketing/transcriber/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(uploaded),
+          signal,
+        })
+      );
 
       patch(job.id, {
         status: "done",
-        analysis: json.analysis,
-        model: json.model ?? null,
-        tokens: json.tokens_used ?? null,
+        analysis: json.analysis as TranscriberAnalysis,
+        model: (json.model as string | null) ?? null,
+        tokens: (json.tokens_used as number | null) ?? null,
       });
       setExpanded((prev) => new Set(prev).add(job.id));
     },

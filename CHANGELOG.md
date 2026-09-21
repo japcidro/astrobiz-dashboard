@@ -1,5 +1,36 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-21: The Transcriber only worked on videos under 4.5MB
+
+Every file bigger than that failed with `Unexpected token 'R', "Request
+En"... is not valid JSON` — Vercel's plain-text "Request Entity Too Large"
+page, hit head-on by a `res.json()` that assumed every error answers in
+JSON.
+
+The size told the real story. The browser was supposed to send the video
+straight to Gemini and never touch our server; it could not, so every
+upload fell through to the relay meant only for small files, and the
+platform rejected anything past its 4.5MB body cap. The fallback had become
+the only path, and it was the wrong one.
+
+So the cross-origin upload is gone rather than patched. The video is now
+sliced and relayed through our own API a chunk at a time — 4MB each, under
+the cap and a clean multiple of the 256KB that Gemini's resumable protocol
+wants — and reassembled on Google's side. Same-origin end to end, so
+nothing depends on the browser being allowed to reach Google, and file size
+stops mattering. The progress bar now tracks real bytes accepted rather
+than bytes handed to a socket.
+
+The upload session URL makes a round trip through the browser to do this,
+which would otherwise let anyone point our server's fetch at a URL of their
+choosing, so the relay checks it is a Gemini upload session before sending
+a byte and refuses an oversized chunk with its own message.
+
+Failed requests are read as text first and parsed as JSON second, so an
+error page from anywhere in the stack now arrives as its status and its
+actual text instead of a parser complaint about the letter R.
+
+
 ## 2026-09-21: Transcriber — drop in videos, get the transcript and the sound
 
 Marketing → **Transcriber**. Drag in mp4s (mov and webm too), press one

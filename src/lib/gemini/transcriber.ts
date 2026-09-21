@@ -1,11 +1,15 @@
-// TRANSCRIBER — upload an mp4 straight from the browser, get back a verbatim
-// transcript plus a deep read of the voice and the music.
+// TRANSCRIBER — upload an mp4 from the browser, get back a verbatim transcript
+// plus a deep read of the voice and the music.
 //
 // Split from lib/gemini/deconstruct.ts on purpose: that module analyses ads
 // that already live on Facebook (server downloads a URL). Here the source is a
-// file on the user's machine, so the bytes never touch our server — the browser
-// PUTs them directly to Gemini's File API using a session URL we mint. That
-// sidesteps Vercel's 4.5MB request-body cap entirely.
+// file on the user's machine.
+//
+// The browser cannot POST the video to Gemini directly — the cross-origin
+// upload is blocked in practice — and Vercel rejects any request body over
+// 4.5MB before our code runs, so a single relayed upload is out too. Instead
+// the file is relayed in chunks that each fit under that cap, using Gemini's
+// resumable upload protocol. Same-origin the whole way, any file size.
 
 const GEMINI_MODEL = "gemini-2.5-flash";
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com";
@@ -106,35 +110,61 @@ export async function startUploadSession(
   return uploadUrl;
 }
 
-// Server-side byte upload. Only used by the proxy fallback for small files
-// when the browser cannot reach Gemini directly.
-export async function uploadBytes(
+export interface UploadedFile {
+  uri: string;
+  name: string;
+  mimeType: string;
+}
+
+// A Gemini upload session URL. Anything the client hands back to us gets
+// checked against this before the server will POST bytes to it — the URL makes
+// a round trip through the browser, so without this it is an open relay.
+const UPLOAD_URL_PATTERN =
+  /^https:\/\/generativelanguage\.googleapis\.com\/upload\/v1beta\/files\?/;
+
+export function isValidUploadUrl(url: string): boolean {
+  return UPLOAD_URL_PATTERN.test(url);
+}
+
+// Relays one chunk into an open resumable session. Gemini requires every
+// non-final chunk to be a multiple of 256KB and to arrive in offset order;
+// the finalising chunk is the one that returns the file metadata.
+export async function uploadChunk(
   uploadUrl: string,
-  body: ArrayBuffer
-): Promise<{ uri: string; name: string; mimeType: string; state: string }> {
+  chunk: ArrayBuffer,
+  offset: number,
+  isLast: boolean
+): Promise<UploadedFile | null> {
   const res = await fetch(uploadUrl, {
     method: "POST",
     headers: {
-      "Content-Length": String(body.byteLength),
-      "X-Goog-Upload-Offset": "0",
-      "X-Goog-Upload-Command": "upload, finalize",
+      "Content-Length": String(chunk.byteLength),
+      "X-Goog-Upload-Offset": String(offset),
+      "X-Goog-Upload-Command": isLast ? "upload, finalize" : "upload",
     },
-    body,
+    body: chunk,
   });
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Upload failed (${res.status}): ${text.slice(0, 200)}`);
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `Upload rejected at ${(offset / 1024 / 1024).toFixed(1)}MB (${res.status}): ${text.slice(0, 200)}`
+    );
   }
-  const json = (await res.json()) as {
-    file?: { uri?: string; name?: string; mimeType?: string; state?: string };
-  };
-  const file = json.file ?? {};
-  if (!file.uri || !file.name) throw new Error("Gemini returned no file uri");
+  // Intermediate chunks come back empty — only the finalising one carries the
+  // file, and that is the only response worth parsing.
+  if (!isLast) return null;
+
+  const json = (await res.json().catch(() => null)) as {
+    file?: { uri?: string; name?: string; mimeType?: string };
+  } | null;
+  const file = json?.file;
+  if (!file?.uri || !file?.name) {
+    throw new Error("Gemini finalised the upload but returned no file");
+  }
   return {
     uri: file.uri,
     name: file.name,
     mimeType: file.mimeType ?? "video/mp4",
-    state: file.state ?? "PROCESSING",
   };
 }
 
