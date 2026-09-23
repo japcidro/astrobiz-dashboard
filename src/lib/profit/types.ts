@@ -4,6 +4,8 @@ export interface CogsItem {
   sku: string;
   product_name: string | null;
   cogs_per_unit: number;
+  /** Fraction added on top of cogs_per_unit — 0.12 for a VAT-registered supplier. */
+  vat_rate: number;
   created_at: string;
   updated_at: string;
 }

@@ -11,15 +11,30 @@ import {
   Search,
 } from "lucide-react";
 import type { CogsItem } from "@/lib/profit/types";
+import { effectiveCogsPerUnit } from "@/lib/profit/formulas";
 
 interface Props {
   initialItems: CogsItem[];
 }
 
+type EditField = "cogs" | "vat";
+
+// The UI speaks in percent (12); the API and the P&L speak in fractions (0.12).
+const pctToRate = (pct: string): number | null => {
+  const n = parseFloat(pct);
+  if (Number.isNaN(n) || n < 0 || n >= 100) return null;
+  return Math.round(n * 100) / 10000;
+};
+const rateToPct = (rate: number): string =>
+  String(Math.round((rate || 0) * 10000) / 100);
+
+const peso = (val: number) =>
+  `₱${val.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 export function CogsManager({ initialItems }: Props) {
   const [items, setItems] = useState<CogsItem[]>(initialItems);
   const [storeFilter, setStoreFilter] = useState("ALL");
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<{ id: string; field: EditField } | null>(null);
   const [editValue, setEditValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,6 +48,7 @@ export function CogsManager({ initialItems }: Props) {
   const [newSku, setNewSku] = useState("");
   const [newName, setNewName] = useState("");
   const [newCogs, setNewCogs] = useState("");
+  const [newVatPct, setNewVatPct] = useState("0");
 
   const stores = Array.from(new Set(items.map((i) => i.store_name))).sort();
   const filteredItems =
@@ -45,34 +61,64 @@ export function CogsManager({ initialItems }: Props) {
     setTimeout(() => setSuccess(null), 5000);
   };
 
-  const handleInlineEdit = (item: CogsItem) => {
-    setEditingId(item.id);
-    setEditValue(item.cogs_per_unit.toString());
+  const refreshItems = async () => {
+    const res = await fetch("/api/profit/cogs");
+    const json = await res.json();
+    if (res.ok && json.items) setItems(json.items);
   };
 
-  const handleInlineSave = async (item: CogsItem) => {
-    const newCost = parseFloat(editValue);
-    if (isNaN(newCost) || newCost < 0) {
-      setError("Invalid COGS value");
+  const startEdit = (item: CogsItem, field: EditField) => {
+    setEditing({ id: item.id, field });
+    setEditValue(
+      field === "cogs" ? item.cogs_per_unit.toString() : rateToPct(item.vat_rate)
+    );
+  };
+
+  const saveEdit = async (item: CogsItem) => {
+    if (!editing) return;
+    const field = editing.field;
+
+    let patch: { cogs_per_unit?: number; vat_rate?: number };
+    if (field === "cogs") {
+      const cost = parseFloat(editValue);
+      if (Number.isNaN(cost) || cost < 0) {
+        setError("Invalid COGS value");
+        return;
+      }
+      patch = { cogs_per_unit: cost };
+    } else {
+      const rate = pctToRate(editValue);
+      if (rate == null) {
+        setError("VAT must be a percent from 0 to 99");
+        return;
+      }
+      patch = { vat_rate: rate };
+    }
+
+    // No change — just close the editor.
+    if (
+      (patch.cogs_per_unit != null && patch.cogs_per_unit === item.cogs_per_unit) ||
+      (patch.vat_rate != null && patch.vat_rate === item.vat_rate)
+    ) {
+      setEditing(null);
       return;
     }
+
     setSaving(true);
     setError(null);
     try {
       const res = await fetch("/api/profit/cogs", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: item.id, cogs_per_unit: newCost }),
+        body: JSON.stringify({ id: item.id, ...patch }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to update");
       setItems((prev) =>
-        prev.map((i) =>
-          i.id === item.id ? { ...i, cogs_per_unit: newCost } : i
-        )
+        prev.map((i) => (i.id === item.id ? { ...i, ...patch } : i))
       );
-      setEditingId(null);
-      showSuccess("COGS updated");
+      setEditing(null);
+      showSuccess(field === "cogs" ? "COGS updated" : "VAT updated");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to update");
     } finally {
@@ -135,11 +181,20 @@ export function CogsManager({ initialItems }: Props) {
           const key = keys.find((k) => k.toLowerCase().trim() === target);
           return key ? String(row[key]).trim() : "";
         };
+        // "vat_rate" is a fraction (0.12); "vat" / "vat_pct" is a percent (12).
+        const vatRateRaw = get("vat_rate");
+        const vatPctRaw = get("vat_pct") || get("vat");
+        const vat_rate = vatRateRaw
+          ? parseFloat(vatRateRaw) || 0
+          : vatPctRaw
+            ? (pctToRate(vatPctRaw) ?? 0)
+            : 0;
         return {
           store_name: get("store_name") || get("store"),
           sku: get("sku"),
           product_name: get("product_name") || get("product") || null,
           cogs_per_unit: parseFloat(get("cogs_per_unit") || get("cogs") || get("cost")) || 0,
+          vat_rate,
         };
       }).filter((item) => item.sku); // skip rows without SKU
 
@@ -154,11 +209,7 @@ export function CogsManager({ initialItems }: Props) {
       if (!res.ok) throw new Error(json.error || "Failed to import");
 
       showSuccess(`${items.length} items imported`);
-      const refreshRes = await fetch("/api/profit/cogs");
-      const refreshJson = await refreshRes.json();
-      if (refreshRes.ok && refreshJson.items) {
-        setItems(refreshJson.items);
-      }
+      await refreshItems();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to import file");
     } finally {
@@ -177,7 +228,7 @@ export function CogsManager({ initialItems }: Props) {
 
       const rows = json.rows || json.inventory || [];
       const existingSkus = new Set(items.map((i) => i.sku));
-      const newSkus: { store_name: string; sku: string; product_name: string | null; cogs_per_unit: number }[] = [];
+      const newSkus: { store_name: string; sku: string; product_name: string | null; cogs_per_unit: number; vat_rate: number }[] = [];
 
       for (const row of rows) {
         const sku = row.sku || row.SKU;
@@ -188,6 +239,7 @@ export function CogsManager({ initialItems }: Props) {
             sku,
             product_name: row.product_name || row.title || null,
             cogs_per_unit: 0,
+            vat_rate: 0,
           });
         }
       }
@@ -206,12 +258,7 @@ export function CogsManager({ initialItems }: Props) {
       if (!postRes.ok) throw new Error(postJson.error || "Failed to save new SKUs");
 
       showSuccess(`${newSkus.length} new SKUs added (COGS = ₱0, update them!)`);
-      // Refresh items
-      const refreshRes = await fetch("/api/profit/cogs");
-      const refreshJson = await refreshRes.json();
-      if (refreshRes.ok && refreshJson.items) {
-        setItems(refreshJson.items);
-      }
+      await refreshItems();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to scan Shopify");
     } finally {
@@ -229,6 +276,11 @@ export function CogsManager({ initialItems }: Props) {
       setError("Invalid COGS value");
       return;
     }
+    const vatRate = pctToRate(newVatPct || "0");
+    if (vatRate == null) {
+      setError("VAT must be a percent from 0 to 99");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -242,6 +294,7 @@ export function CogsManager({ initialItems }: Props) {
               sku: newSku.trim(),
               product_name: newName.trim() || null,
               cogs_per_unit: cogsVal,
+              vat_rate: vatRate,
             },
           ],
         }),
@@ -254,18 +307,32 @@ export function CogsManager({ initialItems }: Props) {
       setNewSku("");
       setNewName("");
       setNewCogs("");
-      // Refresh items
-      const refreshRes = await fetch("/api/profit/cogs");
-      const refreshJson = await refreshRes.json();
-      if (refreshRes.ok && refreshJson.items) {
-        setItems(refreshJson.items);
-      }
+      setNewVatPct("0");
+      await refreshItems();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to add item");
     } finally {
       setSaving(false);
     }
   };
+
+  const inlineInput = (item: CogsItem, field: EditField, max?: string) => (
+    <input
+      type="number"
+      step={field === "cogs" ? "0.01" : "0.5"}
+      min="0"
+      max={max}
+      value={editValue}
+      onChange={(e) => setEditValue(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") saveEdit(item);
+        if (e.key === "Escape") setEditing(null);
+      }}
+      onBlur={() => saveEdit(item)}
+      autoFocus
+      className="w-24 bg-gray-800 border border-emerald-500 rounded px-2 py-1 text-white text-sm focus:outline-none"
+    />
+  );
 
   return (
     <div className="max-w-5xl space-y-6">
@@ -281,7 +348,8 @@ export function CogsManager({ initialItems }: Props) {
                 COGS Items ({filteredItems.length})
               </h2>
               <p className="text-sm text-gray-400">
-                Cost of goods sold per SKU
+                Supplier price per SKU, plus VAT where the supplier charges it.
+                The P&amp;L costs each unit at price + VAT.
               </p>
             </div>
           </div>
@@ -331,7 +399,7 @@ export function CogsManager({ initialItems }: Props) {
         <div className="mb-6 bg-gray-700/30 border border-gray-600/50 rounded-lg p-4">
           <p className="text-sm text-gray-300 mb-2 font-medium">Import from File</p>
           <p className="text-xs text-gray-500 mb-3">
-            Upload CSV or XLSX with columns: store_name, sku, product_name, cogs_per_unit
+            Upload CSV or XLSX with columns: store_name, sku, product_name, cogs_per_unit, vat (percent, optional)
           </p>
           <div className="flex items-center gap-3">
             <input
@@ -360,63 +428,79 @@ export function CogsManager({ initialItems }: Props) {
                   <th className="text-left px-3 py-2 font-medium">Store</th>
                   <th className="text-left px-3 py-2 font-medium">SKU</th>
                   <th className="text-left px-3 py-2 font-medium">Product Name</th>
-                  <th className="text-left px-3 py-2 font-medium">COGS/Unit (₱)</th>
+                  <th className="text-left px-3 py-2 font-medium">Supplier Price (₱)</th>
+                  <th className="text-left px-3 py-2 font-medium">VAT %</th>
+                  <th className="text-left px-3 py-2 font-medium">Cost/Unit (₱)</th>
                   <th className="text-right px-3 py-2 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.map((item) => (
-                  <tr
-                    key={item.id}
-                    className="border-b border-gray-800 hover:bg-gray-800/30"
-                  >
-                    <td className="px-3 py-3 text-gray-300 whitespace-nowrap">
-                      {item.store_name || "—"}
-                    </td>
-                    <td className="px-3 py-3 text-white font-mono text-xs whitespace-nowrap">
-                      {item.sku}
-                    </td>
-                    <td className="px-3 py-3 text-gray-300">
-                      {item.product_name || "—"}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap">
-                      {editingId === item.id ? (
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={editValue}
-                          onChange={(e) => setEditValue(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") handleInlineSave(item);
-                            if (e.key === "Escape") setEditingId(null);
-                          }}
-                          onBlur={() => handleInlineSave(item)}
-                          autoFocus
-                          className="w-24 bg-gray-800 border border-emerald-500 rounded px-2 py-1 text-white text-sm focus:outline-none"
-                        />
-                      ) : (
+                {filteredItems.map((item) => {
+                  const effective = effectiveCogsPerUnit(item.cogs_per_unit, item.vat_rate);
+                  const hasVat = item.vat_rate > 0;
+                  return (
+                    <tr
+                      key={item.id}
+                      className="border-b border-gray-800 hover:bg-gray-800/30"
+                    >
+                      <td className="px-3 py-3 text-gray-300 whitespace-nowrap">
+                        {item.store_name || "—"}
+                      </td>
+                      <td className="px-3 py-3 text-white font-mono text-xs whitespace-nowrap">
+                        {item.sku}
+                      </td>
+                      <td className="px-3 py-3 text-gray-300">
+                        {item.product_name || "—"}
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {editing?.id === item.id && editing.field === "cogs" ? (
+                          inlineInput(item, "cogs")
+                        ) : (
+                          <button
+                            onClick={() => startEdit(item, "cogs")}
+                            className="text-white hover:text-emerald-400 transition-colors cursor-pointer"
+                          >
+                            {peso(item.cogs_per_unit)}
+                          </button>
+                        )}
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        {editing?.id === item.id && editing.field === "vat" ? (
+                          inlineInput(item, "vat", "99")
+                        ) : (
+                          <button
+                            onClick={() => startEdit(item, "vat")}
+                            className={`transition-colors cursor-pointer ${
+                              hasVat ? "text-white hover:text-emerald-400" : "text-gray-500 hover:text-emerald-400"
+                            }`}
+                            title="Click to set the VAT this supplier charges on top of the price"
+                          >
+                            {rateToPct(item.vat_rate)}%
+                          </button>
+                        )}
+                      </td>
+                      <td className={`px-3 py-3 whitespace-nowrap font-medium ${hasVat ? "text-emerald-300" : "text-gray-300"}`}>
+                        {peso(effective)}
+                      </td>
+                      <td className="px-3 py-3 text-right">
                         <button
-                          onClick={() => handleInlineEdit(item)}
-                          className="text-white hover:text-emerald-400 transition-colors cursor-pointer"
+                          onClick={() => handleDelete(item.id)}
+                          className="p-1.5 text-gray-400 hover:text-red-400 transition-colors cursor-pointer"
+                          title="Delete"
                         >
-                          ₱{item.cogs_per_unit.toFixed(2)}
+                          <Trash2 size={14} />
                         </button>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 text-right">
-                      <button
-                        onClick={() => handleDelete(item.id)}
-                        className="p-1.5 text-gray-400 hover:text-red-400 transition-colors cursor-pointer"
-                        title="Delete"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+            {saving && (
+              <p className="text-xs text-gray-500 mt-2 flex items-center gap-1.5">
+                <RefreshCw size={12} className="animate-spin" /> Saving…
+              </p>
+            )}
           </div>
         )}
 
@@ -426,7 +510,7 @@ export function CogsManager({ initialItems }: Props) {
             <Plus size={14} />
             Add New Item
           </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
             <input
               type="text"
               value={newStore}
@@ -454,7 +538,18 @@ export function CogsManager({ initialItems }: Props) {
               min="0"
               value={newCogs}
               onChange={(e) => setNewCogs(e.target.value)}
-              placeholder="COGS/unit"
+              placeholder="Supplier price"
+              className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+            <input
+              type="number"
+              step="0.5"
+              min="0"
+              max="99"
+              value={newVatPct}
+              onChange={(e) => setNewVatPct(e.target.value)}
+              placeholder="VAT %"
+              title="VAT the supplier charges on top of the price, in percent"
               className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
             <button

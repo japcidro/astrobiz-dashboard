@@ -53,6 +53,8 @@ export function ProfitSummaryCards({
     {
       label: "COGS",
       value: formatCurrency(summary.cogs),
+      subtitle: "supplier price incl. VAT",
+      subtitleColor: "text-gray-500",
       icon: <Layers size={20} className="text-orange-400" />,
       bg: "bg-orange-600/20",
       accent: "",
@@ -60,6 +62,8 @@ export function ProfitSummaryCards({
     {
       label: "Ad Spend",
       value: formatCurrency(summary.ad_spend),
+      subtitle: "incl. 12% Meta VAT",
+      subtitleColor: "text-gray-500",
       icon: <TrendingUp size={20} className="text-blue-400" />,
       bg: "bg-blue-600/20",
       accent: "",

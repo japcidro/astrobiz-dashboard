@@ -1280,6 +1280,7 @@ export type Database = {
           sku: string
           store_name: string
           updated_at: string
+          vat_rate: number
         }
         Insert: {
           cogs_per_unit?: number
@@ -1289,6 +1290,7 @@ export type Database = {
           sku: string
           store_name: string
           updated_at?: string
+          vat_rate?: number
         }
         Update: {
           cogs_per_unit?: number
@@ -1298,6 +1300,7 @@ export type Database = {
           sku?: string
           store_name?: string
           updated_at?: string
+          vat_rate?: number
         }
         Relationships: []
       }

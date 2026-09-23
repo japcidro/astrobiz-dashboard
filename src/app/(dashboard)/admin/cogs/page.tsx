@@ -29,7 +29,7 @@ export default function CogsPage() {
         if (addSkusParam) {
           const skusToAdd = addSkusParam.split(",").filter(Boolean);
           const existingSkus = new Set(currentItems.map((i) => `${i.store_name}::${i.sku}`.toLowerCase()));
-          const newItems: Array<{ store_name: string; sku: string; product_name: string; cogs_per_unit: number }> = [];
+          const newItems: Array<{ store_name: string; sku: string; product_name: string; cogs_per_unit: number; vat_rate: number }> = [];
 
           for (const skuKey of skusToAdd) {
             if (existingSkus.has(skuKey.toLowerCase())) continue;
@@ -42,6 +42,7 @@ export default function CogsPage() {
               sku,
               product_name: "",
               cogs_per_unit: 0,
+              vat_rate: 0,
             });
           }
 

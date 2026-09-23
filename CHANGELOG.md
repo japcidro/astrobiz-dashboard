@@ -1,5 +1,38 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-23: The P&L was not charging VAT — on FOLIQ's COGS, or on any ad
+
+Two costs were entering Net Profit before tax.
+
+**COGS.** FOLIQ's FLQ was on file at ₱182.00, the supplier's pre-VAT invoice
+price, and the P&L multiplied that straight into every order. The real cost
+of a unit is ₱203.84. Rather than overwrite the number with one that no
+longer matches the invoice, `cogs_items` gains a **VAT %** column: the
+supplier price stays as invoiced, the VAT sits beside it, and the P&L costs
+each unit at price + VAT. FLQ is set to 12%. Every other SKU defaults to 0%,
+so nothing else moves until someone says its supplier charges VAT too.
+
+The COGS page shows all three — supplier price, VAT %, and the resulting
+cost per unit — each editable inline. Imports accept a `vat` column in
+percent. The accountant's Sales + COGS extract builds its lookup with the
+same helper as the P&L, so the two still reconcile to the centavo.
+
+**Ad spend.** Since June 2025 Meta charges Philippine advertisers 12% VAT
+on top of the ad delivery cost. The figure Ads Manager shows — and the
+figure the Insights API returns — is the amount *before* that tax; the VAT
+lands on the invoice, or comes off the wallet top-up. The P&L was taking
+that number as the cost. It now grosses every ad spend figure up by 12%,
+so Ad Spend and CPP show what actually leaves the bank. This applies to
+every store, and it is the larger of the two corrections.
+
+Ad Performance and the Compare view are left as Meta reports them, so they
+keep matching Ads Manager; the P&L is the one place that answers "what did
+this cost us".
+
+Expect Net Profit to drop on every past date once the cache refreshes —
+that is the profit that was never there.
+
+
 ## 2026-09-21: The Transcriber only worked on videos under 4.5MB
 
 Every file bigger than that failed with `Unexpected token 'R', "Request

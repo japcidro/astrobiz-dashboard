@@ -27,6 +27,71 @@ export const RTS_MIN_DELIVERED = 200; // threshold to use actual rate
 export const SETTLEMENT_WINDOW_DAYS = 6;
 
 /**
+ * Philippine VAT on Meta ads. Since June 2025 (RA 12023) Meta charges 12% on
+ * top of the ad delivery cost for Philippine advertisers. The Insights
+ * `spend` field — what Ads Manager shows — is the pre-VAT amount; the VAT is
+ * billed on the invoice (postpaid) or taken off the wallet top-up (prepaid).
+ * Either way the cash that leaves the business is spend × 1.12, and that is
+ * the number a P&L has to charge.
+ */
+export const AD_SPEND_VAT_RATE = 0.12;
+
+/**
+ * Cash cost of an ad spend figure as Meta reports it.
+ */
+export function applyAdSpendVat(
+  spend: number,
+  rate: number = AD_SPEND_VAT_RATE
+): number {
+  return spend * (1 + rate);
+}
+
+/**
+ * What one unit actually costs once the supplier's VAT is added.
+ *
+ * cogs_per_unit is kept as the price on the supplier's invoice, so it can be
+ * checked against the invoice. vat_rate is the fraction on top of it — 0.12
+ * for a VAT-registered supplier, 0 when the price already includes it. A
+ * missing or nonsense rate counts as 0, never as a discount.
+ */
+export function effectiveCogsPerUnit(
+  cogsPerUnit: number,
+  vatRate: number | null | undefined
+): number {
+  const rate =
+    typeof vatRate === "number" && Number.isFinite(vatRate) && vatRate > 0
+      ? vatRate
+      : 0;
+  return cogsPerUnit * (1 + rate);
+}
+
+/**
+ * "STORE::sku" → effective per-unit cost, for matching Shopify line items.
+ *
+ * Every consumer of cogs_items (the P&L, the accountant's extract) builds its
+ * lookup here so they key the same way — store upper-cased, SKU lower-cased —
+ * and cost a unit the same way, VAT included.
+ */
+export function buildCogsMap(
+  rows: Array<{
+    store_name: string | null;
+    sku: string | null;
+    cogs_per_unit: number | string | null;
+    vat_rate?: number | string | null;
+  }>
+): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    const key = `${(row.store_name || "").toUpperCase()}::${(row.sku || "").toLowerCase()}`;
+    map.set(
+      key,
+      effectiveCogsPerUnit(Number(row.cogs_per_unit) || 0, Number(row.vat_rate))
+    );
+  }
+  return map;
+}
+
+/**
  * Net profit = Revenue - COGS - Ad Spend - Shipping - Returns
  */
 export function calculateNetProfit(

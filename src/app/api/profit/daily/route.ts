@@ -12,6 +12,9 @@ import {
   calculateAov,
   calculateCpp,
   roundCurrency,
+  buildCogsMap,
+  applyAdSpendVat,
+  AD_SPEND_VAT_RATE,
   RTS_WORST_CASE_RATE,
   RTS_MIN_DELIVERED,
   SETTLEMENT_WINDOW_DAYS,
@@ -344,13 +347,11 @@ export async function GET(request: Request) {
       : storesData.filter((s) => s.name.toUpperCase() === storeFilter.toUpperCase());
 
   // --- 2. Fetch COGS lookup ---
-  const { data: cogsData } = await supabase.from("cogs_items").select("store_name, sku, cogs_per_unit");
-
-  const cogsMap = new Map<string, number>();
-  for (const item of cogsData || []) {
-    const key = `${(item.store_name || "").toUpperCase()}::${(item.sku || "").toLowerCase()}`;
-    cogsMap.set(key, item.cogs_per_unit);
-  }
+  // Effective per-unit cost: the supplier price plus that SKU's VAT.
+  const { data: cogsData } = await supabase
+    .from("cogs_items")
+    .select("store_name, sku, cogs_per_unit, vat_rate");
+  const cogsMap = buildCogsMap(cogsData || []);
 
   // --- 3. Fetch Shopify orders (revenue + COGS) ---
   // Per-date, per-store aggregation
@@ -532,7 +533,9 @@ export async function GET(request: Request) {
             );
 
             for (const row of insights) {
-              const spend = parseFloat(row.spend || "0");
+              // Meta reports the pre-VAT delivery cost; the 12% it bills on
+              // top is real cash out, so the P&L charges it here.
+              const spend = applyAdSpendVat(parseFloat(row.spend || "0"));
               if (spend === 0) continue;
 
               const dateStr = row.date_start; // already YYYY-MM-DD
@@ -1001,6 +1004,7 @@ export async function GET(request: Request) {
     daily,
     stores: Array.from(allStoreNames).sort(),
     missing_cogs_skus: Array.from(missingCogsSkus).sort(),
+    ad_spend_vat_rate: AD_SPEND_VAT_RATE,
     warnings,
   };
 

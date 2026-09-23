@@ -3,12 +3,14 @@
 // Replicates the EXACT revenue/COGS logic of /api/profit/daily so the numbers
 // reconcile 1:1 with the CEO's Net Profit tab:
 //   - Gross Sales = sum of order total_price (cancelled/voided/refunded excluded)
-//   - COGS        = cogs_items.cogs_per_unit × qty, matched by store+sku
+//   - COGS        = cogs_items.cogs_per_unit × (1 + vat_rate) × qty, matched
+//                   by store+sku — the same effective cost the P&L charges
 //
 // Aggregated per PHT day (scoped by the store filter). Admin-only.
 
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
+import { buildCogsMap } from "@/lib/profit/formulas";
 import {
   computeComplianceRange,
   toPhtDateStr,
@@ -110,15 +112,12 @@ export async function GET(request: Request) {
       ? storesData
       : storesData.filter((s) => s.id === storeFilter);
 
-  // COGS lookup — same keying as the P&L tab (STORE upper :: sku lower)
+  // COGS lookup — built by the same helper as the P&L tab, so keying and the
+  // VAT gross-up are identical and the two reconcile.
   const { data: cogsData } = await supabase
     .from("cogs_items")
-    .select("store_name, sku, cogs_per_unit");
-  const cogsMap = new Map<string, number>();
-  for (const item of cogsData || []) {
-    const key = `${(item.store_name || "").toUpperCase()}::${(item.sku || "").toLowerCase()}`;
-    cogsMap.set(key, item.cogs_per_unit);
-  }
+    .select("store_name, sku, cogs_per_unit, vat_rate");
+  const cogsMap = buildCogsMap(cogsData || []);
 
   const revenueByDate = new Map<string, number>();
   const ordersByDate = new Map<string, number>();

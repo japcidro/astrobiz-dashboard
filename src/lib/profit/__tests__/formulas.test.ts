@@ -22,6 +22,10 @@ import {
   calculateShippingWithProjection,
   calculateAov,
   calculateCpp,
+  effectiveCogsPerUnit,
+  buildCogsMap,
+  applyAdSpendVat,
+  AD_SPEND_VAT_RATE,
 } from "../formulas";
 import {
   matchAdToStore,
@@ -30,6 +34,69 @@ import {
   isMaskedSenderName,
   ACTIVE_STORES,
 } from "../store-matching";
+
+// ============================================================
+// VAT — supplier VAT on COGS, Meta VAT on ad spend
+// ============================================================
+describe("Effective COGS with supplier VAT", () => {
+  it("FOLIQ FLQ: 182.00 invoice price + 12% = 203.84 a unit", () => {
+    expect(effectiveCogsPerUnit(182, 0.12)).toBeCloseTo(203.84, 2);
+  });
+
+  it("no VAT: the invoice price is the cost", () => {
+    expect(effectiveCogsPerUnit(100, 0)).toBe(100);
+  });
+
+  it("missing, NaN or negative rate is treated as 0 — never a discount", () => {
+    expect(effectiveCogsPerUnit(100, null)).toBe(100);
+    expect(effectiveCogsPerUnit(100, undefined)).toBe(100);
+    expect(effectiveCogsPerUnit(100, Number.NaN)).toBe(100);
+    expect(effectiveCogsPerUnit(100, -0.12)).toBe(100);
+  });
+
+  it("buildCogsMap keys STORE upper :: sku lower and stores the effective cost", () => {
+    const map = buildCogsMap([
+      { store_name: "Foliq", sku: "FLQ", cogs_per_unit: 182, vat_rate: 0.12 },
+      { store_name: "CAPSULED", sku: "AIRBLK", cogs_per_unit: "100.00", vat_rate: "0" },
+      { store_name: "NURTELLE", sku: "KDSPTC", cogs_per_unit: 95 }, // no vat_rate column
+    ]);
+    expect(map.get("FOLIQ::flq")).toBeCloseTo(203.84, 2);
+    expect(map.get("CAPSULED::airblk")).toBe(100);
+    expect(map.get("NURTELLE::kdsptc")).toBe(95);
+    expect(map.size).toBe(3);
+  });
+
+  it("real scenario: 10 FOLIQ units — the missing VAT was 218.40 of overstated profit", () => {
+    const before = calculateNetProfit(15000, 182 * 10, 4000, 1000, 0);
+    const after = calculateNetProfit(15000, effectiveCogsPerUnit(182, 0.12) * 10, 4000, 1000, 0);
+    expect(before - after).toBeCloseTo(218.4, 2);
+  });
+});
+
+describe("Ad spend with Meta VAT", () => {
+  it("rate is the Philippine 12%", () => {
+    expect(AD_SPEND_VAT_RATE).toBe(0.12);
+  });
+
+  it("₱10,000 reported by Meta is ₱11,200 out of the bank", () => {
+    expect(applyAdSpendVat(10000)).toBeCloseTo(11200, 2);
+  });
+
+  it("zero spend stays zero", () => {
+    expect(applyAdSpendVat(0)).toBe(0);
+  });
+
+  it("real scenario: ₱20,000 of ads understated net profit by ₱2,400", () => {
+    const before = calculateNetProfit(100000, 30000, 20000, 12000, 5000);
+    const after = calculateNetProfit(100000, 30000, applyAdSpendVat(20000), 12000, 5000);
+    expect(before - after).toBeCloseTo(2400, 2);
+    expect(after).toBeCloseTo(30600, 2);
+  });
+
+  it("CPP rises with it — the real cost of a purchase includes the tax", () => {
+    expect(calculateCpp(applyAdSpendVat(20000), 100)).toBeCloseTo(224, 2);
+  });
+});
 
 // ============================================================
 // P&L NET PROFIT FORMULA
