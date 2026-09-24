@@ -1,5 +1,35 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-24: Ads Billing — which ad account stopped, and what to pay
+
+When Meta declines a card, every ad in that account stops and nothing in
+the dashboard said so. Ad Performance kept showing the account as ACTIVE
+in its picker while spend went to zero, and the only way to learn why was
+to open Ads Manager and notice the banner.
+
+Marketing gains an **Ads Billing** tab (admin only). It asks Meta about
+every ad account selected in Settings and shows, per account: Meta's
+status in plain words, the unpaid balance, the card on file, lifetime
+spend, remaining ad credits, and the stores advertising from it. Stores
+come from the campaign names already in the Ad Performance cache plus the
+Create Ad store defaults, so the page costs one Graph call for all three
+accounts.
+
+An account whose status is UNSETTLED, IN_GRACE_PERIOD, PENDING_SETTLEMENT
+or DISABLED-for-payment-risk gets a red banner at the top with the amount
+and a **Pay now** button. Meta has no API for settling a balance, so the
+button opens that account's page in Meta's Billing Hub — the one with
+the real Pay Now — with the account and business already selected.
+Payment methods and Ads Manager are one click away on each card.
+
+At the time of writing, TBM1 - NURTELLE was UNSETTLED with ₱31,324.35
+owing; the other two accounts were delivering.
+
+`GET /api/facebook/billing` backs the page, cached five minutes in
+`cached_api_data` (`fb_billing`), with the same rate-limit preflight and
+stale-cache fallback as the accounts route.
+
+
 ## 2026-09-23: The P&L was not charging VAT — on FOLIQ's COGS, or on any ad
 
 Two costs were entering Net Profit before tax.

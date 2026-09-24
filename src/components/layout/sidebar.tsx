@@ -37,6 +37,7 @@ import {
   Award,
   Repeat,
   AudioLines,
+  CreditCard,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -233,6 +234,12 @@ const navEntries: NavEntry[] = [
         icon: <TrendingUp size={18} />,
         roles: ["admin", "marketing"],
         section: "Ad Management",
+      },
+      {
+        label: "Ads Billing",
+        href: "/marketing/ads-billing",
+        icon: <CreditCard size={18} />,
+        roles: ["admin"],
       },
       {
         label: "Create Ad",

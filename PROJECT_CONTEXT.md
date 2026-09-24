@@ -104,6 +104,7 @@ Team members are pre-registered by admin in Settings (email + role). On first Go
 | Route | Description |
 |-------|-------------|
 | `/marketing/ads` | Ad Performance — campaigns/adsets/ads with drill-down, spend/ROAS/CPA/CTR/Cost per LPV |
+| `/marketing/ads-billing` | Ads Billing — per selected ad account: Meta status, unpaid balance, card on file, stores running there, Pay-now deep link into Meta Billing Hub (admin only) |
 | `/marketing/create` | Single ad creation wizard (campaign → adset → creative → ad) |
 | `/marketing/bulk-create` | Bulk create: per-row adset name + ad, spreadsheet table, bulk file upload |
 | `/marketing/drafts` | Saved ad drafts |
@@ -128,6 +129,7 @@ Team members are pre-registered by admin in Settings (email + role). On first Go
 |-------|--------|---------|
 | `all-ads` | GET | Fetch all ads with insights (campaigns, adsets, ads, spend, ROAS, CPA, etc.) |
 | `accounts` | GET | List ad accounts |
+| `billing` | GET | Selected ad accounts with status, balance, funding source, stores; 5-min cache; admin only |
 | `create` | POST | Create campaign + adset + creative + ad (4-step) |
 | `create/pages` | GET | List Facebook Pages |
 | `create/pixels` | GET | List pixels for an account |
