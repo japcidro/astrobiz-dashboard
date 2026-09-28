@@ -28,7 +28,7 @@ export function UgcGenerator() {
   const [picked, setPicked] = useState<Picked | null>(null);
   const [note, setNote] = useState("");
   const [look, setLook] = useState<LookId>(DEFAULT_LOOK);
-  const [count, setCount] = useState(2);
+  const [count, setCount] = useState(1);
   const [busy, setBusy] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const [worker, setWorker] = useState<WorkerStatus | null>(null);

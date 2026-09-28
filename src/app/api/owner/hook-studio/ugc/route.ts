@@ -1,7 +1,7 @@
 import { requireOwner } from "@/lib/hook-studio/auth";
 import { loadUgcLibrary } from "@/lib/hook-studio/views";
 import { UGC_ENGINE, UGC_MAX_PER_BATCH, type UgcParams } from "@/lib/hook-studio/engines";
-import { DEFAULT_LOOK, isLookId, resolveLook, ugcSwapPrompt } from "@/lib/hook-studio/presets";
+import { DEFAULT_LOOK, isLookId, makeRecipe, recipeSummary, resolveLook, ugcSwapPrompt, VARIED_POOL } from "@/lib/hook-studio/presets";
 
 export const dynamic = "force-dynamic";
 
@@ -31,14 +31,16 @@ export async function POST(request: Request) {
   const look = isLookId(b?.look) ? b!.look! : DEFAULT_LOOK;
   const count = Math.min(UGC_MAX_PER_BATCH, Math.max(1, Math.round(Number(b?.count ?? 1)) || 1));
 
+  const start = Math.floor(Math.random() * VARIED_POOL.length);
   const rows = Array.from({ length: count }, (_, i) => {
-    const concrete = resolveLook(look, i);
-    const params: UgcParams & { look: string; look_choice: string } = {
+    const recipe = makeRecipe(resolveLook(look, i, start));
+    const params: UgcParams & { look: string; look_choice: string; recipe: string } = {
       source_path: source,
-      prompt: ugcSwapPrompt(note, concrete),
+      prompt: ugcSwapPrompt(note, recipe),
       note,
-      look: concrete,
+      look: recipe.look,
       look_choice: look,
+      recipe: recipeSummary(recipe),
     };
     return { kind: "ugc_image", engine: UGC_ENGINE, params, status: "queued" };
   });
