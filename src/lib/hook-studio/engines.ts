@@ -66,7 +66,7 @@ export const ENGINES: Engine[] = [
     id: "seedance_ref",
     skill: "motion",
     name: "Seedance 2.0 with references",
-    blurb: "Your image and the reference clip go in as references; Seedance re-renders the scene with the reference's camera and timing.",
+    blurb: "Your image and the reference clip go in as references. Copied the motion as well as Genjutsu in testing, for fewer credits.",
     perSecond: { standard: 4.5, high: 9 },
     qualityLabels: { standard: "720p", high: "1080p" },
     minSeconds: 4,

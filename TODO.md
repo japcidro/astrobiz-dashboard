@@ -39,8 +39,9 @@ agent `com.astrobiz.hook-worker`; `scripts/hook-worker-install.sh status|logs`).
 - [ ] Genjutsu's credit estimate is measured for a 5 s reference (35 cr);
       the page assumes 7 cr/s. Check a 10 s reference's estimate on the clip
       card and adjust `perSecond` in `src/lib/hook-studio/engines.ts`.
-- [ ] Seedance 2.0 with image + video references was the weaker motion copy
-      in the test; demote it further or drop it if it never wins.
+- [ ] Seedance 2.0 with image + video references matched Genjutsu's motion
+      copy in the test at 22.5 cr vs 35. After a few real hooks, consider
+      making it the motion default.
 - [ ] If the CLI session ever lapses (`higgsfield account status` fails),
       run `higgsfield auth login` on the Mac; the queue resumes by itself.
 - [ ] Later, on request: burned-in text with ffmpeg on the Mac; a "score
