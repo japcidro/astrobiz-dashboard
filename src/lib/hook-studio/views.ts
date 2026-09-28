@@ -9,6 +9,7 @@ export function toUgcView(j: JobRow, signed: Map<string, string>): UgcView {
     id: j.id,
     status: j.status,
     note: (j.params.note as string | undefined) ?? "",
+    look: (j.params.look as string | undefined) ?? null,
     source_path: source,
     source_url: source ? signed.get(source) ?? null : null,
     result_path: j.result_path,

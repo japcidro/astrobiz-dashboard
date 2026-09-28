@@ -204,7 +204,7 @@ export function NewHook({
           </>
         )}
 
-        <Label>{needsRef ? "4" : "3"} · What happens (optional, Taglish is fine)</Label>
+        <Label>{needsRef ? "4" : "3"} · What happens (optional)</Label>
         <textarea
           id="hook-brief"
           value={brief}

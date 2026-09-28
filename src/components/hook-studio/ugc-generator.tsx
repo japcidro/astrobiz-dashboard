@@ -6,11 +6,14 @@ import { ImagePlus, Trash2, Clapperboard, RefreshCw, X } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { UGC_CREDITS_PER_IMAGE, UGC_MAX_PER_BATCH } from "@/lib/hook-studio/engines";
+import { LOOKS, DEFAULT_LOOK, type LookId } from "@/lib/hook-studio/presets";
 import type { UgcView, WorkerStatus } from "@/lib/hook-studio/types";
-import { Panel, Label, Button, Pill, credits, timeAgo, api } from "./ui";
+import { Panel, Label, Chip, Button, Pill, credits, timeAgo, api } from "./ui";
 
+// The library refreshes itself: every 3 s while anything is rendering,
+// every 10 s otherwise, so a finished image appears without a reload.
 const POLL_ACTIVE_MS = 3000;
-const POLL_IDLE_MS = 30000;
+const POLL_IDLE_MS = 10000;
 const STATUS_POLL_MS = 15000;
 
 interface Picked {
@@ -24,6 +27,7 @@ export function UgcGenerator() {
   const [items, setItems] = useState<UgcView[]>([]);
   const [picked, setPicked] = useState<Picked | null>(null);
   const [note, setNote] = useState("");
+  const [look, setLook] = useState<LookId>(DEFAULT_LOOK);
   const [count, setCount] = useState(2);
   const [busy, setBusy] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -84,7 +88,7 @@ export function UgcGenerator() {
       setBusy("Queuing…");
       const r = await api<{ items: UgcView[] }>("/api/owner/hook-studio/ugc", {
         method: "POST",
-        body: JSON.stringify({ source_path: path, note, count }),
+        body: JSON.stringify({ source_path: path, note, look, count }),
       });
       setItems(r.items);
       setPicked(null);
@@ -101,7 +105,7 @@ export function UgcGenerator() {
     try {
       const r = await api<{ items: UgcView[] }>("/api/owner/hook-studio/ugc", {
         method: "POST",
-        body: JSON.stringify({ source_path: item.source_path, note: item.note, count: 1 }),
+        body: JSON.stringify({ source_path: item.source_path, note: item.note, look, count: 1 }),
       });
       setItems(r.items);
       toast.success("One more queued");
@@ -183,9 +187,16 @@ export function UgcGenerator() {
             </div>
           )}
 
-          <Label>What always changes</Label>
-          <p className="text-sm text-gray-400">
-            Skin tone, body type, hair style, hair colour and face. A woman stays a woman, a man stays a man. Pose, clothing, framing and background stay exactly as they are.
+          <Label>Look of the new person</Label>
+          <div className="flex flex-wrap gap-2">
+            {LOOKS.map((l) => (
+              <Chip key={l.id} on={look === l.id} onClick={() => setLook(l.id)}>
+                {l.label}
+              </Chip>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            Varied gives each image in a batch a different person from a US mix. Always: a new face, attractive and fit, same gender, straight or softly wavy hair. Every caption, icon and app control is removed so the output is a clean photo. Pose, clothing, framing and background stay.
           </p>
 
           <Label>Anything extra (optional)</Label>
@@ -261,8 +272,9 @@ export function UgcGenerator() {
                 </button>
               </div>
               <div className="px-2.5 py-2 text-[11px] text-gray-400 flex items-center justify-between gap-2">
-                <span className="truncate">
+                <span className="truncate" title={it.look ? `Look: ${LOOKS.find((l) => l.id === it.look)?.label ?? it.look}` : undefined}>
                   {timeAgo(it.created_at)} · {credits(it.estimate_credits ?? UGC_CREDITS_PER_IMAGE)}
+                  {it.look ? ` · ${LOOKS.find((l) => l.id === it.look)?.label ?? it.look}` : ""}
                 </span>
                 <span className="flex items-center gap-2 shrink-0">
                   <button type="button" onClick={() => again(it)} title="One more from the same photo" className="text-gray-400 hover:text-white cursor-pointer">

@@ -48,9 +48,15 @@ export function HookStudio() {
     return () => clearInterval(t);
   }, [loadWorker]);
 
+  // The library refreshes itself: every 5 s while any hook is rendering,
+  // every 30 s otherwise, so finished clips show up without a reload.
+  const rendering = rows.some((r) => r.clips_pending > 0);
   useEffect(() => {
-    if (mode.kind === "library") void loadLibrary();
-  }, [mode, loadLibrary]);
+    if (mode.kind !== "library") return;
+    void loadLibrary();
+    const t = setInterval(() => void loadLibrary(), rendering ? 5000 : 30000);
+    return () => clearInterval(t);
+  }, [mode, rendering, loadLibrary]);
 
   const goLibrary = () => {
     if (preselect) router.replace("/owner/hook-studio");

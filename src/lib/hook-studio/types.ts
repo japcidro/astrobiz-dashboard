@@ -53,6 +53,7 @@ export interface UgcView {
   id: string;
   status: JobStatus;
   note: string;
+  look: string | null;
   source_path: string;
   source_url: string | null;
   result_path: string | null;
