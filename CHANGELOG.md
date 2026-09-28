@@ -39,6 +39,50 @@ Nothing a person sees changes: pages still read the cache, Refresh still
 goes live, autopilot still pauses losers. Only the wasted calls are gone.
 
 
+## 2026-09-28: UGC Generator, and Hook Studio rebuilt around it
+
+Julius's second look at Hook Studio: too many choices, and the wrong anchor.
+The rebuild makes the still image the anchor and drops everything else.
+
+**UGC Generator** (new owner tab, above Hook Studio). Drop a UGC photo; get
+it back with a clearly different person in it: skin tone, body type, hair
+style, hair colour and face all change, gender is kept, pose, clothing,
+framing and background stay exactly as they were. Nano Banana Pro edits in
+place at 9:16 for 2 credits an image (Seedream 4.5 was tested too; it drifts
+the pose). One to four variations per photo; every result is kept in a
+library with delete and a "Use in Hook Studio" button.
+
+**Hook Studio, simplified.** Gone: lanes, the new-person and phone-screen
+choices, the pinned-face step, and the on-screen text options. Now: pick a
+UGC image, pick a skill, optionally drop a reference clip, write a one-line
+brief, and Claude (which now sees the image) writes the prompt. Engine,
+seconds (3 to 15) and clip count are chosen with the estimated credits shown
+on the button.
+
+**Two skills, tested the same day on a generated bedroom reference:**
+- *Higgsfield motion transfer* — the person and room from the UGC image
+  perform the reference clip's exact camera motion and action. Genjutsu
+  (`hf_mult_motion_control`, about 7 cr/s at 720p) is the default and did
+  it cleanly; Seedance 2.0 with image + video references (4.5 cr/s) is the
+  alternative. Length follows the reference, capped at 15 s.
+- *Arcads-style, our version* — no reference clip. Claude writes a shot
+  prompt in the claude-arcads structure (setting, character, camera, beats
+  with timestamps, tone, movement, closing line; forbidden-word list;
+  silent, no text) and an image-to-video engine animates the UGC image.
+  Kling 3.0 (1.25 cr/s std, 1.5 pro) is the default; Kling 3.0 Turbo and
+  Seedance 2.0 are alternatives.
+
+Hook detection was considered and dropped: with the image as the anchor,
+the reference only supplies motion, so a trim window is enough.
+
+Worker 1.1.0: new job kind `ugc_image`, engines above, a guard against
+prompts that start with "@" (the CLI reads that as a file path), and the
+one-time retry for transient upload errors. Migration
+`supabase/hook-studio-v2-migration.sql` (applied): job kinds, hook columns
+`ugc_job_id`, `skill`, `engine`, `quality`, `duration`; lane is nullable.
+The faces routes are gone; the table stays.
+
+
 ## 2026-09-28: Hook Studio — remake a working UGC clip with a new person, for SoulShot
 
 The owner space gets its first tool. Drop in a short UGC video that already

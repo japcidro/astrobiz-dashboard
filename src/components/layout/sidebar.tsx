@@ -38,6 +38,7 @@ import {
   Repeat,
   AudioLines,
   CreditCard,
+  ImagePlus,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -357,6 +358,12 @@ const ownerNavEntries: NavEntry[] = [
     label: "Home",
     href: OWNER_HOME,
     icon: <LayoutDashboard size={20} />,
+    roles: ["admin", "va", "fulfillment", "marketing"],
+  },
+  {
+    label: "UGC Generator",
+    href: "/owner/ugc-generator",
+    icon: <ImagePlus size={20} />,
     roles: ["admin", "va", "fulfillment", "marketing"],
   },
   {

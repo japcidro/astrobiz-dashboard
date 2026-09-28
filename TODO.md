@@ -27,24 +27,24 @@ higher tier, which the app already qualifies for.
 
 ---
 
-## Hook Studio (owner space) — follow-ups
+## Hook Studio + UGC Generator (owner space) — follow-ups
 
 Shipped 2026-09-28. Renders on the Mac via `worker/hook-worker.mjs` (launchd
 agent `com.astrobiz.hook-worker`; `scripts/hook-worker-install.sh status|logs`).
 
-- [ ] **Run one real remake** with a genuine UGC reference (a real ad, not
-      the generated test clip) on Genjutsu with a pinned face, and check
-      that the on-screen text is gone. If ghosts survive, strengthen the
-      "remove all text" line in `src/lib/hook-studio/prompt-writer.ts`.
-- [ ] Genjutsu's first attempt today failed with a Higgsfield upload 520;
-      the worker now retries once. If that keeps happening, ask Higgsfield.
-- [ ] **Gemini durations.** The worker clamps Gemini Omni to 4–8 s; confirm
-      the model's accepted values with `higgsfield model get
-      gemini_omni_flash_1_1` and widen if it takes more.
+- [ ] **First real run.** UGC Generator on a real UGC frame (a genuine ad
+      still), then Hook Studio motion transfer with a real reference clip.
+      Check that no on-screen text from the reference survives; if it does,
+      say so in the brief ("no text") and rewrite the prompt.
+- [ ] Genjutsu's credit estimate is measured for a 5 s reference (35 cr);
+      the page assumes 7 cr/s. Check a 10 s reference's estimate on the clip
+      card and adjust `perSecond` in `src/lib/hook-studio/engines.ts`.
+- [ ] Seedance 2.0 with image + video references was the weaker motion copy
+      in the test; demote it further or drop it if it never wins.
 - [ ] If the CLI session ever lapses (`higgsfield account status` fails),
       run `higgsfield auth login` on the Mac; the queue resumes by itself.
-- [ ] Later, on request: burned-in text with ffmpeg on the Mac; a "score this
-      hook" button (Virality Predictor `brain_activity`, CLI only).
+- [ ] Later, on request: burned-in text with ffmpeg on the Mac; a "score
+      this hook" button (Virality Predictor, CLI only).
 
 ---
 

@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
-const VERSION = "1.0.0";
+const VERSION = "1.1.0";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // ─── Config ───
@@ -178,29 +178,36 @@ function clampInt(n, lo, hi) {
   return Math.min(hi, Math.max(lo, v));
 }
 
-function remakeArgs(params, refFile, faceFile, seconds) {
-  const p = params.prompt;
+/**
+ * Video from a UGC image. `motion` engines also take the reference clip;
+ * `arcads` engines animate the image from the prompt alone.
+ */
+/** The CLI reads a leading "@" as a file reference; a prompt must not start with one. */
+const safePrompt = (t) => String(t ?? "").replace(/^\s*@+/, "").trim() || "natural candid motion";
+
+function remakeArgs(params, ugcFile, refFile, seconds) {
+  const p = safePrompt(params.prompt);
   const hi = params.quality === "high";
+  const d = String(clampInt(params.duration ?? seconds ?? 5, 3, 15));
   switch (params.engine) {
+    case "genjutsu": {
+      if (!refFile) throw new Error("Genjutsu needs a reference clip");
+      return ["hf_mult_motion_control", "--resolution", hi ? "1080p" : "720p", "--prompt", p, "--video", refFile, "--image", ugcFile];
+    }
+    case "seedance_ref": {
+      if (!refFile) throw new Error("Seedance references need a reference clip");
+      return ["seedance_2_0", "--prompt", p, "--image", ugcFile, "--video", refFile, "--aspect_ratio", "9:16", "--resolution", hi ? "1080p" : "720p", "--generate_audio", "false", "--duration", String(clampInt(params.duration ?? seconds ?? 5, 4, 15))];
+    }
+    case "kling_i2v":
+      return ["kling3_0", "--mode", hi ? "pro" : "std", "--aspect_ratio", "9:16", "--sound", "off", "--duration", d, "--start-image", ugcFile, "--prompt", p];
+    case "kling_turbo":
+      return ["kling3_0_turbo", "--aspect_ratio", "9:16", "--resolution", "720p", "--duration", d, "--start-image", ugcFile, "--prompt", p];
+    case "seedance_i2v":
+      return ["seedance_2_0", "--prompt", p, "--start-image", ugcFile, "--aspect_ratio", "9:16", "--resolution", hi ? "1080p" : "720p", "--generate_audio", "false", "--duration", String(clampInt(params.duration ?? seconds ?? 5, 4, 15))];
+    // Kept for rows made before 2026-09-28 v2; the page no longer offers them.
     case "kling_edit": {
       const a = ["kling_video_edit", "--mode", hi ? "pro" : "std", "--prompt", p, "--video", refFile];
-      if (faceFile) a.push("--image", faceFile);
-      return a;
-    }
-    case "gemini_edit": {
-      // 'edit' takes the video only; with a pinned face use reference-to-video.
-      const a = ["gemini_omni_flash_1_1", "--prompt", p, "--video", refFile, "--aspect_ratio", "9:16", "--resolution", "720p", "--duration", String(clampInt(seconds, 4, 8))];
-      if (faceFile) a.push("--mode", "reference-to-video", "--image", faceFile);
-      else a.push("--mode", "edit");
-      return a;
-    }
-    case "genjutsu": {
-      if (!faceFile) throw new Error("Genjutsu needs a pinned face");
-      return ["hf_mult_motion_control", "--resolution", hi ? "1080p" : "720p", "--prompt", p, "--video", refFile, "--image", faceFile];
-    }
-    case "seedance_edit": {
-      const a = ["seedance_2_5", "--mode", "video_edit", "--prompt", p, "--video", refFile, "--aspect_ratio", "9:16", "--resolution", hi ? "1080p" : "720p", "--generate_audio", "false", "--duration", String(clampInt(seconds, 4, 15))];
-      if (faceFile) a.push("--image", faceFile);
+      if (ugcFile) a.push("--image", ugcFile);
       return a;
     }
     default:
@@ -210,6 +217,11 @@ function remakeArgs(params, refFile, faceFile, seconds) {
 
 function faceArgs(params) {
   return ["text2image_soul_v2", "--prompt", params.prompt, "--aspect_ratio", "9:16", "--quality", "1.5k"];
+}
+
+/** UGC Generator: person swap on a still, 9:16, Nano Banana Pro. */
+function ugcArgs(params, srcFile) {
+  return ["nano_banana_pro", "--aspect_ratio", "9:16", "--image", srcFile, "--prompt", safePrompt(params.prompt)];
 }
 
 /** Hide local paths in the stored command line. */
@@ -260,15 +272,21 @@ async function processJob(job) {
 
     if (job.kind === "remake") {
       const p = job.params;
-      const refSrc = join(dir, "reference-src.mp4");
-      const refFile = join(dir, "reference.mp4");
-      await storageDownload(p.reference_path, refSrc);
-      seconds = await trimReference(refSrc, refFile, p.trim_start, p.trim_end);
-      if (p.face_path) {
-        faceFile = join(dir, `face.${extensionOf(p.face_path)}`);
-        await storageDownload(p.face_path, faceFile);
+      const ugcFile = join(dir, `ugc.${extensionOf(p.ugc_path || p.face_path || "x.png")}`);
+      await storageDownload(p.ugc_path || p.face_path, ugcFile);
+      let refFile = null;
+      if (p.reference_path) {
+        const refSrc = join(dir, "reference-src.mp4");
+        refFile = join(dir, "reference.mp4");
+        await storageDownload(p.reference_path, refSrc);
+        seconds = await trimReference(refSrc, refFile, p.trim_start, p.trim_end);
       }
-      args = remakeArgs(p, refFile, faceFile, seconds);
+      args = remakeArgs(p, ugcFile, refFile, seconds);
+    } else if (job.kind === "ugc_image") {
+      const p = job.params;
+      const srcFile = join(dir, `source.${extensionOf(p.source_path)}`);
+      await storageDownload(p.source_path, srcFile);
+      args = ugcArgs(p, srcFile);
     } else if (job.kind === "face") {
       args = faceArgs(job.params);
     } else {
@@ -291,7 +309,10 @@ async function processJob(job) {
     const size = (await stat(outFile)).size;
     if (size < 1000) throw new Error("Result file is empty");
 
-    const resultPath = job.kind === "face" ? `results/faces/${job.id}.${ext}` : `results/${job.hook_id}/${job.id}.${ext}`;
+    const resultPath =
+      job.kind === "face" ? `results/faces/${job.id}.${ext}`
+      : job.kind === "ugc_image" ? `results/ugc/${job.id}.${ext}`
+      : `results/${job.hook_id}/${job.id}.${ext}`;
     await storageUpload(resultPath, outFile, MIME[ext] || "application/octet-stream");
 
     await updateJob(job.id, {

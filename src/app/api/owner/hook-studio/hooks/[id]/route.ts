@@ -1,7 +1,7 @@
 import { requireOwner } from "@/lib/hook-studio/auth";
 import { loadHookView } from "@/lib/hook-studio/views";
-import { CREATORS, SCREEN_MODES } from "@/lib/hook-studio/presets";
-import { MAX_REFERENCE_SECONDS } from "@/lib/hook-studio/engines";
+import { HOOK_BUCKET } from "@/lib/hook-studio/storage";
+import { MAX_REFERENCE_SECONDS, SKILLS, getEngine, type Skill } from "@/lib/hook-studio/engines";
 
 export const dynamic = "force-dynamic";
 
@@ -9,7 +9,7 @@ type Ctx = { params: Promise<{ id: string }> };
 
 const UUID = /^[0-9a-f-]{36}$/;
 
-/** GET — the hook, its jobs and pinned face, with signed URLs. Polled by the page. */
+/** GET — the hook, its UGC image, reference and clips, with signed URLs. Polled by the page. */
 export async function GET(_request: Request, ctx: Ctx) {
   const auth = await requireOwner();
   if (auth.error) return auth.error;
@@ -20,10 +20,7 @@ export async function GET(_request: Request, ctx: Ctx) {
   return Response.json(view);
 }
 
-/**
- * PATCH — edit the brief, prompt, chosen text, creator, screen mode, trim, face.
- * Only the fields present in the body change.
- */
+/** PATCH — edit the brief, prompt, skill, engine, quality, duration, reference, trim or UGC image. */
 export async function PATCH(request: Request, ctx: Ctx) {
   const auth = await requireOwner();
   if (auth.error) return auth.error;
@@ -34,29 +31,41 @@ export async function PATCH(request: Request, ctx: Ctx) {
   if (!b) return Response.json({ error: "Bad JSON" }, { status: 400 });
 
   const patch: Record<string, unknown> = {};
-  if (typeof b.brief === "string") patch.brief = b.brief.slice(0, 2000);
+  if (typeof b.brief === "string") {
+    patch.brief = b.brief.slice(0, 2000);
+    patch.title = b.brief.slice(0, 80) || null;
+  }
   if (typeof b.edit_prompt === "string") patch.edit_prompt = b.edit_prompt.slice(0, 4000);
-  if (b.chosen_text === null || typeof b.chosen_text === "string") {
-    patch.chosen_text = b.chosen_text === null ? null : String(b.chosen_text).slice(0, 200);
-    patch.title = patch.chosen_text;
+  if (typeof b.skill === "string") {
+    if (!SKILLS.some((s) => s.id === b.skill)) return Response.json({ error: "Unknown skill" }, { status: 400 });
+    patch.skill = b.skill;
   }
-  if (Array.isArray(b.text_options)) {
-    patch.text_options = b.text_options.filter((t) => typeof t === "string").map((t) => String(t).slice(0, 200)).slice(0, 6);
+  if (typeof b.engine === "string") {
+    const e = getEngine(b.engine);
+    if (!e) return Response.json({ error: "Unknown engine" }, { status: 400 });
+    const skill = (patch.skill as Skill | undefined) ?? undefined;
+    if (skill && e.skill !== skill) return Response.json({ error: "Engine does not match the skill" }, { status: 400 });
+    patch.engine = e.id;
+    if (!skill) patch.skill = e.skill;
   }
-  if (typeof b.creator === "string") {
-    if (!(CREATORS as readonly string[]).includes(b.creator)) {
-      return Response.json({ error: "Unknown creator preset" }, { status: 400 });
-    }
-    patch.creator = b.creator;
+  if (b.quality === "standard" || b.quality === "high") patch.quality = b.quality;
+  if (b.duration !== undefined) {
+    const d = Math.round(Number(b.duration));
+    if (!Number.isFinite(d) || d < 3 || d > 15) return Response.json({ error: "Duration must be 3 to 15 seconds" }, { status: 400 });
+    patch.duration = d;
   }
-  if (typeof b.screen_mode === "string") {
-    if (!SCREEN_MODES.some((s) => s.id === b.screen_mode)) {
-      return Response.json({ error: "Unknown screen mode" }, { status: 400 });
-    }
-    patch.screen_mode = b.screen_mode;
-  }
-  if (b.face_id === null || (typeof b.face_id === "string" && UUID.test(b.face_id))) {
-    patch.face_id = b.face_id;
+  if (b.ugc_job_id === null || (typeof b.ugc_job_id === "string" && UUID.test(b.ugc_job_id))) patch.ugc_job_id = b.ugc_job_id;
+  if (b.reference_path === null) {
+    patch.reference_path = null;
+    patch.reference_name = null;
+    patch.reference_duration = null;
+  } else if (typeof b.reference_path === "string") {
+    if (!/^refs\/[0-9a-f-]{36}\.(mp4|mov)$/.test(b.reference_path)) return Response.json({ error: "Bad reference path" }, { status: 400 });
+    patch.reference_path = b.reference_path;
+    if (typeof b.reference_name === "string") patch.reference_name = b.reference_name.slice(0, 200);
+    if (Number.isFinite(Number(b.reference_duration))) patch.reference_duration = Number(b.reference_duration);
+    patch.trim_start = 0;
+    patch.trim_end = Number.isFinite(Number(b.reference_duration)) ? Math.min(Number(b.reference_duration), MAX_REFERENCE_SECONDS) : null;
   }
   if (b.trim_start !== undefined || b.trim_end !== undefined) {
     const start = Math.max(0, Number(b.trim_start ?? 0) || 0);
@@ -70,11 +79,10 @@ export async function PATCH(request: Request, ctx: Ctx) {
 
   const { error } = await auth.db.from("hook_studio_hooks").update(patch).eq("id", id);
   if (error) return Response.json({ error: error.message }, { status: 500 });
-  const view = await loadHookView(auth.db, id);
-  return Response.json(view);
+  return Response.json(await loadHookView(auth.db, id));
 }
 
-/** DELETE — remove the hook, its jobs (cascade) and its files. */
+/** DELETE — remove the hook, its clips (cascade) and its files. The UGC image stays in its library. */
 export async function DELETE(_request: Request, ctx: Ctx) {
   const auth = await requireOwner();
   if (auth.error) return auth.error;
@@ -83,10 +91,8 @@ export async function DELETE(_request: Request, ctx: Ctx) {
   const view = await loadHookView(auth.db, id);
   if (!view) return Response.json({ error: "Not found" }, { status: 404 });
 
-  const paths = [view.reference_path, ...view.jobs.map((j) => j.result_path)].filter(
-    (p): p is string => !!p
-  );
-  if (paths.length > 0) await auth.db.storage.from("hook-studio").remove(paths);
+  const paths = [view.reference_path, ...view.jobs.map((j) => j.result_path)].filter((p): p is string => !!p);
+  if (paths.length > 0) await auth.db.storage.from(HOOK_BUCKET).remove(paths);
   const { error } = await auth.db.from("hook_studio_hooks").delete().eq("id", id);
   if (error) return Response.json({ error: error.message }, { status: 500 });
   return Response.json({ ok: true });
