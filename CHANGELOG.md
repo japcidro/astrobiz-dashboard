@@ -39,6 +39,25 @@ Nothing a person sees changes: pages still read the cache, Refresh still
 goes live, autopilot still pauses losers. Only the wasted calls are gone.
 
 
+## 2026-09-29: UGC Generator fixes, Seedance out, titles and delete confirmations
+
+- **A genuinely new person.** The swap prompt named a look that already
+  matched the source, so Nano Banana only removed the text. Each image now
+  gets a recipe of concrete traits (skin shade, hair colour, hair cut, eye
+  colour) from the chosen look's pools, and the prompt says the new person
+  must look nothing like the original. Verified on a real gym frame.
+- **US audience, varied by default.** The default look is "Varied": each
+  image in a batch gets a different look from a US mix (Caucasian, Latina,
+  Asian American, Mediterranean). Specific looks are chips. Hair is straight
+  or softly wavy in every look. One variation is the default.
+- **Clean frame.** Every caption, icon, button and app control is removed.
+- **Seedance is gone** from both skills; Genjutsu alone does motion
+  transfer, Kling 3.0 and Kling Turbo do the Arcads-style path.
+- **Hook titles are editable** in the workspace header, and **every delete
+  asks first** (an inline Yes/No that disarms after five seconds).
+- Both libraries refresh themselves while anything renders.
+
+
 ## 2026-09-28: UGC Generator, and Hook Studio rebuilt around it
 
 Julius's second look at Hook Studio: too many choices, and the wrong anchor.

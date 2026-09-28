@@ -31,10 +31,8 @@ export async function PATCH(request: Request, ctx: Ctx) {
   if (!b) return Response.json({ error: "Bad JSON" }, { status: 400 });
 
   const patch: Record<string, unknown> = {};
-  if (typeof b.brief === "string") {
-    patch.brief = b.brief.slice(0, 2000);
-    patch.title = b.brief.slice(0, 80) || null;
-  }
+  if (typeof b.brief === "string") patch.brief = b.brief.slice(0, 2000);
+  if (typeof b.title === "string") patch.title = b.title.trim().slice(0, 120) || null;
   if (typeof b.edit_prompt === "string") patch.edit_prompt = b.edit_prompt.slice(0, 4000);
   if (typeof b.skill === "string") {
     if (!SKILLS.some((s) => s.id === b.skill)) return Response.json({ error: "Unknown skill" }, { status: 400 });

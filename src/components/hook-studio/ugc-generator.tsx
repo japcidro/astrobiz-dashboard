@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client";
 import { UGC_CREDITS_PER_IMAGE, UGC_MAX_PER_BATCH } from "@/lib/hook-studio/engines";
 import { LOOKS, DEFAULT_LOOK, type LookId } from "@/lib/hook-studio/presets";
 import type { UgcView, WorkerStatus } from "@/lib/hook-studio/types";
-import { Panel, Label, Chip, Button, Pill, credits, timeAgo, api } from "./ui";
+import { Panel, Label, Chip, Button, Pill, ConfirmButton, credits, timeAgo, api } from "./ui";
 
 // The library refreshes itself: every 3 s while anything is rendering,
 // every 10 s otherwise, so a finished image appears without a reload.
@@ -267,9 +267,11 @@ export function UgcGenerator() {
                   // eslint-disable-next-line @next/next/no-img-element -- signed URL
                   <img src={it.source_url} alt="source" title="Source photo" className="absolute left-2 bottom-2 w-12 aspect-[9/16] object-cover rounded-md border border-white/40 shadow" />
                 )}
-                <button type="button" onClick={() => remove(it)} title="Delete" className="absolute top-2 right-2 p-1.5 rounded-full bg-black/60 text-gray-300 hover:text-red-300 cursor-pointer">
-                  <Trash2 size={13} />
-                </button>
+                <div className="absolute top-2 right-2 rounded-full bg-black/60 px-1.5 py-1">
+                  <ConfirmButton onConfirm={() => remove(it)} label="Delete" question="Delete?" className="text-gray-300 hover:text-red-300 cursor-pointer flex">
+                    <Trash2 size={13} />
+                  </ConfirmButton>
+                </div>
               </div>
               <div className="px-2.5 py-2 text-[11px] text-gray-400 flex items-center justify-between gap-2">
                 <span className="truncate" title={it.look ? `Look: ${LOOKS.find((l) => l.id === it.look)?.label ?? it.look}` : undefined}>

@@ -25,12 +25,7 @@ export const SKILLS: Array<{ id: Skill; name: string; blurb: string; needsRefere
   },
 ];
 
-export type EngineId =
-  | "genjutsu"
-  | "seedance_ref"
-  | "kling_i2v"
-  | "kling_turbo"
-  | "seedance_i2v";
+export type EngineId = "genjutsu" | "kling_i2v" | "kling_turbo";
 
 export type Quality = "standard" | "high";
 
@@ -55,23 +50,12 @@ export const ENGINES: Engine[] = [
     id: "genjutsu",
     skill: "motion",
     name: "Genjutsu motion transfer",
-    blurb: "Copies the reference's motion onto the person in your image. Length follows the reference.",
+    blurb: "The person and room from your image perform the reference clip's exact camera motion and action. Length follows the reference.",
     perSecond: { standard: 7, high: 11 },
     qualityLabels: { standard: "720p", high: "1080p" },
     minSeconds: 3,
     maxSeconds: 15,
     followsReference: true,
-  },
-  {
-    id: "seedance_ref",
-    skill: "motion",
-    name: "Seedance 2.0 with references",
-    blurb: "Your image and the reference clip go in as references. Copied the motion as well as Genjutsu in testing, for fewer credits.",
-    perSecond: { standard: 4.5, high: 9 },
-    qualityLabels: { standard: "720p", high: "1080p" },
-    minSeconds: 4,
-    maxSeconds: 15,
-    followsReference: false,
   },
   {
     id: "kling_i2v",
@@ -92,17 +76,6 @@ export const ENGINES: Engine[] = [
     perSecond: { standard: 1.5, high: 1.5 },
     qualityLabels: null,
     minSeconds: 3,
-    maxSeconds: 15,
-    followsReference: false,
-  },
-  {
-    id: "seedance_i2v",
-    skill: "arcads",
-    name: "Seedance 2.0",
-    blurb: "Best motion and identity consistency from a still. Pricier.",
-    perSecond: { standard: 4.5, high: 9 },
-    qualityLabels: { standard: "720p", high: "1080p" },
-    minSeconds: 4,
     maxSeconds: 15,
     followsReference: false,
   },

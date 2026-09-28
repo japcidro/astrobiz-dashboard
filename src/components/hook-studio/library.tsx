@@ -4,7 +4,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { SKILLS, getEngine } from "@/lib/hook-studio/engines";
 import type { LibraryRow } from "@/lib/hook-studio/types";
-import { Panel, Button, Pill, credits, timeAgo, api } from "./ui";
+import { Panel, Button, Pill, ConfirmButton, credits, timeAgo, api } from "./ui";
 
 export function Library({
   rows,
@@ -92,9 +92,9 @@ export function Library({
                   <td className="px-3 py-3 text-right font-mono text-gray-300 tabular-nums">{credits(r.credits)}</td>
                   <td className="px-3 py-3 text-gray-400">{timeAgo(r.created_at)}</td>
                   <td className="px-3 py-3 text-right">
-                    <button type="button" onClick={() => remove(r)} title="Delete hook and its clips" className="text-gray-600 hover:text-red-300 cursor-pointer">
+                    <ConfirmButton onConfirm={() => remove(r)} label="Delete hook and its clips" question="Delete hook?" className="text-gray-600 hover:text-red-300 cursor-pointer">
                       <Trash2 size={14} />
-                    </button>
+                    </ConfirmButton>
                   </td>
                 </tr>
               );

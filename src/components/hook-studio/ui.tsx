@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader2 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 export function Panel({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
@@ -77,6 +77,57 @@ export function Button({
       {busy && <Loader2 size={14} className="animate-spin" />}
       {children}
     </button>
+  );
+}
+
+/**
+ * A delete control that asks first. First click arms it ("Delete? Yes · No");
+ * a second click on Yes runs the action; No or five seconds of silence
+ * disarms it. No modal, nothing the viewer's frame could block.
+ */
+export function ConfirmButton({
+  onConfirm,
+  label = "Delete",
+  question = "Delete?",
+  className = "",
+  children,
+}: {
+  onConfirm: () => void | Promise<void>;
+  label?: string;
+  question?: string;
+  className?: string;
+  children?: ReactNode;
+}) {
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 5000);
+    return () => clearTimeout(t);
+  }, [armed]);
+  if (!armed) {
+    return (
+      <button type="button" onClick={() => setArmed(true)} title={label} className={className}>
+        {children ?? label}
+      </button>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-[11px] font-bold whitespace-nowrap">
+      <span className="text-red-300">{question}</span>
+      <button
+        type="button"
+        onClick={async () => {
+          setArmed(false);
+          await onConfirm();
+        }}
+        className="px-2 py-0.5 rounded bg-red-600 hover:bg-red-500 text-white cursor-pointer"
+      >
+        Yes
+      </button>
+      <button type="button" onClick={() => setArmed(false)} className="px-2 py-0.5 rounded border border-gray-600 text-gray-300 hover:text-white cursor-pointer">
+        No
+      </button>
+    </span>
   );
 }
 

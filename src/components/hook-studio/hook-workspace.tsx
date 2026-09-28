@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Download, RefreshCw, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Download, Pencil, RefreshCw, Sparkles, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { SKILLS, enginesForSkill, getEngine, clipCredits, type EngineId, type Quality } from "@/lib/hook-studio/engines";
 import type { HookView, JobView, WorkerStatus } from "@/lib/hook-studio/types";
@@ -20,6 +20,8 @@ export function HookWorkspace({ id, worker, onBack }: { id: string; worker: Work
   const [count, setCount] = useState(1);
   const [busy, setBusy] = useState<string | null>(null);
   const [editingBrief, setEditingBrief] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
   const promptDirty = useRef(false);
   const settingsSeeded = useRef(false);
 
@@ -145,7 +147,40 @@ export function HookWorkspace({ id, worker, onBack }: { id: string; worker: Work
             <ArrowLeft size={16} /> Library
           </Button>
           <div className="min-w-0">
-            <p className="text-white font-semibold truncate">{hook.title || "Untitled hook"}</p>
+            {editingTitle ? (
+              <form
+                className="flex items-center gap-1"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  await patch({ title: titleDraft }).catch((err) => toast.error(err.message));
+                  setEditingTitle(false);
+                }}
+              >
+                <input
+                  id="hook-title"
+                  autoFocus
+                  value={titleDraft}
+                  onChange={(e) => setTitleDraft(e.target.value)}
+                  maxLength={120}
+                  className="bg-gray-900 border border-gray-700 rounded-lg px-2 py-1 text-sm text-white w-72 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
+                <button type="submit" title="Save title" className="p-1 text-green-400 hover:text-white cursor-pointer"><Check size={16} /></button>
+                <button type="button" title="Cancel" onClick={() => setEditingTitle(false)} className="p-1 text-gray-400 hover:text-white cursor-pointer"><X size={16} /></button>
+              </form>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setTitleDraft(hook.title ?? "");
+                  setEditingTitle(true);
+                }}
+                title="Rename"
+                className="group flex items-center gap-2 text-left cursor-pointer"
+              >
+                <span className="text-white font-semibold truncate">{hook.title || "Untitled hook"}</span>
+                <Pencil size={13} className="text-gray-600 group-hover:text-white shrink-0" />
+              </button>
+            )}
             <p className="text-xs text-gray-500">
               {skillInfo.name} · {timeAgo(hook.created_at)}
             </p>
