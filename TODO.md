@@ -5,6 +5,24 @@ of letting them drift in chat.
 
 ---
 
+## Hook Studio (owner space) — follow-ups
+
+Shipped 2026-09-28. Renders on the Mac via `worker/hook-worker.mjs` (launchd
+agent `com.astrobiz.hook-worker`; `scripts/hook-worker-install.sh status|logs`).
+
+- [ ] **Run one real remake** with a genuine UGC reference and check that
+      Kling removes the on-screen text. If ghosts survive, strengthen the
+      "remove all text" line in `src/lib/hook-studio/prompt-writer.ts`.
+- [ ] **Gemini durations.** The worker clamps Gemini Omni to 4–8 s; confirm
+      the model's accepted values with `higgsfield model get
+      gemini_omni_flash_1_1` and widen if it takes more.
+- [ ] If the CLI session ever lapses (`higgsfield account status` fails),
+      run `higgsfield auth login` on the Mac; the queue resumes by itself.
+- [ ] Later, on request: burned-in text with ffmpeg on the Mac; a "score this
+      hook" button (Virality Predictor `brain_activity`, CLI only).
+
+---
+
 ## Manual setup pending (from recent commits)
 
 ### 1. Run pending Supabase migrations

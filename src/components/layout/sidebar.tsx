@@ -359,6 +359,12 @@ const ownerNavEntries: NavEntry[] = [
     icon: <LayoutDashboard size={20} />,
     roles: ["admin", "va", "fulfillment", "marketing"],
   },
+  {
+    label: "Hook Studio",
+    href: "/owner/hook-studio",
+    icon: <Clapperboard size={20} />,
+    roles: ["admin", "va", "fulfillment", "marketing"],
+  },
 ];
 
 export type SidebarSpace = "ops" | "owner";

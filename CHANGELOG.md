@@ -1,5 +1,47 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-28: Hook Studio — remake a working UGC clip with a new person, for SoulShot
+
+The owner space gets its first tool. Drop in a short UGC video that already
+works, say what to keep and what to change, and get the same shot back,
+silent, with a different person in it and the original text removed. It is
+for SoulShot hooks (the app), not the stores.
+
+**Flow.** Upload the reference (straight from the browser to the private
+`hook-studio` bucket with a signed URL, so Vercel's body limit never
+matters), pick the lane, the new person, and what the phone screen shows,
+and trim to at most 15 seconds. Claude writes the edit prompt and three
+on-screen text options in the app's voice; both are editable. Optionally
+pin a face: four Soul 2 candidates (0.12 credits each) or an uploaded photo,
+reusable across hooks. Then pick an engine and queue one to three remakes.
+
+**Engines** (Higgsfield CLI job types, credits per remake at 5 s): Kling 3.0
+Omni Edit `kling_video_edit` 7.5 std / 10 pro (default); Gemini Omni Flash
+1.1 `gemini_omni_flash_1_1` 15; Genjutsu motion transfer
+`hf_mult_motion_control` 35 / 55, needs a pinned face; Seedance 2.5
+`seedance_2_5 --mode video_edit` 38 / 60. Sound is always off.
+
+**Where it renders.** Not on Vercel. The dashboard writes rows to
+`hook_studio_jobs`; `worker/hook-worker.mjs` on Julius's Mac claims them
+(`hook_studio_claim_job`, skip-locked), trims the reference with ffmpeg,
+runs the CLI with the creator-plan credits, copies the result from the
+Higgsfield CDN into the bucket (those URLs expire), and marks the row done
+with the CLI's own credit estimate. It heartbeats the balance into
+`app_settings.hook_worker_status`; the page shows "Mac worker online" when
+the heartbeat is under two minutes old and says "queued until the Mac is
+back" otherwise. Installed as a launchd agent by
+`scripts/hook-worker-install.sh` (starts at login, restarts on crash, logs
+to `~/Library/Logs/astrobiz-hook-worker.log`). Jobs stuck `running` for 45
+minutes are re-queued.
+
+The developer API (api.higgsfield.ai) was considered and rejected: it bills
+from a separate prepaid balance and the CLI's 6,000 credits would go unused.
+
+Owner-only end to end: `/owner/hook-studio`, `/api/owner/hook-studio/*`
+(404 for anyone else), tables with RLS and no anon policies, service-role
+access only. Migration: `supabase/hook-studio-migration.sql` (applied).
+
+
 ## 2026-09-28: Owner switch — a second, private dashboard
 
 Next to "Astrobiz" at the top of the sidebar there is now a switch that

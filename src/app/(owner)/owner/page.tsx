@@ -10,9 +10,9 @@ export default function OwnerHomePage() {
 
       <div className="mt-8 rounded-xl border border-dashed border-gray-800 p-10 text-center">
         <LayoutDashboard size={28} className="mx-auto text-gray-600" />
-        <p className="text-sm text-gray-400 mt-3">Nothing here yet.</p>
+        <p className="text-sm text-gray-400 mt-3">Hook Studio is in the sidebar.</p>
         <p className="text-xs text-gray-600 mt-1">
-          New pages added to this space show up in the sidebar.
+          New pages added to this space show up there too.
         </p>
       </div>
     </div>
