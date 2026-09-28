@@ -10,6 +10,7 @@ import {
   detectCashAtRisk,
   detectStoreOutage,
 } from "@/lib/alerts/rules/operations";
+import { detectAdBillingThreshold } from "@/lib/alerts/rules/billing";
 import { sendEmail } from "@/lib/email/resend";
 import { buildUrgentEmail } from "@/lib/email/templates";
 import { getAdminEmails } from "@/lib/email/admin-recipients";
@@ -18,7 +19,7 @@ import type { AdminAlert } from "@/lib/alerts/types";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-// Runs every 30 min (see vercel.json). Checks all 7 rules and inserts
+// Runs every 30 min (see vercel.json). Checks all 8 rules and inserts
 // any new alerts. Dedup is handled inside each rule via insert_admin_alert.
 export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization");
@@ -42,6 +43,7 @@ export async function GET(request: Request) {
     ["rts_spike", () => detectRtsSpike(supabase)],
     ["cash_at_risk", () => detectCashAtRisk(supabase)],
     ["store_outage", () => detectStoreOutage(supabase, baseUrl, cronSecret)],
+    ["ad_billing_threshold", () => detectAdBillingThreshold(supabase)],
   ];
 
   for (const [name, runner] of rules) {

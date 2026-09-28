@@ -10,6 +10,8 @@ import {
   Wallet,
   Store,
   Loader2,
+  BellRing,
+  Check,
 } from "lucide-react";
 import { cachedFetch, formatLastRefreshed } from "@/lib/client-cache";
 import type {
@@ -17,6 +19,11 @@ import type {
   BillingResponse,
   StatusTone,
 } from "@/lib/facebook/billing";
+import {
+  thresholdStatus,
+  type ThresholdSetting,
+  type ThresholdStage,
+} from "@/lib/facebook/billing-threshold";
 
 const BILLING_URL = "/api/facebook/billing";
 const CLIENT_TTL_MS = 5 * 60 * 1000;
@@ -57,7 +64,164 @@ function StatusBadge({ account }: { account: BillingAccount }) {
   );
 }
 
-function AccountCard({ account }: { account: BillingAccount }) {
+const STAGE_BAR: Record<ThresholdStage | "none", string> = {
+  none: "bg-emerald-500",
+  approaching: "bg-orange-400",
+  reached: "bg-red-500",
+};
+
+/** Balance against the billing limit — the bar the email is about. */
+function ThresholdBar({ account }: { account: BillingAccount }) {
+  const t = account.threshold;
+  const stage = t.stage ?? "none";
+  const width = Math.max(2, Math.min(100, t.pct));
+  return (
+    <div className="mt-2">
+      <div className="h-1.5 w-full rounded-full bg-gray-700/70 overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all ${STAGE_BAR[stage]}`}
+          style={{ width: `${width}%` }}
+        />
+      </div>
+      <p
+        className={`text-[11px] mt-1 ${
+          stage === "reached"
+            ? "text-red-300"
+            : stage === "approaching"
+              ? "text-orange-300"
+              : "text-gray-500"
+        }`}
+      >
+        {Math.round(t.pct)}% of {pesoWhole(t.limit)} limit
+        {stage === "reached"
+          ? " · Meta is charging the card"
+          : stage === "approaching"
+            ? ` · ${pesoWhole(t.remaining)} to the charge`
+            : ` · email at ${pesoWhole(t.alert_at)}`}
+      </p>
+    </div>
+  );
+}
+
+const THRESHOLDS_URL = "/api/facebook/billing/thresholds";
+
+/**
+ * Where the limit lives. Meta does not tell the API what an account's
+ * payment threshold is, so the reader sets it here and the alert cron
+ * emails at the warning level.
+ */
+function ThresholdEditor({
+  account,
+  onSaved,
+}: {
+  account: BillingAccount;
+  onSaved: (accountId: string, setting: ThresholdSetting) => void;
+}) {
+  const [limit, setLimit] = useState(String(account.threshold.limit));
+  const [alertAt, setAlertAt] = useState(String(account.threshold.alert_at));
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLimit(String(account.threshold.limit));
+    setAlertAt(String(account.threshold.alert_at));
+  }, [account.threshold.limit, account.threshold.alert_at]);
+
+  const dirty =
+    Number(limit) !== account.threshold.limit ||
+    Number(alertAt) !== account.threshold.alert_at;
+
+  const save = async () => {
+    setSaving(true);
+    setErr(null);
+    setSaved(false);
+    try {
+      const res = await fetch(THRESHOLDS_URL, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          account_id: account.id,
+          limit: Number(limit),
+          alert_at: Number(alertAt),
+        }),
+      });
+      const json = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        threshold?: ThresholdSetting;
+      };
+      if (!res.ok || !json.threshold) throw new Error(json.error ?? "Could not save");
+      onSaved(account.id, json.threshold);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not save");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const field = (
+    label: string,
+    value: string,
+    set: (v: string) => void,
+    hint: string
+  ) => (
+    <label className="flex-1 min-w-[120px]">
+      <span className="block text-[10px] uppercase tracking-wider text-gray-500 font-medium">
+        {label}
+      </span>
+      <span className="mt-1 flex items-center rounded-md bg-gray-900/60 border border-gray-700/60 focus-within:border-emerald-600/60">
+        <span className="pl-2 text-xs text-gray-500">₱</span>
+        <input
+          type="number"
+          min={1}
+          step={1000}
+          inputMode="numeric"
+          value={value}
+          onChange={(e) => set(e.target.value)}
+          className="w-full bg-transparent px-1.5 py-1.5 text-sm text-white outline-none"
+          aria-label={label}
+        />
+      </span>
+      <span className="block text-[10px] text-gray-500 mt-0.5">{hint}</span>
+    </label>
+  );
+
+  return (
+    <div className="rounded-lg border border-gray-700/50 bg-gray-900/30 p-3">
+      <p className="text-[10px] uppercase tracking-wider text-gray-500 font-medium mb-2 flex items-center gap-1">
+        <BellRing size={11} /> Billing limit &amp; email warning
+      </p>
+      <div className="flex flex-wrap items-end gap-2">
+        {field("Meta charges at", limit, setLimit, "Payment threshold on Meta's Billing page")}
+        {field("Email me at", alertAt, setAlertAt, "Urgent email once the balance gets here")}
+        <button
+          onClick={save}
+          disabled={saving || !dirty}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-40 disabled:hover:bg-emerald-700 mb-[18px]"
+        >
+          {saving ? (
+            <Loader2 size={13} className="animate-spin" />
+          ) : saved ? (
+            <Check size={13} />
+          ) : null}
+          {saved ? "Saved" : "Save"}
+        </button>
+      </div>
+      {err && <p className="text-xs text-red-300 mt-2">{err}</p>}
+    </div>
+  );
+}
+
+function AccountCard({
+  account,
+  onThresholdSaved,
+}: {
+  account: BillingAccount;
+  onThresholdSaved: (accountId: string, setting: ThresholdSetting) => void;
+}) {
   const { status } = account;
   const primaryIsPay = status.needsPayment;
 
@@ -122,8 +286,10 @@ function AccountCard({ account }: { account: BillingAccount }) {
           >
             {peso(account.balance)}
           </p>
-          {status.needsPayment && (
+          {status.needsPayment ? (
             <p className="text-[11px] text-red-400/80 mt-0.5">Ads stop until this is paid</p>
+          ) : (
+            <ThresholdBar account={account} />
           )}
         </div>
         <div className="bg-gray-900/50 rounded-lg p-3">
@@ -158,6 +324,8 @@ function AccountCard({ account }: { account: BillingAccount }) {
           )}
         </div>
       </div>
+
+      <ThresholdEditor account={account} onSaved={onThresholdSaved} />
 
       {/* What it means */}
       <div
@@ -250,9 +418,28 @@ export default function AdsBillingPage() {
     void load();
   }, [load]);
 
+  // A saved limit changes the bar immediately; Meta's figures are untouched.
+  const onThresholdSaved = useCallback((accountId: string, setting: ThresholdSetting) => {
+    setData((prev) =>
+      prev
+        ? {
+            ...prev,
+            accounts: prev.accounts.map((a) =>
+              a.id === accountId
+                ? { ...a, threshold: thresholdStatus(a.balance, setting) }
+                : a
+            ),
+          }
+        : prev
+    );
+  }, []);
+
   const accounts = data?.accounts ?? [];
   const summary = data?.summary;
   const problem = accounts.filter((a) => a.status.needsPayment);
+  const nearLimit = accounts.filter(
+    (a) => !a.status.needsPayment && a.threshold.stage !== null
+  );
   const otherIssues = accounts.filter(
     (a) => a.status.tone !== "ok" && !a.status.needsPayment
   );
@@ -287,7 +474,9 @@ export default function AdsBillingPage() {
         balance and the card on file. When an account stops delivering over a
         failed payment, <span className="text-white">Pay now</span> opens that
         account&apos;s Billing page on Meta with the balance ready to settle —
-        Meta does not let the API pay it for you.
+        Meta does not let the API pay it for you. Each card also tracks the
+        balance against the account&apos;s billing limit, and an urgent email
+        goes out once the balance reaches the warning level you set.
       </p>
 
       {/* Rate-limit / stale notice */}
@@ -356,6 +545,63 @@ export default function AdsBillingPage() {
         </div>
       )}
 
+      {/* Near-limit banner: the charge is coming, is the card ready? */}
+      {nearLimit.length > 0 && (
+        <div
+          className={`mb-6 rounded-xl border p-4 ${
+            nearLimit.some((a) => a.threshold.stage === "reached")
+              ? "border-red-700/70 bg-red-950/40"
+              : "border-orange-700/70 bg-orange-950/30"
+          }`}
+        >
+          <div className="flex items-start gap-3">
+            <BellRing className="text-orange-300 shrink-0 mt-0.5" size={20} />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-orange-50">
+                {nearLimit.length === 1
+                  ? "1 ad account is close to its billing limit"
+                  : `${nearLimit.length} ad accounts are close to their billing limit`}
+                {" · "}
+                <span className="font-normal text-orange-100/80">
+                  Meta will charge the card when the balance reaches the limit. If the charge fails, the ads stop.
+                </span>
+              </p>
+              <ul className="mt-2 space-y-2">
+                {nearLimit.map((a) => (
+                  <li
+                    key={a.id}
+                    className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-orange-50/90"
+                  >
+                    <span className="font-medium text-white">{a.name}</span>
+                    {a.stores.length > 0 && (
+                      <span className="text-orange-200/70">
+                        {a.stores.map((s) => s.store).join(", ")}
+                      </span>
+                    )}
+                    <span className="font-semibold">
+                      {peso(a.balance)} of {pesoWhole(a.threshold.limit)}
+                    </span>
+                    <span className="text-xs text-orange-200/70">
+                      {a.threshold.stage === "reached"
+                        ? "limit reached"
+                        : `${pesoWhole(a.threshold.remaining)} to go`}
+                    </span>
+                    <a
+                      href={a.links.pay}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold"
+                    >
+                      <CreditCard size={12} /> Pay early <ExternalLink size={11} />
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      )}
+
       {otherIssues.length > 0 && problem.length === 0 && (
         <div className="mb-6 rounded-xl border border-orange-800/60 bg-orange-950/30 p-4 text-sm text-orange-100">
           {otherIssues.map((a) => a.name).join(", ")}{" "}
@@ -413,7 +659,7 @@ export default function AdsBillingPage() {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
           {accounts.map((a) => (
-            <AccountCard key={a.id} account={a} />
+            <AccountCard key={a.id} account={a} onThresholdSaved={onThresholdSaved} />
           ))}
         </div>
       )}

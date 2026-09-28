@@ -24,6 +24,13 @@ import {
   type BillingResponse,
 } from "@/lib/facebook/billing";
 import { matchAdToStore } from "@/lib/profit/store-matching";
+import {
+  BILLING_THRESHOLDS_KEY,
+  parseThresholdConfig,
+  resolveThreshold,
+  thresholdStatus,
+  type ThresholdConfig,
+} from "@/lib/facebook/billing-threshold";
 
 export const dynamic = "force-dynamic";
 
@@ -73,7 +80,23 @@ interface GraphAccount {
   error?: { message: string };
 }
 
-type CachedPayload = { accounts: BillingAccount[] };
+type CachedAccount = Omit<BillingAccount, "threshold">;
+type CachedPayload = { accounts: CachedAccount[] };
+
+/**
+ * Thresholds are applied when responding, not when caching, so editing a
+ * limit on the page shows up on the next load without waiting five
+ * minutes for Meta's figures to refresh.
+ */
+function withThresholds(
+  accounts: CachedAccount[],
+  config: ThresholdConfig
+): BillingAccount[] {
+  return accounts.map((a) => ({
+    ...a,
+    threshold: thresholdStatus(a.balance, resolveThreshold(config, a.id)),
+  }));
+}
 
 function summarize(accounts: BillingAccount[]): BillingResponse["summary"] {
   return {
@@ -93,11 +116,13 @@ function summarize(accounts: BillingAccount[]): BillingResponse["summary"] {
 
 function respond(
   payload: CachedPayload,
+  config: ThresholdConfig,
   extra: Partial<BillingResponse> = {}
 ): Response {
+  const accounts = withThresholds(payload.accounts, config);
   const body: BillingResponse = {
-    accounts: payload.accounts,
-    summary: summarize(payload.accounts),
+    accounts,
+    summary: summarize(accounts),
     from_cache: false,
     ...extra,
   };
@@ -128,14 +153,22 @@ export async function GET(request: Request) {
   // is how every other Facebook route reaches them.
   const db = createServiceClient();
 
-  const [{ data: tokenSetting }, { data: selectedSetting }] = await Promise.all([
-    supabase.from("app_settings").select("value").eq("key", "fb_access_token").single(),
-    supabase
-      .from("app_settings")
-      .select("value")
-      .eq("key", "fb_selected_accounts")
-      .single(),
-  ]);
+  const [{ data: tokenSetting }, { data: selectedSetting }, { data: thresholdSetting }] =
+    await Promise.all([
+      supabase.from("app_settings").select("value").eq("key", "fb_access_token").single(),
+      supabase
+        .from("app_settings")
+        .select("value")
+        .eq("key", "fb_selected_accounts")
+        .single(),
+      supabase
+        .from("app_settings")
+        .select("value")
+        .eq("key", BILLING_THRESHOLDS_KEY)
+        .maybeSingle(),
+    ]);
+
+  const thresholdConfig = parseThresholdConfig(thresholdSetting?.value as string | undefined);
 
   const token = tokenSetting?.value as string | undefined;
   if (!token) {
@@ -164,7 +197,7 @@ export async function GET(request: Request) {
       BILLING_CACHE_MAX_AGE_MS
     );
     if (cached) {
-      return respond(cached.data, {
+      return respond(cached.data, thresholdConfig, {
         from_cache: true,
         refreshed_at: cached.refreshed_at,
       });
@@ -178,7 +211,7 @@ export async function GET(request: Request) {
       .eq("cache_key", cacheKey)
       .maybeSingle();
     if (!staleRow) return null;
-    return respond(staleRow.response_data as CachedPayload, {
+    return respond(staleRow.response_data as CachedPayload, thresholdConfig, {
       from_cache: true,
       stale: true,
       refreshed_at: staleRow.refreshed_at,
@@ -221,7 +254,7 @@ export async function GET(request: Request) {
     }
 
     if (accountIds.length === 0) {
-      return respond({ accounts: [] });
+      return respond({ accounts: [] }, thresholdConfig);
     }
 
     const [detailRes, defaultsResult, adsCache] = await Promise.all([
@@ -263,7 +296,7 @@ export async function GET(request: Request) {
         | Array<{ account_id: string; campaign?: string; adset?: string; spend?: number }>
         | undefined) ?? [];
 
-    const accounts: BillingAccount[] = [];
+    const accounts: CachedAccount[] = [];
     for (const id of accountIds) {
       const a = detail[id] as GraphAccount | undefined;
       if (!a || a.error) {
@@ -356,7 +389,7 @@ export async function GET(request: Request) {
     const payload: CachedPayload = { accounts };
     await setCachedResponse(db, "fb_billing", cacheKey, payload).catch(() => {});
 
-    return respond(payload, { from_cache: false });
+    return respond(payload, thresholdConfig, { from_cache: false });
   } catch (e) {
     if (e instanceof RateLimitedError) {
       const stale = await serveStale({

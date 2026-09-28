@@ -11,6 +11,7 @@ import {
   Sparkles,
   ClipboardList,
   ClipboardCheck,
+  CreditCard,
 } from "lucide-react";
 import type { AlertType, AlertSeverity } from "@/lib/alerts/types";
 
@@ -24,6 +25,8 @@ const ICON_BY_TYPE: Record<AlertType, React.ReactNode> = {
   rts_spike: <Truck size={16} />,
   cash_at_risk: <AlertTriangle size={16} />,
   store_outage: <Wifi size={16} />,
+  ad_billing_threshold: <CreditCard size={16} />,
+  ad_account_payment_failed: <CreditCard size={16} />,
   waybill_sender_mismatch: <Tag size={16} />,
   task_assigned: <ClipboardList size={16} />,
   task_completed: <ClipboardCheck size={16} />,

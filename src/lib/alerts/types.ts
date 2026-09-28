@@ -10,6 +10,8 @@ export type AlertType =
   | "rts_spike"
   | "cash_at_risk"
   | "store_outage"
+  | "ad_billing_threshold"
+  | "ad_account_payment_failed"
   | "waybill_sender_mismatch"
   | "task_assigned"
   | "task_completed";
@@ -20,6 +22,7 @@ export type AlertResourceType =
   | "ad"
   | "campaign"
   | "store"
+  | "ad_account"
   | "autopilot_run"
   | "system"
   | "task";
@@ -65,6 +68,8 @@ export const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   rts_spike: "RTS spike",
   cash_at_risk: "Cash at risk",
   store_outage: "Store connection failing",
+  ad_billing_threshold: "Ad account near billing limit",
+  ad_account_payment_failed: "Ad account payment failed",
   waybill_sender_mismatch: "Wrong sender on waybill",
   task_assigned: "Task assigned",
   task_completed: "Task completed",

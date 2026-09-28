@@ -10,6 +10,8 @@
  * lands on that account's "Pay now" button.
  */
 
+import type { ThresholdStatus } from "./billing-threshold";
+
 export type AccountStatusLabel =
   | "ACTIVE"
   | "DISABLED"
@@ -327,6 +329,12 @@ export interface BillingAccount {
     payment_settings: string;
     ads_manager: string;
   };
+  /**
+   * How close the balance is to the account's payment threshold — the
+   * point where Meta charges the card. Configured per account, not read
+   * from Meta (the API does not expose it). See billing-threshold.ts.
+   */
+  threshold: ThresholdStatus;
 }
 
 export interface BillingResponse {
