@@ -5,6 +5,7 @@ import { alertUnauthorizedAccess } from "@/lib/alerts/unauthorized-access";
 import { Sidebar } from "@/components/layout/sidebar";
 import { BackgroundRefresh } from "@/components/layout/background-refresh";
 import { ClockStatusBanner } from "@/components/attendance/clock-status-banner";
+import { isOwnerEmail } from "@/lib/owner";
 
 export default async function DashboardLayout({
   children,
@@ -65,6 +66,7 @@ export default async function DashboardLayout({
       <Sidebar
         employeeName={employee.full_name}
         employeeRole={employee.role}
+        isOwner={isOwnerEmail(user.email)}
       />
       <main className="flex-1 overflow-auto">
         <ClockStatusBanner />

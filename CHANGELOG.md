@@ -1,5 +1,43 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-28: Owner switch — a second, private dashboard
+
+Next to "Astrobiz" at the top of the sidebar there is now a switch that
+only japcidro@gmail.com sees. Turning it on opens the **Owner Dashboard**
+at `/owner`: the same dark shell and left navigation, with nothing in it
+yet but a Home page. Turning it off goes back to `/dashboard`.
+
+The check is the signed-in Supabase user's email, on the server
+(`src/lib/owner.ts`). Anyone else opening an `/owner` URL gets a 404, so
+the space is not advertised. To add a page, put it under
+`src/app/(owner)/owner/` and list it in `ownerNavEntries` in the sidebar.
+
+
+## 2026-09-28: Billing alerts — before the card is charged, and when it fails
+
+Meta charges an ad account's card each time its unpaid balance reaches the
+account's payment threshold (₱50,000 on ours). If the card cannot cover
+it, every ad in the account stops. The detect-alerts cron (every 30 min)
+now emails two urgent alerts:
+
+- **Near the limit.** At ₱40,000 (80%), and again at ₱50,000. One alert per
+  stage per billing cycle. Meta does not say when it charged, so each pass
+  records the balance it saw (`app_settings.fb_billing_threshold_state`)
+  and a lower balance on the next pass starts a new cycle. Comparing only
+  against the last alert missed a cycle when the balance jumped past
+  ₱50,000 and was charged between two passes: the next ₱40,000 warning
+  never went out.
+- **Payment failed.** When Meta reports UNSETTLED, IN_GRACE_PERIOD,
+  PENDING_SETTLEMENT, or disabled for payment risk, a separate
+  `ad_account_payment_failed` alert goes out and repeats every 6 hours
+  until the account is paid. Before, a failed charge left the balance
+  above the limit and produced no further email. While a payment has
+  failed, the threshold alert stays quiet.
+
+Limits are per account on the Ads Billing page (admin), stored in
+`app_settings.fb_billing_thresholds`, default ₱50,000 / ₱40,000.
+
+
 ## 2026-09-24: Ads Billing — which ad account stopped, and what to pay
 
 When Meta declines a card, every ad in that account stops and nothing in

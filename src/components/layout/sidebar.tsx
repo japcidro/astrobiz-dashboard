@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Clock,
   LayoutDashboard,
@@ -44,6 +44,7 @@ import { createClient } from "@/lib/supabase/client";
 import type { UserRole } from "@/lib/types";
 import { NotificationBell } from "@/components/alerts/notification-bell";
 import { EmployeeNotificationBell } from "@/components/attendance/employee-notification-bell";
+import { OPS_HOME, OWNER_HOME } from "@/lib/owner";
 
 interface NavItem {
   label: string;
@@ -349,6 +350,19 @@ const navEntries: NavEntry[] = [
   },
 ];
 
+// The owner space's own navigation. Starts empty on purpose: add a page
+// under src/app/(owner)/owner/ and list it here.
+const ownerNavEntries: NavEntry[] = [
+  {
+    label: "Home",
+    href: OWNER_HOME,
+    icon: <LayoutDashboard size={20} />,
+    roles: ["admin", "va", "fulfillment", "marketing"],
+  },
+];
+
+export type SidebarSpace = "ops" | "owner";
+
 const roleColors: Record<UserRole, string> = {
   admin: "bg-purple-600",
   va: "bg-blue-600",
@@ -359,13 +373,30 @@ const roleColors: Record<UserRole, string> = {
 interface SidebarProps {
   employeeName: string;
   employeeRole: UserRole;
+  /** Shows the space switch. Decided on the server from the signed-in email. */
+  isOwner?: boolean;
+  space?: SidebarSpace;
 }
 
-export function Sidebar({ employeeName, employeeRole }: SidebarProps) {
+export function Sidebar({
+  employeeName,
+  employeeRole,
+  isOwner = false,
+  space = "ops",
+}: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const filteredEntries = navEntries.filter((entry) =>
+  const inOwnerSpace = space === "owner";
+  const entries = inOwnerSpace ? ownerNavEntries : navEntries;
+
+  const switchSpace = () => {
+    setMobileOpen(false);
+    router.push(inOwnerSpace ? OPS_HOME : OWNER_HOME);
+  };
+
+  const filteredEntries = entries.filter((entry) =>
     entry.roles.includes(employeeRole)
   );
 
@@ -374,7 +405,7 @@ export function Sidebar({ employeeName, employeeRole }: SidebarProps) {
     group.children.some((c) => pathname === c.href || pathname.startsWith(c.href + "/"));
 
   const findActiveGroupLabel = () =>
-    navEntries.find((e): e is NavGroup => isGroup(e) && isGroupActive(e))?.label ?? null;
+    entries.find((e): e is NavGroup => isGroup(e) && isGroupActive(e))?.label ?? null;
 
   // Accordion: only one group expanded at a time.
   const [openGroup, setOpenGroup] = useState<string | null>(() => findActiveGroupLabel());
@@ -403,8 +434,31 @@ export function Sidebar({ employeeName, employeeRole }: SidebarProps) {
     <div className="flex flex-col h-full">
       {/* Logo */}
       <div className="shrink-0 p-6 border-b border-gray-800">
-        <h1 className="text-xl font-bold text-white">Astrobiz</h1>
-        <p className="text-xs text-gray-500 mt-1">Operations Dashboard</p>
+        <div className="flex items-center gap-3">
+          <h1 className="text-xl font-bold text-white">Astrobiz</h1>
+          {isOwner && (
+            <button
+              type="button"
+              role="switch"
+              aria-checked={inOwnerSpace}
+              aria-label="Owner dashboard"
+              title={inOwnerSpace ? "Back to Operations" : "Open Owner Dashboard"}
+              onClick={switchSpace}
+              className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950 ${
+                inOwnerSpace ? "bg-purple-600" : "bg-gray-700 hover:bg-gray-600"
+              }`}
+            >
+              <span
+                className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                  inOwnerSpace ? "translate-x-[18px]" : "translate-x-0.5"
+                }`}
+              />
+            </button>
+          )}
+        </div>
+        <p className="text-xs text-gray-500 mt-1">
+          {inOwnerSpace ? "Owner Dashboard" : "Operations Dashboard"}
+        </p>
       </div>
 
       {/* Nav */}
