@@ -54,11 +54,16 @@ on-screen text options in the app's voice; both are editable. Optionally
 pin a face: four Soul 2 candidates (0.12 credits each) or an uploaded photo,
 reusable across hooks. Then pick an engine and queue one to three remakes.
 
-**Engines** (Higgsfield CLI job types, credits per remake at 5 s): Kling 3.0
-Omni Edit `kling_video_edit` 7.5 std / 10 pro (default); Gemini Omni Flash
-1.1 `gemini_omni_flash_1_1` 15; Genjutsu motion transfer
-`hf_mult_motion_control` 35 / 55, needs a pinned face; Seedance 2.5
-`seedance_2_5 --mode video_edit` 38 / 60. Sound is always off.
+**Engines** (Higgsfield CLI job types, credits per remake at 5 s), tested
+the same day on a generated bedroom reference with a pinned Soul 2 face:
+Genjutsu motion transfer `hf_mult_motion_control` 35 / 55 was the only
+engine that put the pinned face into the shot, so it is the default and it
+requires a face. Kling 3.0 Omni Edit `kling_video_edit` 7.5 std / 10 pro
+kept the same woman with or without a face image, a short prompt or a long
+one; it is the cheap clean-up option (text removal, clothes, light). Gemini
+Omni Flash 1.1 `gemini_omni_flash_1_1` 15 changed hair and clothes but kept
+a similar face. Seedance 2.5 `seedance_2_5 --mode video_edit` 38 / 60
+changed the shirt only. Sound is always off.
 
 **Where it renders.** Not on Vercel. The dashboard writes rows to
 `hook_studio_jobs`; `worker/hook-worker.mjs` on Julius's Mac claims them

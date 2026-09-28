@@ -27,7 +27,7 @@ export function HookWorkspace({
   const [customText, setCustomText] = useState("");
   const [engine, setEngine] = useState<EngineId>(DEFAULT_ENGINE);
   const [quality, setQuality] = useState<Quality>("standard");
-  const [count, setCount] = useState(2);
+  const [count, setCount] = useState(1);
   const [busy, setBusy] = useState<string | null>(null);
   const [editingBrief, setEditingBrief] = useState(false);
   const promptDirty = useRef(false);
@@ -329,7 +329,7 @@ export function HookWorkspace({
           <div>
             <p className="text-sm font-semibold text-white flex items-center gap-2">
               <UserRound size={15} /> Who is in the remake
-              <span className="text-xs font-normal text-gray-500">optional. Skip it and the engine invents a person from the brief.</span>
+              <span className="text-xs font-normal text-gray-500">pin a face for a real change of person. Without one, the engines keep the reference&apos;s face.</span>
             </p>
           </div>
           <div className="flex gap-2">

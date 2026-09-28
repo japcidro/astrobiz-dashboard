@@ -28,9 +28,18 @@ export interface Engine {
 
 export const ENGINES: Engine[] = [
   {
+    id: "genjutsu",
+    name: "Genjutsu motion transfer",
+    blurb: "A pinned face performs the reference's exact motion. The only engine that truly changes the person. Default.",
+    credits: { standard: 35, high: 55 },
+    qualityLabels: { standard: "720p", high: "1080p" },
+    needsFace: true,
+    usesFace: true,
+  },
+  {
     id: "kling_edit",
     name: "Kling 3.0 Omni Edit",
-    blurb: "Edits the reference in place: same frames, new person, text removed. Default.",
+    blurb: "Cheap clean-up of the reference: removes text, changes clothes and lighting. Keeps the same person.",
     credits: { standard: 7.5, high: 10 },
     qualityLabels: { standard: "Standard", high: "Pro" },
     needsFace: false,
@@ -39,25 +48,16 @@ export const ENGINES: Engine[] = [
   {
     id: "gemini_edit",
     name: "Gemini Omni Flash 1.1",
-    blurb: "Regenerates from the reference. A different look with the same motion.",
+    blurb: "Regenerates from the reference. Changes hair and clothes; the face stays similar.",
     credits: { standard: 15, high: 15 },
     qualityLabels: null,
     needsFace: false,
     usesFace: true,
   },
   {
-    id: "genjutsu",
-    name: "Genjutsu motion transfer",
-    blurb: "Your pinned face performs the reference's exact motion.",
-    credits: { standard: 35, high: 55 },
-    qualityLabels: { standard: "720p", high: "1080p" },
-    needsFace: true,
-    usesFace: true,
-  },
-  {
     id: "seedance_edit",
     name: "Seedance 2.5 Edit",
-    blurb: "Highest realism edit of the reference. Slowest.",
+    blurb: "High-fidelity edit of the reference. Changes clothes; the face stays similar. Slow.",
     credits: { standard: 38, high: 60 },
     qualityLabels: { standard: "720p", high: "1080p" },
     needsFace: false,
@@ -65,7 +65,7 @@ export const ENGINES: Engine[] = [
   },
 ];
 
-export const DEFAULT_ENGINE: EngineId = "kling_edit";
+export const DEFAULT_ENGINE: EngineId = "genjutsu";
 
 export function getEngine(id: string): Engine | undefined {
   return ENGINES.find((e) => e.id === id);

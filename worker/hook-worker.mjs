@@ -305,6 +305,16 @@ async function processJob(job) {
     log(`job ${job.id} done (${estimate ?? "?"} cr, ${(size / 1e6).toFixed(1)} MB)`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    // Higgsfield's upload/CDN side flakes now and then (HTTP 5xx, "fetch
+    // failed"). One automatic retry; a second failure is real.
+    const transient = /HTTP 5\d\d|fetch failed|ECONNRESET|ETIMEDOUT|socket hang up|upload_url/i.test(message);
+    if (transient && job.attempts < 2) {
+      log(`job ${job.id} transient error, re-queued: ${message.slice(0, 160)}`);
+      await updateJob(job.id, { status: "queued", worker: null, claimed_at: null, started_at: null, error: `retrying after: ${message.slice(0, 300)}` }).catch((e) =>
+        log("could not re-queue:", e.message)
+      );
+      return;
+    }
     log(`job ${job.id} FAILED: ${message}`);
     await updateJob(job.id, { status: "failed", error: message.slice(0, 1000), finished_at: new Date().toISOString() }).catch((e) =>
       log("could not mark failed:", e.message)

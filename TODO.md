@@ -32,9 +32,12 @@ higher tier, which the app already qualifies for.
 Shipped 2026-09-28. Renders on the Mac via `worker/hook-worker.mjs` (launchd
 agent `com.astrobiz.hook-worker`; `scripts/hook-worker-install.sh status|logs`).
 
-- [ ] **Run one real remake** with a genuine UGC reference and check that
-      Kling removes the on-screen text. If ghosts survive, strengthen the
+- [ ] **Run one real remake** with a genuine UGC reference (a real ad, not
+      the generated test clip) on Genjutsu with a pinned face, and check
+      that the on-screen text is gone. If ghosts survive, strengthen the
       "remove all text" line in `src/lib/hook-studio/prompt-writer.ts`.
+- [ ] Genjutsu's first attempt today failed with a Higgsfield upload 520;
+      the worker now retries once. If that keeps happening, ask Higgsfield.
 - [ ] **Gemini durations.** The worker clamps Gemini Omni to 4–8 s; confirm
       the model's accepted values with `higgsfield model get
       gemini_omni_flash_1_1` and widen if it takes more.
