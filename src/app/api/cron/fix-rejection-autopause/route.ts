@@ -1,4 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/service";
+import { fbFetchWithLimits, getBlockedUntil, RateLimitedError } from "@/lib/facebook/rate-limit";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -44,6 +45,12 @@ export async function GET(request: Request) {
   const watching = (rows ?? []) as WatchRow[];
   const until = new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
 
+  // A watched ad pauses a cycle later rather than deepening a block.
+  const blockedUntil = await getBlockedUntil(supabase);
+  if (blockedUntil && watching.length > 0) {
+    return Response.json({ ok: true, skipped: true, watching: watching.length, reason: `Facebook rate-limited until ${blockedUntil.toISOString()}` });
+  }
+
   let paused = 0;
   let checked = 0;
   const errors: string[] = [];
@@ -57,9 +64,10 @@ export async function GET(request: Request) {
         time_range: JSON.stringify({ since: row.since_date, until }),
         access_token: token,
       });
-      const insRes = await fetch(
+      const insRes = await fbFetchWithLimits(
         `${FB_API_BASE}/${row.ad_id}/insights?${params}`,
-        { cache: "no-store" }
+        { cache: "no-store" },
+        supabase
       );
       const insJson = (await insRes.json()) as {
         data?: Array<{ spend?: string }>;
@@ -73,11 +81,11 @@ export async function GET(request: Request) {
 
       if (spend >= row.spend_threshold) {
         // Pause the ad.
-        const pauseRes = await fetch(`${FB_API_BASE}/${row.ad_id}`, {
+        const pauseRes = await fbFetchWithLimits(`${FB_API_BASE}/${row.ad_id}`, {
           method: "POST",
           headers: { "Content-Type": "application/x-www-form-urlencoded" },
           body: new URLSearchParams({ access_token: token, status: "PAUSED" }).toString(),
-        });
+        }, supabase);
         if (!pauseRes.ok) {
           const j = await pauseRes.json().catch(() => ({}));
           errors.push(
@@ -115,6 +123,9 @@ export async function GET(request: Request) {
       }
     } catch (e) {
       errors.push(`${row.ad_id}: ${e instanceof Error ? e.message : "error"}`);
+      // Once Meta blocks us, every further call fails the same way and
+      // extends the block. The rest of the list gets the next run.
+      if (e instanceof RateLimitedError) break;
     }
   }
 

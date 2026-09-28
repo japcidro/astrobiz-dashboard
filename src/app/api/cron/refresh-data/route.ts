@@ -1,4 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/service";
+import { getBlockedUntil, isUnderPressure } from "@/lib/facebook/rate-limit";
 import { buildCacheKey, setCachedResponse } from "@/lib/data-cache";
 
 export const dynamic = "force-dynamic";
@@ -6,6 +7,8 @@ export const maxDuration = 300; // 5 minutes max
 
 // Date presets to pre-compute
 const PNL_DATE_FILTERS = ["today", "yesterday", "last_7d", "this_month", "last_30d"];
+// Under Facebook pressure only these P&L windows refresh; the wide ones wait.
+const PNL_NARROW_FILTERS = ["today", "yesterday"];
 // IMPORTANT: these strings MUST match the values the dashboard sends from
 // DATE_PRESETS in marketing/creatives/page.tsx and marketing/ads/page.tsx.
 // A previous version used "last_7_days"/"last_30_days" (with underscores)
@@ -38,6 +41,23 @@ export async function GET(request: Request) {
   // Auth header for internal calls (bypasses user auth on API routes)
   const cronAuth = { Authorization: `Bearer ${cronSecret}` };
 
+  // Everything below spends Facebook calls. While Meta has us blocked, a
+  // run would only fail and lengthen the block; while usage is high, warm
+  // the narrow windows only and let the wide ones wait for the next run.
+  const blockedUntil = await getBlockedUntil(supabase);
+  if (blockedUntil) {
+    return Response.json({
+      success: true,
+      skipped: true,
+      reason: `Facebook rate-limited until ${blockedUntil.toISOString()}`,
+      refreshed: 0,
+      errors: 0,
+      timestamp: new Date().toISOString(),
+    });
+  }
+  const pressure = await isUnderPressure(supabase);
+  const pnlFilters = pressure.pressured ? PNL_NARROW_FILTERS : PNL_DATE_FILTERS;
+
   // --- 1. Refresh P&L data ---
   const { data: stores } = await supabase
     .from("shopify_stores")
@@ -46,7 +66,7 @@ export async function GET(request: Request) {
 
   const storeFilters = ["ALL", ...(stores || []).map((s) => s.name.toUpperCase())];
 
-  for (const dateFilter of PNL_DATE_FILTERS) {
+  for (const dateFilter of pnlFilters) {
     for (const store of storeFilters) {
       try {
         const params = new URLSearchParams({
@@ -85,7 +105,7 @@ export async function GET(request: Request) {
   const onTheHour = new Date().getUTCMinutes() < 30;
   const adsPresets = [
     ...ADS_FREQUENT_PRESETS,
-    ...(onTheHour ? ADS_HOURLY_PRESETS : []),
+    ...(onTheHour && !pressure.pressured ? ADS_HOURLY_PRESETS : []),
   ];
 
   for (const datePreset of adsPresets) {
@@ -131,6 +151,7 @@ export async function GET(request: Request) {
     refreshed: results.length,
     errors: errors.length,
     error_details: errors,
+    fb_pressure: pressure.pressured ? pressure.reason : null,
     duration_seconds: duration,
     timestamp: new Date().toISOString(),
   });

@@ -5,6 +5,28 @@ of letting them drift in chat.
 
 ---
 
+## Facebook rate limits — request Standard Access (Julius, ~5 minutes)
+
+The app "CEO DASHBOARD" (id 962989506149543) is on **development access**,
+the tier with the small hourly quotas that keep tripping "User request
+limit reached". The code now backs off properly, but the real fix is the
+higher tier, which the app already qualifies for.
+
+- [ ] developers.facebook.com → My Apps → CEO DASHBOARD → App Review →
+      Permissions and Features → search **Ads Management Standard Access**
+      → Request (also called "Advanced Access" in newer dashboards).
+      Requirement: 500+ Marketing API calls in the past 15 days and an error
+      rate under 15%. We make thousands, so this should be granted quickly,
+      sometimes instantly.
+- [ ] After approval, confirm with any Graph call: the
+      `x-business-use-case-usage` header should say
+      `"ads_api_access_tier":"standard_access"`.
+- [ ] Optional, later: raise the ads cache freshness window from 45 min to
+      60 and drop the refresh cron to hourly once Standard Access is on and
+      the pressure is gone. Not needed for correctness.
+
+---
+
 ## Hook Studio (owner space) — follow-ups
 
 Shipped 2026-09-28. Renders on the Mac via `worker/hook-worker.mjs` (launchd

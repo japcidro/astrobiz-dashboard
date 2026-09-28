@@ -4,10 +4,8 @@ import { getEmployee } from "@/lib/supabase/get-employee";
 import { buildCacheKey, getCachedResponse, setCachedResponse } from "@/lib/data-cache";
 import {
   RateLimitedError,
-  isRateLimitError,
-  parseUsageHeader,
-  recordRateLimit,
   getBlockedUntil,
+  inspectFbResponse,
 } from "@/lib/facebook/rate-limit";
 import { shapeForZeroSpend } from "@/lib/facebook/ads-payload";
 import type { DatePreset } from "@/lib/facebook/types";
@@ -119,54 +117,12 @@ async function _fbFetchAllImpl<T>(
       clearTimeout(timer);
     }
 
-    // Best-effort usage telemetry — writes to fb_rate_limit_state.
-    const usageHeader =
-      res.headers.get("x-business-use-case-usage") ||
-      res.headers.get("x-ad-account-usage");
-    if (usageHeader) {
-      const { maxUsagePct } = parseUsageHeader(usageHeader);
-      if (maxUsagePct !== null) {
-        void recordRateLimit(db, { usagePct: maxUsagePct });
-      }
-    }
-
-    if (res.status === 429) {
-      const body = await res.json().catch(() => ({}));
-      const { message, waitSeconds } = isRateLimitError(body);
-      const blockedUntil = waitSeconds
-        ? new Date(Date.now() + waitSeconds * 1000)
-        : null;
-      await recordRateLimit(db, {
-        is429: true,
-        blockedUntil,
-        message: message ?? "Facebook rate limit (429)",
-      });
-      throw new RateLimitedError({
-        message: message ?? "Facebook rate limit",
-        status: 429,
-        blockedUntil,
-      });
-    }
-
+    // Records the usage headers and, on a rate-limit answer, the block
+    // window (Meta's 300 s when the message names no wait), then throws
+    // RateLimitedError so the outer handler serves stale cache instead.
+    await inspectFbResponse(res, db);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      const { limited, code, message, waitSeconds } = isRateLimitError(body);
-      if (limited) {
-        const blockedUntil = waitSeconds
-          ? new Date(Date.now() + waitSeconds * 1000)
-          : null;
-        await recordRateLimit(db, {
-          is429: true,
-          blockedUntil,
-          message: message ?? "Facebook rate limit",
-        });
-        throw new RateLimitedError({
-          message: message ?? "Facebook rate limit",
-          status: res.status,
-          blockedUntil,
-          fbCode: code,
-        });
-      }
       throw new Error(
         (body as { error?: { message?: string } }).error?.message ||
           `FB API error: ${res.status}`

@@ -20,6 +20,8 @@ import {
   SETTLEMENT_WINDOW_DAYS,
 } from "@/lib/profit/formulas";
 import { buildCacheKey, getCachedResponse, setCachedResponse } from "@/lib/data-cache";
+import { fbFetchWithLimits } from "@/lib/facebook/rate-limit";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllRows } from "@/lib/supabase/paginate";
 
 type JtDailyRow = {
@@ -232,12 +234,23 @@ interface FbDailyInsight {
   date_stop: string;
 }
 
+// The refresh cron asks for every store × every date filter, and the store
+// split happens in code from the same campaign rows, so one Facebook fetch
+// per account and range serves all six store variants. Twenty minutes is
+// shorter than the cron's cadence, so the cron still refreshes it.
+const FB_DAILY_INSIGHTS_TTL_MS = 20 * 60 * 1000;
+
 async function fbFetchInsightsDaily(
   accountId: string,
   token: string,
   since: string,
-  until: string
+  until: string,
+  db: SupabaseClient
 ): Promise<FbDailyInsight[]> {
+  const cacheKey = `fb_daily_insights:${accountId}:${since}:${until}`;
+  const cached = await getCachedResponse<FbDailyInsight[]>(db, cacheKey, FB_DAILY_INSIGHTS_TTL_MS).catch(() => null);
+  if (cached) return cached.data;
+
   const allData: FbDailyInsight[] = [];
   let fetchUrl =
     `${FB_API_BASE}/act_${accountId}/insights?` +
@@ -251,7 +264,7 @@ async function fbFetchInsightsDaily(
     });
 
   while (fetchUrl) {
-    const res = await fetch(fetchUrl, { cache: "no-store" });
+    const res = await fbFetchWithLimits(fetchUrl, { cache: "no-store" }, db);
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       throw new Error(
@@ -264,6 +277,7 @@ async function fbFetchInsightsDaily(
     fetchUrl = json.paging?.next || "";
   }
 
+  void setCachedResponse(db, "fb_daily_insights", cacheKey, allData).catch(() => {});
   return allData;
 }
 
@@ -508,6 +522,9 @@ export async function GET(request: Request) {
 
     if (tokenSetting?.value) {
       const fbToken = tokenSetting.value;
+      // The insights cache and the rate-limit state are shared infrastructure
+      // (admin-only under RLS), so they go through the service client.
+      const fbDb = createServiceClient();
       let accountIds: string[] = [];
       try {
         accountIds = selectedSetting?.value
@@ -529,7 +546,8 @@ export async function GET(request: Request) {
               accountId,
               fbToken,
               startDate,
-              endDate
+              endDate,
+              fbDb
             );
 
             for (const row of insights) {

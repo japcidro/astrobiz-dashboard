@@ -1,5 +1,44 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-09-28: "User request limit reached" — the block was never recorded, and the P&L paid six times for one fetch
+
+Facebook has been cutting the dashboard off several times a day. Two
+findings, one of them a fix for Julius to make in Meta's app dashboard.
+
+**The app is on Marketing API development access.** Every response says so
+(`ads_api_access_tier: development_access`). That tier allows, per ad
+account per hour, 300 + 40 × active ads management calls and 600 + 400 ×
+active ads insights calls, and blocks for 300 seconds once exceeded.
+Standard access raises the bases to 100,000 and 190,000. The app qualifies
+(the bar is 500 Marketing API calls in 15 days with under 15% errors); it
+only has to be requested. See TODO.
+
+**The block was never recorded.** Meta's "User request limit reached" (code
+17) carries no "wait N minutes" text, and the guard only set `blocked_until`
+when it found one, so it stayed null. Every preflight check that reads it
+(`/all-ads`, autopilot, scaling detection, billing alerts) therefore saw
+"clear" and kept calling into the block, which extends it. A rate-limit
+error with no explicit wait now blocks for Meta's 300 seconds, or for the
+header's `estimated_time_to_regain_access` when it gives one. The insights
+throttle header (`x-fb-ads-insights-throttle`) is read too; before, only the
+ads-management one was, so insights pressure was invisible.
+
+**Calls that were spent for nothing.** The refresh cron asked
+`/api/profit/daily` for every store × every date window, thirty requests per
+run, and each one walked Facebook's daily insights for all three accounts
+on its own: about 90 insights calls per run, 180 an hour, for rows that are
+identical across stores (the store split happens in code). One fetch per
+account and range is now cached for 20 minutes and shared, so a run costs
+15. The cron also skips Facebook entirely while blocked, and under high
+usage (80%+) warms only today and yesterday, leaving the wide windows for
+the next run. The submitted-videos and fix-rejection crons check the block
+before calling and stop at the first rate-limit error instead of walking
+the rest of their lists into it.
+
+Nothing a person sees changes: pages still read the cache, Refresh still
+goes live, autopilot still pauses losers. Only the wasted calls are gone.
+
+
 ## 2026-09-28: Hook Studio — remake a working UGC clip with a new person, for SoulShot
 
 The owner space gets its first tool. Drop in a short UGC video that already

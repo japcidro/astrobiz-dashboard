@@ -1,6 +1,8 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { sendEmail } from "@/lib/email/resend";
 import { getAdminEmails } from "@/lib/email/admin-recipients";
+import { fbFetchWithLimits, getBlockedUntil, RateLimitedError } from "@/lib/facebook/rate-limit";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -34,7 +36,8 @@ function attributeMarketer(adName: string): { code: string | null; name: string 
 async function fetchAccountAds(
   accountId: string,
   token: string,
-  sinceUnix: number
+  sinceUnix: number,
+  db: SupabaseClient
 ): Promise<RawAd[]> {
   const fields =
     "id,name,created_time,effective_status,creative{video_id,object_story_spec}";
@@ -52,7 +55,7 @@ async function fetchAccountAds(
 
   const out: RawAd[] = [];
   for (let page = 0; url && page < MAX_PAGES; page++) {
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fbFetchWithLimits(url, { cache: "no-store" }, db);
     const json = await res.json();
     if (!res.ok) break;
     out.push(...((json.data ?? []) as RawAd[]));
@@ -94,14 +97,21 @@ export async function GET(request: Request) {
     accountIds = [];
   }
   if (accountIds.length === 0) {
-    const res = await fetch(
+    const res = await fbFetchWithLimits(
       `${FB_API_BASE}/me/adaccounts?fields=id&limit=100&access_token=${encodeURIComponent(token)}`,
-      { cache: "no-store" }
+      { cache: "no-store" },
+      supabase
     );
     const json = await res.json();
     if (res.ok) {
       accountIds = ((json.data ?? []) as { id: string }[]).map((a) => a.id);
     }
+  }
+
+  // New submissions can wait a cycle; piling calls onto a block cannot.
+  const blockedUntil = await getBlockedUntil(supabase);
+  if (blockedUntil) {
+    return Response.json({ ok: true, skipped: true, reason: `Facebook rate-limited until ${blockedUntil.toISOString()}` });
   }
 
   const sinceUnix = Math.floor((Date.now() - LOOKBACK_DAYS * 86400 * 1000) / 1000);
@@ -114,7 +124,15 @@ export async function GET(request: Request) {
     created_time: string | null;
   }[] = [];
   for (const acc of accountIds) {
-    const ads = await fetchAccountAds(acc, token, sinceUnix);
+    let ads: RawAd[];
+    try {
+      ads = await fetchAccountAds(acc, token, sinceUnix, supabase);
+    } catch (err) {
+      if (err instanceof RateLimitedError) {
+        return Response.json({ ok: true, skipped: true, reason: "Facebook rate-limited mid-scan" });
+      }
+      throw err;
+    }
     for (const ad of ads) {
       const { code, name } = attributeMarketer(ad.name);
       if (!code) continue; // only marketer submissions (LIN/JO)
