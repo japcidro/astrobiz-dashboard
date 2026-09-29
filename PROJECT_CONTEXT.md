@@ -353,3 +353,35 @@ after the table already exists.
 
 Facebook token + Anthropic API key stored in `app_settings` table (not env vars).
 Shopify OAuth tokens stored in `shopify_stores` table.
+
+## Owner space (added 2026-09-29) — read this when picking up on another machine
+
+Only `japcidro@gmail.com` sees it: a switch next to "Astrobiz" in the sidebar
+opens `/owner` (server-checked; everyone else gets a 404). Code:
+`src/app/(owner)/`, `src/components/hook-studio/`, `src/lib/hook-studio/`,
+`src/app/api/owner/hook-studio/`, `src/lib/owner.ts`.
+
+| Page | What it does |
+|---|---|
+| `/owner/ugc-generator` | UGC photo in → same shot with a genuinely new person (US audience, "Varied" default, one variation). Nano Banana Pro, 2 cr. Library with confirm-delete. |
+| `/owner/hook-studio` | UGC image + skill → silent 9:16 clip. *Higgsfield motion transfer* = Genjutsu copies a reference clip's exact camera motion (≈7 cr/s). *Arcads-style* = Claude writes a shot prompt from the image; Kling 3.0 animates it (1.25 cr/s). Editable titles, confirm-delete. |
+
+**Where it renders.** Not on Vercel. `worker/hook-worker.mjs` runs on Julius's
+MacBook Air as launchd agent `com.astrobiz.hook-worker`, claims rows from
+`hook_studio_jobs`, runs the Higgsfield CLI (creator-plan credits, account
+skills.astrobiz@gmail.com), copies results into the private `hook-studio`
+bucket and heartbeats `app_settings.hook_worker_status`. Only that Mac needs
+`worker/.env` (Supabase service key) and the CLI login; a second machine
+should NOT run the worker. Control: `scripts/hook-worker-install.sh status|logs|stop`.
+
+**Decisions that are not in the code.** Target market is the US; never
+default generated people to Filipino; no single-look lock-in; straight or
+softly wavy hair; clips are clean (text and the SoulShot screen go on in
+CapCut/Meta). Kling Omni Edit, Gemini edit and Seedance video_edit were
+tested for person swaps and rejected (they keep the source face); Seedance
+was later removed entirely. Facebook: the app is on Marketing API
+*development access*; requesting Standard Access is the real fix (TODO.md).
+
+**Working on another machine.** `git pull`, `npm install`; `.env.local` needs
+`SUPABASE_DB_URL` only for `npm run db:run|db:query`. Vercel deploys from
+GitHub, so pushing from any machine ships.
