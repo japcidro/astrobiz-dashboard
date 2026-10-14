@@ -58,6 +58,7 @@ export function RemakeList() {
   };
 
   const readyCards = (board?.items ?? []).filter((i) => i.video_status === "ready" && i.video_url);
+  const clippedTitles = new Set((projects ?? []).map((p) => p.title));
 
   return (
     <div className="max-w-6xl">
@@ -106,6 +107,7 @@ export function RemakeList() {
                     {starting === c.id && <Loader2 size={11} className="animate-spin text-gray-400" />}
                   </div>
                   <p className="text-xs text-white mt-1 line-clamp-2">{c.title || c.source_url}</p>
+                  {c.title && clippedTitles.has(c.title) && <p className="text-[10px] text-green-400 mt-0.5">Already clipped · opens it</p>}
                 </button>
               ))}
             </div>

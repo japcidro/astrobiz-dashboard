@@ -12,7 +12,8 @@ export async function GET() {
 
 /**
  * POST — start a remake from a board card's saved copy or an uploaded video.
- * Body: { board_item_id } | { source_path, title? }, plus store?
+ * Body: { board_item_id, force? } | { source_path, title? }, plus store?
+ * A card that already has a project reopens it unless force is true.
  * The Mac worker cuts it into shots; Claude labels them on the next load.
  */
 export async function POST(request: Request) {
@@ -31,6 +32,18 @@ export async function POST(request: Request) {
     const { data: item } = await db.from("marketing_board_items").select("id, title, store, video_path, video_status").eq("id", b.board_item_id).maybeSingle();
     if (!item) return Response.json({ error: "Board card not found" }, { status: 404 });
     if (!item.video_path || item.video_status !== "ready") return Response.json({ error: "That card has no saved copy yet" }, { status: 400 });
+    // Already clipped? Open that project instead of cutting the video again.
+    if (b.force !== true) {
+      const { data: existing } = await db
+        .from("remake_projects")
+        .select("id")
+        .eq("board_item_id", item.id)
+        .neq("status", "failed")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (existing) return Response.json({ project: await loadProject(db, existing.id as string), existing: true });
+    }
     sourcePath = item.video_path as string;
     boardItemId = item.id as string;
     title = title || ((item.title as string | null) ?? "Clip");
