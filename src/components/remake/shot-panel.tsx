@@ -1,12 +1,12 @@
 "use client";
 
-import { AlertTriangle, Check, Download, Images, Loader2, Mic, RefreshCw, Sparkles, Upload, UserCheck, Video } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { AlertTriangle, Check, Download, Images, Info, Loader2, Mic, RefreshCw, Sparkles, UserCheck, Video } from "lucide-react";
+import { useState } from "react";
 import type { Quality } from "@/lib/hook-studio/engines";
 import { CLIP_ENGINES, STILL_CREDITS, VO_CREDITS_PER_CHAR, clipEstimate, getClipEngine, veoLengthFor } from "@/lib/remake/engines";
-import type { LibraryImage, ProjectView, ShotView, Voice } from "@/lib/remake/types";
-import { Button, Label, Panel, Pill, api, credits } from "@/components/hook-studio/ui";
+import type { ProjectView, ShotView, Voice } from "@/lib/remake/types";
+import { Button, Label, Panel, Pill, credits } from "@/components/hook-studio/ui";
+import { CastPicker } from "./cast-picker";
 import { ClipVideo, ComparePlayer } from "./clip-video";
 
 const field =
@@ -14,17 +14,14 @@ const field =
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
-function Busy({ label }: { label: string }) {
+const NOT_CHECKED = /^Not checked/;
+
+function Frame({ children, dashed = false }: { children: React.ReactNode; dashed?: boolean }) {
   return (
-    <div className="aspect-[9/16] rounded-lg bg-gray-950 border border-gray-800 flex flex-col items-center justify-center gap-2 text-gray-500">
-      <Loader2 size={18} className="animate-spin" />
-      <p className="text-[11px] text-center px-2">{label}</p>
+    <div className={`aspect-[9/16] rounded-lg bg-gray-950 border ${dashed ? "border-dashed" : ""} border-gray-800 flex flex-col items-center justify-center gap-2 text-gray-500 p-3 text-center`}>
+      {children}
     </div>
   );
-}
-
-function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="aspect-[9/16] rounded-lg bg-gray-950 border border-dashed border-gray-800 flex flex-col items-center justify-center gap-2 text-gray-500 p-3 text-center">{children}</div>;
 }
 
 /** One clip: keep the real one, or redo it from our still and animate. */
@@ -53,13 +50,6 @@ export function ShotPanel({
   const [direction, setDirection] = useState(shot.voice_direction);
   const [prompt, setPrompt] = useState(shot.clip_prompt ?? "");
   const [picker, setPicker] = useState(false);
-  const [library, setLibrary] = useState<LibraryImage[] | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (picker && library === null) api<{ images: LibraryImage[] }>("/api/owner/remake/library").then((r) => setLibrary(r.images)).catch(() => setLibrary([]));
-  }, [picker, library]);
 
   const engine = getClipEngine(shot.clip_engine) ?? CLIP_ENGINES[0];
   const swap = shot.mode === "swap";
@@ -73,29 +63,17 @@ export function ShotPanel({
   const mixBusy = shot.mixed_status === "queued" || shot.mixed_status === "running";
   const check = shot.brand_check;
   const checking = check?.notes === "Checking…";
+  const unchecked = !!check && NOT_CHECKED.test(check.notes);
   const canRender = swap && shot.still_status === "done" && shot.approved && !clipBusy;
   const isCast = project.cast_shot_id === shot.id;
-  const ours = shot.mixed_url ?? (swap ? shot.clip_url : shot.ref_url);
-
-  const uploadCast = async (file: File) => {
-    setUploading(true);
-    try {
-      const { path, token, bucket } = await api<{ path: string; token: string; bucket: string }>("/api/owner/remake/upload-url", {
-        method: "POST",
-        body: JSON.stringify({ kind: "cast", mime: file.type, project_id: project.id }),
-      });
-      const up = await createClient().storage.from(bucket).uploadToSignedUrl(path, token, file, { contentType: file.type });
-      if (up.error) throw new Error(up.error.message);
-      await onCastFrom({ path });
-      setPicker(false);
-    } finally {
-      setUploading(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
-  };
+  const hasPerson = !!project.cast_url || !!project.cast_shot_id;
+  /** What there is to compare against the reference: our rendered clip, or the kept clip once a voiceover is mixed in. */
+  const result = swap ? (shot.mixed_url ?? shot.clip_url) : shot.mixed_url;
 
   return (
     <Panel className="space-y-4">
+      {picker && <CastPicker projectId={project.id} current={project.cast_url} onPick={onCastFrom} onClose={() => setPicker(false)} />}
+
       <div className="flex items-center gap-2 flex-wrap">
         <p className="text-sm font-semibold text-white">
           Clip {shot.idx + 1} <span className="text-gray-500 font-normal">· {fmt(Number(shot.start_s))}–{fmt(Number(shot.end_s))} · {shot.seconds}s</span>
@@ -127,102 +105,81 @@ export function ShotPanel({
       )}
       {shot.description && shot.description !== "—" && <p className="text-xs text-gray-400 -mt-2">{shot.description}</p>}
 
-      <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] gap-4">
+      {/* Reference + our still (or the kept note) */}
+      <div className="grid grid-cols-[minmax(0,150px)_minmax(0,1fr)] gap-4">
         <div>
-          <Label>Reference vs ours</Label>
-          <ComparePlayer refSrc={shot.ref_url} ourSrc={ours} ourLabel={shot.mixed_url ? "Ours + voiceover" : swap ? "Ours" : "Kept"} />
-          {!shot.ref_url && <p className="text-[11px] text-gray-500 mt-1">The Mac is cutting the real clip…</p>}
-          {ours && (
-            <a href={ours} download className="mt-1 text-[11px] text-gray-300 hover:text-white inline-flex items-center gap-1">
-              <Download size={11} /> Download ours{shot.clip_credits && swap ? ` · ${credits(shot.clip_credits)}` : ""}
-            </a>
+          <Label>Reference</Label>
+          {shot.ref_url ? (
+            <ClipVideo src={shot.ref_url} className="aspect-[9/16]" />
+          ) : (
+            <Frame dashed>
+              <Loader2 size={14} className="animate-spin" />
+              <p className="text-[11px]">Cutting the real clip…</p>
+            </Frame>
           )}
         </div>
 
         {swap ? (
           <div>
             <Label>Our still · the clip starts from this</Label>
-            <div className="grid grid-cols-[minmax(0,130px)_minmax(0,1fr)] gap-3">
+            <div className="grid grid-cols-[minmax(0,150px)_minmax(0,1fr)] gap-3">
               <div>
                 {stillBusy ? (
-                  <Busy label={shot.still_status === "running" ? "Nano Banana Pro…" : "Queued on the Mac"} />
-                ) : shot.still_url ? (
+                  <Frame>
+                    <Loader2 size={18} className="animate-spin" />
+                    <p className="text-[11px]">{shot.still_status === "running" ? "Nano Banana Pro…" : "Queued on the Mac"}</p>
+                  </Frame>
+                ) : shot.still_preview_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img src={shot.still_url} alt="" className={`aspect-[9/16] w-full object-cover rounded-lg border bg-black ${shot.approved ? "border-green-600" : "border-gray-800"}`} />
+                  <img src={shot.still_preview_url} alt="" className={`aspect-[9/16] w-full object-cover rounded-lg border bg-black ${shot.approved ? "border-green-600" : "border-gray-800"}`} />
+                ) : project.cast_url ? (
+                  <Frame dashed>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={project.cast_url} alt="" className="w-16 aspect-[9/16] object-cover rounded-md border border-purple-500" />
+                    <p className="text-[11px]">This person goes into the real frame</p>
+                  </Frame>
                 ) : (
-                  <Empty>
-                    {project.cast_url ? (
-                      <>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={project.cast_url} alt="" className="w-14 aspect-[9/16] object-cover rounded-md border border-purple-500" />
-                        <p className="text-[11px]">{shot.still_status === "failed" ? shot.still_error : "This person goes into the real frame"}</p>
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles size={16} />
-                        <p className="text-[11px]">{shot.still_status === "failed" ? shot.still_error : "No still yet"}</p>
-                      </>
-                    )}
-                  </Empty>
+                  <Frame dashed>
+                    <Sparkles size={16} />
+                    <p className="text-[11px]">{shot.still_status === "failed" ? shot.still_error : "No still yet"}</p>
+                  </Frame>
                 )}
               </div>
-              <div className="space-y-2 text-xs">
-                {project.cast_url && !shot.still_url && !stillBusy && (
+
+              <div className="space-y-2.5 text-xs">
+                {!shot.still_preview_url && !stillBusy && (
                   <p className="text-gray-400">
-                    Person picked. Generate puts them into this clip&apos;s frame{project.brand_kit?.images.length ? " with our product" : ""}.
+                    {hasPerson ? "Generate puts the picked person into this clip's frame" : "Generate makes a new US person in this clip's frame"}
+                    {project.brand_kit?.images.length ? ", holding our product." : "."}
                   </p>
                 )}
-                {shot.still_status === "done" && check && (
-                  <p className={`inline-flex items-start gap-1 ${checking ? "text-gray-500" : check.ok ? "text-green-400" : "text-red-300"}`}>
-                    {checking ? <Loader2 size={11} className="animate-spin mt-0.5" /> : check.ok ? <Check size={11} className="mt-0.5" /> : <AlertTriangle size={11} className="mt-0.5" />}
-                    <span>{checking ? "Brand check…" : check.notes}</span>
-                  </p>
-                )}
+                {shot.still_status === "failed" && shot.still_preview_url && <p className="text-red-300">{shot.still_error}</p>}
+
                 <div className="flex gap-1.5 flex-wrap">
-                  <Button primary={!shot.still_url} onClick={() => onAction("still")} busy={busy === "still"} disabled={stillBusy || !shot.frame_url} title={`${STILL_CREDITS} credits`}>
-                    {shot.still_url ? <RefreshCw size={13} /> : <Sparkles size={13} />} {shot.still_url ? "Regenerate" : project.cast_url || project.cast_shot_id ? "Generate with this person" : "Generate (new person)"} · {STILL_CREDITS} cr
+                  <Button primary={!shot.still_preview_url} onClick={() => onAction("still")} busy={busy === "still"} disabled={stillBusy || !shot.frame_url} title={`${STILL_CREDITS} credits`}>
+                    {shot.still_preview_url ? <RefreshCw size={13} /> : <Sparkles size={13} />} {shot.still_preview_url ? "Regenerate" : "Generate still"} · {STILL_CREDITS} cr
                   </Button>
-                  <Button onClick={() => setPicker((v) => !v)} disabled={stillBusy}>
+                  <Button onClick={() => setPicker(true)} disabled={stillBusy}>
                     <Images size={13} /> {project.cast_url ? "Change person" : "Use existing image"}
                   </Button>
                 </div>
-                {picker && (
-                  <div className="rounded-lg border border-gray-700 bg-gray-900 p-2 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <p className="text-gray-400 flex-1">Pick the person to put into every clip: from the UGC Generator library, or upload. The still is then generated from the real frame with them in it.</p>
-                      <Button ghost onClick={() => fileRef.current?.click()} busy={uploading}>
-                        <Upload size={12} /> Upload
-                      </Button>
-                      <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => e.target.files?.[0] && void uploadCast(e.target.files[0])} />
-                    </div>
-                    {library === null ? (
-                      <Loader2 size={14} className="animate-spin text-gray-500 mx-auto" />
-                    ) : library.length === 0 ? (
-                      <p className="text-gray-600">The library is empty.</p>
-                    ) : (
-                      <div className="grid grid-cols-5 gap-1.5 max-h-48 overflow-y-auto">
-                        {library.map((img) => (
-                          <button
-                            key={img.id}
-                            type="button"
-                            title={img.note}
-                            disabled={busy === "cast"}
-                            onClick={async () => {
-                              await onCastFrom({ ugc_job_id: img.id });
-                              setPicker(false);
-                            }}
-                            className="aspect-[9/16] rounded-md overflow-hidden border border-gray-700 hover:border-purple-500 cursor-pointer disabled:opacity-50"
-                          >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={img.url} alt="" className="w-full h-full object-cover" />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+
+                {shot.still_status === "done" && check && (
+                  <p className={`inline-flex items-start gap-1.5 ${checking || unchecked ? "text-gray-500" : check.ok ? "text-green-400" : "text-red-300"}`}>
+                    {checking ? <Loader2 size={11} className="animate-spin mt-0.5" /> : unchecked ? <Info size={11} className="mt-0.5" /> : check.ok ? <Check size={11} className="mt-0.5" /> : <AlertTriangle size={11} className="mt-0.5" />}
+                    <span>
+                      {checking ? "Brand check…" : check.notes}
+                      {!checking && (
+                        <button type="button" onClick={() => void onAction("recheck")} className="ml-2 text-purple-300 hover:text-white cursor-pointer">
+                          Check again
+                        </button>
+                      )}
+                    </span>
+                  </p>
                 )}
+
                 {shot.still_status === "done" && (
-                  <div className="flex gap-1.5 flex-wrap items-center">
+                  <div className="flex gap-2 flex-wrap items-center">
                     <Button primary={!shot.approved} onClick={() => onPatch({ approved: !shot.approved })} busy={busy === "approve"}>
                       <Check size={13} /> {shot.approved ? "Approved" : "Approve still"}
                     </Button>
@@ -278,18 +235,18 @@ export function ShotPanel({
 
           {speaks && (
             <div className="space-y-2">
-              <textarea value={script} onChange={(e) => setScript(e.target.value)} onBlur={() => script !== shot.script && void onPatch({ script })} rows={3} placeholder="What the person says. Veo makes the voice and the lips from this. Keep it to one or two sentences for 8 seconds." className={`${field} resize-none`} />
+              <textarea value={script} onChange={(e) => setScript(e.target.value)} onBlur={() => script !== shot.script && void onPatch({ script })} rows={3} placeholder="What the person says. Veo makes the voice and the lips from this. One or two sentences for 8 seconds." className={`${field} resize-none`} />
               <input value={direction} onChange={(e) => setDirection(e.target.value)} onBlur={() => direction !== shot.voice_direction && void onPatch({ voice_direction: direction })} placeholder="Voice direction, e.g. warm, casual, slight smile" className={field} />
             </div>
           )}
-          {swap && engine.mode === "speak" && shot.kind === "broll" && <p className="text-[11px] text-gray-500">B-roll: Veo animates the still with natural ambience and no speech. Add a voiceover below.</p>}
+          {engine.mode === "speak" && shot.kind === "broll" && <p className="text-[11px] text-gray-500">B-roll: Veo animates the still with natural ambience and no speech. Add a voiceover below.</p>}
           {engine.mode === "prompt" && (
             <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} onBlur={() => prompt !== (shot.clip_prompt ?? "") && void onPatch({ clip_prompt: prompt })} rows={2} placeholder="Optional motion prompt. Empty = natural small movement." className={`${field} resize-none`} />
           )}
 
           <div className="flex items-center gap-3 flex-wrap">
             <Button primary onClick={() => onAction("clip")} busy={busy === "clip"} disabled={!canRender || (speaks && script !== shot.script)}>
-              {clipBusy ? <Loader2 size={13} className="animate-spin" /> : <Video size={13} />} {shot.clip_url ? "Render again" : "Render clip"}
+              {clipBusy ? <Loader2 size={13} className="animate-spin" /> : <Video size={13} />} {clipBusy ? (shot.clip_status === "running" ? `${engine.name} rendering…` : "Queued on the Mac") : shot.clip_url ? "Render again" : "Render clip"}
             </Button>
             <span className="text-xs text-gray-400">
               ≈ {credits(estimate)} · {engine.lengths ? `${veoLen}s` : `${Math.ceil(shot.seconds)}s, follows the real clip`}
@@ -297,6 +254,18 @@ export function ShotPanel({
             {shot.clip_status === "failed" && <span className="text-xs text-red-300">{shot.clip_error}</span>}
             {!shot.approved && shot.still_status === "done" && <span className="text-xs text-amber-300">Approve the still first</span>}
           </div>
+        </div>
+      )}
+
+      {result && (
+        <div>
+          <Label>Result · reference vs ours</Label>
+          <div className="max-w-sm">
+            <ComparePlayer refSrc={shot.ref_url} ourSrc={result} ourLabel={shot.mixed_url ? "Ours + voiceover" : "Ours"} />
+          </div>
+          <a href={result} download className="mt-1.5 text-[11px] text-gray-300 hover:text-white inline-flex items-center gap-1">
+            <Download size={11} /> Download{shot.clip_credits && swap ? ` · ${credits(shot.clip_credits)}` : ""}
+          </a>
         </div>
       )}
 
@@ -328,24 +297,28 @@ export function ShotPanel({
               <span className="text-[10px] text-gray-300 font-normal">≈ {credits(Math.max(0.2, script.length * VO_CREDITS_PER_CHAR))}</span>
             </Button>
             {audioBusy && <Loader2 size={14} className="animate-spin text-gray-400" />}
-            {mixBusy && <span className="text-xs text-gray-400 inline-flex items-center gap-1"><Loader2 size={11} className="animate-spin" /> Mixing onto the clip…</span>}
-            {shot.mixed_status === "done" && shot.mixed_url && <span className="text-xs text-green-400 inline-flex items-center gap-1"><Check size={11} /> Mixed</span>}
+            {mixBusy && (
+              <span className="text-xs text-gray-400 inline-flex items-center gap-1">
+                <Loader2 size={11} className="animate-spin" /> Mixing onto the clip…
+              </span>
+            )}
+            {shot.mixed_status === "done" && shot.mixed_url && (
+              <span className="text-xs text-green-400 inline-flex items-center gap-1">
+                <Check size={11} /> Mixed
+              </span>
+            )}
             {shot.audio_status === "failed" && <span className="text-xs text-red-300">{shot.audio_error}</span>}
           </div>
           {shot.audio_url && (
             <div className="flex items-center gap-2">
               <audio key={shot.audio_url} src={shot.audio_url} controls className="h-8 flex-1" />
               {shot.audio_seconds && <Pill tone={shot.audio_seconds > shot.seconds + 0.5 ? "warn" : "muted"}>{shot.audio_seconds}s{shot.audio_seconds > shot.seconds + 0.5 ? " · longer than the clip" : ""}</Pill>}
-              <a href={shot.audio_url} download className="text-[11px] text-gray-300 hover:text-white inline-flex items-center gap-1"><Download size={11} /> MP3</a>
+              <a href={shot.audio_url} download className="text-[11px] text-gray-300 hover:text-white inline-flex items-center gap-1">
+                <Download size={11} /> MP3
+              </a>
             </div>
           )}
           {voices.length === 0 && <p className="text-[11px] text-amber-300">No voices yet: the Mac worker lists them when it is online.</p>}
-        </div>
-      )}
-
-      {shot.ref_url && !swap && shot.selected && (
-        <div className="hidden">
-          <ClipVideo src={shot.ref_url} autoplay={false} />
         </div>
       )}
     </Panel>

@@ -38,6 +38,7 @@ const toShotView = (s: ShotRow, signed: Map<string, string>): ShotView => {
     frame_url: url(s.frame_path),
     ref_url: url(s.ref_path),
     still_url: url(s.still_path),
+    still_preview_url: url(s.still_preview_path) ?? url(s.still_path),
     audio_url: url(s.audio_path),
     clip_url: url(s.clip_path),
     mixed_url: url(s.mixed_path),
@@ -60,7 +61,7 @@ export async function loadProject(db: SupabaseClient, id: string): Promise<Proje
     project.source_path,
     project.strip_path,
     project.cast_path,
-    ...shots.flatMap((s) => [s.frame_path, s.ref_path, s.still_path, s.audio_path, s.clip_path, s.mixed_path]),
+    ...shots.flatMap((s) => [s.frame_path, s.ref_path, s.still_path, s.still_preview_path, s.audio_path, s.clip_path, s.mixed_path]),
     ...((imgs ?? []) as Array<{ path: string }>).map((i) => i.path),
   ]);
   return {
@@ -177,7 +178,7 @@ export async function queueStill(db: SupabaseClient, project: ProjectRow, shot: 
   });
   await db
     .from("remake_shots")
-    .update({ mode: "swap", still_job_id: jobId, still_status: "queued", still_error: null, brand_check: null, approved: false, clip_status: "none", clip_path: null, mixed_status: "none", mixed_path: null })
+    .update({ mode: "swap", still_job_id: jobId, still_status: "queued", still_error: null, still_preview_path: null, brand_check: null, approved: false, clip_status: "none", clip_path: null, mixed_status: "none", mixed_path: null })
     .eq("id", shot.id);
   return null;
 }
@@ -377,14 +378,14 @@ export async function runPendingPasses(db: SupabaseClient, id: string): Promise<
   const unchecked = shots.filter((s) => s.still_status === "done" && s.still_path && s.brand_check === null).slice(0, 3);
   if (unchecked.length) {
     const kit = await loadBrandKit(db, project.store);
-    const signed = await signBoardPaths(db, unchecked.map((s) => s.still_path));
+    const signed = await signBoardPaths(db, unchecked.flatMap((s) => [s.still_path, s.still_preview_path]));
     await Promise.all(
       unchecked.map(async (s) => {
         const { data: locked } = await db.from("remake_shots").update({ brand_check: { ok: true, notes: "Checking…" } }).eq("id", s.id).is("brand_check", null).select("id");
         if (!locked || locked.length === 0) return;
-        const url = signed.get(s.still_path!);
+        const url = (s.still_preview_path && signed.get(s.still_preview_path)) || signed.get(s.still_path!);
         const result = url ? await brandCheck(db, url, (kit?.images ?? []).map((i) => i.url).filter((u): u is string => !!u), kit?.rules ?? "") : null;
-        await db.from("remake_shots").update({ brand_check: result ?? { ok: true, notes: "Not checked (no Anthropic key or Claude unavailable)." } }).eq("id", s.id);
+        await db.from("remake_shots").update({ brand_check: result ?? { ok: true, notes: "Not checked: Claude could not read the still (no Anthropic key, or the image is too large)." } }).eq("id", s.id);
       })
     );
   }

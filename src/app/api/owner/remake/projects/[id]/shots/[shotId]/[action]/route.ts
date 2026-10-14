@@ -11,6 +11,7 @@ type Ctx = { params: Promise<{ id: string; shotId: string; action: string }> };
  *   still       → the cast person + our product on the real frame (Mac worker)
  *   voice       → ElevenLabs voiceover of the script
  *   clip        → animate the approved still with the chosen model
+ *   recheck     → run the brand check on the still again
  *   split       → { at: seconds } cut this clip in two
  *   merge       → join with the next clip
  */
@@ -43,6 +44,11 @@ export async function POST(request: Request, ctx: Ctx) {
     case "clip":
       if (s.clip_status === "queued" || s.clip_status === "running") return Response.json({ error: "Clip is already rendering" }, { status: 409 });
       problem = await queueClip(db, p, s);
+      break;
+    case "recheck":
+      if (s.still_status !== "done") return Response.json({ error: "No still to check" }, { status: 400 });
+      await db.from("remake_shots").update({ brand_check: null }).eq("id", s.id);
+      problem = null;
       break;
     case "split":
       problem = await splitShot(db, p, s, Number(body.at));

@@ -274,7 +274,7 @@ export function RemakeProject({ id }: { id: string }) {
           <div className="mt-4 grid grid-cols-1 lg:grid-cols-[200px_minmax(0,1fr)_280px] gap-4">
             <aside className="space-y-1.5">
               {project.shots.map((s) => {
-                const thumb = s.still_url ?? s.frame_url;
+                const thumb = s.still_preview_url ?? s.frame_url;
                 const bad = s.brand_check && !s.brand_check.ok && s.brand_check.notes !== "Checking…";
                 const done = s.mode === "keep" ? !!s.ref_path : s.clip_status === "done";
                 return (

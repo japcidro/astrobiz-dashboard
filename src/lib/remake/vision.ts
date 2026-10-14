@@ -22,7 +22,7 @@ async function imageBlock(url: string): Promise<Record<string, unknown> | null> 
     const type = res.headers.get("content-type")?.split(";")[0] ?? "image/jpeg";
     if (!/^image\/(png|jpeg|webp|gif)$/.test(type)) return null;
     const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.byteLength > 4.5 * 1024 * 1024) return null;
+    if (buf.byteLength > 4.9 * 1024 * 1024) return null;
     return { type: "image", source: { type: "base64", media_type: type, data: buf.toString("base64") } };
   } catch {
     return null;

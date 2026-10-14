@@ -88,9 +88,9 @@ export function CastBrandPanel({
           {project.cast_url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={project.cast_url} alt="" className="w-10 aspect-[9/16] object-cover rounded-md border border-purple-500" />
-          ) : castShot?.still_url ? (
+          ) : castShot?.still_preview_url ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={castShot.still_url} alt="" className="w-10 aspect-[9/16] object-cover rounded-md border border-gray-700" />
+            <img src={castShot.still_preview_url} alt="" className="w-10 aspect-[9/16] object-cover rounded-md border border-gray-700" />
           ) : (
             <div className="w-10 aspect-[9/16] rounded-md border border-dashed border-gray-700" />
           )}

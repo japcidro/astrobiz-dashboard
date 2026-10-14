@@ -50,6 +50,7 @@ export interface ShotRow {
   ref_path: string | null;
   still_job_id: string | null;
   still_path: string | null;
+  still_preview_path: string | null;
   still_status: StepStatus;
   still_error: string | null;
   brand_check: BrandCheck | null;
@@ -84,6 +85,8 @@ export interface ShotView extends ShotRow {
   frame_url: string | null;
   ref_url: string | null;
   still_url: string | null;
+  /** Small JPEG of the still for thumbnails; falls back to the full still. */
+  still_preview_url: string | null;
   audio_url: string | null;
   clip_url: string | null;
   mixed_url: string | null;
