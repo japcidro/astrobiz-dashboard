@@ -1,6 +1,6 @@
 import { requireBoardUser } from "@/lib/marketing-board/auth";
 import type { ProjectRow, ShotRow } from "@/lib/remake/types";
-import { isUuid, loadProject, mergeShot, queueClip, queueStill, queueVoice, splitShot, stillFrom } from "@/lib/remake/views";
+import { isUuid, loadProject, mergeShot, queueClip, queueStill, queueVoice, splitShot } from "@/lib/remake/views";
 
 export const dynamic = "force-dynamic";
 
@@ -8,8 +8,7 @@ type Ctx = { params: Promise<{ id: string; shotId: string; action: string }> };
 
 /**
  * POST — act on one clip:
- *   still       → new person + our product on the real frame (Mac worker)
- *   still-from  → use an existing image { ugc_job_id } | { path }
+ *   still       → the cast person + our product on the real frame (Mac worker)
  *   voice       → ElevenLabs voiceover of the script
  *   clip        → animate the approved still with the chosen model
  *   split       → { at: seconds } cut this clip in two
@@ -36,9 +35,6 @@ export async function POST(request: Request, ctx: Ctx) {
     case "still":
       if (s.still_status === "queued" || s.still_status === "running") return Response.json({ error: "Still is already being made" }, { status: 409 });
       problem = await queueStill(db, p, s);
-      break;
-    case "still-from":
-      problem = await stillFrom(db, p, s, { ugc_job_id: isUuid(body.ugc_job_id) ? body.ugc_job_id : undefined, path: typeof body.path === "string" ? body.path : undefined });
       break;
     case "voice":
       if (s.audio_status === "queued" || s.audio_status === "running") return Response.json({ error: "Voice is already being made" }, { status: 409 });

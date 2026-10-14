@@ -36,6 +36,7 @@ export function ShotPanel({
   onPatch,
   onAction,
   onProjectPatch,
+  onCastFrom,
 }: {
   project: ProjectView;
   shot: ShotView;
@@ -44,6 +45,8 @@ export function ShotPanel({
   onPatch: (body: Record<string, unknown>) => Promise<void>;
   onAction: (action: string, body?: Record<string, unknown>) => Promise<void>;
   onProjectPatch: (body: Record<string, unknown>) => Promise<void>;
+  /** Pick the person for every clip from an existing image. */
+  onCastFrom: (body: { ugc_job_id?: string; path?: string }) => Promise<void>;
 }) {
   // Local drafts; the parent remounts this panel per clip (key = shot id).
   const [script, setScript] = useState(shot.script);
@@ -74,16 +77,16 @@ export function ShotPanel({
   const isCast = project.cast_shot_id === shot.id;
   const ours = shot.mixed_url ?? (swap ? shot.clip_url : shot.ref_url);
 
-  const uploadStill = async (file: File) => {
+  const uploadCast = async (file: File) => {
     setUploading(true);
     try {
       const { path, token, bucket } = await api<{ path: string; token: string; bucket: string }>("/api/owner/remake/upload-url", {
         method: "POST",
-        body: JSON.stringify({ kind: "still", mime: file.type, project_id: project.id, shot_id: shot.id }),
+        body: JSON.stringify({ kind: "cast", mime: file.type, project_id: project.id }),
       });
       const up = await createClient().storage.from(bucket).uploadToSignedUrl(path, token, file, { contentType: file.type });
       if (up.error) throw new Error(up.error.message);
-      await onAction("still-from", { path });
+      await onCastFrom({ path });
       setPicker(false);
     } finally {
       setUploading(false);
@@ -148,12 +151,27 @@ export function ShotPanel({
                   <img src={shot.still_url} alt="" className={`aspect-[9/16] w-full object-cover rounded-lg border bg-black ${shot.approved ? "border-green-600" : "border-gray-800"}`} />
                 ) : (
                   <Empty>
-                    <Sparkles size={16} />
-                    <p className="text-[11px]">{shot.still_status === "failed" ? shot.still_error : "No still yet"}</p>
+                    {project.cast_url ? (
+                      <>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={project.cast_url} alt="" className="w-14 aspect-[9/16] object-cover rounded-md border border-purple-500" />
+                        <p className="text-[11px]">{shot.still_status === "failed" ? shot.still_error : "This person goes into the real frame"}</p>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles size={16} />
+                        <p className="text-[11px]">{shot.still_status === "failed" ? shot.still_error : "No still yet"}</p>
+                      </>
+                    )}
                   </Empty>
                 )}
               </div>
               <div className="space-y-2 text-xs">
+                {project.cast_url && !shot.still_url && !stillBusy && (
+                  <p className="text-gray-400">
+                    Person picked. Generate puts them into this clip&apos;s frame{project.brand_kit?.images.length ? " with our product" : ""}.
+                  </p>
+                )}
                 {shot.still_status === "done" && check && (
                   <p className={`inline-flex items-start gap-1 ${checking ? "text-gray-500" : check.ok ? "text-green-400" : "text-red-300"}`}>
                     {checking ? <Loader2 size={11} className="animate-spin mt-0.5" /> : check.ok ? <Check size={11} className="mt-0.5" /> : <AlertTriangle size={11} className="mt-0.5" />}
@@ -161,21 +179,21 @@ export function ShotPanel({
                   </p>
                 )}
                 <div className="flex gap-1.5 flex-wrap">
-                  <Button onClick={() => onAction("still")} busy={busy === "still"} disabled={stillBusy || !shot.frame_url} title={`${STILL_CREDITS} credits`}>
-                    {shot.still_url ? <RefreshCw size={13} /> : <Sparkles size={13} />} {shot.still_url ? "Regenerate" : "Generate"} · {STILL_CREDITS} cr
+                  <Button primary={!shot.still_url} onClick={() => onAction("still")} busy={busy === "still"} disabled={stillBusy || !shot.frame_url} title={`${STILL_CREDITS} credits`}>
+                    {shot.still_url ? <RefreshCw size={13} /> : <Sparkles size={13} />} {shot.still_url ? "Regenerate" : project.cast_url || project.cast_shot_id ? "Generate with this person" : "Generate (new person)"} · {STILL_CREDITS} cr
                   </Button>
                   <Button onClick={() => setPicker((v) => !v)} disabled={stillBusy}>
-                    <Images size={13} /> Use existing image
+                    <Images size={13} /> {project.cast_url ? "Change person" : "Use existing image"}
                   </Button>
                 </div>
                 {picker && (
                   <div className="rounded-lg border border-gray-700 bg-gray-900 p-2 space-y-2">
                     <div className="flex items-center gap-2">
-                      <p className="text-gray-400 flex-1">From the UGC Generator library, or upload.</p>
+                      <p className="text-gray-400 flex-1">Pick the person to put into every clip: from the UGC Generator library, or upload. The still is then generated from the real frame with them in it.</p>
                       <Button ghost onClick={() => fileRef.current?.click()} busy={uploading}>
                         <Upload size={12} /> Upload
                       </Button>
-                      <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => e.target.files?.[0] && void uploadStill(e.target.files[0])} />
+                      <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => e.target.files?.[0] && void uploadCast(e.target.files[0])} />
                     </div>
                     {library === null ? (
                       <Loader2 size={14} className="animate-spin text-gray-500 mx-auto" />
@@ -188,9 +206,9 @@ export function ShotPanel({
                             key={img.id}
                             type="button"
                             title={img.note}
-                            disabled={busy === "still-from"}
+                            disabled={busy === "cast"}
                             onClick={async () => {
-                              await onAction("still-from", { ugc_job_id: img.id });
+                              await onCastFrom({ ugc_job_id: img.id });
                               setPicker(false);
                             }}
                             className="aspect-[9/16] rounded-md overflow-hidden border border-gray-700 hover:border-purple-500 cursor-pointer disabled:opacity-50"

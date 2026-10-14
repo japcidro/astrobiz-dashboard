@@ -85,14 +85,27 @@ export function CastBrandPanel({
           className={`${field} mt-2 resize-none`}
         />
         <div className="mt-3 flex items-center gap-2">
-          {castShot?.still_url ? (
+          {project.cast_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={project.cast_url} alt="" className="w-10 aspect-[9/16] object-cover rounded-md border border-purple-500" />
+          ) : castShot?.still_url ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={castShot.still_url} alt="" className="w-10 aspect-[9/16] object-cover rounded-md border border-gray-700" />
           ) : (
             <div className="w-10 aspect-[9/16] rounded-md border border-dashed border-gray-700" />
           )}
           <div className="flex-1 min-w-0 text-xs">
-            {castShot ? (
+            {project.cast_url ? (
+              <>
+                <p className="text-white inline-flex items-center gap-1">
+                  <UserCheck size={12} className="text-green-400" /> Picked image
+                </p>
+                <p className="text-gray-500">Every still is generated with this person in the real frame.</p>
+                <button type="button" onClick={() => void onPatch({ cast_path: null })} className="text-gray-400 hover:text-white cursor-pointer mt-0.5">
+                  Remove
+                </button>
+              </>
+            ) : castShot ? (
               <>
                 <p className="text-white inline-flex items-center gap-1">
                   <UserCheck size={12} className="text-green-400" /> Locked to shot {castShot.idx + 1}
@@ -103,7 +116,7 @@ export function CastBrandPanel({
                 </button>
               </>
             ) : (
-              <p className="text-gray-500">Generate one still, approve it, then click &ldquo;Use as cast&rdquo; so every other shot gets the same person.</p>
+              <p className="text-gray-500">Pick a person with &ldquo;Use existing image&rdquo; on any clip, or generate one still, approve it, and click &ldquo;Use this person as the cast&rdquo;.</p>
             )}
           </div>
         </div>

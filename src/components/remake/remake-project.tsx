@@ -82,6 +82,9 @@ export function RemakeProject({ id }: { id: string }) {
   const action = (shotId: string, a: string, body?: Record<string, unknown>) =>
     call(a, () => api(`/api/owner/remake/projects/${id}/shots/${shotId}/${a}`, { method: "POST", body: JSON.stringify(body ?? {}) }));
 
+  const castFrom = (body: { ugc_job_id?: string; path?: string }) =>
+    call("cast", () => api(`/api/owner/remake/projects/${id}/cast`, { method: "POST", body: JSON.stringify(body) }));
+
   const renderAll = async () => {
     if (!project) return;
     const ready = project.shots.filter((s) => s.selected && s.mode === "swap" && s.approved && s.still_status === "done" && s.clip_status !== "done" && !shotBusy(s));
@@ -300,7 +303,7 @@ export function RemakeProject({ id }: { id: string }) {
 
             <main className="min-w-0">
               {shot ? (
-                <ShotPanel key={shot.id} project={project} shot={shot} voices={voices} busy={busy} onPatch={(b) => patchShot(shot.id, b)} onAction={(a, b) => action(shot.id, a, b)} onProjectPatch={patchProject} />
+                <ShotPanel key={shot.id} project={project} shot={shot} voices={voices} busy={busy} onPatch={(b) => patchShot(shot.id, b)} onAction={(a, b) => action(shot.id, a, b)} onProjectPatch={patchProject} onCastFrom={castFrom} />
               ) : (
                 <p className="text-sm text-gray-500">Pick a clip.</p>
               )}

@@ -27,6 +27,8 @@ export interface ProjectRow {
   cast_look: LookId;
   cast_note: string;
   cast_shot_id: string | null;
+  /** A picked person image (UGC library or upload); wins over cast_shot_id. */
+  cast_path: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -108,6 +110,7 @@ export interface BrandKit {
 export interface ProjectView extends ProjectRow {
   source_url: string | null;
   strip_url: string | null;
+  cast_url: string | null;
   board_item_title: string | null;
   shots: ShotView[];
   brand_kit: BrandKit | null;

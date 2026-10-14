@@ -42,8 +42,10 @@ export async function PATCH(request: Request, ctx: Ctx) {
       const { data: shot } = await auth.db.from("remake_shots").select("id, still_status").eq("id", b.cast_shot_id).eq("project_id", id).maybeSingle();
       if (!shot || shot.still_status !== "done") return Response.json({ error: "That shot has no finished still" }, { status: 400 });
       patch.cast_shot_id = shot.id;
+      patch.cast_path = null;
     } else return Response.json({ error: "Bad cast shot" }, { status: 400 });
   }
+  if ("cast_path" in b && b.cast_path === null) patch.cast_path = null;
   if (Object.keys(patch).length === 0) return Response.json({ error: "Nothing to change" }, { status: 400 });
 
   const { error } = await auth.db.from("remake_projects").update(patch).eq("id", id);

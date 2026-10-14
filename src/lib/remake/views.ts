@@ -59,6 +59,7 @@ export async function loadProject(db: SupabaseClient, id: string): Promise<Proje
   const signed = await signBoardPaths(db, [
     project.source_path,
     project.strip_path,
+    project.cast_path,
     ...shots.flatMap((s) => [s.frame_path, s.ref_path, s.still_path, s.audio_path, s.clip_path, s.mixed_path]),
     ...((imgs ?? []) as Array<{ path: string }>).map((i) => i.path),
   ]);
@@ -66,6 +67,7 @@ export async function loadProject(db: SupabaseClient, id: string): Promise<Proje
     ...project,
     source_url: signed.get(project.source_path) ?? null,
     strip_url: project.strip_path ? signed.get(project.strip_path) ?? null : null,
+    cast_url: project.cast_path ? signed.get(project.cast_path) ?? null : null,
     board_item_title: (boardItem?.title as string | undefined) ?? null,
     shots: shots.map((s) => toShotView(s, signed)),
     brand_kit: await loadBrandKit(db, project.store, signed),
@@ -149,8 +151,9 @@ export async function queueFrames(db: SupabaseClient, project: Pick<ProjectRow, 
 export async function queueStill(db: SupabaseClient, project: ProjectRow, shot: ShotRow): Promise<string | null> {
   if (!shot.frame_path) return "This clip has no frame yet";
   const kit = await loadBrandKit(db, project.store);
-  let castPath: string | null = null;
-  if (project.cast_shot_id && project.cast_shot_id !== shot.id) {
+  // The person for the scene: a picked image, or the approved still the cast was locked to.
+  let castPath: string | null = project.cast_path ?? null;
+  if (!castPath && project.cast_shot_id && project.cast_shot_id !== shot.id) {
     const { data: cast } = await db.from("remake_shots").select("still_path").eq("id", project.cast_shot_id).maybeSingle();
     castPath = (cast?.still_path as string | null) ?? null;
   }
@@ -180,11 +183,12 @@ export async function queueStill(db: SupabaseClient, project: ProjectRow, shot: 
 }
 
 /**
- * Use an image that already exists as the still: a UGC Generator result
- * (copied out of the hook-studio bucket) or a photo just uploaded to
- * remake/<project>/stills/.
+ * Pick the person for every clip from an image that already exists: a UGC
+ * Generator result (copied out of the hook-studio bucket) or an upload to
+ * remake/<project>/cast/. The still is then generated from the real frame
+ * with this person in it; the picked image is never used as the still.
  */
-export async function stillFrom(db: SupabaseClient, project: ProjectRow, shot: ShotRow, source: { ugc_job_id?: string; path?: string }): Promise<string | null> {
+export async function setCastFrom(db: SupabaseClient, project: ProjectRow, source: { ugc_job_id?: string; path?: string }): Promise<string | null> {
   let path: string;
   if (source.ugc_job_id) {
     const { data: job } = await db.from("hook_studio_jobs").select("result_path").eq("id", source.ugc_job_id).eq("kind", "ugc_image").eq("status", "done").maybeSingle();
@@ -193,18 +197,16 @@ export async function stillFrom(db: SupabaseClient, project: ProjectRow, shot: S
     const { data: blob, error } = await db.storage.from(HOOK_BUCKET).download(from);
     if (error || !blob) return "Could not read the library image";
     const ext = from.split(".").pop() ?? "png";
-    path = `remake/${project.id}/stills/${shot.id}-${crypto.randomUUID()}.${ext}`;
+    path = `remake/${project.id}/cast/${crypto.randomUUID()}.${ext}`;
     const up = await db.storage.from(BOARD_BUCKET).upload(path, blob, { contentType: blob.type || "image/png", upsert: true });
     if (up.error) return up.error.message;
-  } else if (source.path && new RegExp(`^remake/${project.id}/stills/${shot.id}-[0-9a-f-]{36}\\.(png|jpg|webp)$`).test(source.path)) {
+  } else if (source.path && new RegExp(`^remake/${project.id}/cast/[0-9a-f-]{36}\\.(png|jpg|webp)$`).test(source.path)) {
     path = source.path;
   } else {
     return "Pick a library image or upload one";
   }
-  await db
-    .from("remake_shots")
-    .update({ mode: "swap", still_path: path, still_status: "done", still_error: null, still_job_id: null, brand_check: null, approved: false, clip_status: "none", clip_path: null, mixed_status: "none", mixed_path: null })
-    .eq("id", shot.id);
+  if (project.cast_path && project.cast_path !== path) await db.storage.from(BOARD_BUCKET).remove([project.cast_path]);
+  await db.from("remake_projects").update({ cast_path: path, cast_shot_id: null }).eq("id", project.id);
   return null;
 }
 
