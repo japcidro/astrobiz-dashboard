@@ -6,15 +6,18 @@ export const dynamic = "force-dynamic";
 
 const VIDEO: Record<string, string> = { "video/mp4": "mp4", "video/quicktime": "mov", "video/webm": "webm" };
 const IMAGE: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
+const UUID = /^[0-9a-f-]{36}$/;
 
 /**
- * POST { kind: "source" | "brand", mime, store? } — a one-time signed upload
- * URL for a reference video or a brand product photo.
+ * POST { kind, mime, … } — a one-time signed upload URL.
+ *   kind "source": a reference video
+ *   kind "brand" + store: a product photo for the brand kit
+ *   kind "still" + project_id + shot_id: an image to use as a clip's still
  */
 export async function POST(request: Request) {
   const auth = await requireBoardUser();
   if (auth.error) return auth.error;
-  const b = (await request.json().catch(() => null)) as { kind?: string; mime?: string; store?: string } | null;
+  const b = (await request.json().catch(() => null)) as { kind?: string; mime?: string; store?: string; project_id?: string; shot_id?: string } | null;
   const mime = b?.mime ?? "";
   let path: string;
   if (b?.kind === "source") {
@@ -27,8 +30,13 @@ export async function POST(request: Request) {
     if (!ext) return Response.json({ error: "Upload a PNG, JPG or WebP photo" }, { status: 400 });
     if (!store) return Response.json({ error: "Pick a store first" }, { status: 400 });
     path = `brand/${store}/${randomUUID()}.${ext}`;
+  } else if (b?.kind === "still") {
+    const ext = IMAGE[mime];
+    if (!ext) return Response.json({ error: "Upload a PNG, JPG or WebP image" }, { status: 400 });
+    if (!UUID.test(b.project_id ?? "") || !UUID.test(b.shot_id ?? "")) return Response.json({ error: "Missing clip" }, { status: 400 });
+    path = `remake/${b.project_id}/stills/${b.shot_id}-${randomUUID()}.${ext}`;
   } else {
-    return Response.json({ error: "kind must be source or brand" }, { status: 400 });
+    return Response.json({ error: "kind must be source, brand or still" }, { status: 400 });
   }
   const { data, error } = await auth.db.storage.from(BOARD_BUCKET).createSignedUploadUrl(path);
   if (error || !data) return Response.json({ error: error?.message ?? "Could not create upload URL" }, { status: 500 });

@@ -386,8 +386,8 @@ const ownerNavEntries: NavEntry[] = [
         roles: ownerRoles,
       },
       {
-        label: "Remake Studio",
-        href: "/owner/remake-studio",
+        label: "Clipper",
+        href: "/owner/clipper",
         icon: <Film size={18} />,
         roles: ownerRoles,
       },

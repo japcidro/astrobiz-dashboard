@@ -5,6 +5,8 @@ import type { ClipEngineId } from "./engines";
 export type ProjectStatus = "splitting" | "classifying" | "ready" | "failed";
 export type StepStatus = "none" | "queued" | "running" | "done" | "failed";
 export type ShotKind = "talking_head" | "broll";
+/** keep = use the real clip as it is; swap = redo it from our still. */
+export type ShotMode = "keep" | "swap";
 
 export interface BrandCheck {
   ok: boolean;
@@ -18,6 +20,8 @@ export interface ProjectRow {
   board_item_id: string | null;
   source_path: string;
   source_duration: number | null;
+  strip_path: string | null;
+  strip_count: number | null;
   status: ProjectStatus;
   error: string | null;
   cast_look: LookId;
@@ -35,10 +39,13 @@ export interface ShotRow {
   start_s: number;
   end_s: number;
   kind: ShotKind;
+  mode: ShotMode;
+  person: string | null;
   selected: boolean;
   brand_heavy: boolean;
   description: string | null;
   frame_path: string | null;
+  ref_path: string | null;
   still_job_id: string | null;
   still_path: string | null;
   still_status: StepStatus;
@@ -46,6 +53,7 @@ export interface ShotRow {
   brand_check: BrandCheck | null;
   approved: boolean;
   script: string;
+  voice_direction: string;
   voice_id: string | null;
   voice_type: string | null;
   voice_name: string | null;
@@ -56,21 +64,29 @@ export interface ShotRow {
   audio_error: string | null;
   clip_engine: ClipEngineId;
   clip_quality: Quality;
+  clip_seconds: number | null;
   clip_prompt: string | null;
   clip_job_id: string | null;
   clip_path: string | null;
   clip_status: StepStatus;
   clip_error: string | null;
   clip_credits: number | null;
+  mixed_path: string | null;
+  mixed_key: string | null;
+  mixed_status: StepStatus;
   created_at: string;
   updated_at: string;
 }
 
 export interface ShotView extends ShotRow {
   frame_url: string | null;
+  ref_url: string | null;
   still_url: string | null;
   audio_url: string | null;
   clip_url: string | null;
+  mixed_url: string | null;
+  /** What the tray shows for this shot: the mixed clip, our clip, or the kept real clip. */
+  final_url: string | null;
   seconds: number;
 }
 
@@ -91,6 +107,7 @@ export interface BrandKit {
 
 export interface ProjectView extends ProjectRow {
   source_url: string | null;
+  strip_url: string | null;
   board_item_title: string | null;
   shots: ShotView[];
   brand_kit: BrandKit | null;
@@ -111,4 +128,12 @@ export interface Voice {
   id: string;
   name: string;
   type: "preset" | "element";
+}
+
+/** A finished UGC Generator image the still can be taken from. */
+export interface LibraryImage {
+  id: string;
+  url: string;
+  note: string;
+  created_at: string;
 }

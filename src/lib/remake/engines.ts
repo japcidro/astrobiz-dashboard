@@ -1,62 +1,71 @@
 import { ENGINES, type EngineId, type Quality } from "@/lib/hook-studio/engines";
 
 /**
- * How a Remake Studio still becomes a clip. The three Hook Studio engines
- * carry over; two lipsync engines speak the marketer's script.
+ * How a Clipper still becomes a clip. Every engine starts from OUR still
+ * (new person, our product): Veo speaks the script with its own voice,
+ * Genjutsu copies the real clip's motion, Kling animates from a prompt.
  *
- * Credits per second are the CLI's estimates for 9:16 output
- * (2026-10-14); the worker records the live estimate per job.
+ * Credits are the CLI's estimates for 9:16 output (2026-10-14); the worker
+ * records the live estimate per job.
  */
-export type ClipEngineId = EngineId | "wan_lipsync" | "seedance_lipsync";
+export type ClipEngineId = "veo3_1" | "veo3" | Extract<EngineId, "genjutsu" | "kling_i2v">;
 
-export type ClipMode = "motion" | "prompt" | "speak";
+export type ClipMode = "speak" | "motion" | "prompt";
 
 export interface ClipEngine {
   id: ClipEngineId;
   mode: ClipMode;
   name: string;
   blurb: string;
-  perSecond: Record<Quality, number>;
+  /** Fixed lengths the model accepts; null = follows the real clip. */
+  lengths: number[] | null;
+  /** Credits for a clip of n seconds at a quality. */
+  cost: (seconds: number, quality: Quality) => number;
   qualityLabels: Record<Quality, string> | null;
-  minSeconds: number;
-  maxSeconds: number;
 }
 
-const hook = (id: EngineId, mode: ClipMode, blurb: string): ClipEngine => {
-  const e = ENGINES.find((x) => x.id === id)!;
-  return { id, mode, name: e.name, blurb, perSecond: e.perSecond, qualityLabels: e.qualityLabels, minSeconds: e.minSeconds, maxSeconds: e.maxSeconds };
-};
+const hookEngine = (id: "genjutsu" | "kling_i2v") => ENGINES.find((e) => e.id === id)!;
 
 export const CLIP_ENGINES: ClipEngine[] = [
-  hook("genjutsu", "motion", "Copies the real shot's camera and body movement onto the new person. Most realistic for b-rolls and silent talking heads."),
-  hook("kling_i2v", "prompt", "Animates the still from a written prompt. Cheapest; good for simple b-roll motion."),
-  hook("kling_turbo", "prompt", "Faster Kling for very simple motion."),
   {
-    id: "wan_lipsync",
+    id: "veo3_1",
     mode: "speak",
-    name: "Wan 2.7 lipsync",
-    blurb: "The new person speaks your script. Needs the voice generated first; clip length follows the audio.",
-    perSecond: { standard: 1.5, high: 2.5 },
-    qualityLabels: { standard: "720p", high: "1080p" },
-    minSeconds: 3,
-    maxSeconds: 15,
+    name: "Veo 3.1",
+    blurb: "Starts from our still and speaks the script with its own voice and lips. 4, 6 or 8 seconds.",
+    lengths: [4, 6, 8],
+    cost: (s, q) => (q === "high" ? 10 : 4) * (s === 4 ? 4 : s === 6 ? 6 : 8),
+    qualityLabels: { standard: "Fast", high: "Preview · high" },
   },
   {
-    id: "seedance_lipsync",
+    id: "veo3",
     mode: "speak",
-    name: "Seedance 2.0 lipsync",
-    blurb: "Alternative lipsync engine, stronger on expressive delivery. Pricier.",
-    perSecond: { standard: 4.5, high: 6 },
+    name: "Veo 3",
+    blurb: "Same idea, fixed 8 seconds. Cheaper on Fast.",
+    lengths: [8],
+    cost: (_s, q) => (q === "high" ? 58 : 22),
+    qualityLabels: { standard: "Fast", high: "Preview" },
+  },
+  {
+    id: "genjutsu",
+    mode: "motion",
+    name: "Genjutsu motion copy",
+    blurb: "Silent. Our still performs the real clip's exact camera and body movement; length follows the real clip.",
+    lengths: null,
+    cost: (s, q) => Math.round(hookEngine("genjutsu").perSecond[q] * Math.min(15, Math.max(3, s)) * 100) / 100,
     qualityLabels: { standard: "720p", high: "1080p" },
-    minSeconds: 4,
-    maxSeconds: 15,
+  },
+  {
+    id: "kling_i2v",
+    mode: "prompt",
+    name: "Kling 3.0",
+    blurb: "Silent, cheapest. Animates our still from a short motion prompt.",
+    lengths: null,
+    cost: (s, q) => Math.round(hookEngine("kling_i2v").perSecond[q] * Math.min(15, Math.max(3, s)) * 100) / 100,
+    qualityLabels: { standard: "Standard", high: "Pro" },
   },
 ];
 
-export const DEFAULT_CLIP_ENGINE: Record<"talking_head" | "broll", ClipEngineId> = {
-  talking_head: "wan_lipsync",
-  broll: "genjutsu",
-};
+export const DEFAULT_CLIP_ENGINE: ClipEngineId = "veo3_1";
 
 export function getClipEngine(id: string): ClipEngine | undefined {
   return CLIP_ENGINES.find((e) => e.id === id);
@@ -66,16 +75,17 @@ export function isClipEngine(id: unknown): id is ClipEngineId {
   return typeof id === "string" && CLIP_ENGINES.some((e) => e.id === id);
 }
 
+/** The Veo length that covers the real clip: 3.2 s → 4, 5 s → 6, anything longer → 8. */
+export function veoLengthFor(seconds: number): number {
+  return seconds <= 4 ? 4 : seconds <= 6 ? 6 : 8;
+}
+
 export function clipEstimate(engine: ClipEngineId, quality: Quality, seconds: number): number {
   const e = getClipEngine(engine);
-  if (!e) return 0;
-  const s = Math.min(e.maxSeconds, Math.max(e.minSeconds, Math.ceil(seconds)));
-  return Math.round(e.perSecond[quality] * s * 100) / 100;
+  return e ? e.cost(seconds, quality) : 0;
 }
 
 /** Nano Banana Pro still, with product references. */
 export const STILL_CREDITS = 2;
-/** Text-to-speech: about 0.15 credits per short sentence. */
-export const TTS_CREDITS_PER_CHAR = 0.003;
-/** Longest script the lipsync engines can carry in one clip. */
-export const MAX_SPEAK_SECONDS = 15;
+/** ElevenLabs v4: about 0.2 credits per sentence. */
+export const VO_CREDITS_PER_CHAR = 0.005;

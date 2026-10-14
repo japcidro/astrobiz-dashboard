@@ -2,9 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { BrandCheck, ShotKind } from "./types";
 
 /**
- * Claude looks at frames for two jobs: label each shot of a reference
- * (talking head or b-roll, brand-heavy or not, what happens), and check a
- * generated still for leftover competitor branding.
+ * Claude looks at frames for three jobs: label each clip (talking head or
+ * b-roll, which person, brand-heavy, what happens), find where the person
+ * or scene changes in the one-frame-per-second strip, and check a generated
+ * still for leftover competitor branding.
  */
 
 const MODEL = "claude-sonnet-5";
@@ -34,7 +35,10 @@ function extractJson<T>(text: string): T | null {
   const b = cleaned.lastIndexOf("}");
   const s = cleaned.indexOf("[");
   const e = cleaned.lastIndexOf("]");
-  const candidates = [a >= 0 && b > a ? cleaned.slice(a, b + 1) : null, s >= 0 && e > s ? cleaned.slice(s, e + 1) : null];
+  const objFirst = a >= 0 && (s < 0 || a < s);
+  const candidates = objFirst
+    ? [a >= 0 && b > a ? cleaned.slice(a, b + 1) : null, s >= 0 && e > s ? cleaned.slice(s, e + 1) : null]
+    : [s >= 0 && e > s ? cleaned.slice(s, e + 1) : null, a >= 0 && b > a ? cleaned.slice(a, b + 1) : null];
   for (const c of candidates) {
     if (!c) continue;
     try {
@@ -67,26 +71,28 @@ async function ask<T>(db: SupabaseClient, system: string, content: Array<Record<
 export interface ShotLabel {
   idx: number;
   kind: ShotKind;
+  person: string | null;
   brand_heavy: boolean;
   description: string;
 }
 
-/** Label every shot from its frame. Returns null when Claude is unavailable. */
+/** Label every clip from its frame. Returns null when Claude is unavailable. */
 export async function labelShots(db: SupabaseClient, frames: Array<{ idx: number; url: string }>): Promise<ShotLabel[] | null> {
   const blocks: Array<Record<string, unknown>> = [];
   for (const f of frames.slice(0, 20)) {
     const img = await imageBlock(f.url);
     if (!img) continue;
-    blocks.push({ type: "text", text: `Shot ${f.idx}:` }, img);
+    blocks.push({ type: "text", text: `Clip ${f.idx}:` }, img);
   }
   if (blocks.length === 0) return null;
   blocks.push({
     type: "text",
-    text: "Label each shot. Answer with JSON only: an array of {\"idx\": number, \"kind\": \"talking_head\" | \"broll\", \"brand_heavy\": boolean, \"description\": string}.",
+    text: 'Label each clip. Answer with JSON only: an array of {"idx": number, "kind": "talking_head" | "broll", "person": "A" | "B" | "C" | null, "brand_heavy": boolean, "description": string}.',
   });
   const system = `You label frames from a short vertical ad so an editor can plan a remake.
 - kind "talking_head": a person facing the camera, speaking or presenting, face clearly the subject.
 - kind "broll": anything else: hands, product, unboxing, application, room, text cards, screens.
+- person: the same letter for the same person wherever they appear (first person seen = "A", next = "B", …). null when no person is the subject.
 - brand_heavy true when the frame is mostly a competitor's packaging, logo, website or app screen, so swapping the person would not make it ours.
 - description: one plain sentence of what is happening (who, what they hold or do, where). No brand names.
 Answer with JSON only.`;
@@ -97,9 +103,28 @@ Answer with JSON only.`;
     .map((o) => ({
       idx: o.idx,
       kind: o.kind === "talking_head" ? "talking_head" : "broll",
+      person: typeof o.person === "string" && /^[A-F]$/.test(o.person) ? o.person : null,
       brand_heavy: !!o.brand_heavy,
       description: typeof o.description === "string" ? o.description.slice(0, 300) : "",
     }));
+}
+
+/**
+ * Where does the person or scene change? Reads the strip (one tile per
+ * second, left to right) and returns the seconds a new clip starts at.
+ */
+export async function detectChanges(db: SupabaseClient, stripUrl: string, tiles: number): Promise<number[] | null> {
+  const img = await imageBlock(stripUrl);
+  if (!img) return null;
+  const blocks: Array<Record<string, unknown>> = [
+    { type: "text", text: `This strip has ${tiles} tiles, one per second of a vertical ad, left to right: tile 0 is second 0, tile ${tiles - 1} is second ${tiles - 1}.` },
+    img,
+    { type: "text", text: 'List the seconds where a new shot starts: a different person on screen, a cut to a product or hands, a new location, or a clear camera change. Answer with JSON only: {"cuts": number[]} (do not include 0).' },
+  ];
+  const system = `You find shot boundaries in interview-style and UGC ads. Be sensitive to the speaker changing even when the room is the same. Answer with JSON only.`;
+  const out = await ask<{ cuts?: unknown }>(db, system, blocks, 400);
+  if (!out || !Array.isArray(out.cuts)) return null;
+  return Array.from(new Set(out.cuts.map(Number).filter((n) => Number.isInteger(n) && n > 0 && n < tiles))).sort((a, b) => a - b);
 }
 
 /** Does the generated still show only our product and no competitor branding? */

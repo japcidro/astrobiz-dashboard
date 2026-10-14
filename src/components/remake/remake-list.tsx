@@ -11,7 +11,7 @@ import { Button, Panel, Pill, api, timeAgo } from "@/components/hook-studio/ui";
 import { SourceBadge } from "@/components/marketing-board/format";
 
 const STATUS_TONE = { splitting: "run", classifying: "run", ready: "ok", failed: "bad" } as const;
-const STATUS_LABEL = { splitting: "Cutting shots", classifying: "Labelling", ready: "Ready", failed: "Failed" } as const;
+const STATUS_LABEL = { splitting: "Cutting clips", classifying: "Labelling", ready: "Ready", failed: "Failed" } as const;
 
 /** Every remake, and the two ways to start one: a board card or an upload. */
 export function RemakeList() {
@@ -33,7 +33,7 @@ export function RemakeList() {
     setError(null);
     try {
       const r = await api<{ project: ProjectView }>("/api/owner/remake/projects", { method: "POST", body: JSON.stringify(body) });
-      router.push(`/owner/remake-studio/${r.project.id}`);
+      router.push(`/owner/clipper/${r.project.id}`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not start");
       setStarting(null);
@@ -63,8 +63,8 @@ export function RemakeList() {
     <div className="max-w-6xl">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Remake Studio</h1>
-          <p className="text-sm text-gray-500 mt-1">A real reference in, our brand&apos;s clips out: new person, our product, real motion.</p>
+          <h1 className="text-2xl font-bold text-white">Clipper</h1>
+          <p className="text-sm text-gray-500 mt-1">Cut a real reference into clips. Keep them, or redo any clip from our still with our product and person.</p>
         </div>
         <div className="flex gap-2">
           <Button primary onClick={() => setPickOpen((v) => !v)} disabled={starting !== null}>
@@ -117,13 +117,13 @@ export function RemakeList() {
       {projects && projects.length === 0 && !pickOpen && (
         <div className="mt-8 rounded-xl border border-dashed border-gray-800 p-10 text-center">
           <Film size={28} className="mx-auto text-gray-600" />
-          <p className="text-sm text-gray-400 mt-3">No remakes yet. Start one from a board card or upload a reference.</p>
+          <p className="text-sm text-gray-400 mt-3">Nothing clipped yet. Start from a board card or upload a reference.</p>
         </div>
       )}
       {projects && projects.length > 0 && (
         <div className="mt-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {projects.map((p) => (
-            <Link key={p.id} href={`/owner/remake-studio/${p.id}`} className="flex gap-3 rounded-xl border border-gray-800 bg-gray-900/40 hover:bg-gray-800/60 p-3">
+            <Link key={p.id} href={`/owner/clipper/${p.id}`} className="flex gap-3 rounded-xl border border-gray-800 bg-gray-900/40 hover:bg-gray-800/60 p-3">
               <div className="w-16 shrink-0 aspect-[9/16] rounded-md bg-gray-950 overflow-hidden">
                 {p.cover_url ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -131,7 +131,7 @@ export function RemakeList() {
                 ) : null}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-white font-medium truncate">{p.title || "Remake"}</p>
+                <p className="text-sm text-white font-medium truncate">{p.title || "Clip"}</p>
                 <p className="text-xs text-gray-500 mt-0.5">{p.store ?? "No store"} · {timeAgo(p.created_at)}</p>
                 <div className="mt-2 flex items-center gap-2 flex-wrap">
                   <Pill tone={STATUS_TONE[p.status]}>{STATUS_LABEL[p.status]}</Pill>

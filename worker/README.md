@@ -38,16 +38,24 @@ Marketing Board (`kind = board_fetch`): yt-dlp downloads the best MP4 up to
 the `marketing-board` bucket, and the card gets its title, creator, size and
 duration. Failures land on the card as `video_error`, with a Try again button.
 
-Remake Studio (`kind = remake_*`):
-- `remake_split`: ffmpeg scene detection on the reference, 1.5–12 s shots (max
-  12), one JPEG frame per shot to `remake/<project>/frames/`, rows in
-  `remake_shots`, project → `classifying` (Claude labels them on the next load).
+Clipper (`kind = remake_*`, tables kept the remake_ names):
+- `remake_split`: ffmpeg scene detection (threshold 0.2) on the reference, 1–12 s
+  clips (max 16); per clip a JPEG frame AND the real clip cut out with sound
+  (`remake/<project>/frames/`, `remake/<project>/ref/`); a one-frame-per-second
+  strip (`strip-<job>.jpg`) for the timeline and Claude's re-detect; project →
+  `classifying` (Claude labels clips on the next page load).
+- `remake_frames`: after split / merge / re-detect, new frame + real clip for the
+  clips that changed.
 - `remake_still`: Nano Banana Pro with the frame, the cast image (if locked) and
   up to 4 brand product photos → `remake/<project>/stills/`.
-- `remake_tts`: `text2speech_v2` (elevenlabs) speaks the shot's script →
+- `remake_tts`: ElevenLabs v4 (`--dialogue @file.json`) voiceover →
   `remake/<project>/audio/`, duration probed.
-- `remake_clip`: Genjutsu (trimmed real shot as motion reference), Kling, Wan 2.7
-  or Seedance 2.0 lipsync (still + audio) → `remake/<project>/clips/`.
+- `remake_clip`: Veo 3.1 / Veo 3 (`--start-image` = our still; Veo speaks the
+  script itself), Genjutsu (the real clip as motion reference), Kling →
+  `remake/<project>/clips/`.
+- `remake_mix`: voiceover laid over the clip (original audio ducked to 15%,
+  clip length kept) → `remake/<project>/mixed/`. Queued by the app when a
+  voiceover and its clip both exist.
 
 Heartbeats `app_settings.hook_worker_status` each loop with the balance,
 the yt-dlp version (`ytdlp`, null when it is not installed) and the CLI's

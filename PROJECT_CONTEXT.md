@@ -366,7 +366,7 @@ Hook Studio), **Marketing Board**.
 
 | Page | What it does |
 |---|---|
-| `/owner/remake-studio` | Remake Studio: a reference video (board card's saved copy or upload) → the Mac worker cuts it into shots (ffmpeg scene detection, `remake_split`) → Claude labels each shot talking head / b-roll / brand-heavy → per shot: Nano Banana Pro still with a new person AND our product from the store's brand kit (`remake_still`, 2 cr; Claude brand-checks the result) → owner approves the still → clip via Genjutsu motion transfer, Kling, or a lipsync engine (Wan 2.7 / Seedance 2.0) speaking the marketer's script (TTS `text2speech_v2` elevenlabs, `remake_tts`; `remake_clip`). One cast person per project (lock any approved still). Clips attach to the board card as outputs. Tables `remake_projects/_shots/_brand_kits/_brand_images`; files under `remake/` and `brand/` in the `marketing-board` bucket. Credits: Wan 1.5 cr/s 720p, Seedance 4.5 cr/s, TTS ≈0.15 cr/line. |
+| `/owner/clipper` | Clipper: a reference video (board card's saved copy or upload) → the Mac worker cuts it into clips (ffmpeg scene detection at 0.2, each clip also cut out as a real MP4 with sound, plus a one-frame-per-second strip) → Claude labels each clip talking head / b-roll / Person A,B / brand-heavy. Timeline: split at playhead, merge, "re-detect people changes" (Claude reads the strip). Per clip: **Keep original** (the real cut) or **Swap person**: Nano Banana Pro still with a new person AND our product from the store's brand kit — or an existing image from the UGC library / upload — Claude brand-checks it, owner approves, then Veo 3.1 (default; speaks the talking-head script with its own voice, 4/6/8 s) / Veo 3 / Genjutsu motion copy / Kling. **Veo always starts from our still, never from the real frame.** B-roll voiceovers: ElevenLabs v4, mixed onto the clip by the Mac (original sound ducked), MP3 kept. Previews auto-play muted; reference and ours side by side. Tables `remake_projects/_shots/_brand_kits/_brand_images` (kept the remake_ names); API under `/api/owner/remake`; files under `remake/` and `brand/` in the `marketing-board` bucket. Credits: Veo 3.1 fast 4 cr/s (16/24/32), preview-high 10 cr/s; Veo 3 fast 22 / preview 58; still 2; ElevenLabs ≈0.2 per line. |
 | `/owner/marketing-board` | Marketing Board: paste a TikTok / Ads Library / FB / IG / YouTube link → card in To do; the Mac worker saves a 1080p copy with yt-dlp (job kind `board_fetch`, bucket `marketing-board`); assign a marketer, store, due date; notes thread; drag across To do / In progress / Done; attach outputs (an ad submitted via Create/Bulk Create from `ad_drafts`, played via the FB video source, or an uploaded video). Owner-only for now — it is being built here and moves to the operations dashboard (admin + marketing) when approved; widen `src/lib/marketing-board/auth.ts` and mount the same component under `(dashboard)`. Tables: `marketing_board_items/_comments/_outputs`. |
 | `/owner/ugc-generator` | UGC photo in → same shot with a genuinely new person (US audience, "Varied" default, one variation). Nano Banana Pro, 2 cr. Library with confirm-delete. |
 | `/owner/hook-studio` | UGC image + skill → silent 9:16 clip. *Higgsfield motion transfer* = Genjutsu copies a reference clip's exact camera motion (≈7 cr/s). *Arcads-style* = Claude writes a shot prompt from the image; Kling 3.0 animates it (1.25 cr/s). Editable titles, confirm-delete. |
@@ -385,11 +385,14 @@ should NOT run the worker. Control: `scripts/hook-worker-install.sh status|logs|
 **Decisions that are not in the code.** Target market is the US; never
 default generated people to Filipino; no single-look lock-in; straight or
 softly wavy hair; clips are clean (text and the SoulShot screen go on in
-CapCut/Meta). Remake Studio rule (Julius, 2026-10-14): realism first — every clip
+CapCut/Meta). Clipper rule (Julius, 2026-10-14): realism first — every clip
 starts from a real frame of a real reference and its motion comes from the
 real shot or from the marketer's own script; nothing is generated from text
 alone. Talking heads are driven by scripts the team writes, never by the
-reference's audio. Kling Omni Edit, Gemini edit and Seedance video_edit were
+reference's audio. A separate TTS + lipsync chain (Wan/Seedance) was tried
+and rejected: the voice never matched the face. Veo generates voice and lips
+together instead, always starting from OUR still (generated, or an existing
+image), never straight from the real frame. Kling Omni Edit, Gemini edit and Seedance video_edit were
 tested for person swaps and rejected (they keep the source face); Seedance
 was later removed entirely. Facebook: the app is on Marketing API
 *development access*; requesting Standard Access is the real fix (TODO.md).

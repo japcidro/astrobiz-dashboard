@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
-const VERSION = "1.2.0";
+const VERSION = "1.3.0";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // ─── Config ───
@@ -264,20 +264,21 @@ function extensionOf(url) {
 }
 const MIME = { mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", mp3: "audio/mpeg", wav: "audio/wav", m4a: "audio/mp4" };
 
-// ─── Remake Studio ───
+// ─── Clipper (tables keep the remake_* names) ───
 const updateShot = (id, patch) =>
   rest(`/remake_shots?id=eq.${id}`, { method: "PATCH", body: patch, headers: { Prefer: "return=minimal" } });
 const updateProject = (id, patch) =>
   rest(`/remake_projects?id=eq.${id}`, { method: "PATCH", body: patch, headers: { Prefer: "return=minimal" } });
 
-const MIN_SHOT = 1.5;
+const MIN_SHOT = 1.0;
 const MAX_SHOT = 12;
-const MAX_SHOTS = 12;
+const MAX_SHOTS = 16;
+const SCENE_THRESHOLD = 0.2;
 
-/** Cut points from ffmpeg's scene detector, then tidy into shots the engines can take. */
+/** Cut points from ffmpeg's scene detector, then tidy into clips the engines can take. */
 async function detectShots(src, duration) {
-  const r = await run(FFMPEG, ["-hide_banner", "-i", src, "-vf", "select='gt(scene,0.3)',showinfo", "-an", "-f", "null", "-"], { timeoutMs: 10 * 60_000 });
-  const cuts = [...r.err.matchAll(/pts_time:([\d.]+)/g)].map((m) => parseFloat(m[1])).filter((t) => Number.isFinite(t) && t > 0.8 && t < duration - 0.8);
+  const r = await run(FFMPEG, ["-hide_banner", "-i", src, "-vf", `select='gt(scene,${SCENE_THRESHOLD})',showinfo`, "-an", "-f", "null", "-"], { timeoutMs: 10 * 60_000 });
+  const cuts = [...r.err.matchAll(/pts_time:([\d.]+)/g)].map((m) => parseFloat(m[1])).filter((t) => Number.isFinite(t) && t > 0.5 && t < duration - 0.5);
   const bounds = [0, ...Array.from(new Set(cuts)).sort((a, b) => a - b), duration];
   let segs = [];
   let start = 0;
@@ -289,7 +290,7 @@ async function detectShots(src, duration) {
     else segs.push([start, end]);
     start = end;
   }
-  // A static ad with no cuts still gets a few shots to work on.
+  // A static ad with no cuts still gets a few clips to work on.
   if (segs.length <= 1 && duration > 6) {
     segs = [];
     for (let t = 0; t < duration; t += 4) segs.push([t, Math.min(duration, t + 4)]);
@@ -321,30 +322,88 @@ async function grabFrame(src, at, dest) {
   return r.code === 0;
 }
 
+/** The real clip, with its sound, re-encoded so it plays everywhere. */
+async function cutClip(src, s, e, dest) {
+  const r = await run(
+    FFMPEG,
+    ["-y", "-loglevel", "error", "-ss", String(s), "-to", String(e), "-i", src, "-vf", "scale='min(1080,iw)':-2", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", dest],
+    { timeoutMs: 10 * 60_000 }
+  );
+  if (r.code !== 0) throw new Error(`ffmpeg cut failed: ${r.err.slice(-300)}`);
+}
+
+/** One frame per second, tiled left to right into a single JPEG, for the timeline and Claude's re-detect. */
+async function makeStrip(src, duration, dest) {
+  const n = Math.max(1, Math.min(60, Math.ceil(duration)));
+  const r = await run(FFMPEG, ["-y", "-loglevel", "error", "-i", src, "-vf", `fps=1,scale=120:-2,tile=${n}x1`, "-frames:v", "1", "-q:v", "4", dest], { timeoutMs: 5 * 60_000 });
+  return r.code === 0 ? n : 0;
+}
+
+/** Frame + real clip for a list of shots; shared by the first cut and later timeline edits. */
+async function materializeShots(dir, src, projectId, shots, keyOf) {
+  const out = [];
+  for (const s of shots) {
+    const key = keyOf(s);
+    const frameFile = join(dir, `frame-${key}.jpg`);
+    const clipFile = join(dir, `ref-${key}.mp4`);
+    let framePath = null;
+    let refPath = null;
+    if (await grabFrame(src, Math.min(s.end_s - 0.2, s.start_s + (s.end_s - s.start_s) / 2), frameFile)) {
+      framePath = `remake/${projectId}/frames/${key}.jpg`;
+      await storageUpload(framePath, frameFile, "image/jpeg", BOARD_BUCKET);
+    }
+    try {
+      await cutClip(src, s.start_s, s.end_s, clipFile);
+      refPath = `remake/${projectId}/ref/${key}.mp4`;
+      await storageUpload(refPath, clipFile, "video/mp4", BOARD_BUCKET);
+    } catch (e) {
+      log(`ref clip ${key} failed: ${e.message}`);
+    }
+    out.push({ ...s, frame_path: framePath, ref_path: refPath });
+  }
+  return out;
+}
+
 async function remakeSplit(job, dir) {
   const { project_id: projectId, source_path: sourcePath } = job.params;
   const src = join(dir, "source.mp4");
   await storageDownload(sourcePath, src, BOARD_BUCKET);
   const duration = await probeDuration(src);
   if (!duration) throw new Error("Could not read the video's duration");
-  const shots = await detectShots(src, duration);
-  const rows = [];
-  for (let idx = 0; idx < shots.length; idx++) {
-    const [s, e] = shots[idx];
-    const frameFile = join(dir, `frame-${idx}.jpg`);
-    const ok = await grabFrame(src, Math.min(e - 0.2, s + (e - s) / 2), frameFile);
-    let framePath = null;
-    if (ok) {
-      framePath = `remake/${projectId}/frames/${idx}.jpg`;
-      await storageUpload(framePath, frameFile, "image/jpeg", BOARD_BUCKET);
-    }
-    rows.push({ project_id: projectId, idx, start_s: s, end_s: e, frame_path: framePath });
+
+  const stripFile = join(dir, "strip.jpg");
+  const tiles = await makeStrip(src, duration, stripFile);
+  let stripPath = null;
+  if (tiles) {
+    stripPath = `remake/${projectId}/strip-${job.id}.jpg`;
+    await storageUpload(stripPath, stripFile, "image/jpeg", BOARD_BUCKET);
   }
-  // Replace any shots from an earlier attempt.
+
+  const segs = (await detectShots(src, duration)).map(([s, e], idx) => ({ idx, start_s: s, end_s: e }));
+  const rows = await materializeShots(dir, src, projectId, segs, (s) => `${s.idx}-${job.id}`);
   await rest(`/remake_shots?project_id=eq.${projectId}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
-  await rest("/remake_shots", { method: "POST", body: rows, headers: { Prefer: "return=minimal" } });
-  await updateProject(projectId, { status: "classifying", source_duration: Math.round(duration * 10) / 10, error: null });
-  return `${rows.length} shots`;
+  await rest("/remake_shots", {
+    method: "POST",
+    body: rows.map((r) => ({ project_id: projectId, idx: r.idx, start_s: r.start_s, end_s: r.end_s, frame_path: r.frame_path, ref_path: r.ref_path })),
+    headers: { Prefer: "return=minimal" },
+  });
+  await updateProject(projectId, { status: "classifying", source_duration: Math.round(duration * 10) / 10, strip_path: stripPath, strip_count: tiles || null, error: null });
+  return `${rows.length} clips`;
+}
+
+/** After a split, merge or re-detect: new frame and real clip for the shots that changed. */
+async function remakeFrames(job, dir) {
+  const { project_id: projectId, source_path: sourcePath, shots, relabel } = job.params;
+  const src = join(dir, "source.mp4");
+  await storageDownload(sourcePath, src, BOARD_BUCKET);
+  const rows = await materializeShots(dir, src, projectId, shots, (s) => `${s.id}-${job.id}`);
+  for (const r of rows) {
+    const patch = { frame_path: r.frame_path, ref_path: r.ref_path };
+    if (relabel) Object.assign(patch, { description: null });
+    await updateShot(r.id, patch);
+  }
+  if (relabel) await updateProject(projectId, { status: "classifying" });
+  return `${rows.length} clips refreshed`;
 }
 
 /** Run a CLI generation and bring the result file home. */
@@ -389,9 +448,12 @@ async function remakeStill(job, dir) {
   return r;
 }
 
+/** ElevenLabs v4 voiceover. `dialogue` is a JSON array passed through a file. */
 async function remakeTts(job, dir) {
   const p = job.params;
-  const args = ["text2speech_v2", "--prompt", safePrompt(p.script), "--variant", "elevenlabs", "--voice_id", p.voice_id, "--voice_type", p.voice_type];
+  const dialogueFile = join(dir, "dialogue.json");
+  await writeFile(dialogueFile, JSON.stringify([{ text: String(p.script).slice(0, 1500), voice_id: p.voice_id, voice_type: p.voice_type }]));
+  const args = ["elevenlabs_v4", "--dialogue", `@${dialogueFile}`];
   await updateShot(p.shot_id, { audio_status: "running" });
   const r = await generateToFile(job, args, dir);
   const seconds = await probeDuration(r.outFile);
@@ -401,36 +463,36 @@ async function remakeTts(job, dir) {
   return r;
 }
 
+/** Every engine starts from our still. Veo makes voice and lips itself; Genjutsu copies the real clip. */
 async function remakeClip(job, dir) {
   const p = job.params;
   const still = join(dir, `still.${extensionOf(p.still_path)}`);
   await storageDownload(p.still_path, still, BOARD_BUCKET);
   const hi = p.quality === "high";
-  const d = String(clampInt(p.duration ?? 5, 3, 15));
   let args;
   switch (p.engine) {
+    case "veo3_1":
+      args = ["veo3_1", "--prompt", safePrompt(p.prompt), "--aspect_ratio", "9:16", "--duration", String([4, 6, 8].includes(Number(p.duration)) ? p.duration : 8), "--quality", hi ? "high" : "basic", "--variant", hi ? "veo-3-1-preview" : "veo-3-1-fast", "--start-image", still];
+      break;
+    case "veo3":
+      args = ["veo3", "--prompt", safePrompt(p.prompt), "--aspect_ratio", "9:16", "--variant", hi ? "veo-3-preview" : "veo-3-fast", "--start-image", still];
+      break;
     case "genjutsu": {
-      const src = join(dir, "source.mp4");
       const ref = join(dir, "reference.mp4");
-      await storageDownload(p.source_path, src, BOARD_BUCKET);
-      await trimReference(src, ref, p.trim_start, p.trim_end);
-      args = ["hf_mult_motion_control", "--resolution", hi ? "1080p" : "720p", "--prompt", safePrompt(p.prompt), "--video", ref, "--image", still];
+      await storageDownload(p.ref_path, ref, BOARD_BUCKET);
+      const refDur = await probeDuration(ref);
+      if (refDur && refDur > MAX_REFERENCE_SECONDS) {
+        const trimmed = join(dir, "reference-trim.mp4");
+        await trimReference(ref, trimmed, 0, MAX_REFERENCE_SECONDS);
+        args = ["hf_mult_motion_control", "--resolution", hi ? "1080p" : "720p", "--prompt", safePrompt(p.prompt), "--video", trimmed, "--image", still];
+      } else {
+        args = ["hf_mult_motion_control", "--resolution", hi ? "1080p" : "720p", "--prompt", safePrompt(p.prompt), "--video", ref, "--image", still];
+      }
       break;
     }
     case "kling_i2v":
-    case "kling_turbo":
-      args = remakeArgs({ engine: p.engine, prompt: p.prompt, quality: p.quality, duration: Number(d) }, still, null, Number(d));
+      args = remakeArgs({ engine: "kling_i2v", prompt: p.prompt, quality: p.quality, duration: Number(p.duration) || 5 }, still, null, Number(p.duration) || 5);
       break;
-    case "wan_lipsync":
-    case "seedance_lipsync": {
-      const audio = join(dir, `audio.${extensionOf(p.audio_path)}`);
-      await storageDownload(p.audio_path, audio, BOARD_BUCKET);
-      args =
-        p.engine === "wan_lipsync"
-          ? ["wan2_7", "--prompt", safePrompt(p.prompt), "--start-image", still, "--audio", audio, "--aspect_ratio", "9:16", "--resolution", hi ? "1080p" : "720p", "--duration", d]
-          : ["seedance_2_0", "--prompt", safePrompt(p.prompt), "--start-image", still, "--audio", audio, "--aspect_ratio", "9:16", "--resolution", hi ? "1080p" : "720p", "--duration", String(clampInt(p.duration ?? 5, 4, 15)), "--generate_audio", "false", "--mode", "std"];
-      break;
-    }
     default:
       throw new Error(`Unknown clip engine ${p.engine}`);
   }
@@ -442,11 +504,34 @@ async function remakeClip(job, dir) {
   return r;
 }
 
+/** Voiceover onto a clip: the clip keeps its length, the voice is laid on top (original sound ducked). */
+async function remakeMix(job, dir) {
+  const p = job.params;
+  const clip = join(dir, "clip.mp4");
+  const audio = join(dir, `vo.${extensionOf(p.audio_path)}`);
+  await storageDownload(p.clip_path, clip, BOARD_BUCKET);
+  await storageDownload(p.audio_path, audio, BOARD_BUCKET);
+  const out = join(dir, "mixed.mp4");
+  await updateShot(p.shot_id, { mixed_status: "running" });
+  const hasAudio = (await run(FFPROBE, ["-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", clip], { timeoutMs: 60_000 })).out.trim().length > 0;
+  const filter = hasAudio
+    ? "[0:a]volume=0.15[bg];[1:a]apad[vo];[bg][vo]amix=inputs=2:duration=first:dropout_transition=0[a]"
+    : "[1:a]apad[a]";
+  const r = await run(FFMPEG, ["-y", "-loglevel", "error", "-i", clip, "-i", audio, "-filter_complex", filter, "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", "-movflags", "+faststart", out], { timeoutMs: 5 * 60_000 });
+  if (r.code !== 0) throw new Error(`ffmpeg mix failed: ${r.err.slice(-300)}`);
+  const mixedPath = `remake/${p.project_id}/mixed/${p.shot_id}-${job.id}.mp4`;
+  await storageUpload(mixedPath, out, "video/mp4", BOARD_BUCKET);
+  await updateShot(p.shot_id, { mixed_path: mixedPath, mixed_status: "done", mixed_key: p.key });
+  return "mixed";
+}
+
 const REMAKE_FAIL = {
   remake_still: (p, m) => updateShot(p.shot_id, { still_status: "failed", still_error: m }),
   remake_tts: (p, m) => updateShot(p.shot_id, { audio_status: "failed", audio_error: m }),
   remake_clip: (p, m) => updateShot(p.shot_id, { clip_status: "failed", clip_error: m }),
+  remake_mix: (p, m) => updateShot(p.shot_id, { mixed_status: "failed" }).then(() => log(`mix: ${m}`)),
   remake_split: (p, m) => updateProject(p.project_id, { status: "failed", error: m }),
+  remake_frames: (p, m) => updateProject(p.project_id, { status: "failed", error: m }),
 };
 
 async function processRemakeJob(job) {
@@ -456,8 +541,10 @@ async function processRemakeJob(job) {
   try {
     const r =
       job.kind === "remake_split" ? await remakeSplit(job, dir)
+      : job.kind === "remake_frames" ? await remakeFrames(job, dir)
       : job.kind === "remake_still" ? await remakeStill(job, dir)
       : job.kind === "remake_tts" ? await remakeTts(job, dir)
+      : job.kind === "remake_mix" ? await remakeMix(job, dir)
       : await remakeClip(job, dir);
     const patch = { status: "done", error: null, finished_at: new Date().toISOString() };
     if (r && typeof r === "object") Object.assign(patch, { cli_job_id: r.cliJobId ?? null, result_source_url: r.url ?? null });
@@ -477,108 +564,6 @@ async function processRemakeJob(job) {
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
-}
-
-// ─── Marketing Board: save a copy of a reference ───
-const updateBoardItem = (id, patch) =>
-  rest(`/marketing_board_items?id=eq.${id}`, { method: "PATCH", body: patch, headers: { Prefer: "return=minimal" } });
-
-async function probeVideo(file) {
-  const r = await run(
-    FFPROBE,
-    ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height:format=duration", "-of", "json", file],
-    { timeoutMs: 60_000 }
-  );
-  try {
-    const j = JSON.parse(r.out);
-    const s = j.streams?.[0] ?? {};
-    const d = parseFloat(j.format?.duration);
-    return {
-      width: Number.isInteger(s.width) ? s.width : null,
-      height: Number.isInteger(s.height) ? s.height : null,
-      duration: Number.isFinite(d) ? Math.round(d * 10) / 10 : null,
-    };
-  } catch {
-    return { width: null, height: null, duration: null };
-  }
-}
-
-/** A still from just after the start, for the card. */
-async function makeThumbnail(src, dest) {
-  const r = await run(FFMPEG, ["-y", "-loglevel", "error", "-ss", "0.3", "-i", src, "-frames:v", "1", "-vf", "scale='min(720,iw)':-2", "-q:v", "3", dest], { timeoutMs: 2 * 60_000 });
-  return r.code === 0;
-}
-
-const clip = (v, n) => (typeof v === "string" && v.trim() ? v.trim().slice(0, n) : null);
-
-/**
- * yt-dlp fetches the best MP4 up to 1080p (merging video+audio when the
- * site splits them), and writes the page's metadata next to it. Ads
- * Library ads with several videos are playlists: the first one is taken.
- */
-async function boardFetch(job) {
-  const { item_id: itemId, url } = job.params;
-  if (!itemId || !url) throw new Error("board_fetch needs item_id and url");
-  const dir = join(WORK_DIR, "jobs", job.id);
-  await mkdir(dir, { recursive: true });
-  try {
-    await stat(YTDLP);
-  } catch {
-    throw new Error(`yt-dlp is not installed on the Mac worker (expected at ${YTDLP}). See worker/README.md.`);
-  }
-  await updateBoardItem(itemId, { video_status: "saving", video_error: null });
-
-  const args = [
-    "--no-warnings", "--no-progress", "--no-mtime", "--playlist-items", "1",
-    "-f", "bv*[ext=mp4][height<=1080]+ba[ext=m4a]/b[ext=mp4][height<=1080]/bv*[height<=1080]+ba/b",
-    "--merge-output-format", "mp4",
-    // ffmpeg is on the launchd PATH; point yt-dlp at it only when overridden.
-    ...(FFMPEG.startsWith("/") ? ["--ffmpeg-location", dirname(FFMPEG)] : []),
-    "--write-info-json", "-o", join(dir, "video.%(ext)s"),
-    url,
-  ];
-  await updateJob(job.id, { cli_command: ["yt-dlp", ...args.map((a) => (a.startsWith("/") ? "<file>" : a))].join(" ") });
-  const r = await run(YTDLP, args, { timeoutMs: 15 * 60_000 });
-  if (r.code !== 0) {
-    const tail = (r.err || r.out).trim().split("\n").filter((l) => /ERROR|error/i.test(l)).slice(-3).join(" ").slice(-500);
-    throw new Error(tail || `yt-dlp exited ${r.code}`);
-  }
-
-  const videoFile = join(dir, "video.mp4");
-  const size = (await stat(videoFile).catch(() => null))?.size ?? 0;
-  if (size < 1000) throw new Error("yt-dlp produced no video file (private, removed, or login-only page)");
-
-  let info = {};
-  try {
-    info = JSON.parse(await readFile(join(dir, "video.info.json"), "utf8"));
-  } catch {
-    // metadata is a bonus
-  }
-  const meta = await probeVideo(videoFile);
-  const thumbFile = join(dir, "thumb.jpg");
-  const hasThumb = await makeThumbnail(videoFile, thumbFile);
-
-  const videoPath = `items/${itemId}/${job.id}.mp4`;
-  const thumbPath = `items/${itemId}/${job.id}.jpg`;
-  await storageUpload(videoPath, videoFile, "video/mp4", BOARD_BUCKET);
-  if (hasThumb) await storageUpload(thumbPath, thumbFile, "image/jpeg", BOARD_BUCKET);
-
-  // Keep a title the owner typed; otherwise take the page's.
-  const current = await rest(`/marketing_board_items?id=eq.${itemId}&select=title,author`).then((rows) => rows?.[0] ?? null);
-  if (!current) throw new Error("Card was deleted while saving");
-  const patch = {
-    video_path: videoPath,
-    thumb_path: hasThumb ? thumbPath : null,
-    video_status: "ready",
-    video_error: null,
-    ...meta,
-  };
-  const pageTitle = clip(info.title, 160) || clip(info.description, 160);
-  if (!current.title || /^Ads Library ad/.test(current.title)) patch.title = pageTitle || current.title;
-  if (!current.author) patch.author = clip(info.uploader, 120) || clip(info.channel, 120) || clip(info.creator, 120);
-  await updateBoardItem(itemId, patch);
-  await rm(dir, { recursive: true, force: true }).catch(() => {});
-  return { size, videoPath };
 }
 
 // ─── One job ───

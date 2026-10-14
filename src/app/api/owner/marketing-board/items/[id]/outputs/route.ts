@@ -54,7 +54,7 @@ export async function POST(request: Request, ctx: Ctx) {
   } else if (b.kind === "upload") {
     const path = typeof b.file_path === "string" ? b.file_path : "";
     // An upload for this card, or a Remake Studio clip.
-    if (!new RegExp(`^outputs/${id}/[0-9a-f-]{36}\\.(mp4|mov|webm)$`).test(path) && !/^remake\/[0-9a-f-]{36}\/clips\/[0-9a-f-]{36}-[0-9a-f-]{36}\.mp4$/.test(path)) {
+    if (!new RegExp(`^outputs/${id}/[0-9a-f-]{36}\\.(mp4|mov|webm)$`).test(path) && !/^remake\/[0-9a-f-]{36}\/(clips|mixed|ref)\/[0-9a-f-]{36}-[0-9a-f-]{36}\.mp4$|^remake\/[0-9a-f-]{36}\/ref\/\d+-[0-9a-f-]{36}\.mp4$/.test(path)) {
       return Response.json({ error: "Upload the video first" }, { status: 400 });
     }
     row = {

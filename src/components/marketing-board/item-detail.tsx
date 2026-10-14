@@ -114,9 +114,9 @@ export function ItemDetail({
     setError(null);
     try {
       const r = await api<{ project: { id: string } }>("/api/owner/remake/projects", { method: "POST", body: JSON.stringify({ board_item_id: item.id }) });
-      router.push(`/owner/remake-studio/${r.project.id}`);
+      router.push(`/owner/clipper/${r.project.id}`);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not start the remake");
+      setError(e instanceof Error ? e.message : "Could not open the Clipper");
       setRemaking(false);
     }
   };
@@ -161,7 +161,7 @@ export function ItemDetail({
               Saved copy{item.height ? ` · ${item.height}p` : ""}{item.duration ? ` · ${Math.round(item.duration)}s` : ""}
             </span>
             <button type="button" onClick={startRemake} disabled={remaking} className="inline-flex items-center gap-1 font-semibold text-purple-300 hover:text-white cursor-pointer disabled:opacity-50">
-              {remaking ? <Loader2 size={11} className="animate-spin" /> : <Film size={11} />} Remake for our brand
+              {remaking ? <Loader2 size={11} className="animate-spin" /> : <Film size={11} />} Open in Clipper
             </button>
           </div>
         )}

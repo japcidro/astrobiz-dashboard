@@ -1,5 +1,28 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-10-14 (later): Remake Studio becomes the Clipper
+
+Julius's first live test: the separate voice + lipsync chain (Text to Speech
+V2 → Wan 2.7) gave a voice that did not match the face, previews needed a
+click to play, the reference was not visible next to the result, and an
+interview-style ad was cut without catching the speaker changes.
+
+**Clipper** (`/owner/clipper`, same tables and API). The core job is now
+cutting the reference into real clips you can keep as they are; "Swap person"
+is a per-clip option. Veo 3.1 (default) and Veo 3 generate the talking head's
+voice and lips together from the marketer's script, always starting from OUR
+still — generated with our product, or an existing image from the UGC library
+or an upload — never straight from the real frame. Genjutsu and Kling stay for
+silent motion. B-roll voiceovers use ElevenLabs v4 and are mixed onto the clip
+by the Mac (MP3 kept). Wan/Seedance lipsync and Text to Speech V2 are gone.
+
+Previews auto-play muted (sound on click); every clip shows reference and
+ours side by side with "Play both in sync"; the tray toggles Reference / Ours
+/ Side by side. Timeline: a one-frame-per-second strip with clip markers,
+split at playhead, merge with next, and "Re-detect people changes" (Claude
+reads the strip). Scene threshold lowered to 0.2; Claude labels Person A/B per
+clip with "swap all / keep all" per person. Worker 1.3.0.
+
 ## 2026-10-14: Marketing Board and Remake Studio (owner space)
 
 **Mobile App group.** UGC Generator and Hook Studio moved under one

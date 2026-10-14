@@ -33,11 +33,11 @@ export async function POST(request: Request) {
     if (!item.video_path || item.video_status !== "ready") return Response.json({ error: "That card has no saved copy yet" }, { status: 400 });
     sourcePath = item.video_path as string;
     boardItemId = item.id as string;
-    title = title || ((item.title as string | null) ?? "Remake");
+    title = title || ((item.title as string | null) ?? "Clip");
     store = store ?? ((item.store as string | null) ?? null);
   } else if (typeof b.source_path === "string" && /^remake\/sources\/[0-9a-f-]{36}\.(mp4|mov|webm)$/.test(b.source_path)) {
     sourcePath = b.source_path;
-    title = title || "Remake";
+    title = title || "Clip";
   } else {
     return Response.json({ error: "Pick a board card or upload a video" }, { status: 400 });
   }
