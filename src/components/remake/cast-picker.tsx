@@ -359,13 +359,13 @@ export function CastPicker({
       <div className="absolute inset-0 bg-black/70" onClick={onClose} />
       {menuFor && <div className="absolute inset-0" onClick={() => setMenuFor(null)} />}
       <div
-        className="relative w-full max-w-5xl max-h-[90vh] flex flex-col rounded-2xl bg-gray-950 border border-gray-800 shadow-2xl"
+        className="relative w-full max-w-5xl h-[90vh] flex flex-col rounded-2xl bg-gray-950 border border-gray-800 shadow-2xl overflow-hidden"
         onDragEnter={onModalDragEnter}
         onDragOver={onModalDragOver}
         onDragLeave={onModalDragLeave}
         onDrop={onModalDrop}
       >
-        <div className="flex items-start gap-3 p-5 border-b border-gray-800">
+        <div className="flex items-start gap-3 p-5 border-b border-gray-800 shrink-0">
           <div className="flex-1">
             <h2 className="text-lg font-bold text-white">Pick the person</h2>
             <p className="text-sm text-gray-400 mt-0.5">They go into every clip&apos;s real frame. The still is generated from the frame with this person in it.</p>
@@ -383,7 +383,7 @@ export function CastPicker({
         </div>
 
         {/* Breadcrumb + folder actions */}
-        <div className="flex items-center gap-2 px-5 py-2.5 border-b border-gray-800/70 text-sm min-h-12">
+        <div className="flex items-center gap-2 px-5 py-2.5 border-b border-gray-800/70 text-sm min-h-12 shrink-0">
           {folder ? (
             <>
               <button
@@ -428,8 +428,8 @@ export function CastPicker({
           )}
         </div>
 
-        <div className="relative flex-1 min-h-0">
-          <div className="h-full overflow-y-auto p-5">
+        <div className="relative flex-1 min-h-0 flex flex-col">
+          <div className="flex-1 min-h-0 overflow-y-auto p-5">
             {error && <p className="text-xs text-red-300 mb-3">{error}</p>}
             {lib === null ? (
               <Loader2 size={20} className="mx-auto my-10 animate-spin text-gray-500" />
@@ -474,7 +474,7 @@ export function CastPicker({
           )}
         </div>
 
-        <div className="flex items-center gap-2 p-4 border-t border-gray-800">
+        <div className="relative z-10 flex items-center gap-2 p-4 border-t border-gray-800 bg-gray-950 shrink-0">
           <Button onClick={() => fileRef.current?.click()} busy={uploading !== null} disabled={busy !== null || uploading !== null}>
             <Upload size={14} /> Upload photos
           </Button>
