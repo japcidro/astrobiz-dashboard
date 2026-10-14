@@ -1,5 +1,24 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-10-15: UGC Generator from text, and a gender choice
+
+Jap needs male models for FOLIQ. The generator only ever kept the gender of
+the source photo (and all its hair cuts were women's), and it could not run
+without a photo at all.
+
+**Gender** chips on the UGC Generator: "Same as photo" (the old behaviour),
+"Woman", "Man". A forced gender replaces the person with that gender even if
+the photo shows the other; "Man" draws from a men's hair-cut pool. The
+library card shows the gender when it was forced.
+
+**Text only.** The source photo is optional. Without one, "Describe the
+shot" is the whole brief (up to 600 characters) and Nano Banana Pro makes a
+9:16 UGC-style still from the description plus the gender and look; the
+"Same as photo" chip hides and "Woman" is the default. A photo or a
+description is required. "One more" on a text-only result re-queues the
+same brief. Worker 1.4.0 skips the download and the `--image` flag when a
+job has no source.
+
 ## 2026-10-14 (later): Remake Studio becomes the Clipper
 
 Julius's first live test: the separate voice + lipsync chain (Text to Speech

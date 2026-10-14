@@ -6,7 +6,7 @@ import { ImagePlus, Trash2, Clapperboard, RefreshCw, X } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { UGC_CREDITS_PER_IMAGE, UGC_MAX_PER_BATCH } from "@/lib/hook-studio/engines";
-import { LOOKS, DEFAULT_LOOK, type LookId } from "@/lib/hook-studio/presets";
+import { LOOKS, DEFAULT_LOOK, GENDERS, DEFAULT_GENDER, type LookId, type GenderId } from "@/lib/hook-studio/presets";
 import type { UgcView, WorkerStatus } from "@/lib/hook-studio/types";
 import { Panel, Label, Chip, Button, Pill, ConfirmButton, credits, timeAgo, api } from "./ui";
 
@@ -28,6 +28,7 @@ export function UgcGenerator() {
   const [picked, setPicked] = useState<Picked | null>(null);
   const [note, setNote] = useState("");
   const [look, setLook] = useState<LookId>(DEFAULT_LOOK);
+  const [gender, setGender] = useState<GenderId>(DEFAULT_GENDER);
   const [count, setCount] = useState(1);
   const [busy, setBusy] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -76,19 +77,23 @@ export function UgcGenerator() {
   };
 
   const generate = async () => {
-    if (!picked) return;
+    if (!picked && !note.trim()) return;
     try {
-      setBusy("Uploading…");
-      const { path, token, bucket } = await api<{ path: string; token: string; bucket: string }>(
-        "/api/owner/hook-studio/upload-url",
-        { method: "POST", body: JSON.stringify({ kind: "ugc", mime: picked.file.type }) }
-      );
-      const up = await createClient().storage.from(bucket).uploadToSignedUrl(path, token, picked.file, { contentType: picked.file.type });
-      if (up.error) throw new Error(up.error.message);
+      let path: string | null = null;
+      if (picked) {
+        setBusy("Uploading…");
+        const up = await api<{ path: string; token: string; bucket: string }>("/api/owner/hook-studio/upload-url", {
+          method: "POST",
+          body: JSON.stringify({ kind: "ugc", mime: picked.file.type }),
+        });
+        const res = await createClient().storage.from(up.bucket).uploadToSignedUrl(up.path, up.token, picked.file, { contentType: picked.file.type });
+        if (res.error) throw new Error(res.error.message);
+        path = up.path;
+      }
       setBusy("Queuing…");
       const r = await api<{ items: UgcView[] }>("/api/owner/hook-studio/ugc", {
         method: "POST",
-        body: JSON.stringify({ source_path: path, note, look, count }),
+        body: JSON.stringify({ source_path: path, note, look, gender: textOnly && gender === "keep" ? "woman" : gender, count }),
       });
       setItems(r.items);
       setPicked(null);
@@ -105,7 +110,7 @@ export function UgcGenerator() {
     try {
       const r = await api<{ items: UgcView[] }>("/api/owner/hook-studio/ugc", {
         method: "POST",
-        body: JSON.stringify({ source_path: item.source_path, note: item.note, look, count: 1 }),
+        body: JSON.stringify({ source_path: item.source_path || null, note: item.note, look, gender: item.gender ?? (item.source_path ? "keep" : "woman"), count: 1 }),
       });
       setItems(r.items);
       toast.success("One more queued");
@@ -125,6 +130,8 @@ export function UgcGenerator() {
 
   const portrait = picked ? picked.height > picked.width : true;
   const total = UGC_CREDITS_PER_IMAGE * count;
+  const textOnly = !picked;
+  const canGenerate = !!picked || note.trim().length > 0;
 
   return (
     <div className="max-w-6xl">
@@ -133,7 +140,7 @@ export function UgcGenerator() {
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <ImagePlus size={22} className="text-purple-300" /> UGC Generator
           </h1>
-          <p className="text-sm text-gray-500 mt-1">Drop a UGC photo. Get the same shot back with a clearly different person in it.</p>
+          <p className="text-sm text-gray-500 mt-1">Drop a UGC photo and get the same shot back with a clearly different person in it, or describe the shot and make it from text alone.</p>
         </div>
         {worker &&
           (worker.online ? (
@@ -145,7 +152,7 @@ export function UgcGenerator() {
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-4">
         <Panel>
-          <Label>Source photo</Label>
+          <Label>Source photo (optional)</Label>
           {!picked ? (
             <div
               onDragOver={(e) => {
@@ -165,7 +172,7 @@ export function UgcGenerator() {
             >
               <ImagePlus size={26} className="mx-auto text-gray-500" />
               <p className="text-sm text-gray-300 mt-3 font-medium">Drop a UGC frame, or click to choose</p>
-              <p className="text-xs text-gray-500 mt-1">PNG, JPG or WebP. Portrait works best; the output is always 9:16.</p>
+              <p className="text-xs text-gray-500 mt-1">PNG, JPG or WebP. Portrait works best; the output is always 9:16. Skip this to generate from text only.</p>
               <input ref={inputRef} id="ugc-source-file" type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => pick(e.target.files?.[0])} />
             </div>
           ) : (
@@ -187,6 +194,19 @@ export function UgcGenerator() {
             </div>
           )}
 
+          <Label>Gender</Label>
+          <div className="flex flex-wrap gap-2">
+            {GENDERS.map((g) => {
+              if (g.id === "keep" && textOnly) return null;
+              const on = textOnly && gender === "keep" ? g.id === "woman" : gender === g.id;
+              return (
+                <Chip key={g.id} on={on} onClick={() => setGender(g.id)}>
+                  {g.label}
+                </Chip>
+              );
+            })}
+          </div>
+
           <Label>Look of the new person</Label>
           <div className="flex flex-wrap gap-2">
             {LOOKS.map((l) => (
@@ -196,16 +216,24 @@ export function UgcGenerator() {
             ))}
           </div>
           <p className="text-xs text-gray-500 mt-2">
-            Varied gives each image in a batch a different person from a US mix. Always: a new face, attractive and fit, same gender, straight or softly wavy hair. Every caption, icon and app control is removed so the output is a clean photo. Pose, clothing, framing and background stay.
+            {textOnly
+              ? "Varied gives each image in a batch a different person from a US mix. Always: attractive and fit, straight or softly wavy hair, a clean photo with no text or app controls, shot like a frame from a phone video."
+              : "Varied gives each image in a batch a different person from a US mix. Always: a new face, attractive and fit, straight or softly wavy hair. Every caption, icon and app control is removed so the output is a clean photo. Pose, clothing, framing and background stay."}
           </p>
 
-          <Label>Anything extra (optional)</Label>
-          <input
+          <Label>{textOnly ? "Describe the shot" : "Anything extra (optional)"}</Label>
+          <textarea
             id="ugc-note"
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder='e.g. "make her look older" or "short hair"'
-            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500"
+            rows={textOnly ? 3 : 1}
+            maxLength={600}
+            placeholder={
+              textOnly
+                ? 'e.g. "a guy in his 30s in a bathroom holding a hair serum bottle, talking to the camera"'
+                : 'e.g. "make her look older" or "short hair"'
+            }
+            className="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:ring-2 focus:ring-purple-500 resize-y"
           />
 
           <div className="flex items-center justify-between gap-3 flex-wrap mt-5 pt-4 border-t border-gray-700">
@@ -225,7 +253,7 @@ export function UgcGenerator() {
               </div>
               <span className="text-xs text-gray-500">{UGC_CREDITS_PER_IMAGE} cr each</span>
             </div>
-            <Button primary onClick={generate} busy={!!busy} disabled={!picked}>
+            <Button primary onClick={generate} busy={!!busy} disabled={!canGenerate}>
               {busy ?? `Generate ×${count} · ${credits(total)}`}
             </Button>
           </div>
@@ -234,7 +262,8 @@ export function UgcGenerator() {
         <Panel className="self-start">
           <p className="text-sm font-semibold text-white">How this works</p>
           <ul className="text-sm text-gray-400 mt-2 space-y-2 list-disc pl-4">
-            <li>Nano Banana Pro edits the photo in place: same room, same pose, same clothes, new person.</li>
+            <li>With a photo, Nano Banana Pro edits it in place: same room, same pose, same clothes, new person.</li>
+            <li>Without one, it makes the shot from your description and the gender and look you pick.</li>
             <li>Every result lands in the library below. Delete what you don&apos;t like; keep what works.</li>
             <li>Press &quot;Use in Hook Studio&quot; on a result to turn it into a silent video hook.</li>
             <li>Renders on the Mac with your creator credits, about 40 seconds each.</li>
@@ -277,9 +306,10 @@ export function UgcGenerator() {
                 <span className="truncate" title={it.look ? `Look: ${LOOKS.find((l) => l.id === it.look)?.label ?? it.look}` : undefined}>
                   {timeAgo(it.created_at)} · {credits(it.estimate_credits ?? UGC_CREDITS_PER_IMAGE)}
                   {it.look ? ` · ${LOOKS.find((l) => l.id === it.look)?.label ?? it.look}` : ""}
+                  {it.gender && it.gender !== "keep" ? ` · ${it.gender}` : ""}
                 </span>
                 <span className="flex items-center gap-2 shrink-0">
-                  <button type="button" onClick={() => again(it)} title="One more from the same photo" className="text-gray-400 hover:text-white cursor-pointer">
+                  <button type="button" onClick={() => again(it)} title={it.source_path ? "One more from the same photo" : "One more from the same brief"} className="text-gray-400 hover:text-white cursor-pointer">
                     <RefreshCw size={12} />
                   </button>
                   {it.status === "done" && (

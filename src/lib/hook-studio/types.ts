@@ -54,6 +54,8 @@ export interface UgcView {
   status: JobStatus;
   note: string;
   look: string | null;
+  gender: string | null;
+  /** Empty for a text-only image. */
   source_path: string;
   source_url: string | null;
   result_path: string | null;

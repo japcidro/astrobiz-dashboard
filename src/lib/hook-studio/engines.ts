@@ -125,9 +125,11 @@ export interface RemakeParams {
   trim_end: number | null;
 }
 
-/** Params stored on a UGC image job. */
+/** Params stored on a UGC image job. No source_path means text-only. */
 export interface UgcParams {
-  source_path: string;
+  source_path: string | null;
   prompt: string;
   note: string;
+  /** "keep" (same as the photo), "woman" or "man". Rows before 2026-10-15 have none. */
+  gender?: string;
 }

@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
-const VERSION = "1.3.0";
+const VERSION = "1.4.0";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // ─── Config ───
@@ -223,9 +223,11 @@ function faceArgs(params) {
   return ["text2image_soul_v2", "--prompt", params.prompt, "--aspect_ratio", "9:16", "--quality", "1.5k"];
 }
 
-/** UGC Generator: person swap on a still, 9:16, Nano Banana Pro. */
+/** UGC Generator: person swap on a still, or text-only without one. 9:16, Nano Banana Pro. */
 function ugcArgs(params, srcFile) {
-  return ["nano_banana_pro", "--aspect_ratio", "9:16", "--image", srcFile, "--prompt", safePrompt(params.prompt)];
+  const a = ["nano_banana_pro", "--aspect_ratio", "9:16"];
+  if (srcFile) a.push("--image", srcFile);
+  return [...a, "--prompt", safePrompt(params.prompt)];
 }
 
 /** Hide local paths in the stored command line. */
@@ -607,8 +609,11 @@ async function processJob(job) {
       args = remakeArgs(p, ugcFile, refFile, seconds);
     } else if (job.kind === "ugc_image") {
       const p = job.params;
-      const srcFile = join(dir, `source.${extensionOf(p.source_path)}`);
-      await storageDownload(p.source_path, srcFile);
+      let srcFile = null;
+      if (p.source_path) {
+        srcFile = join(dir, `source.${extensionOf(p.source_path)}`);
+        await storageDownload(p.source_path, srcFile);
+      }
       args = ugcArgs(p, srcFile);
     } else if (job.kind === "face") {
       args = faceArgs(job.params);

@@ -10,6 +10,7 @@ export function toUgcView(j: JobRow, signed: Map<string, string>): UgcView {
     status: j.status,
     note: (j.params.note as string | undefined) ?? "",
     look: (j.params.look as string | undefined) ?? null,
+    gender: (j.params.gender as string | undefined) ?? null,
     source_path: source,
     source_url: source ? signed.get(source) ?? null : null,
     result_path: j.result_path,
@@ -41,7 +42,7 @@ export async function loadUgcLibrary(db: SupabaseClient): Promise<UgcView[]> {
     .order("created_at", { ascending: false })
     .limit(300);
   const rows = (data ?? []) as JobRow[];
-  const signed = await signPaths(db, rows.flatMap((r) => [r.params.source_path as string, r.result_path]));
+  const signed = await signPaths(db, rows.flatMap((r) => [r.params.source_path as string | null, r.result_path]));
   return rows.map((r) => toUgcView(r, signed));
 }
 
