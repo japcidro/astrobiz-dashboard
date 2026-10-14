@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
-const VERSION = "1.4.0";
+const VERSION = "1.4.1";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // ─── Config ───
@@ -446,7 +446,15 @@ async function remakeStill(job, dir) {
   const r = await generateToFile(job, args, dir);
   const stillPath = `remake/${p.project_id}/stills/${p.shot_id}-${job.id}.${r.ext}`;
   await storageUpload(stillPath, r.outFile, MIME[r.ext] || "image/png", BOARD_BUCKET);
-  await updateShot(p.shot_id, { still_path: stillPath, still_status: "done", still_error: null, brand_check: null });
+  // A small JPEG for the brand check and thumbnails; the engines use the full still.
+  const previewFile = join(dir, "preview.jpg");
+  const pv = await run(FFMPEG, ["-y", "-loglevel", "error", "-i", r.outFile, "-vf", "scale='min(900,iw)':-2", "-q:v", "3", previewFile], { timeoutMs: 60_000 });
+  let previewPath = null;
+  if (pv.code === 0) {
+    previewPath = `remake/${p.project_id}/stills/${p.shot_id}-${job.id}-preview.jpg`;
+    await storageUpload(previewPath, previewFile, "image/jpeg", BOARD_BUCKET);
+  }
+  await updateShot(p.shot_id, { still_path: stillPath, still_preview_path: previewPath, still_status: "done", still_error: null, brand_check: null });
   return r;
 }
 
@@ -566,6 +574,108 @@ async function processRemakeJob(job) {
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
+}
+
+// ─── Marketing Board ───
+const updateBoardItem = (id, patch) =>
+  rest(`/marketing_board_items?id=eq.${id}`, { method: "PATCH", body: patch, headers: { Prefer: "return=minimal" } });
+
+async function probeVideo(file) {
+  const r = await run(
+    FFPROBE,
+    ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height:format=duration", "-of", "json", file],
+    { timeoutMs: 60_000 }
+  );
+  try {
+    const j = JSON.parse(r.out);
+    const s = j.streams?.[0] ?? {};
+    const d = parseFloat(j.format?.duration);
+    return {
+      width: Number.isInteger(s.width) ? s.width : null,
+      height: Number.isInteger(s.height) ? s.height : null,
+      duration: Number.isFinite(d) ? Math.round(d * 10) / 10 : null,
+    };
+  } catch {
+    return { width: null, height: null, duration: null };
+  }
+}
+
+/** A still from just after the start, for the card. */
+async function makeThumbnail(src, dest) {
+  const r = await run(FFMPEG, ["-y", "-loglevel", "error", "-ss", "0.3", "-i", src, "-frames:v", "1", "-vf", "scale='min(720,iw)':-2", "-q:v", "3", dest], { timeoutMs: 2 * 60_000 });
+  return r.code === 0;
+}
+
+const clip = (v, n) => (typeof v === "string" && v.trim() ? v.trim().slice(0, n) : null);
+
+/**
+ * yt-dlp fetches the best MP4 up to 1080p (merging video+audio when the
+ * site splits them), and writes the page's metadata next to it. Ads
+ * Library ads with several videos are playlists: the first one is taken.
+ */
+async function boardFetch(job) {
+  const { item_id: itemId, url } = job.params;
+  if (!itemId || !url) throw new Error("board_fetch needs item_id and url");
+  const dir = join(WORK_DIR, "jobs", job.id);
+  await mkdir(dir, { recursive: true });
+  try {
+    await stat(YTDLP);
+  } catch {
+    throw new Error(`yt-dlp is not installed on the Mac worker (expected at ${YTDLP}). See worker/README.md.`);
+  }
+  await updateBoardItem(itemId, { video_status: "saving", video_error: null });
+
+  const args = [
+    "--no-warnings", "--no-progress", "--no-mtime", "--playlist-items", "1",
+    "-f", "bv*[ext=mp4][height<=1080]+ba[ext=m4a]/b[ext=mp4][height<=1080]/bv*[height<=1080]+ba/b",
+    "--merge-output-format", "mp4",
+    // ffmpeg is on the launchd PATH; point yt-dlp at it only when overridden.
+    ...(FFMPEG.startsWith("/") ? ["--ffmpeg-location", dirname(FFMPEG)] : []),
+    "--write-info-json", "-o", join(dir, "video.%(ext)s"),
+    url,
+  ];
+  await updateJob(job.id, { cli_command: ["yt-dlp", ...args.map((a) => (a.startsWith("/") ? "<file>" : a))].join(" ") });
+  const r = await run(YTDLP, args, { timeoutMs: 15 * 60_000 });
+  if (r.code !== 0) {
+    const tail = (r.err || r.out).trim().split("\n").filter((l) => /ERROR|error/i.test(l)).slice(-3).join(" ").slice(-500);
+    throw new Error(tail || `yt-dlp exited ${r.code}`);
+  }
+
+  const videoFile = join(dir, "video.mp4");
+  const size = (await stat(videoFile).catch(() => null))?.size ?? 0;
+  if (size < 1000) throw new Error("yt-dlp produced no video file (private, removed, or login-only page)");
+
+  let info = {};
+  try {
+    info = JSON.parse(await readFile(join(dir, "video.info.json"), "utf8"));
+  } catch {
+    // metadata is a bonus
+  }
+  const meta = await probeVideo(videoFile);
+  const thumbFile = join(dir, "thumb.jpg");
+  const hasThumb = await makeThumbnail(videoFile, thumbFile);
+
+  const videoPath = `items/${itemId}/${job.id}.mp4`;
+  const thumbPath = `items/${itemId}/${job.id}.jpg`;
+  await storageUpload(videoPath, videoFile, "video/mp4", BOARD_BUCKET);
+  if (hasThumb) await storageUpload(thumbPath, thumbFile, "image/jpeg", BOARD_BUCKET);
+
+  // Keep a title the owner typed; otherwise take the page's.
+  const current = await rest(`/marketing_board_items?id=eq.${itemId}&select=title,author`).then((rows) => rows?.[0] ?? null);
+  if (!current) throw new Error("Card was deleted while saving");
+  const patch = {
+    video_path: videoPath,
+    thumb_path: hasThumb ? thumbPath : null,
+    video_status: "ready",
+    video_error: null,
+    ...meta,
+  };
+  const pageTitle = clip(info.title, 160) || clip(info.description, 160);
+  if (!current.title || /^Ads Library ad/.test(current.title)) patch.title = pageTitle || current.title;
+  if (!current.author) patch.author = clip(info.uploader, 120) || clip(info.channel, 120) || clip(info.creator, 120);
+  await updateBoardItem(itemId, patch);
+  await rm(dir, { recursive: true, force: true }).catch(() => {});
+  return { size, videoPath };
 }
 
 // ─── One job ───

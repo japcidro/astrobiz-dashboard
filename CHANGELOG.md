@@ -11,6 +11,12 @@ without a photo at all.
 the photo shows the other; "Man" draws from a men's hair-cut pool. The
 library card shows the gender when it was forced.
 
+**Marketing Board fix.** The Clipper commit (2026-10-14) dropped the
+worker's `boardFetch` / `updateBoardItem` functions but kept the call, so
+every new card crashed the worker with "boardFetch is not defined" and sat
+on "Waiting for the Mac worker" forever (the failure could not even be
+written to the card). Restored in worker 1.4.1.
+
 **Text only.** The source photo is optional. Without one, "Describe the
 shot" is the whole brief (up to 600 characters) and Nano Banana Pro makes a
 9:16 UGC-style still from the description plus the gender and look; the
