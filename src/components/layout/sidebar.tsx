@@ -39,6 +39,9 @@ import {
   AudioLines,
   CreditCard,
   ImagePlus,
+  Smartphone,
+  Kanban,
+  Film,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -351,26 +354,50 @@ const navEntries: NavEntry[] = [
   },
 ];
 
-// The owner space's own navigation. Starts empty on purpose: add a page
-// under src/app/(owner)/owner/ and list it here.
+// The owner space's own navigation: add a page under
+// src/app/(owner)/owner/ and list it here. Roles are irrelevant in this
+// space (the layout already restricts it to the owner), so every entry
+// lists all of them.
+const ownerRoles: UserRole[] = ["admin", "va", "fulfillment", "marketing"];
+
 const ownerNavEntries: NavEntry[] = [
   {
     label: "Home",
     href: OWNER_HOME,
     icon: <LayoutDashboard size={20} />,
-    roles: ["admin", "va", "fulfillment", "marketing"],
+    roles: ownerRoles,
   },
   {
-    label: "UGC Generator",
-    href: "/owner/ugc-generator",
-    icon: <ImagePlus size={20} />,
-    roles: ["admin", "va", "fulfillment", "marketing"],
+    // The creative tooling behind the mobile app's ads.
+    label: "Mobile App",
+    icon: <Smartphone size={20} />,
+    roles: ownerRoles,
+    children: [
+      {
+        label: "UGC Generator",
+        href: "/owner/ugc-generator",
+        icon: <ImagePlus size={18} />,
+        roles: ownerRoles,
+      },
+      {
+        label: "Hook Studio",
+        href: "/owner/hook-studio",
+        icon: <Clapperboard size={18} />,
+        roles: ownerRoles,
+      },
+      {
+        label: "Remake Studio",
+        href: "/owner/remake-studio",
+        icon: <Film size={18} />,
+        roles: ownerRoles,
+      },
+    ],
   },
   {
-    label: "Hook Studio",
-    href: "/owner/hook-studio",
-    icon: <Clapperboard size={20} />,
-    roles: ["admin", "va", "fulfillment", "marketing"],
+    label: "Marketing Board",
+    href: "/owner/marketing-board",
+    icon: <Kanban size={20} />,
+    roles: ownerRoles,
   },
 ];
 

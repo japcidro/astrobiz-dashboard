@@ -20,7 +20,15 @@ export async function GET() {
     db.from("hook_studio_jobs").select("id", { count: "exact", head: true }).eq("status", "running"),
   ]);
 
-  let hb: { last_seen?: string; credits?: number; plan?: string; worker?: string; version?: string } = {};
+  let hb: {
+    last_seen?: string;
+    credits?: number;
+    plan?: string;
+    worker?: string;
+    version?: string;
+    ytdlp?: string | null;
+    voices?: Array<{ id: string; name: string; type: "preset" | "element" }>;
+  } = {};
   try {
     hb = row?.value ? JSON.parse(row.value as string) : {};
   } catch {
@@ -36,6 +44,8 @@ export async function GET() {
     plan: hb.plan ?? null,
     worker: hb.worker ?? null,
     version: hb.version ?? null,
+    ytdlp: typeof hb.ytdlp === "string" ? hb.ytdlp : null,
+    voices: Array.isArray(hb.voices) ? hb.voices : [],
     queued: queued ?? 0,
     running: running ?? 0,
   };

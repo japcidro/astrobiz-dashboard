@@ -1,5 +1,30 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-10-14: Marketing Board and Remake Studio (owner space)
+
+**Mobile App group.** UGC Generator and Hook Studio moved under one
+collapsible "Mobile App" entry in the owner sidebar; URLs unchanged.
+
+**Marketing Board** (`/owner/marketing-board`). Paste a TikTok / Ads Library /
+Facebook / Instagram / YouTube link → a card in To do. The Mac worker saves a
+1080p copy with yt-dlp (new job kind `board_fetch`, private bucket
+`marketing-board`), so the preview plays in our own player and survives the
+ad being pulled. Assign a marketer, store and due date; notes thread; drag
+across To do / In progress / Done; "N done this week" ticker. Outputs: attach
+an ad submitted through Create / Bulk Create (from `ad_drafts`, video
+resolved from Facebook on open, shows "runs <date>" when scheduled) or upload
+the finished video. Owner-only while it is reviewed; it moves to the
+operations dashboard afterwards.
+
+**Remake Studio** (`/owner/remake-studio`). A real reference becomes clips for
+our brand without generating anything from scratch: shots are cut from the
+real video, each frame is redone with a new person and OUR product (brand kit
+per store: product photos + rules), Claude brand-checks the still, the owner
+approves it, then it is animated by motion transfer from the real shot, by
+Kling, or by a lipsync engine speaking the marketer's script. Credits are
+spent in two gates (2 cr per still, clips only after approval). yt-dlp was
+installed on the worker Mac; the worker is at 1.2.0.
+
 ## 2026-09-28: "User request limit reached" — the block was never recorded, and the P&L paid six times for one fetch
 
 Facebook has been cutting the dashboard off several times a day. Two

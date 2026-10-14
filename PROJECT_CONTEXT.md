@@ -361,8 +361,13 @@ opens `/owner` (server-checked; everyone else gets a 404). Code:
 `src/app/(owner)/`, `src/components/hook-studio/`, `src/lib/hook-studio/`,
 `src/app/api/owner/hook-studio/`, `src/lib/owner.ts`.
 
+Sidebar tabs: **Home**, **Mobile App** (a group holding UGC Generator and
+Hook Studio), **Marketing Board**.
+
 | Page | What it does |
 |---|---|
+| `/owner/remake-studio` | Remake Studio: a reference video (board card's saved copy or upload) → the Mac worker cuts it into shots (ffmpeg scene detection, `remake_split`) → Claude labels each shot talking head / b-roll / brand-heavy → per shot: Nano Banana Pro still with a new person AND our product from the store's brand kit (`remake_still`, 2 cr; Claude brand-checks the result) → owner approves the still → clip via Genjutsu motion transfer, Kling, or a lipsync engine (Wan 2.7 / Seedance 2.0) speaking the marketer's script (TTS `text2speech_v2` elevenlabs, `remake_tts`; `remake_clip`). One cast person per project (lock any approved still). Clips attach to the board card as outputs. Tables `remake_projects/_shots/_brand_kits/_brand_images`; files under `remake/` and `brand/` in the `marketing-board` bucket. Credits: Wan 1.5 cr/s 720p, Seedance 4.5 cr/s, TTS ≈0.15 cr/line. |
+| `/owner/marketing-board` | Marketing Board: paste a TikTok / Ads Library / FB / IG / YouTube link → card in To do; the Mac worker saves a 1080p copy with yt-dlp (job kind `board_fetch`, bucket `marketing-board`); assign a marketer, store, due date; notes thread; drag across To do / In progress / Done; attach outputs (an ad submitted via Create/Bulk Create from `ad_drafts`, played via the FB video source, or an uploaded video). Owner-only for now — it is being built here and moves to the operations dashboard (admin + marketing) when approved; widen `src/lib/marketing-board/auth.ts` and mount the same component under `(dashboard)`. Tables: `marketing_board_items/_comments/_outputs`. |
 | `/owner/ugc-generator` | UGC photo in → same shot with a genuinely new person (US audience, "Varied" default, one variation). Nano Banana Pro, 2 cr. Library with confirm-delete. |
 | `/owner/hook-studio` | UGC image + skill → silent 9:16 clip. *Higgsfield motion transfer* = Genjutsu copies a reference clip's exact camera motion (≈7 cr/s). *Arcads-style* = Claude writes a shot prompt from the image; Kling 3.0 animates it (1.25 cr/s). Editable titles, confirm-delete. |
 
@@ -370,14 +375,21 @@ opens `/owner` (server-checked; everyone else gets a 404). Code:
 MacBook Air as launchd agent `com.astrobiz.hook-worker`, claims rows from
 `hook_studio_jobs`, runs the Higgsfield CLI (creator-plan credits, account
 skills.astrobiz@gmail.com), copies results into the private `hook-studio`
-bucket and heartbeats `app_settings.hook_worker_status`. Only that Mac needs
+bucket and heartbeats `app_settings.hook_worker_status`. The same worker saves
+Marketing Board references with `yt-dlp` (standalone binary at
+`~/.local/bin/yt-dlp`; the heartbeat carries its version as `ytdlp`, and the
+board shows "yt-dlp missing on the Mac" when it is null). Only that Mac needs
 `worker/.env` (Supabase service key) and the CLI login; a second machine
 should NOT run the worker. Control: `scripts/hook-worker-install.sh status|logs|stop`.
 
 **Decisions that are not in the code.** Target market is the US; never
 default generated people to Filipino; no single-look lock-in; straight or
 softly wavy hair; clips are clean (text and the SoulShot screen go on in
-CapCut/Meta). Kling Omni Edit, Gemini edit and Seedance video_edit were
+CapCut/Meta). Remake Studio rule (Julius, 2026-10-14): realism first — every clip
+starts from a real frame of a real reference and its motion comes from the
+real shot or from the marketer's own script; nothing is generated from text
+alone. Talking heads are driven by scripts the team writes, never by the
+reference's audio. Kling Omni Edit, Gemini edit and Seedance video_edit were
 tested for person swaps and rejected (they keep the source face); Seedance
 was later removed entirely. Facebook: the app is on Marketing API
 *development access*; requesting Standard Access is the real fix (TODO.md).

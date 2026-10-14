@@ -77,6 +77,10 @@ export interface WorkerStatus {
   plan: string | null;
   worker: string | null;
   version: string | null;
+  /** yt-dlp version on the Mac, or null when it is not installed (Marketing Board). */
+  ytdlp: string | null;
+  /** Text-to-speech voices the CLI account has (Remake Studio). */
+  voices: Array<{ id: string; name: string; type: "preset" | "element" }>;
   queued: number;
   running: number;
 }

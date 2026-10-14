@@ -62,7 +62,9 @@ case "${1:-install}" in
 </plist>
 EOF
     launchctl bootout "gui/$UID_NUM/$LABEL" 2>/dev/null || true
-    launchctl bootstrap "gui/$UID_NUM" "$PLIST"
+    # launchd needs a moment after bootout, or bootstrap fails with "Input/output error".
+    sleep 2
+    launchctl bootstrap "gui/$UID_NUM" "$PLIST" || { sleep 3; launchctl bootstrap "gui/$UID_NUM" "$PLIST"; }
     sleep 2
     echo "installed $LABEL"
     launchctl print "gui/$UID_NUM/$LABEL" | grep -E "state|pid" | sed 's/^/  /' || true
