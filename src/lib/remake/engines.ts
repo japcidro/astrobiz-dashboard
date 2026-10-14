@@ -66,6 +66,8 @@ export const CLIP_ENGINES: ClipEngine[] = [
 ];
 
 export const DEFAULT_CLIP_ENGINE: ClipEngineId = "veo3_1";
+/** Realism defaults by clip kind: talking heads speak the script, b-rolls copy the real motion. */
+export const DEFAULT_CLIP_ENGINE_FOR: Record<"talking_head" | "broll", ClipEngineId> = { talking_head: "veo3_1", broll: "genjutsu" };
 
 export function getClipEngine(id: string): ClipEngine | undefined {
   return CLIP_ENGINES.find((e) => e.id === id);

@@ -15,8 +15,10 @@ export interface StillPromptInput {
   recipe: SwapRecipe;
   /** True when a cast image is attached: keep that person, don't invent one. */
   hasCast: boolean;
-  /** Number of product photos attached after the frame (and cast). */
-  productImages: number;
+  /** Product photos attached after the frame (and cast), in order. */
+  products: Array<{ kind: string | null; description: string | null }>;
+  /** What the person holds in the reference frame, when known. */
+  holds: string | null;
   brandRules: string;
   castNote: string;
   shotDescription: string | null;
@@ -26,9 +28,18 @@ export function stillPrompt(i: StillPromptInput): string {
   const who = i.hasCast
     ? `Replace the person in the first image with the exact person shown in the second image (same face, hair, skin and body), keeping the second image's identity faithfully.`
     : `Replace the person in the first image with a completely different person who looks nothing like the original: ${i.recipe.who} of the same gender with ${i.recipe.skin}, ${i.recipe.hairColor} hair styled as ${i.recipe.hairCut}, ${i.recipe.eyes} eyes, and a different face shape, nose, lips, eyebrows and jawline. Attractive, fit and toned, healthy glowing skin, well groomed.`;
+  const firstProduct = i.hasCast ? 3 : 2;
+  const list = i.products
+    .map((p, n) => `image ${firstProduct + n} shows our ${p.kind && p.kind !== "other" ? p.kind : "product"}${p.description ? ` (${p.description})` : ""}`)
+    .join("; ");
+  const held = i.holds && i.holds !== "none" ? i.holds : null;
   const product =
-    i.productImages > 0
-      ? ` The remaining ${i.productImages === 1 ? "image is our product" : `${i.productImages} images are our product`}: replace the product, bottle, box or packaging the person holds or shows with our product exactly as it appears in those photos (same shape, colors, label and text), at the same position, angle and scale, held the same way.`
+    i.products.length > 0
+      ? ` The remaining ${i.products.length === 1 ? "image is" : "images are"} our own product: ${list}. ${
+          held
+            ? `The person holds ${/^[aeiou]/.test(held) ? "an" : "a"} ${held} in the frame: replace it with our ${held} from those photos`
+            : "Replace whatever product, bottle, box, pieces or packaging the person holds or shows with the matching form of our product from those photos"
+        }, exactly as it appears there (same shape, colors, label and text), at the same position, angle and scale, held the same way. Do not change the kind of object: a bottle stays a bottle, loose gummies stay loose gummies, a box stays a box.`
       : ` Remove or blur any brand name, logo or label on products in the frame so no competitor branding is visible.`;
   const rules = i.brandRules.trim() ? ` Brand rules: ${i.brandRules.trim()}.` : "";
   const note = i.castNote.trim() ? ` Also: ${i.castNote.trim()}.` : "";

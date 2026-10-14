@@ -4,7 +4,7 @@ import { AlertTriangle, Check, Download, Images, Info, Loader2, Mic, RefreshCw, 
 import { useState } from "react";
 import type { Quality } from "@/lib/hook-studio/engines";
 import { CLIP_ENGINES, STILL_CREDITS, VO_CREDITS_PER_CHAR, clipEstimate, getClipEngine, veoLengthFor } from "@/lib/remake/engines";
-import type { ProjectView, ShotView, Voice } from "@/lib/remake/types";
+import { PRODUCT_FORMS, type ProjectView, type ShotView, type Voice } from "@/lib/remake/types";
 import { Button, Label, Panel, Pill, credits } from "@/components/hook-studio/ui";
 import { CastPicker } from "./cast-picker";
 import { ClipVideo, ComparePlayer } from "./clip-video";
@@ -79,6 +79,17 @@ export function ShotPanel({
           Clip {shot.idx + 1} <span className="text-gray-500 font-normal">· {fmt(Number(shot.start_s))}–{fmt(Number(shot.end_s))} · {shot.seconds}s</span>
         </p>
         {shot.person && <Pill tone="muted">Person {shot.person}</Pill>}
+        <label className="inline-flex items-center gap-1 text-[11px] text-gray-400" title="What the person holds in this frame; the still swap replaces it with our matching product">
+          holds
+          <select value={shot.holds ?? "none"} onChange={(e) => void onPatch({ holds: e.target.value })} className="bg-gray-900 border border-gray-700 rounded-md px-1 py-0.5 text-[11px] text-gray-300 focus:outline-none">
+            <option value="none">nothing</option>
+            {PRODUCT_FORMS.map((f) => (
+              <option key={f} value={f}>
+                {f}
+              </option>
+            ))}
+          </select>
+        </label>
         <div className="ml-auto flex items-center gap-1 rounded-lg bg-gray-900 p-0.5">
           {(["talking_head", "broll"] as const).map((k) => (
             <button key={k} type="button" onClick={() => k !== shot.kind && void onPatch({ kind: k })} className={`px-2 py-1 rounded-md text-[11px] font-semibold cursor-pointer ${shot.kind === k ? "bg-gray-700 text-white" : "text-gray-400 hover:text-white"}`}>
@@ -204,14 +215,22 @@ export function ShotPanel({
 
       {swap && (
         <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-3 space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-2">
-            <select value={shot.clip_engine} onChange={(e) => void onPatch({ clip_engine: e.target.value })} className={field}>
-              {CLIP_ENGINES.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.name}
-                </option>
-              ))}
-            </select>
+          <div className="flex flex-wrap gap-1.5">
+            {CLIP_ENGINES.map((e) => (
+              <button
+                key={e.id}
+                type="button"
+                onClick={() => e.id !== shot.clip_engine && void onPatch({ clip_engine: e.id })}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors cursor-pointer ${
+                  shot.clip_engine === e.id ? "border-purple-500 bg-purple-500/15 text-white" : "border-gray-700 text-gray-400 hover:text-white hover:border-gray-500"
+                }`}
+              >
+                {e.name}
+                <span className="font-normal text-gray-500"> · {e.mode === "speak" ? "speaks the script" : e.mode === "motion" ? "copies the real motion" : "from a prompt"}</span>
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
             {engine.qualityLabels && (
               <div className="flex items-center gap-1 rounded-lg bg-gray-900 border border-gray-700 p-0.5">
                 {(["standard", "high"] as Quality[]).map((q) => (
@@ -230,8 +249,8 @@ export function ShotPanel({
                 ))}
               </div>
             )}
+            <p className="text-[11px] text-gray-500">{engine.blurb}</p>
           </div>
-          <p className="text-[11px] text-gray-500 -mt-1">{engine.blurb}</p>
 
           {speaks && (
             <div className="space-y-2">

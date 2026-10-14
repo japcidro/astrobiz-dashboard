@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { BrandCheck, ShotKind } from "./types";
+import { PRODUCT_FORMS, type BrandCheck, type ProductForm, type ShotKind } from "./types";
 
 /**
  * Claude looks at frames for three jobs: label each clip (talking head or
@@ -72,9 +72,13 @@ export interface ShotLabel {
   idx: number;
   kind: ShotKind;
   person: string | null;
+  holds: string;
   brand_heavy: boolean;
   description: string;
 }
+
+const FORMS = PRODUCT_FORMS.join(" | ");
+const asForm = (v: unknown): ProductForm | null => (typeof v === "string" && (PRODUCT_FORMS as string[]).includes(v) ? (v as ProductForm) : null);
 
 /** Label every clip from its frame. Returns null when Claude is unavailable. */
 export async function labelShots(db: SupabaseClient, frames: Array<{ idx: number; url: string }>): Promise<ShotLabel[] | null> {
@@ -87,12 +91,13 @@ export async function labelShots(db: SupabaseClient, frames: Array<{ idx: number
   if (blocks.length === 0) return null;
   blocks.push({
     type: "text",
-    text: 'Label each clip. Answer with JSON only: an array of {"idx": number, "kind": "talking_head" | "broll", "person": "A" | "B" | "C" | null, "brand_heavy": boolean, "description": string}.',
+    text: `Label each clip. Answer with JSON only: an array of {"idx": number, "kind": "talking_head" | "broll", "person": "A" | "B" | "C" | null, "holds": ${FORMS} | "none", "brand_heavy": boolean, "description": string}.`,
   });
   const system = `You label frames from a short vertical ad so an editor can plan a remake.
 - kind "talking_head": a person facing the camera, speaking or presenting, face clearly the subject.
 - kind "broll": anything else: hands, product, unboxing, application, room, text cards, screens.
 - person: the same letter for the same person wherever they appear (first person seen = "A", next = "B", …). null when no person is the subject.
+- holds: the form of the product the person holds or shows in this frame: bottle (any bottle or pill jar with a cap), gummies (loose gummies or candy-like pieces), capsules (loose capsules, tablets or softgels), box, sachet, tube, jar (wide-mouth cream or powder jar), other, or "none" when no product is held or shown.
 - brand_heavy true when the frame is mostly a competitor's packaging, logo, website or app screen, so swapping the person would not make it ours.
 - description: one plain sentence of what is happening (who, what they hold or do, where). No brand names.
 Answer with JSON only.`;
@@ -104,6 +109,7 @@ Answer with JSON only.`;
       idx: o.idx,
       kind: o.kind === "talking_head" ? "talking_head" : "broll",
       person: typeof o.person === "string" && /^[A-F]$/.test(o.person) ? o.person : null,
+      holds: asForm(o.holds) ?? "none",
       brand_heavy: !!o.brand_heavy,
       description: typeof o.description === "string" ? o.description.slice(0, 300) : "",
     }));
@@ -147,4 +153,19 @@ Pass (ok=true) otherwise. "notes" is one or two short sentences naming what to f
   const out = await ask<BrandCheck>(db, system, blocks, 400);
   if (!out || typeof out.ok !== "boolean") return null;
   return { ok: out.ok, notes: typeof out.notes === "string" ? out.notes.slice(0, 400) : "" };
+}
+
+/** What a brand kit photo shows, so the still swap can pick the matching form. */
+export async function describeProduct(db: SupabaseClient, url: string): Promise<{ kind: ProductForm; description: string } | null> {
+  const img = await imageBlock(url);
+  if (!img) return null;
+  const out = await ask<{ kind?: unknown; description?: unknown }>(
+    db,
+    `You label product photos for an ad tool. "kind" is the physical form shown: ${FORMS}. "description" is one short line: what it is, colors, label text if readable (e.g. "white bottle with teal label, Relax Gummies"). Answer with JSON only.`,
+    [img, { type: "text", text: 'Answer with JSON only: {"kind": string, "description": string}.' }],
+    200
+  );
+  const kind = asForm(out?.kind);
+  if (!kind) return null;
+  return { kind, description: typeof out?.description === "string" ? out.description.slice(0, 160) : "" };
 }

@@ -43,6 +43,8 @@ export interface ShotRow {
   kind: ShotKind;
   mode: ShotMode;
   person: string | null;
+  /** What the person holds or shows in the frame; a ProductForm or 'none'. */
+  holds: string | null;
   selected: boolean;
   brand_heavy: boolean;
   description: string | null;
@@ -95,11 +97,17 @@ export interface ShotView extends ShotRow {
   seconds: number;
 }
 
+/** What a product photo or a held object shows. */
+export type ProductForm = "bottle" | "gummies" | "capsules" | "box" | "sachet" | "tube" | "jar" | "other";
+export const PRODUCT_FORMS: ProductForm[] = ["bottle", "gummies", "capsules", "box", "sachet", "tube", "jar", "other"];
+
 export interface BrandImage {
   id: string;
   store: string;
   path: string;
   label: string | null;
+  kind: ProductForm | null;
+  description: string | null;
   url: string | null;
   created_at: string;
 }

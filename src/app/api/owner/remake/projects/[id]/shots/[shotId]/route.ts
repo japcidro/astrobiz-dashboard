@@ -1,4 +1,5 @@
 import { requireBoardUser } from "@/lib/marketing-board/auth";
+import { PRODUCT_FORMS } from "@/lib/remake/types";
 import { asClipEngine, isUuid, loadProject } from "@/lib/remake/views";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
   if (b.kind === "talking_head" || b.kind === "broll") patch.kind = b.kind;
   if (b.mode === "keep" || b.mode === "swap") patch.mode = b.mode;
   if ("person" in b) patch.person = typeof b.person === "string" && /^[A-F]$/.test(b.person) ? b.person : null;
+  if (typeof b.holds === "string" && (b.holds === "none" || (PRODUCT_FORMS as string[]).includes(b.holds))) patch.holds = b.holds;
   if (typeof b.selected === "boolean") patch.selected = b.selected;
   if (typeof b.approved === "boolean") patch.approved = b.approved;
   if (typeof b.script === "string") patch.script = b.script.slice(0, 1500);

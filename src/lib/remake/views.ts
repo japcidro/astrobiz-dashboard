@@ -2,10 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { BOARD_BUCKET, signBoardPaths } from "@/lib/marketing-board/storage";
 import { HOOK_BUCKET } from "@/lib/hook-studio/storage";
 import { isLookId } from "@/lib/hook-studio/presets";
-import { DEFAULT_CLIP_ENGINE, getClipEngine, isClipEngine, veoLengthFor, type ClipEngineId } from "./engines";
+import { DEFAULT_CLIP_ENGINE, DEFAULT_CLIP_ENGINE_FOR, getClipEngine, isClipEngine, veoLengthFor, type ClipEngineId } from "./engines";
 import { castRecipe, motionPrompt, stillPrompt, veoPrompt } from "./prompts";
 import type { BrandImage, BrandKit, LibraryImage, ProjectRow, ProjectSummary, ProjectView, ShotRow, ShotView } from "./types";
-import { brandCheck, detectChanges, labelShots } from "./vision";
+import { brandCheck, describeProduct, detectChanges, labelShots } from "./vision";
 
 const UUID = /^[0-9a-f-]{36}$/;
 export const isUuid = (v: unknown): v is string => typeof v === "string" && UUID.test(v);
@@ -15,6 +15,15 @@ export const asClipEngine = (v: unknown): ClipEngineId | null => (isClipEngine(v
 export const MIN_CLIP_SECONDS = 1;
 
 // ─── Brand kit ───
+
+/** Label a brand kit photo with its form (bottle, gummies…) once it is registered. Best effort. */
+export async function labelBrandImage(db: SupabaseClient, id: string, path: string): Promise<void> {
+  const signed = await signBoardPaths(db, [path]);
+  const url = signed.get(path);
+  if (!url) return;
+  const d = await describeProduct(db, url);
+  if (d) await db.from("remake_brand_images").update({ kind: d.kind, description: d.description }).eq("id", id);
+}
 
 export async function loadBrandKit(db: SupabaseClient, store: string | null, signed?: Map<string, string>): Promise<BrandKit | null> {
   if (!store) return null;
@@ -158,12 +167,18 @@ export async function queueStill(db: SupabaseClient, project: ProjectRow, shot: 
     const { data: cast } = await db.from("remake_shots").select("still_path").eq("id", project.cast_shot_id).maybeSingle();
     castPath = (cast?.still_path as string | null) ?? null;
   }
-  const productPaths = (kit?.images ?? []).slice(0, 4).map((i) => i.path);
+  // Products that match what is held come first; the rest fill up to four.
+  const held = shot.holds && shot.holds !== "none" ? shot.holds : null;
+  const images = kit?.images ?? [];
+  const ranked = held ? [...images.filter((i) => i.kind === held), ...images.filter((i) => i.kind !== held)] : images;
+  const chosen = (held && ranked.some((i) => i.kind === held) ? ranked.filter((i) => i.kind === held) : ranked).slice(0, 4);
+  const productPaths = chosen.map((i) => i.path);
   const look = isLookId(project.cast_look) ? project.cast_look : "varied";
   const prompt = stillPrompt({
     recipe: castRecipe(look),
     hasCast: !!castPath,
-    productImages: productPaths.length,
+    products: chosen.map((i) => ({ kind: i.kind, description: i.description })),
+    holds: held,
     brandRules: kit?.rules ?? "",
     castNote: project.cast_note,
     shotDescription: shot.description,
@@ -363,7 +378,16 @@ export async function runPendingPasses(db: SupabaseClient, id: string): Promise<
             if (!shot) return Promise.resolve();
             return db
               .from("remake_shots")
-              .update({ kind: l.kind, person: l.person, brand_heavy: l.brand_heavy, description: l.description || "—", mode: l.brand_heavy ? "keep" : shot.mode })
+              .update({
+                kind: l.kind,
+                person: l.person,
+                holds: l.holds,
+                brand_heavy: l.brand_heavy,
+                description: l.description || "—",
+                mode: l.brand_heavy ? "keep" : shot.mode,
+                // Realism default: b-rolls copy the real motion, talking heads speak the script.
+                clip_engine: shot.clip_status === "none" ? DEFAULT_CLIP_ENGINE_FOR[l.kind] : shot.clip_engine,
+              })
               .eq("id", shot.id);
           })
         );

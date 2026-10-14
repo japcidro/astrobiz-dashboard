@@ -4,7 +4,7 @@ import { Loader2, Plus, Trash2, UserCheck } from "lucide-react";
 import { useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { LOOKS } from "@/lib/hook-studio/presets";
-import type { BrandKit, ProjectView } from "@/lib/remake/types";
+import { PRODUCT_FORMS, type BrandKit, type ProjectView } from "@/lib/remake/types";
 import { Button, ConfirmButton, Label, Panel, api } from "@/components/hook-studio/ui";
 
 const field =
@@ -141,9 +141,10 @@ export function CastBrandPanel({
           <p className="text-xs text-gray-500 mt-2">Set the store to attach product photos. Without them, competitor branding is only removed, not replaced.</p>
         ) : (
           <>
-            <div className="mt-3 grid grid-cols-4 gap-1.5">
+            <div className="mt-3 grid grid-cols-3 gap-2">
               {(kit?.images ?? []).map((img) => (
-                <div key={img.id} className="relative group aspect-square rounded-md bg-gray-950 border border-gray-700 overflow-hidden">
+                <div key={img.id} className="min-w-0">
+                <div className="relative group aspect-square rounded-md bg-gray-950 border border-gray-700 overflow-hidden">
                   {img.url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={img.url} alt={img.label ?? ""} className="w-full h-full object-cover" />
@@ -165,6 +166,27 @@ export function CastBrandPanel({
                     </ConfirmButton>
                   </div>
                 </div>
+                <select
+                  value={img.kind ?? ""}
+                  title={img.description ?? "What this photo shows"}
+                  onChange={async (e) => {
+                    try {
+                      const r = await api<{ kit: BrandKit }>("/api/owner/remake/brand-kit", { method: "PATCH", body: JSON.stringify({ id: img.id, kind: e.target.value }) });
+                      onKit(r.kit);
+                    } catch (err) {
+                      onError(err instanceof Error ? err.message : "Could not save");
+                    }
+                  }}
+                  className={`mt-1 w-full bg-gray-900 border rounded-md px-1 py-0.5 text-[11px] focus:outline-none ${img.kind ? "border-gray-700 text-gray-300" : "border-amber-700 text-amber-300"}`}
+                >
+                  <option value="">unlabelled</option>
+                  {PRODUCT_FORMS.map((f) => (
+                    <option key={f} value={f}>
+                      {f}
+                    </option>
+                  ))}
+                </select>
+                </div>
               ))}
               <button
                 type="button"
@@ -177,7 +199,23 @@ export function CastBrandPanel({
               </button>
               <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={(e) => e.target.files?.[0] && void uploadProduct(e.target.files[0])} />
             </div>
-            <p className="text-[11px] text-gray-500 mt-1.5">Front, back, in hand. Up to 6; the first 4 go into every still.</p>
+            <p className="text-[11px] text-gray-500 mt-1.5">One photo per form you sell: the bottle, the loose gummies or capsules, the box. The still swap picks the form that matches what the person holds.</p>
+            {(kit?.images ?? []).some((i) => !i.kind) && (
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    const r = await api<{ kit: BrandKit }>("/api/owner/remake/brand-kit", { method: "PUT", body: JSON.stringify({ store: project.store, relabel: true }) });
+                    onKit(r.kit);
+                  } catch (err) {
+                    onError(err instanceof Error ? err.message : "Could not label");
+                  }
+                }}
+                className="mt-1 text-[11px] text-purple-300 hover:text-white cursor-pointer"
+              >
+                Label the unlabelled photos with Claude
+              </button>
+            )}
             <textarea value={rules} onChange={(e) => setRules(e.target.value)} rows={3} placeholder="Rules, e.g. keep the gold cap visible · no competitor text · US bathroom or kitchen settings" className={`${field} mt-3 resize-none`} />
             {rules !== (kit?.rules ?? "") && (
               <Button onClick={saveRules} busy={savingRules} className="mt-2">
