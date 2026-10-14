@@ -1,10 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { BOARD_BUCKET, signBoardPaths } from "@/lib/marketing-board/storage";
-import { HOOK_BUCKET } from "@/lib/hook-studio/storage";
+import { HOOK_BUCKET, signPaths as signHookPaths } from "@/lib/hook-studio/storage";
 import { isLookId } from "@/lib/hook-studio/presets";
 import { DEFAULT_CLIP_ENGINE, DEFAULT_CLIP_ENGINE_FOR, getClipEngine, isClipEngine, veoLengthFor, type ClipEngineId } from "./engines";
 import { castRecipe, motionPrompt, stillPrompt, veoPrompt } from "./prompts";
-import type { BrandImage, BrandKit, LibraryImage, ProjectRow, ProjectSummary, ProjectView, ShotRow, ShotView } from "./types";
+import type { BrandImage, BrandKit, CastSource, Person, PersonFolder, PersonLibrary, ProjectRow, ProjectSummary, ProjectView, ShotRow, ShotView } from "./types";
 import { brandCheck, describeProduct, detectChanges, labelShots } from "./vision";
 
 const UUID = /^[0-9a-f-]{36}$/;
@@ -116,8 +116,12 @@ export async function loadProjects(db: SupabaseClient): Promise<ProjectSummary[]
   });
 }
 
-/** Finished UGC Generator images, newest first, for "use an existing image". */
-export async function loadLibraryImages(db: SupabaseClient): Promise<LibraryImage[]> {
+// ─── Person library ───
+
+type PersonRow = { id: string; folder_id: string | null; name: string; bucket: string; path: string; ugc_job_id: string | null; created_at: string };
+
+/** New UGC Generator results join the library as Unsorted people; ones already there are left alone. */
+async function syncUgcPeople(db: SupabaseClient): Promise<void> {
   const { data } = await db
     .from("hook_studio_jobs")
     .select("id, params, result_path, created_at")
@@ -125,13 +129,48 @@ export async function loadLibraryImages(db: SupabaseClient): Promise<LibraryImag
     .eq("status", "done")
     .not("result_path", "is", null)
     .order("created_at", { ascending: false })
-    .limit(60);
+    .limit(200);
   const rows = (data ?? []) as Array<{ id: string; params: Record<string, unknown>; result_path: string; created_at: string }>;
-  const { data: signed } = await db.storage.from(HOOK_BUCKET).createSignedUrls(rows.map((r) => r.result_path), 3600);
-  const urls = new Map((signed ?? []).filter((s) => s.path && s.signedUrl).map((s) => [s.path as string, s.signedUrl]));
-  return rows
-    .filter((r) => urls.has(r.result_path))
-    .map((r) => ({ id: r.id, url: urls.get(r.result_path)!, note: (r.params.note as string | undefined) ?? "", created_at: r.created_at }));
+  if (rows.length === 0) return;
+  await db
+    .from("remake_people")
+    .upsert(
+      rows.map((r) => ({ bucket: HOOK_BUCKET, path: r.result_path, ugc_job_id: r.id, name: (r.params.note as string | undefined) ?? "", created_at: r.created_at })),
+      { onConflict: "ugc_job_id", ignoreDuplicates: true }
+    );
+}
+
+/** Folders and every person in them (and Unsorted), newest first, thumbnails signed. */
+export async function loadPeopleLibrary(db: SupabaseClient): Promise<PersonLibrary> {
+  await syncUgcPeople(db).catch(() => {});
+  const [{ data: folderRows }, { data: peopleRows }] = await Promise.all([
+    db.from("remake_people_folders").select("*").order("name"),
+    db.from("remake_people").select("*").order("created_at", { ascending: false }).limit(1000),
+  ]);
+  const rows = (peopleRows ?? []) as PersonRow[];
+  const [board, hook] = await Promise.all([
+    signBoardPaths(db, rows.filter((r) => r.bucket === BOARD_BUCKET).map((r) => r.path)),
+    signHookPaths(db, rows.filter((r) => r.bucket === HOOK_BUCKET).map((r) => r.path)),
+  ]);
+  const people: Person[] = [];
+  for (const r of rows) {
+    const url = (r.bucket === HOOK_BUCKET ? hook : board).get(r.path);
+    if (!url) continue;
+    people.push({ id: r.id, folder_id: r.folder_id, name: r.name, url, ugc_job_id: r.ugc_job_id, created_at: r.created_at });
+  }
+  return { folders: (folderRows ?? []) as PersonFolder[], people };
+}
+
+/** Register an uploaded photo (people/<uuid>.<ext> in the marketing-board bucket) as a person. */
+export async function addUploadedPerson(db: SupabaseClient, input: { path: string; name: string; folder_id: string | null }): Promise<{ id: string } | { error: string }> {
+  if (!/^people\/[0-9a-f-]{36}\.(png|jpg|webp)$/.test(input.path)) return { error: "Bad upload path" };
+  const { data, error } = await db
+    .from("remake_people")
+    .insert({ bucket: BOARD_BUCKET, path: input.path, name: input.name.trim().slice(0, 120), folder_id: input.folder_id })
+    .select("id")
+    .single();
+  if (error || !data) return { error: error?.message ?? "Could not add the person" };
+  return { id: data.id as string };
 }
 
 // ─── Queueing ───
@@ -199,14 +238,24 @@ export async function queueStill(db: SupabaseClient, project: ProjectRow, shot: 
 }
 
 /**
- * Pick the person for every clip from an image that already exists: a UGC
- * Generator result (copied out of the hook-studio bucket) or an upload to
- * remake/<project>/cast/. The still is then generated from the real frame
+ * Pick the person for every clip from an image that already exists: a
+ * library person (copied out of its bucket), a UGC Generator result, or an
+ * upload to remake/<project>/cast/. The still is then generated from the real frame
  * with this person in it; the picked image is never used as the still.
  */
-export async function setCastFrom(db: SupabaseClient, project: ProjectRow, source: { ugc_job_id?: string; path?: string }): Promise<string | null> {
+export async function setCastFrom(db: SupabaseClient, project: ProjectRow, source: CastSource): Promise<string | null> {
   let path: string;
-  if (source.ugc_job_id) {
+  if (source.person_id) {
+    const { data: person } = await db.from("remake_people").select("bucket, path").eq("id", source.person_id).maybeSingle();
+    const row = person as Pick<PersonRow, "bucket" | "path"> | null;
+    if (!row) return "That person is not in the library";
+    const { data: blob, error } = await db.storage.from(row.bucket).download(row.path);
+    if (error || !blob) return "Could not read the library photo";
+    const ext = row.path.split(".").pop() ?? "png";
+    path = `remake/${project.id}/cast/${crypto.randomUUID()}.${ext}`;
+    const up = await db.storage.from(BOARD_BUCKET).upload(path, blob, { contentType: blob.type || "image/png", upsert: true });
+    if (up.error) return up.error.message;
+  } else if (source.ugc_job_id) {
     const { data: job } = await db.from("hook_studio_jobs").select("result_path").eq("id", source.ugc_job_id).eq("kind", "ugc_image").eq("status", "done").maybeSingle();
     const from = job?.result_path as string | undefined;
     if (!from) return "That image is not in the library";

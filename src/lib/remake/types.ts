@@ -145,9 +145,33 @@ export interface Voice {
 }
 
 /** A finished UGC Generator image the still can be taken from. */
-export interface LibraryImage {
+/** A folder in the person library (FOLIQ, Momentum, …). */
+export interface PersonFolder {
   id: string;
-  url: string;
-  note: string;
+  name: string;
   created_at: string;
+}
+
+/** Someone who can be put into every clip: a UGC Generator image or an uploaded photo. */
+export interface Person {
+  id: string;
+  /** null = Unsorted (the root view). */
+  folder_id: string | null;
+  name: string;
+  url: string;
+  /** Set when this person came out of the UGC Generator. */
+  ugc_job_id: string | null;
+  created_at: string;
+}
+
+export interface PersonLibrary {
+  folders: PersonFolder[];
+  people: Person[];
+}
+
+/** What the picker hands back: a library person, or (legacy) a UGC job / an upload path. */
+export interface CastSource {
+  person_id?: string;
+  ugc_job_id?: string;
+  path?: string;
 }

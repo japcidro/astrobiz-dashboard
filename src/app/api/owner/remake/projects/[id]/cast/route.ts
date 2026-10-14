@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-/** POST { ugc_job_id } | { path } — pick the person for every clip from an existing image. */
+/** POST { person_id } | { ugc_job_id } | { path } — pick the person for every clip from an existing image. */
 export async function POST(request: Request, ctx: Ctx) {
   const auth = await requireBoardUser();
   if (auth.error) return auth.error;
@@ -16,6 +16,7 @@ export async function POST(request: Request, ctx: Ctx) {
   if (!project) return Response.json({ error: "Not found" }, { status: 404 });
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const problem = await setCastFrom(auth.db, project as ProjectRow, {
+    person_id: isUuid(body.person_id) ? body.person_id : undefined,
     ugc_job_id: isUuid(body.ugc_job_id) ? body.ugc_job_id : undefined,
     path: typeof body.path === "string" ? body.path : undefined,
   });

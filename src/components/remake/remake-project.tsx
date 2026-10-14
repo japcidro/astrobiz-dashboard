@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { WorkerStatus } from "@/lib/hook-studio/types";
 import type { BoardView } from "@/lib/marketing-board/types";
 import { STILL_CREDITS, clipEstimate, getClipEngine, veoLengthFor } from "@/lib/remake/engines";
-import type { BrandKit, ProjectView, ShotView } from "@/lib/remake/types";
+import type { BrandKit, CastSource, ProjectView, ShotView } from "@/lib/remake/types";
 import { Button, ConfirmButton, Pill, api, credits } from "@/components/hook-studio/ui";
 import { CastBrandPanel } from "./cast-brand-panel";
 import { ClipVideo } from "./clip-video";
@@ -82,7 +82,7 @@ export function RemakeProject({ id }: { id: string }) {
   const action = (shotId: string, a: string, body?: Record<string, unknown>) =>
     call(a, () => api(`/api/owner/remake/projects/${id}/shots/${shotId}/${a}`, { method: "POST", body: JSON.stringify(body ?? {}) }));
 
-  const castFrom = (body: { ugc_job_id?: string; path?: string }) =>
+  const castFrom = (body: CastSource) =>
     call("cast", () => api(`/api/owner/remake/projects/${id}/cast`, { method: "POST", body: JSON.stringify(body) }));
 
   const renderAll = async () => {

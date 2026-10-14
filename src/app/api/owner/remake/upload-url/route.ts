@@ -13,6 +13,7 @@ const UUID = /^[0-9a-f-]{36}$/;
  *   kind "source": a reference video
  *   kind "brand" + store: a product photo for the brand kit
  *   kind "cast" + project_id: the person to put into every clip
+ *   kind "person": a photo for the person library (folders, reusable across projects)
  */
 export async function POST(request: Request) {
   const auth = await requireBoardUser();
@@ -35,8 +36,12 @@ export async function POST(request: Request) {
     if (!ext) return Response.json({ error: "Upload a PNG, JPG or WebP image" }, { status: 400 });
     if (!UUID.test(b.project_id ?? "")) return Response.json({ error: "Missing project" }, { status: 400 });
     path = `remake/${b.project_id}/cast/${randomUUID()}.${ext}`;
+  } else if (b?.kind === "person") {
+    const ext = IMAGE[mime];
+    if (!ext) return Response.json({ error: "Upload PNG, JPG or WebP photos" }, { status: 400 });
+    path = `people/${randomUUID()}.${ext}`;
   } else {
-    return Response.json({ error: "kind must be source, brand or cast" }, { status: 400 });
+    return Response.json({ error: "kind must be source, brand, cast or person" }, { status: 400 });
   }
   const { data, error } = await auth.db.storage.from(BOARD_BUCKET).createSignedUploadUrl(path);
   if (error || !data) return Response.json({ error: error?.message ?? "Could not create upload URL" }, { status: 500 });

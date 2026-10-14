@@ -4,7 +4,7 @@ import { AlertTriangle, Check, Download, Images, Info, Loader2, Mic, RefreshCw, 
 import { useState } from "react";
 import type { Quality } from "@/lib/hook-studio/engines";
 import { CLIP_ENGINES, STILL_CREDITS, VO_CREDITS_PER_CHAR, clipEstimate, getClipEngine, veoLengthFor } from "@/lib/remake/engines";
-import { PRODUCT_FORMS, type ProjectView, type ShotView, type Voice } from "@/lib/remake/types";
+import { PRODUCT_FORMS, type CastSource, type ProjectView, type ShotView, type Voice } from "@/lib/remake/types";
 import { Button, Label, Panel, Pill, credits } from "@/components/hook-studio/ui";
 import { CastPicker } from "./cast-picker";
 import { ClipVideo, ComparePlayer } from "./clip-video";
@@ -43,7 +43,7 @@ export function ShotPanel({
   onAction: (action: string, body?: Record<string, unknown>) => Promise<void>;
   onProjectPatch: (body: Record<string, unknown>) => Promise<void>;
   /** Pick the person for every clip from an existing image. */
-  onCastFrom: (body: { ugc_job_id?: string; path?: string }) => Promise<void>;
+  onCastFrom: (body: CastSource) => Promise<void>;
 }) {
   // Local drafts; the parent remounts this panel per clip (key = shot id).
   const [script, setScript] = useState(shot.script);
