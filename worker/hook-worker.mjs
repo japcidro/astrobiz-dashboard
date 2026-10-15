@@ -634,7 +634,8 @@ async function cartoonAdvance(hookId) {
         resolution: hook.resolution === "720p" ? "720p" : "480p",
       });
     }
-    if (hook.voice_on && hook.voice_id && b.voice_status === null && b.line.trim()) {
+    // The team's own ElevenLabs voices are made by the app on Vercel (the key lives there); only wait for those.
+    if (hook.voice_on && hook.voice_provider !== "elevenlabs" && hook.voice_id && b.voice_status === null && b.line.trim()) {
       await queueCartoonStep("cartoon_beats", b.id, "voice", "cartoon_voice", "elevenlabs_v4", {
         hook_id: hook.id,
         beat_id: b.id,

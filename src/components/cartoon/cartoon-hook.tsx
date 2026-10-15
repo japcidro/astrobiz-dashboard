@@ -71,7 +71,7 @@ export function CartoonHook({ id }: { id: string }) {
       if (!hook) return;
       await api("/api/owner/cartoon-hooks", {
         method: "POST",
-        body: JSON.stringify({ script: hook.script, direction: hook.direction, style: hook.style, resolution: hook.resolution, voice_on: hook.voice_on, voice_id: hook.voice_id, voice_type: hook.voice_type, voice_name: hook.voice_name, variants: 1, batch_id: hook.batch_id }),
+        body: JSON.stringify({ script: hook.script, direction: hook.direction, style: hook.style, resolution: hook.resolution, voice_on: hook.voice_on, voice_provider: hook.voice_provider, voice_id: hook.voice_id, voice_type: hook.voice_type, voice_name: hook.voice_name, variants: 1, batch_id: hook.batch_id }),
       });
       router.push("/owner/cartoon-hooks");
     });
@@ -100,7 +100,7 @@ export function CartoonHook({ id }: { id: string }) {
           </h1>
           <Pill tone={st.tone}>{st.label}</Pill>
           <span className="text-xs text-gray-500">
-            {styleName(hook.style)} · {hook.resolution} · {hook.voice_on ? `voice: ${hook.voice_name ?? "on"}` : "no voiceover"} · {timeAgo(hook.created_at)} · spent {credits(hook.credits)}
+            {styleName(hook.style)} · {hook.resolution} · {hook.voice_on ? `voice: ${hook.voice_name ?? "on"}${hook.voice_provider === "elevenlabs" ? " (ElevenLabs)" : ""}` : "no voiceover"} · {timeAgo(hook.created_at)} · spent {credits(hook.credits)}
           </span>
           <span className="flex-1" />
           <Button onClick={() => void anotherTake()} busy={busy === "take"} disabled={busy !== null || hook.status === "planning"} title="Same script and settings, a different visual idea">

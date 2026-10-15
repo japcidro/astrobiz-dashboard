@@ -3,6 +3,17 @@ export type BeatStyle = Exclude<CartoonStyle, "mixed">;
 export type CartoonResolution = "480p" | "720p";
 export type StepStatus = "queued" | "running" | "done" | "failed";
 export type HookStatus = "planning" | "working" | "done" | "failed";
+/** "elevenlabs" = the team's own ElevenLabs account, voiced by the app; "higgsfield" = Higgsfield's ElevenLabs, voiced by the Mac worker. */
+export type VoiceProvider = "higgsfield" | "elevenlabs";
+
+/** A voice the picker offers. */
+export interface CartoonVoice {
+  provider: VoiceProvider;
+  id: string;
+  name: string;
+  /** Higgsfield "preset" / "element", ElevenLabs "cloned" / "generated" / "professional". */
+  type: string;
+}
 
 export interface CartoonHookRow {
   id: string;
@@ -14,6 +25,7 @@ export interface CartoonHookRow {
   direction: string;
   resolution: CartoonResolution;
   voice_on: boolean;
+  voice_provider: VoiceProvider;
   voice_id: string | null;
   voice_type: string | null;
   voice_name: string | null;

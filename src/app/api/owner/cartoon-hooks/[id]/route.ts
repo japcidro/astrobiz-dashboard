@@ -1,6 +1,7 @@
 import { after } from "next/server";
 import { requireBoardUser } from "@/lib/marketing-board/auth";
 import { isUuid } from "@/lib/remake/views";
+import { voiceElevenLabsBeats } from "@/lib/cartoon/elevenlabs";
 import { deleteHook, loadHook, planAndStart } from "@/lib/cartoon/views";
 
 export const dynamic = "force-dynamic";
@@ -16,6 +17,11 @@ export async function GET(_request: Request, ctx: Ctx) {
   if (!isUuid(id)) return Response.json({ error: "Not found" }, { status: 404 });
   const hook = await loadHook(auth.db, id);
   if (!hook) return Response.json({ error: "Not found" }, { status: 404 });
+  // ElevenLabs lines are made by the app: pick up any the planning request did not finish.
+  if (hook.voice_on && hook.voice_provider === "elevenlabs" && hook.status === "working" && hook.beats.some((b) => b.voice_status === null || b.voice_status === "running")) {
+    const db = auth.db;
+    after(() => voiceElevenLabsBeats(db, id));
+  }
   return Response.json(hook);
 }
 

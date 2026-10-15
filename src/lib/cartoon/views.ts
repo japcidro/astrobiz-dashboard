@@ -1,8 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { BOARD_BUCKET, signBoardPaths } from "@/lib/marketing-board/storage";
 import { MAX_VARIANTS, characterPrompt, motionPrompt, stillPrompt } from "./engines";
+import { voiceElevenLabsBeats } from "./elevenlabs";
 import { planHook } from "./planner";
-import type { BeatStyle, CartoonBeatRow, CartoonBeatView, CartoonHookRow, CartoonHookSummary, CartoonHookView, CartoonResolution, CartoonStyle } from "./types";
+import type { BeatStyle, CartoonBeatRow, CartoonBeatView, CartoonHookRow, CartoonHookSummary, CartoonHookView, CartoonResolution, CartoonStyle, VoiceProvider } from "./types";
 
 /**
  * The app plans a hook (Claude) and resets steps for redos. The Mac worker
@@ -75,6 +76,7 @@ export interface CreateHooks {
   direction: string;
   resolution: CartoonResolution;
   voice_on: boolean;
+  voice_provider: VoiceProvider;
   voice_id: string | null;
   voice_type: string | null;
   voice_name: string | null;
@@ -88,7 +90,7 @@ export async function createHooks(db: SupabaseClient, input: CreateHooks): Promi
   const script = input.script.trim();
   if (!script) return { error: "Paste the script first" };
   if (script.length > 2500) return { error: "Keep the script under 2,500 characters (a hook is 10 to 30 seconds)" };
-  if (input.voice_on && (!input.voice_id || !input.voice_type)) return { error: "Pick a voice, or turn the voiceover off" };
+  if (input.voice_on && (!input.voice_id || (input.voice_provider === "higgsfield" && !input.voice_type))) return { error: "Pick a voice, or turn the voiceover off" };
   const variants = Math.min(MAX_VARIANTS, Math.max(1, Math.round(input.variants) || 1));
 
   // Another take of an existing batch continues its variant numbering.
@@ -107,6 +109,7 @@ export async function createHooks(db: SupabaseClient, input: CreateHooks): Promi
     direction: input.direction.trim().slice(0, 600),
     resolution: input.resolution,
     voice_on: input.voice_on,
+    voice_provider: input.voice_provider,
     voice_id: input.voice_on ? input.voice_id : null,
     voice_type: input.voice_on ? input.voice_type : null,
     voice_name: input.voice_on ? input.voice_name : null,
@@ -167,6 +170,8 @@ export async function planAndStart(db: SupabaseClient, hookId: string): Promise<
       error: null,
     })
     .eq("id", hookId);
+  // The team's ElevenLabs lines are made here; the worker makes everything else.
+  await voiceElevenLabsBeats(db, hookId);
   return null;
 }
 
@@ -228,6 +233,7 @@ export async function redo(db: SupabaseClient, hookId: string, what: Redo, beatI
     return "Unknown step";
   }
   await db.from("cartoon_hooks").update({ status: "working", final_status: null, final_error: null, error: null }).eq("id", hookId);
+  if (what === "voice") await voiceElevenLabsBeats(db, hookId);
   return null;
 }
 

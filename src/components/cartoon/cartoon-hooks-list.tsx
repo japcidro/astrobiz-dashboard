@@ -5,12 +5,14 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { WorkerStatus } from "@/lib/hook-studio/types";
 import { MAX_VARIANTS, STYLES, roughEstimate } from "@/lib/cartoon/engines";
-import type { CartoonHookSummary, CartoonResolution, CartoonStyle } from "@/lib/cartoon/types";
+import type { CartoonHookSummary, CartoonResolution, CartoonStyle, CartoonVoice } from "@/lib/cartoon/types";
 import { Button, Chip, ConfirmButton, Label, Panel, Pill, api, credits, timeAgo } from "@/components/hook-studio/ui";
 import { ClipVideo } from "@/components/remake/clip-video";
 
 const field = "w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-purple-500";
 const VOICE_KEY = "cartoon-hooks:voice";
+/** A picker value: "<provider>:<voice id>". */
+const voiceKey = (v: CartoonVoice) => `${v.provider}:${v.id}`;
 
 export const HOOK_STATUS: Record<CartoonHookSummary["status"], { tone: "run" | "ok" | "bad"; label: string }> = {
   planning: { tone: "run", label: "Claude is planning" },
@@ -37,6 +39,8 @@ interface Form {
 export function CartoonHooksList() {
   const [hooks, setHooks] = useState<CartoonHookSummary[] | null>(null);
   const [worker, setWorker] = useState<WorkerStatus | null>(null);
+  const [elevenVoices, setElevenVoices] = useState<CartoonVoice[]>([]);
+  const [elevenError, setElevenError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState<Form>({ script: "", direction: "", style: "mixed", resolution: "480p", voiceOn: false, voiceId: "", variants: 1 });
@@ -57,15 +61,19 @@ export function CartoonHooksList() {
     } catch {
       // no storage: pick again
     }
-    api<WorkerStatus>("/api/owner/hook-studio/status")
-      .then((w) => {
-        setWorker(w);
-        // The last voice used here, else the team's own first voice.
-        const list = w.voices ?? [];
-        const pick = list.find((v) => v.id === saved) ?? list.find((v) => v.type === "element");
-        if (pick) setForm((f) => (f.voiceId ? f : { ...f, voiceId: pick.id }));
-      })
-      .catch(() => {});
+    Promise.all([
+      api<WorkerStatus>("/api/owner/hook-studio/status").catch(() => null),
+      api<{ voices: CartoonVoice[]; error: string | null }>("/api/owner/cartoon-hooks/voices").catch((e) => ({ voices: [] as CartoonVoice[], error: e instanceof Error ? e.message : "Could not load" })),
+    ]).then(([w, el]) => {
+      if (w) setWorker(w);
+      setElevenVoices(el.voices);
+      setElevenError(el.error);
+      // The last voice used here, else the team's first ElevenLabs voice, else their first Higgsfield voice.
+      const higgs = (w?.voices ?? []).map((v) => ({ provider: "higgsfield" as const, id: v.id, name: v.name, type: v.type }));
+      const all = [...el.voices, ...higgs];
+      const pick = all.find((v) => voiceKey(v) === saved) ?? el.voices[0] ?? higgs.find((v) => v.type === "element");
+      if (pick) setForm((f) => (f.voiceId ? f : { ...f, voiceId: voiceKey(pick) }));
+    });
   }, [refresh]);
 
   const working = !!hooks?.some((h) => h.status === "planning" || h.status === "working");
@@ -74,12 +82,13 @@ export function CartoonHooksList() {
     return () => clearInterval(t);
   }, [refresh, working]);
 
-  const voices = useMemo(() => worker?.voices ?? [], [worker]);
-  // Voices the team made on Higgsfield come first; the stock presets after.
-  const ownVoices = voices.filter((v) => v.type === "element");
-  const presetVoices = voices.filter((v) => v.type !== "element");
-  const voice = voices.find((v) => v.id === form.voiceId) ?? null;
-  const rough = roughEstimate(form.script, form.resolution, form.voiceOn);
+  // The team's own ElevenLabs voices (FOLIQ) first, then their Higgsfield voices, then Higgsfield's presets.
+  const higgsVoices = useMemo<CartoonVoice[]>(() => (worker?.voices ?? []).map((v) => ({ provider: "higgsfield", id: v.id, name: v.name, type: v.type })), [worker]);
+  const higgsOwn = higgsVoices.filter((v) => v.type === "element");
+  const higgsPresets = higgsVoices.filter((v) => v.type !== "element");
+  const voice = [...elevenVoices, ...higgsVoices].find((v) => voiceKey(v) === form.voiceId) ?? null;
+  // ElevenLabs lines are billed on the team's ElevenLabs plan, not in Higgsfield credits.
+  const rough = roughEstimate(form.script, form.resolution, form.voiceOn && voice?.provider === "higgsfield");
 
   const generate = async () => {
     setBusy(true);
@@ -93,6 +102,7 @@ export function CartoonHooksList() {
           style: form.style,
           resolution: form.resolution,
           voice_on: form.voiceOn,
+          voice_provider: voice?.provider ?? "higgsfield",
           voice_id: voice?.id ?? null,
           voice_type: voice?.type ?? null,
           voice_name: voice?.name ?? null,
@@ -200,26 +210,24 @@ export function CartoonHooksList() {
                   className={`${field} !py-1.5 text-xs`}
                 >
                   <option value="">Pick a voice…</option>
-                  {ownVoices.length > 0 && (
-                    <optgroup label="Your voices">
-                      {ownVoices.map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {v.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                  {presetVoices.length > 0 && (
-                    <optgroup label="Higgsfield presets">
-                      {presetVoices.map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {v.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
+                  {[
+                    { label: "Your ElevenLabs voices", list: elevenVoices },
+                    { label: "Your Higgsfield voices", list: higgsOwn },
+                    { label: "Higgsfield presets", list: higgsPresets },
+                  ]
+                    .filter((g) => g.list.length > 0)
+                    .map((g) => (
+                      <optgroup key={g.label} label={g.label}>
+                        {g.list.map((v) => (
+                          <option key={voiceKey(v)} value={voiceKey(v)}>
+                            {v.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
                 </select>
               )}
+              {form.voiceOn && elevenError && <p className="text-[11px] text-amber-300">Your ElevenLabs voices could not load: {elevenError}</p>}
               {!form.voiceOn && <p className="text-[11px] text-gray-600">Off: beats follow Claude&apos;s timing and the hook is silent, ready for your CapCut voiceover.</p>}
             </div>
             <div className="flex items-center gap-2">

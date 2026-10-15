@@ -3,6 +3,8 @@ import { isUuid } from "@/lib/remake/views";
 import { loadHook, redo, type Redo } from "@/lib/cartoon/views";
 
 export const dynamic = "force-dynamic";
+// A voice redo with the team's ElevenLabs voice is made in this request.
+export const maxDuration = 60;
 
 type Ctx = { params: Promise<{ id: string }> };
 

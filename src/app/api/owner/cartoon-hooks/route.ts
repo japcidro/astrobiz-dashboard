@@ -18,7 +18,7 @@ export async function GET() {
 }
 
 /**
- * POST — make hooks from a script: { script, style?, direction?, resolution?, voice_on?, voice_id?, voice_type?, voice_name?, variants?, batch_id? }.
+ * POST — make hooks from a script: { script, style?, direction?, resolution?, voice_on?, voice_provider?, voice_id?, voice_type?, voice_name?, variants?, batch_id? }.
  * Rows are saved in "planning" and returned at once; Claude plans them in the background and the Mac worker takes over.
  */
 export async function POST(request: Request) {
@@ -33,6 +33,7 @@ export async function POST(request: Request) {
     direction: str(b.direction),
     resolution: (b.resolution === "720p" ? "720p" : "480p") as CartoonResolution,
     voice_on: b.voice_on === true,
+    voice_provider: b.voice_provider === "elevenlabs" ? "elevenlabs" : "higgsfield",
     voice_id: str(b.voice_id) || null,
     voice_type: str(b.voice_type) || null,
     voice_name: str(b.voice_name) || null,
