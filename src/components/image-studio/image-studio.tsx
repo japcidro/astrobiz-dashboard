@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { STILL_CREDITS } from "@/lib/remake/engines";
 import type { ResultView, RunView, StudioPage } from "@/lib/image-studio/types";
-import { Button, ConfirmButton, Label, Panel, Pill, api, credits, timeAgo } from "@/components/hook-studio/ui";
+import { Button, ConfirmButton, Label, Panel, Pill, api, credits, downloadHref, timeAgo } from "@/components/hook-studio/ui";
 import { Lightbox } from "@/components/remake/clip-video";
 
 const field = "w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-purple-500";
@@ -401,7 +401,7 @@ export function ImageStudio() {
                             </button>
                           )}
                           {x.url && (
-                            <a href={x.url} download className="text-gray-300 hover:text-white inline-flex items-center gap-1">
+                            <a href={downloadHref(x.url, `${run.store ?? "ad"}-${x.idx + 1}`)} className="text-gray-300 hover:text-white inline-flex items-center gap-1" title="Full-size PNG">
                               <Download size={11} /> Download
                             </a>
                           )}

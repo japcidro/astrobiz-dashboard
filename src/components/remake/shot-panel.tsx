@@ -5,7 +5,7 @@ import { useState } from "react";
 import type { Quality } from "@/lib/hook-studio/engines";
 import { CLIP_ENGINES, STILL_CREDITS, clipEstimate, getClipEngine, veoLengthFor } from "@/lib/remake/engines";
 import { PRODUCT_FORMS, type BrandMode, type CastSource, type ProjectView, type ShotView, type VoiceGender } from "@/lib/remake/types";
-import { Button, Label, Panel, Pill, credits } from "@/components/hook-studio/ui";
+import { Button, Label, Panel, Pill, credits, downloadHref } from "@/components/hook-studio/ui";
 import { CastPicker } from "./cast-picker";
 import { ClipVideo, ComparePlayer, Lightbox } from "./clip-video";
 
@@ -356,7 +356,7 @@ export function ShotPanel({
             <ComparePlayer refSrc={shot.ref_url} ourSrc={result} ourLabel={shot.mixed_url ? "Ours + voiceover" : "Ours"} />
           </div>
           <div className="mt-1.5 flex items-center gap-3 text-[11px]">
-            <a href={result} download className="text-gray-300 hover:text-white inline-flex items-center gap-1" title="Free: saves the finished clip">
+            <a href={downloadHref(result, `${project.title || "clip"}-clip-${shot.idx + 1}`)} className="text-gray-300 hover:text-white inline-flex items-center gap-1" title="Free: saves the finished clip">
               <Download size={11} /> Download
             </a>
             {shot.clip_credits && swap ? <span className="text-gray-600">This render cost {credits(shot.clip_credits)}</span> : null}

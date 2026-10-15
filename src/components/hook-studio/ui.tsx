@@ -167,3 +167,22 @@ export async function api<T>(url: string, init?: RequestInit): Promise<T> {
   if (!res.ok) throw new Error(json.error || `Request failed (${res.status})`);
   return json;
 }
+
+/**
+ * A signed storage URL that downloads instead of opening: Supabase honours a
+ * `download=<file name>` query, which the browser's `download` attribute
+ * cannot do across origins. The extension comes from the stored file.
+ */
+export function downloadHref(url: string, name: string | null | undefined, ext?: string): string {
+  const base = (name || "file").replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "-").slice(0, 60) || "file";
+  let extension = ext;
+  if (!extension) {
+    try {
+      const m = new URL(url).pathname.match(/\.([a-z0-9]{2,5})$/i);
+      extension = m ? m[1].toLowerCase() : "bin";
+    } catch {
+      extension = "bin";
+    }
+  }
+  return `${url}${url.includes("?") ? "&" : "?"}download=${encodeURIComponent(`${base}.${extension}`)}`;
+}

@@ -8,7 +8,7 @@ import { CLIP_ENGINES, clipEstimate, getClipEngine } from "@/lib/remake/engines"
 import { DEFAULT_VOICE_PROFILE } from "@/lib/remake/prompts";
 import type { VoiceGender } from "@/lib/remake/types";
 import type { StartingImage, TalkingHeadEngine, TalkingHeadPage, TalkingHeadView } from "@/lib/talking-head/types";
-import { Button, ConfirmButton, Label, Panel, Pill, api, credits, timeAgo } from "@/components/hook-studio/ui";
+import { Button, ConfirmButton, Label, Panel, Pill, api, credits, downloadHref, timeAgo } from "@/components/hook-studio/ui";
 import { ClipVideo, Lightbox } from "@/components/remake/clip-video";
 
 const field = "w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-purple-500";
@@ -433,7 +433,7 @@ export function TalkingHeadStudio() {
                   </div>
                   <div className="flex items-center gap-2 text-[11px] mt-auto">
                     {r.clip_url && (
-                      <a href={r.clip_url} download className="text-gray-300 hover:text-white inline-flex items-center gap-1">
+                      <a href={downloadHref(r.clip_url, r.title)} className="text-gray-300 hover:text-white inline-flex items-center gap-1">
                         <Download size={11} /> Download
                       </a>
                     )}

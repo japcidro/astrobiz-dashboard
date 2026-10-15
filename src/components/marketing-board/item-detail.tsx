@@ -12,7 +12,7 @@ import {
   type Person,
   type SubmittedAdOption,
 } from "@/lib/marketing-board/types";
-import { Button, ConfirmButton, Label, api, timeAgo } from "@/components/hook-studio/ui";
+import { api, Button, ConfirmButton, downloadHref, Label, timeAgo } from "@/components/hook-studio/ui";
 import { AdPicker } from "./ad-picker";
 import { SourceBadge, fmtWhen, isFuture } from "./format";
 import { FbAdPlayer, ReferencePlayer, UploadPlayer } from "./players";
@@ -21,11 +21,6 @@ import { FbAdPlayer, ReferencePlayer, UploadPlayer } from "./players";
  * Supabase serves a signed URL as an attachment when `download=<name>` is
  * added, so the browser saves the file instead of playing it.
  */
-function downloadHref(url: string, title: string | null): string {
-  const base = (title || "reference").replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "-").slice(0, 60) || "reference";
-  return `${url}${url.includes("?") ? "&" : "?"}download=${encodeURIComponent(`${base}.mp4`)}`;
-}
-
 const field =
   "w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-purple-500";
 
