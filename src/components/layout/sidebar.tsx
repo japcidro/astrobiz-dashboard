@@ -41,6 +41,7 @@ import {
   ImagePlus,
   Smartphone,
   Kanban,
+  Megaphone,
   Film,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -57,6 +58,8 @@ interface NavItem {
   roles: UserRole[];
   comingSoon?: boolean;
   section?: string; // visual section header above this item
+  /** Only the owner (by email) sees it, whatever the role. */
+  ownerOnly?: boolean;
 }
 
 interface NavGroup {
@@ -64,6 +67,7 @@ interface NavGroup {
   icon: React.ReactNode;
   roles: UserRole[];
   children: NavItem[];
+  ownerOnly?: boolean;
 }
 
 type NavEntry = NavItem | NavGroup;
@@ -354,10 +358,10 @@ const navEntries: NavEntry[] = [
   },
 ];
 
-// The owner space's own navigation: add a page under
-// src/app/(owner)/owner/ and list it here. Roles are irrelevant in this
-// space (the layout already restricts it to the owner), so every entry
-// lists all of them.
+// The Development Dashboard's own navigation: add a page under
+// src/app/(owner)/owner/ and list it here. The layout already restricts the
+// space to the owner and the marketing team, so entries list every role;
+// `ownerOnly` hides an entry from the team.
 const ownerRoles: UserRole[] = ["admin", "va", "fulfillment", "marketing"];
 
 const ownerNavEntries: NavEntry[] = [
@@ -368,10 +372,25 @@ const ownerNavEntries: NavEntry[] = [
     roles: ownerRoles,
   },
   {
-    // The creative tooling behind the mobile app's ads.
+    // Tools the marketing team works in day to day.
+    label: "Marketing Tools",
+    icon: <Megaphone size={20} />,
+    roles: ownerRoles,
+    children: [
+      {
+        label: "Clipper",
+        href: "/owner/clipper",
+        icon: <Film size={18} />,
+        roles: ownerRoles,
+      },
+    ],
+  },
+  {
+    // The creative tooling behind the mobile app's ads. Owner only.
     label: "Mobile App",
     icon: <Smartphone size={20} />,
     roles: ownerRoles,
+    ownerOnly: true,
     children: [
       {
         label: "UGC Generator",
@@ -383,12 +402,6 @@ const ownerNavEntries: NavEntry[] = [
         label: "Hook Studio",
         href: "/owner/hook-studio",
         icon: <Clapperboard size={18} />,
-        roles: ownerRoles,
-      },
-      {
-        label: "Clipper",
-        href: "/owner/clipper",
-        icon: <Film size={18} />,
         roles: ownerRoles,
       },
     ],
@@ -413,7 +426,9 @@ const roleColors: Record<UserRole, string> = {
 interface SidebarProps {
   employeeName: string;
   employeeRole: UserRole;
-  /** Shows the space switch. Decided on the server from the signed-in email. */
+  /** Shows the Development Dashboard switch. Decided on the server (owner email or team role). */
+  devAccess?: boolean;
+  /** The owner by email: sees owner-only entries too. */
   isOwner?: boolean;
   space?: SidebarSpace;
 }
@@ -421,6 +436,7 @@ interface SidebarProps {
 export function Sidebar({
   employeeName,
   employeeRole,
+  devAccess = false,
   isOwner = false,
   space = "ops",
 }: SidebarProps) {
@@ -436,9 +452,8 @@ export function Sidebar({
     router.push(inOwnerSpace ? OPS_HOME : OWNER_HOME);
   };
 
-  const filteredEntries = entries.filter((entry) =>
-    entry.roles.includes(employeeRole)
-  );
+  const visible = (entry: NavEntry) => entry.roles.includes(employeeRole) && (!entry.ownerOnly || isOwner);
+  const filteredEntries = entries.filter(visible);
 
   // Auto-open group if current path matches a child
   const isGroupActive = (group: NavGroup) =>
@@ -476,13 +491,13 @@ export function Sidebar({
       <div className="shrink-0 p-6 border-b border-gray-800">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-bold text-white">Astrobiz</h1>
-          {isOwner && (
+          {devAccess && (
             <button
               type="button"
               role="switch"
               aria-checked={inOwnerSpace}
-              aria-label="Owner dashboard"
-              title={inOwnerSpace ? "Back to Operations" : "Open Owner Dashboard"}
+              aria-label="Development dashboard"
+              title={inOwnerSpace ? "Back to Operations" : "Open Development Dashboard"}
               onClick={switchSpace}
               className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950 ${
                 inOwnerSpace ? "bg-purple-600" : "bg-gray-700 hover:bg-gray-600"
@@ -497,7 +512,7 @@ export function Sidebar({
           )}
         </div>
         <p className="text-xs text-gray-500 mt-1">
-          {inOwnerSpace ? "Owner Dashboard" : "Operations Dashboard"}
+          {inOwnerSpace ? "Development Dashboard" : "Operations Dashboard"}
         </p>
       </div>
 
@@ -526,7 +541,7 @@ export function Sidebar({
                 {expanded && (
                   <div className="ml-4 mt-1 space-y-0.5">
                     {entry.children
-                      .filter((child) => child.roles.includes(employeeRole))
+                      .filter(visible)
                       .map((child) => {
                         // Check if another sibling has a longer matching href (prevents parent matching child)
                         const hasMoreSpecificSibling = entry.children.some(

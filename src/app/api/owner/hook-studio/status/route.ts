@@ -1,4 +1,4 @@
-import { requireOwner } from "@/lib/hook-studio/auth";
+import { requireBoardUser } from "@/lib/marketing-board/auth";
 import type { WorkerStatus } from "@/lib/hook-studio/types";
 
 export const dynamic = "force-dynamic";
@@ -8,9 +8,9 @@ const WORKER_STATUS_KEY = "hook_worker_status";
 /** The worker heartbeats every loop; two minutes of silence means offline. */
 const ONLINE_WINDOW_MS = 2 * 60 * 1000;
 
-/** GET — is the Mac worker alive, and how many jobs wait for it. */
+/** GET — is the Mac worker alive, and how many jobs wait for it. Shared by the Clipper and the board, so owner or marketing. */
 export async function GET() {
-  const auth = await requireOwner();
+  const auth = await requireBoardUser();
   if (auth.error) return auth.error;
   const { db } = auth;
 

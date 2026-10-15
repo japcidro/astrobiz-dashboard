@@ -3,8 +3,9 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { isOwnerEmail } from "@/lib/owner";
 
 /**
- * Owner-only gate for Hook Studio routes. Anyone else gets a 404, the same
- * answer the owner layout gives, so the routes don't reveal the feature.
+ * Owner-only gate for Hook Studio and UGC Generator routes (the Mobile App
+ * tab, hidden from the marketing team). Anyone else gets a 404, the same
+ * answer the layout gives, so the routes don't reveal the feature.
  * Returns a service-role client: the tables have no anon policies.
  */
 export async function requireOwner() {
