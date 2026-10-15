@@ -90,7 +90,7 @@ export interface StudioPage {
 }
 
 export const PRESETS: Array<{ id: PresetId; label: string; instruction: string; product: ProductMode; person: PersonMode; output: OutputMode }> = [
-  { id: "adapt", label: "Adapt this ad for FOLIQ", instruction: "Same layout, composition and vibe as the reference, but it is our brand: our person holds our product the way the original does. Keep the text placement; the headline is our text.", product: "in", person: "model", output: "single" },
+  { id: "adapt", label: "Adapt this ad for our brand", instruction: "Same layout, composition and vibe as the reference, but it is our brand: our person holds our product the way the original does. Keep the text placement; the headline is our text.", product: "in", person: "model", output: "single" },
   { id: "before_after", label: "Before & after scalp", instruction: "Close-up of a man's crown and hairline, overhead bathroom light, phone-camera realism. BEFORE: visibly thinning crown, scalp showing through. AFTER (90 days later): noticeably fuller, denser hair on the same head, same angle and lighting. No product, no face, no text.", product: "none", person: "none", output: "pair" },
   { id: "product_only", label: "Product shot, no person", instruction: "Our bottle on a clean bathroom counter next to a towel, soft morning window light, shallow depth of field, premium but real. Label straight to camera and fully readable.", product: "in", person: "none", output: "single" },
   { id: "model_only", label: "Model only", instruction: "Our person, candid phone selfie in a bright room, relaxed smile, looking at the camera, no product, no text.", product: "none", person: "model", output: "single" },

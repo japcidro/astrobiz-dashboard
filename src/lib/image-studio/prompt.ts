@@ -36,9 +36,9 @@ export function studioPrompt(i: PromptInput): string {
         case "reference":
           return `Image ${k} is a REFERENCE: copy its layout, composition, framing, pose and text placement; do not copy its people, products or brand names.`;
         case "model":
-          return `Image ${k} is our MODEL: the person in the output is this exact individual, with the same face, facial features, skin tone, hair and body. Do not use anyone else's face and do not blend faces.`;
+          return `Image ${k} is our MODEL: whenever a person appears in the output, it is this exact individual, with the same face, facial features, skin tone, hair and body. Do not use anyone else's face and do not blend faces.`;
         case "product":
-          return `Image ${k} is our PRODUCT: reproduce it exactly, same shape, colors and label, with every word of the label copied letter for letter, sharp and legible, nothing invented.`;
+          return `Image ${k} is our PRODUCT: whenever the product appears in the output, reproduce this one exactly, same shape, colors and label, with every word of the label copied letter for letter, sharp and legible, nothing invented, at its true real-world size relative to hands and faces.`;
         default:
           return `Image ${k} is a LOOK reference: use only its style, lighting, colors or subject matter; do not copy its people, products or text.`;
       }
@@ -49,14 +49,13 @@ export function studioPrompt(i: PromptInput): string {
   const hasModel = i.attachments.some((a) => a.role === "model");
   const hasProduct = i.attachments.some((a) => a.role === "product");
 
+  // Whether a person or a product appears is the instruction's (and the reference's) call; these only say who they are when they do.
   if (i.person_mode === "none") parts.push("No person appears in the image: no face, no body, no hands, unless the instruction explicitly asks for hands.");
-  else if (i.person_mode === "new") parts.push("The person is a new, attractive Filipino adult who looks nothing like anyone in the reference images.");
-  else if (hasModel) parts.push("The person is our model from the attached image, recognisably the same individual.");
-  else parts.push("If a person appears, they are a natural-looking Filipino adult; do not copy the face of anyone in the reference images.");
+  else if (!hasModel) parts.push("If a person appears, they are a natural-looking Filipino adult who looks nothing like anyone in the reference images; never copy a face from the references.");
 
   if (i.product_mode === "none") parts.push("No product, bottle, box or packaging appears; if the reference shows one, leave it out and rebuild the scene naturally.");
-  else if (hasProduct) parts.push("Our product from the attached product image appears at its true real-world size relative to hands and faces: a supplement bottle is palm-sized, fingers wrap most of the way around it; never enlarged to fill the frame.");
-  else parts.push("Any product shown is unbranded and generic; no readable brand names.");
+  else if (!hasProduct) parts.push("Any product shown is unbranded and generic; no readable brand names.");
+  else parts.push("The product appears where the instruction or the reference's layout calls for it, and never bigger than real life: a supplement bottle is palm-sized, fingers wrap most of the way around it.");
 
   const text = i.text_on_image.trim().replace(/"/g, "'");
   if (text) parts.push(`Render exactly this text on the image, letter for letter, nothing added: "${text}". ${i.text_style === "reference" ? "Match the reference's typography, size, colors and placement." : "Clean, modern, highly legible typography that suits the image."}`);

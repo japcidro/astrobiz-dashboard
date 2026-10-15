@@ -191,3 +191,17 @@ export async function describeProduct(db: SupabaseClient, url: string): Promise<
   if (!kind) return null;
   return { kind, description: typeof out?.description === "string" ? out.description.slice(0, 160) : "" };
 }
+
+/** The words printed on an ad or post image (headline first, then the rest), so they can be approved before a remake renders them. */
+export async function readImageText(db: SupabaseClient, url: string): Promise<{ text: string; has_text: boolean } | null> {
+  const img = await imageBlock(url);
+  if (!img) return null;
+  const out = await ask<{ has_text?: unknown; text?: unknown }>(
+    db,
+    `You transcribe the text printed on a social media image or ad. Return every piece of text that is part of the design (headline, subhead, bullets, captions, stickers), exactly as written, one line per block, biggest and most prominent first. Leave out watermarks, platform UI, and tiny legal print. If there is no designed text, has_text is false and text is "". Answer with JSON only.`,
+    [img, { type: "text", text: 'Answer with JSON only: {"has_text": boolean, "text": string}.' }],
+    600
+  );
+  if (!out) return null;
+  return { has_text: out.has_text === true, text: typeof out.text === "string" ? out.text.trim().slice(0, 600) : "" };
+}
