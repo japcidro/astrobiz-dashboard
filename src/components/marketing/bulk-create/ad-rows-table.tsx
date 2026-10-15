@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useState } from "react";
 import {
   Upload,
   X,
@@ -8,27 +8,25 @@ import {
   AlertCircle,
   Loader2,
   Plus,
+  Trash2,
+  Film,
+  Image as ImageIcon,
 } from "lucide-react";
 import { PresetPicker } from "./preset-picker";
+import {
+  baseFileName,
+  groupRows,
+  hasCreative,
+  makeEmptyRow,
+  resolveCopy,
+  type AdSetGroup,
+  type BulkAdRow,
+  type DefaultCopy,
+} from "./types";
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
 
 // ── Types ────────────────────────────────────────────────────────────────────
-
-export interface BulkAdRow {
-  id: string;
-  adset_name: string;
-  ad_name: string;
-  creative_type: "image" | "video";
-  image_hash: string | null;
-  video_id: string | null;
-  file_name: string | null;
-  primary_text: string;
-  headline: string;
-  description: string;
-  status: "pending" | "uploading" | "submitting" | "done" | "error";
-  error: string | null;
-}
 
 interface AdRowsTableProps {
   rows: BulkAdRow[];
@@ -37,11 +35,20 @@ interface AdRowsTableProps {
   // description). Null disables the picker with a hint to select a store.
   shopifyStoreId?: string | null;
   // False when every ad is going into one ad set the user already picked —
-  // there is no per-row ad set to name.
+  // there are no ad sets to name or group by.
   showAdsetName?: boolean;
+  // Section B's ad set name; a blank ad set name falls back to "<prefix> - N".
+  adsetNamePrefix: string;
+  // Shared copy that blank copy fields fall back to.
+  defaultCopy: DefaultCopy;
+  // Outline missing fields in red — only once the user tried to submit.
+  showErrors: boolean;
   onUpdateRow: (id: string, updates: Partial<BulkAdRow>) => void;
-  onAddRow: () => void;
+  onRenameGroup: (groupId: string, name: string) => void;
+  // Adds rows, each placed at the end of its ad set (new ad sets go last).
+  onAddRows: (rows: BulkAdRow[]) => void;
   onRemoveRow: (id: string) => void;
+  onRemoveGroup: (groupId: string) => void;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -203,22 +210,45 @@ async function runWithConcurrency<T>(
 
 // ── Component ────────────────────────────────────────────────────────────────
 
+// Where picked files should go: one ad's creative, more ads in one ad set,
+// or (top-level upload) empty ads first, then a new ad set per file.
+type UploadTarget =
+  | { kind: "row"; rowId: string }
+  | { kind: "group"; groupId: string }
+  | { kind: "new" };
+
+interface PlannedUpload {
+  file: File;
+  rowId: string;
+}
+
+const ACCEPT = "image/*,video/*";
+
 export function AdRowsTable({
   rows,
   adAccountId,
   shopifyStoreId,
   showAdsetName = true,
+  adsetNamePrefix,
+  defaultCopy,
+  showErrors,
   onUpdateRow,
-  onAddRow,
+  onRenameGroup,
+  onAddRows,
   onRemoveRow,
+  onRemoveGroup,
 }: AdRowsTableProps) {
-  const bulkInputRef = useRef<HTMLInputElement>(null);
-  const rowInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadTargetRef = useRef<UploadTarget>({ kind: "new" });
+
+  const groups = showAdsetName
+    ? groupRows(rows)
+    : // Everything goes into the one ad set picked above.
+      [{ group_id: rows[rows.length - 1]?.group_id ?? "", adset_name: "", rows }];
 
   // Upload a single file for a given row — detect type from file MIME
   const uploadFileForRow = useCallback(
     async (file: File, rowId: string, token: string) => {
-      onUpdateRow(rowId, { status: "uploading", error: null });
       const isVideo = file.type.startsWith("video/");
       try {
         if (isVideo) {
@@ -252,334 +282,594 @@ export function AdRowsTable({
     [adAccountId, onUpdateRow],
   );
 
-  // Bulk upload: match files to rows by position
-  const handleBulkUpload = useCallback(
-    async (files: FileList) => {
+  // Pair files with ads (creating ads where needed), show the local preview
+  // straight away, then upload to Facebook three at a time.
+  const handleFiles = useCallback(
+    async (files: File[], target: UploadTarget) => {
+      if (files.length === 0) return;
+
+      const planned: PlannedUpload[] = [];
+      const newRows: BulkAdRow[] = [];
+      const startRow = (row: BulkAdRow, file: File) => {
+        if (row.preview_url) URL.revokeObjectURL(row.preview_url);
+        onUpdateRow(row.id, {
+          status: "uploading",
+          error: null,
+          image_hash: null,
+          video_id: null,
+          file_name: file.name,
+          creative_type: file.type.startsWith("video/") ? "video" : "image",
+          preview_url: URL.createObjectURL(file),
+          ...(row.ad_name.trim() ? {} : { ad_name: baseFileName(file.name) }),
+        });
+        planned.push({ file, rowId: row.id });
+      };
+      const newRow = (file: File, groupId?: string, adsetName?: string) => {
+        const row = {
+          ...makeEmptyRow(groupId, adsetName),
+          status: "uploading" as const,
+          file_name: file.name,
+          creative_type: file.type.startsWith("video/")
+            ? ("video" as const)
+            : ("image" as const),
+          preview_url: URL.createObjectURL(file),
+          ad_name: baseFileName(file.name),
+        };
+        newRows.push(row);
+        planned.push({ file, rowId: row.id });
+      };
+
+      if (target.kind === "row") {
+        const row = rows.find((r) => r.id === target.rowId);
+        if (row) startRow(row, files[0]);
+      } else {
+        const scope =
+          target.kind === "group" && showAdsetName
+            ? rows.filter((r) => r.group_id === target.groupId)
+            : rows;
+        const empty = scope.filter(
+          (r) => !hasCreative(r) && r.status !== "uploading",
+        );
+        const group =
+          target.kind === "group" ? scope[scope.length - 1] : undefined;
+        files.forEach((file, i) => {
+          if (empty[i]) startRow(empty[i], file);
+          else if (target.kind === "group" || !showAdsetName)
+            newRow(file, group?.group_id ?? rows[rows.length - 1]?.group_id, group?.adset_name);
+          else newRow(file);
+        });
+      }
+
+      if (newRows.length > 0) onAddRows(newRows);
+
       let token: string;
       try {
         token = await fetchToken();
       } catch {
+        for (const p of planned)
+          onUpdateRow(p.rowId, { status: "error", error: "Failed to fetch token" });
         return;
       }
 
-      // Ensure enough rows exist
-      const needed = files.length - rows.length;
-      for (let i = 0; i < needed; i++) {
-        onAddRow();
-      }
-
-      // We need to reference the latest rows after adding.
-      // Since onAddRow is sync in state, we build a snapshot of row ids.
-      // The rows prop won't have updated yet in this closure, so we rely
-      // on the caller ensuring rows are in sync. We'll use what we have
-      // plus placeholders for new rows — the parent must provide stable ids.
-      // To handle this robustly, we defer to a microtask.
-      await new Promise((r) => setTimeout(r, 0));
-
-      // Build tasks — at this point rows may not reflect new additions yet,
-      // so we pair files with rows we know about and skip extras (parent
-      // should re-render before user interacts further).
-      const tasks: (() => Promise<void>)[] = [];
-      for (let i = 0; i < files.length; i++) {
-        const row = rows[i];
-        if (!row) continue;
-        const file = files[i];
-        tasks.push(() => uploadFileForRow(file, row.id, token));
-      }
-
-      await runWithConcurrency(tasks, 3);
+      await runWithConcurrency(
+        planned.map((p) => () => uploadFileForRow(p.file, p.rowId, token)),
+        3,
+      );
     },
-    [rows, onAddRow, uploadFileForRow],
+    [rows, showAdsetName, onUpdateRow, onAddRows, uploadFileForRow],
   );
 
-  // Per-row single file upload
-  const handleRowUpload = useCallback(
-    async (file: File, rowId: string) => {
-      let token: string;
-      try {
-        token = await fetchToken();
-      } catch {
-        onUpdateRow(rowId, { status: "error", error: "Failed to fetch token" });
-        return;
-      }
-      await uploadFileForRow(file, rowId, token);
-    },
-    [uploadFileForRow, onUpdateRow],
-  );
+  const pickFiles = (target: UploadTarget) => {
+    const input = fileInputRef.current;
+    if (!input) return;
+    uploadTargetRef.current = target;
+    input.multiple = target.kind !== "row";
+    input.click();
+  };
 
-  const accept = "image/*,video/*";
+  const adCount = rows.length;
+  const groupCount = showAdsetName ? groups.length : 1;
 
   return (
-    <div className="space-y-3">
-      {/* Bulk upload button */}
-      <div>
-        <input
-          ref={bulkInputRef}
-          type="file"
-          accept={accept}
-          multiple
-          className="hidden"
-          onChange={(e) => {
-            if (e.target.files && e.target.files.length > 0) {
-              handleBulkUpload(e.target.files);
-              e.target.value = "";
-            }
-          }}
+    <div className="space-y-4">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept={ACCEPT}
+        className="hidden"
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          e.target.value = "";
+          handleFiles(files, uploadTargetRef.current);
+        }}
+      />
+
+      {/* Summary + bulk upload */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-gray-400">
+          {showAdsetName ? (
+            <>
+              <span className="text-white font-medium">{groupCount}</span>{" "}
+              {groupCount === 1 ? "ad set" : "ad sets"} ·{" "}
+            </>
+          ) : null}
+          <span className="text-white font-medium">{adCount}</span>{" "}
+          {adCount === 1 ? "ad" : "ads"}
+        </p>
+        {showAdsetName && (
+          <button
+            type="button"
+            onClick={() => pickFiles({ kind: "new" })}
+            title="Fills ads that have no creative yet, then adds a new ad set for each extra file"
+            className="flex items-center gap-2 rounded-lg bg-gray-700 px-3 py-1.5 text-sm text-white hover:bg-gray-600 transition-colors cursor-pointer"
+          >
+            <Upload size={14} />
+            Upload creatives — 1 ad set each
+          </button>
+        )}
+      </div>
+
+      {groups.map((group, gi) => (
+        <AdSetCard
+          key={group.group_id || "all"}
+          group={group}
+          number={gi + 1}
+          showAdsetName={showAdsetName}
+          adsetNamePrefix={adsetNamePrefix}
+          defaultCopy={defaultCopy}
+          showErrors={showErrors}
+          shopifyStoreId={shopifyStoreId ?? null}
+          onUpdateRow={onUpdateRow}
+          onRenameGroup={onRenameGroup}
+          onRemoveRow={onRemoveRow}
+          onRemoveGroup={onRemoveGroup}
+          onAddAd={() =>
+            onAddRows([makeEmptyRow(group.group_id || undefined, group.adset_name)])
+          }
+          onPickFiles={pickFiles}
+          onDropFiles={handleFiles}
         />
+      ))}
+
+      {showAdsetName && (
         <button
           type="button"
-          onClick={() => bulkInputRef.current?.click()}
-          className="flex items-center gap-2 rounded bg-gray-700 px-3 py-1.5 text-sm text-white hover:bg-gray-600 transition-colors"
+          onClick={() => onAddRows([makeEmptyRow()])}
+          className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-gray-600 py-3 text-sm text-gray-400 hover:border-gray-500 hover:text-white transition-colors cursor-pointer"
         >
-          <Upload size={14} />
-          Upload Files
+          <Plus size={14} />
+          Add ad set
         </button>
+      )}
+    </div>
+  );
+}
+
+// ── Ad set card ──────────────────────────────────────────────────────────────
+
+function AdSetCard({
+  group,
+  number,
+  showAdsetName,
+  adsetNamePrefix,
+  defaultCopy,
+  showErrors,
+  shopifyStoreId,
+  onUpdateRow,
+  onRenameGroup,
+  onRemoveRow,
+  onRemoveGroup,
+  onAddAd,
+  onPickFiles,
+  onDropFiles,
+}: {
+  group: AdSetGroup;
+  number: number;
+  showAdsetName: boolean;
+  adsetNamePrefix: string;
+  defaultCopy: DefaultCopy;
+  showErrors: boolean;
+  shopifyStoreId: string | null;
+  onUpdateRow: (id: string, updates: Partial<BulkAdRow>) => void;
+  onRenameGroup: (groupId: string, name: string) => void;
+  onRemoveRow: (id: string) => void;
+  onRemoveGroup: (groupId: string) => void;
+  onAddAd: () => void;
+  onPickFiles: (target: UploadTarget) => void;
+  onDropFiles: (files: File[], target: UploadTarget) => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const fallbackName = `${adsetNamePrefix.trim() || "Ad set"} - ${number}`;
+  const count = group.rows.length;
+
+  return (
+    <section
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes("Files")) return;
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragging(false);
+        onDropFiles(Array.from(e.dataTransfer.files), {
+          kind: "group",
+          groupId: group.group_id,
+        });
+      }}
+      className={`rounded-xl border bg-gray-800/40 transition-colors ${
+        dragging ? "border-blue-500 bg-blue-500/5" : "border-gray-700"
+      }`}
+    >
+      {/* Header */}
+      <header className="flex flex-wrap items-center gap-3 border-b border-gray-700/60 px-4 py-3">
+        {showAdsetName ? (
+          <>
+            <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Ad set {number}
+            </span>
+            <input
+              type="text"
+              value={group.adset_name}
+              placeholder={fallbackName}
+              onChange={(e) => onRenameGroup(group.group_id, e.target.value)}
+              title={`Leave blank to name it "${fallbackName}"`}
+              className="min-w-0 flex-1 basis-56 rounded-lg border border-gray-600 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+            />
+          </>
+        ) : (
+          <span className="text-sm text-gray-300">
+            Going into the ad set selected in Setup
+          </span>
+        )}
+        <span className="text-xs text-gray-500">
+          {count} {count === 1 ? "ad" : "ads"}
+        </span>
+        {showAdsetName && (
+          <button
+            type="button"
+            onClick={() => onRemoveGroup(group.group_id)}
+            className="ml-auto rounded p-1.5 text-gray-500 hover:bg-gray-700 hover:text-red-400 transition-colors cursor-pointer"
+            title="Remove this ad set and its ads"
+          >
+            <Trash2 size={14} />
+          </button>
+        )}
+      </header>
+
+      {/* Ads */}
+      <div className="space-y-3 p-4">
+        {group.rows.map((row, ai) => (
+          <AdCard
+            key={row.id}
+            row={row}
+            number={ai + 1}
+            defaultCopy={defaultCopy}
+            showErrors={showErrors}
+            shopifyStoreId={shopifyStoreId}
+            onUpdate={(updates) => onUpdateRow(row.id, updates)}
+            onRemove={() => onRemoveRow(row.id)}
+            onPickFile={() => onPickFiles({ kind: "row", rowId: row.id })}
+            onDropFile={(file) =>
+              onDropFiles([file], { kind: "row", rowId: row.id })
+            }
+          />
+        ))}
+
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onAddAd}
+            className="flex items-center gap-1.5 rounded-lg bg-gray-700/70 px-3 py-1.5 text-xs text-gray-200 hover:bg-gray-600 transition-colors cursor-pointer"
+          >
+            <Plus size={13} />
+            Add ad{showAdsetName ? " to this ad set" : ""}
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              onPickFiles({ kind: "group", groupId: group.group_id })
+            }
+            className="flex items-center gap-1.5 rounded-lg bg-gray-700/70 px-3 py-1.5 text-xs text-gray-200 hover:bg-gray-600 transition-colors cursor-pointer"
+          >
+            <Upload size={13} />
+            Upload creatives{showAdsetName ? " into this ad set" : ""}
+          </button>
+          <span className="self-center text-[11px] text-gray-600">
+            or drop files on this card
+          </span>
+        </div>
       </div>
+    </section>
+  );
+}
 
-      {/* Table */}
-      <div className="overflow-x-auto rounded border border-gray-700">
-        <table className="w-full text-sm text-left">
-          <thead>
-            <tr className="border-b border-gray-700 bg-gray-800/80 text-gray-400 text-xs uppercase tracking-wide">
-              <th className="px-2 py-2 w-8">#</th>
-              {showAdsetName && (
-                <th className="px-2 py-2 w-44">Adset Name</th>
-              )}
-              <th className="px-2 py-2 w-36">Ad Name</th>
-              <th className="px-2 py-2 w-36">Creative</th>
-              <th className="px-2 py-2">Primary Text</th>
-              <th className="px-2 py-2 w-40">Headline</th>
-              <th className="px-2 py-2 w-40">Description</th>
-              <th className="px-2 py-2 w-10">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, idx) => (
-              <tr
-                key={row.id}
-                className="border-b border-gray-700 last:border-b-0"
-              >
-                {/* # */}
-                <td className="px-2 py-1.5 bg-gray-800/50 text-gray-500 text-center">
-                  {idx + 1}
-                </td>
+// ── Ad card ──────────────────────────────────────────────────────────────────
 
-                {/* Adset Name */}
-                {showAdsetName && (
-                  <td className="px-2 py-1.5 bg-gray-800/50">
-                    <input
-                      type="text"
-                      value={row.adset_name}
-                      placeholder={`Adset ${idx + 1}`}
-                      onChange={(e) =>
-                        onUpdateRow(row.id, { adset_name: e.target.value })
-                      }
-                      className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
-                        !row.adset_name.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
-                      }`}
-                    />
-                  </td>
-                )}
+const inputBase =
+  "w-full rounded-lg border bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none";
 
-                {/* Ad Name */}
-                <td className="px-2 py-1.5 bg-gray-800/50">
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-end">
-                      <PresetPicker
-                        kind="ad_name"
-                        storeId={shopifyStoreId ?? null}
-                        currentValue={row.ad_name}
-                        onApply={(content) =>
-                          onUpdateRow(row.id, {
-                            ad_name: content.slice(0, 80),
-                          })
-                        }
-                      />
-                    </div>
-                    <input
-                      type="text"
-                      value={row.ad_name}
-                      placeholder={`Ad ${idx + 1}`}
-                      onChange={(e) =>
-                        onUpdateRow(row.id, { ad_name: e.target.value })
-                      }
-                      className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
-                        !row.ad_name.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
-                      }`}
-                    />
-                  </div>
-                </td>
+function inputClass(invalid: boolean) {
+  return `${inputBase} ${
+    invalid
+      ? "border-red-500/60 focus:border-red-500"
+      : "border-gray-600 focus:border-blue-500"
+  }`;
+}
 
-                {/* Creative */}
-                <td className="px-2 py-1.5 bg-gray-800/50">
-                  <input
-                    ref={(el) => {
-                      rowInputRefs.current[row.id] = el;
-                    }}
-                    type="file"
-                    accept={accept}
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        handleRowUpload(file, row.id);
-                        e.target.value = "";
-                      }
-                    }}
-                  />
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-1.5">
-                      {row.status === "uploading" && (
-                        <Loader2 size={14} className="shrink-0 animate-spin text-blue-400" />
-                      )}
-                      {row.status === "done" && row.file_name && (
-                        <>
-                          <CheckCircle size={14} className="shrink-0 text-green-400" />
-                          <span className="truncate text-xs text-gray-300" title={row.file_name}>
-                            {row.file_name}
-                          </span>
-                        </>
-                      )}
-                      {row.status === "error" && (
-                        <span className="flex items-center gap-1" title={row.error ?? "Upload error"}>
-                          <AlertCircle size={14} className="shrink-0 text-red-400" />
-                          <span className="truncate text-xs text-red-400">
-                            {row.error ?? "Error"}
-                          </span>
-                        </span>
-                      )}
-                      {row.status === "pending" && !row.file_name && (
-                        <button
-                          type="button"
-                          onClick={() => rowInputRefs.current[row.id]?.click()}
-                          className="rounded bg-red-900/30 border border-red-500/50 px-2 py-0.5 text-xs text-red-300 hover:bg-red-900/50 transition-colors"
-                        >
-                          Upload required
-                        </button>
-                      )}
-                      {row.status === "error" && (
-                        <button
-                          type="button"
-                          onClick={() => rowInputRefs.current[row.id]?.click()}
-                          className="rounded bg-gray-700 px-2 py-0.5 text-xs text-gray-300 hover:bg-gray-600 transition-colors"
-                        >
-                          Retry
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </td>
-
-                {/* Primary Text */}
-                <td className="px-2 py-1.5 bg-gray-800/50">
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-end">
-                      <PresetPicker
-                        kind="primary_text"
-                        storeId={shopifyStoreId ?? null}
-                        currentValue={row.primary_text}
-                        onApply={(content) =>
-                          onUpdateRow(row.id, { primary_text: content })
-                        }
-                      />
-                    </div>
-                    <textarea
-                      rows={2}
-                      value={row.primary_text}
-                      placeholder="Primary text..."
-                      onChange={(e) =>
-                        onUpdateRow(row.id, { primary_text: e.target.value })
-                      }
-                      className={`w-full resize-none rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
-                        !row.primary_text.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
-                      }`}
-                    />
-                  </div>
-                </td>
-
-                {/* Headline */}
-                <td className="px-2 py-1.5 bg-gray-800/50">
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-end">
-                      <PresetPicker
-                        kind="headline"
-                        storeId={shopifyStoreId ?? null}
-                        currentValue={row.headline}
-                        onApply={(content) =>
-                          onUpdateRow(row.id, {
-                            headline: content.slice(0, 255),
-                          })
-                        }
-                      />
-                    </div>
-                    <input
-                      type="text"
-                      value={row.headline}
-                      placeholder="Headline"
-                      onChange={(e) =>
-                        onUpdateRow(row.id, { headline: e.target.value })
-                      }
-                      className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
-                        !row.headline.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
-                      }`}
-                    />
-                  </div>
-                </td>
-
-                {/* Description */}
-                <td className="px-2 py-1.5 bg-gray-800/50">
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-end">
-                      <PresetPicker
-                        kind="description"
-                        storeId={shopifyStoreId ?? null}
-                        currentValue={row.description}
-                        onApply={(content) =>
-                          onUpdateRow(row.id, { description: content })
-                        }
-                      />
-                    </div>
-                    <input
-                      type="text"
-                      value={row.description}
-                      placeholder="Description"
-                      onChange={(e) =>
-                        onUpdateRow(row.id, { description: e.target.value })
-                      }
-                      className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
-                        !row.description.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
-                      }`}
-                    />
-                  </div>
-                </td>
-
-                {/* Actions */}
-                <td className="px-2 py-1.5 bg-gray-800/50 text-center">
-                  <button
-                    type="button"
-                    onClick={() => onRemoveRow(row.id)}
-                    className="rounded p-1 text-gray-500 hover:bg-gray-700 hover:text-red-400 transition-colors"
-                    title="Remove row"
-                  >
-                    <X size={14} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+function Field({
+  label,
+  preset,
+  className = "",
+  children,
+}: {
+  label: string;
+  preset?: React.ReactNode;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={className}>
+      <div className="mb-1 flex h-5 items-center justify-between">
+        <span className="text-xs text-gray-400">{label}</span>
+        {preset}
       </div>
+      {children}
+    </div>
+  );
+}
 
-      {/* Add Row */}
+// Placeholder for a copy field: shows the shared default it will fall back to.
+function copyPlaceholder(fallback: string, empty: string) {
+  const text = fallback.trim();
+  if (!text) return empty;
+  return `Default: ${text.replace(/\s+/g, " ")}`;
+}
+
+function AdCard({
+  row,
+  number,
+  defaultCopy,
+  showErrors,
+  shopifyStoreId,
+  onUpdate,
+  onRemove,
+  onPickFile,
+  onDropFile,
+}: {
+  row: BulkAdRow;
+  number: number;
+  defaultCopy: DefaultCopy;
+  showErrors: boolean;
+  shopifyStoreId: string | null;
+  onUpdate: (updates: Partial<BulkAdRow>) => void;
+  onRemove: () => void;
+  onPickFile: () => void;
+  onDropFile: (file: File) => void;
+}) {
+  const copy = resolveCopy(row, defaultCopy);
+  const missing = {
+    ad_name: !row.ad_name.trim(),
+    creative: !hasCreative(row) && row.status !== "uploading",
+    primary_text: !copy.primary_text.trim(),
+    headline: !copy.headline.trim(),
+    description: !copy.description.trim(),
+  };
+  // A failed submit leaves status "error" on an ad that has its creative.
+  const submitError = row.status === "error" && hasCreative(row) ? row.error : null;
+
+  return (
+    <div className="relative rounded-lg border border-gray-700/60 bg-gray-900/40 p-3">
       <button
         type="button"
-        onClick={onAddRow}
-        className="flex items-center gap-1.5 rounded bg-gray-700 px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-600 transition-colors"
+        onClick={onRemove}
+        className="absolute right-2 top-2 rounded p-1 text-gray-500 hover:bg-gray-700 hover:text-red-400 transition-colors cursor-pointer"
+        title="Remove this ad"
       >
-        <Plus size={14} />
-        Add Row
+        <X size={14} />
       </button>
 
+      <div className="flex flex-col gap-4 sm:flex-row">
+        <CreativeTile
+          row={row}
+          invalid={showErrors && missing.creative}
+          onPick={onPickFile}
+          onDrop={onDropFile}
+        />
+
+        <div className="grid min-w-0 flex-1 grid-cols-1 gap-3 pr-6 md:grid-cols-2">
+          <Field
+            label={`Ad ${number} name`}
+            className="md:col-span-2"
+            preset={
+              <PresetPicker
+                kind="ad_name"
+                storeId={shopifyStoreId}
+                currentValue={row.ad_name}
+                onApply={(content) => onUpdate({ ad_name: content.slice(0, 80) })}
+              />
+            }
+          >
+            <input
+              type="text"
+              value={row.ad_name}
+              placeholder="Ad name"
+              onChange={(e) => onUpdate({ ad_name: e.target.value })}
+              className={inputClass(showErrors && missing.ad_name)}
+            />
+          </Field>
+
+          <Field
+            label="Primary text"
+            className="md:col-span-2"
+            preset={
+              <PresetPicker
+                kind="primary_text"
+                storeId={shopifyStoreId}
+                currentValue={row.primary_text}
+                onApply={(content) => onUpdate({ primary_text: content })}
+              />
+            }
+          >
+            <textarea
+              rows={3}
+              value={row.primary_text}
+              placeholder={copyPlaceholder(defaultCopy.primary_text, "Primary text…")}
+              onChange={(e) => onUpdate({ primary_text: e.target.value })}
+              className={`${inputClass(showErrors && missing.primary_text)} resize-y`}
+            />
+          </Field>
+
+          <Field
+            label="Headline"
+            preset={
+              <PresetPicker
+                kind="headline"
+                storeId={shopifyStoreId}
+                currentValue={row.headline}
+                onApply={(content) => onUpdate({ headline: content.slice(0, 255) })}
+              />
+            }
+          >
+            <input
+              type="text"
+              value={row.headline}
+              placeholder={copyPlaceholder(defaultCopy.headline, "Headline")}
+              onChange={(e) => onUpdate({ headline: e.target.value })}
+              className={inputClass(showErrors && missing.headline)}
+            />
+          </Field>
+
+          <Field
+            label="Description"
+            preset={
+              <PresetPicker
+                kind="description"
+                storeId={shopifyStoreId}
+                currentValue={row.description}
+                onApply={(content) => onUpdate({ description: content })}
+              />
+            }
+          >
+            <input
+              type="text"
+              value={row.description}
+              placeholder={copyPlaceholder(defaultCopy.description, "Description")}
+              onChange={(e) => onUpdate({ description: e.target.value })}
+              className={inputClass(showErrors && missing.description)}
+            />
+          </Field>
+        </div>
+      </div>
+
+      {submitError && (
+        <p className="mt-3 flex items-start gap-1.5 rounded-md bg-red-900/20 px-2.5 py-1.5 text-xs text-red-300">
+          <AlertCircle size={13} className="mt-px shrink-0" />
+          Facebook: {submitError}
+        </p>
+      )}
     </div>
+  );
+}
+
+// ── Creative tile ────────────────────────────────────────────────────────────
+
+function CreativeTile({
+  row,
+  invalid,
+  onPick,
+  onDrop,
+}: {
+  row: BulkAdRow;
+  invalid: boolean;
+  onPick: () => void;
+  onDrop: (file: File) => void;
+}) {
+  const uploading = row.status === "uploading";
+  const uploaded = hasCreative(row);
+  const uploadError = row.status === "error" && !uploaded;
+
+  return (
+    <button
+      type="button"
+      onClick={onPick}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes("Files")) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const file = e.dataTransfer.files[0];
+        if (file) onDrop(file);
+      }}
+      title={
+        uploaded
+          ? `${row.file_name ?? "Creative"} — click to replace`
+          : "Upload an image or video"
+      }
+      className={`group relative flex h-32 w-full shrink-0 flex-col items-center justify-center overflow-hidden rounded-lg border text-xs transition-colors cursor-pointer sm:w-32 ${
+        uploadError || invalid
+          ? "border-red-500/60 bg-red-900/10"
+          : row.preview_url
+          ? "border-gray-700 bg-gray-950"
+          : "border-dashed border-gray-600 bg-gray-900 hover:border-gray-500"
+      }`}
+    >
+      {row.preview_url &&
+        (row.creative_type === "video" ? (
+          <video
+            src={row.preview_url}
+            muted
+            playsInline
+            preload="metadata"
+            className={`absolute inset-0 h-full w-full object-cover ${uploading ? "opacity-40" : ""}`}
+          />
+        ) : (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={row.preview_url}
+            alt=""
+            className={`absolute inset-0 h-full w-full object-cover ${uploading ? "opacity-40" : ""}`}
+          />
+        ))}
+
+      {uploading ? (
+        <span className="relative flex flex-col items-center gap-1 text-blue-300">
+          <Loader2 size={18} className="animate-spin" />
+          Uploading…
+        </span>
+      ) : uploadError ? (
+        <span className="relative flex flex-col items-center gap-1 px-2 text-center text-red-300">
+          <AlertCircle size={16} />
+          <span className="line-clamp-2" title={row.error ?? undefined}>
+            {row.error ?? "Upload failed"}
+          </span>
+          <span className="text-[11px] text-gray-400 underline">Try again</span>
+        </span>
+      ) : uploaded ? (
+        <>
+          {!row.preview_url && (
+            <span className="relative flex flex-col items-center gap-1 px-2 text-center text-gray-300">
+              {row.creative_type === "video" ? <Film size={18} /> : <ImageIcon size={18} />}
+              <span className="line-clamp-2 break-all">{row.file_name}</span>
+            </span>
+          )}
+          <span className="absolute left-1.5 top-1.5 rounded-full bg-gray-900/80 p-0.5">
+            <CheckCircle size={14} className="text-green-400" />
+          </span>
+          <span className="absolute inset-x-0 bottom-0 bg-gray-900/80 py-1 text-center text-[11px] text-gray-200 opacity-0 transition-opacity group-hover:opacity-100">
+            Replace
+          </span>
+        </>
+      ) : (
+        <span className="flex flex-col items-center gap-1 text-gray-400">
+          <Upload size={18} />
+          Image or video
+        </span>
+      )}
+    </button>
   );
 }

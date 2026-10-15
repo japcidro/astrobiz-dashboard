@@ -368,8 +368,13 @@ export async function POST(request: Request) {
         .eq("id", draft_id);
     }
 
+    // Hand back whatever was already created, so a caller retrying the same
+    // ad (or adding more ads to the same ad set) reuses it instead of making
+    // a duplicate campaign or ad set on Facebook.
     return Response.json({
       error: message,
+      fb_campaign_id: fbCampaignId,
+      fb_adset_id: fbAdsetId,
       debug: { page_id: ad_data.page_id, ad_account_id, mode },
     }, { status: 500 });
   }

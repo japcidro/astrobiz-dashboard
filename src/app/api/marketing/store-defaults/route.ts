@@ -50,9 +50,30 @@ export async function GET(request: Request) {
   return NextResponse.json({ data });
 }
 
+const WRITABLE_FIELDS = [
+  "ad_account_id",
+  "page_id",
+  "page_name",
+  "pixel_id",
+  "website_url",
+  "url_parameters",
+  "default_cta",
+  "default_daily_budget",
+  "default_countries",
+  "default_age_min",
+  "default_age_max",
+  "default_primary_text",
+  "default_headline",
+  "default_description",
+  "campaign_name_pattern",
+  "adset_name_pattern",
+  "ad_name_pattern",
+] as const;
+
 // PUT /api/marketing/store-defaults
 //   Body: { shopify_store_id, ...fields }
-//   Upserts the single-row defaults for that store.
+//   Upserts the single-row defaults for that store. Fields left out of the
+//   body keep their saved value.
 export async function PUT(request: Request) {
   const employee = await getEmployee();
   if (!employee || !assertRole(employee.role)) {
@@ -69,25 +90,17 @@ export async function PUT(request: Request) {
     );
   }
 
-  const payload = {
+  // Only the fields the caller sent are written. A wizard that does not know
+  // about a column (the naming patterns, say) must not null it out on save;
+  // a new row falls back to the column defaults for anything not sent.
+  const payload: Record<string, unknown> = {
     shopify_store_id,
-    ad_account_id: body.ad_account_id ?? null,
-    page_id: body.page_id ?? null,
-    page_name: body.page_name ?? null,
-    pixel_id: body.pixel_id ?? null,
-    website_url: body.website_url ?? null,
-    url_parameters: body.url_parameters ?? null,
-    default_cta: body.default_cta ?? null,
-    default_daily_budget: body.default_daily_budget ?? null,
-    default_countries: body.default_countries ?? ["PH"],
-    default_age_min: body.default_age_min ?? 18,
-    default_age_max: body.default_age_max ?? 65,
-    campaign_name_pattern: body.campaign_name_pattern ?? null,
-    adset_name_pattern: body.adset_name_pattern ?? null,
-    ad_name_pattern: body.ad_name_pattern ?? null,
     updated_by: employee.id,
     updated_at: new Date().toISOString(),
   };
+  for (const field of WRITABLE_FIELDS) {
+    if (field in body) payload[field] = body[field];
+  }
 
   const supabase = await createClient();
   const { data, error } = await supabase

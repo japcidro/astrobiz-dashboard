@@ -1,5 +1,35 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-10-15: Bulk Create — several ads per ad set, and copy saved as a store default
+
+**Ad sets hold ads.** Section C is now a card per ad set with its ads
+inside, instead of one row per ad set. "Add ad to this ad set" or
+"Upload creatives into this ad set" (or dropping files on the card) puts
+two or more ads in one ad set; the first ad submitted creates the ad set
+and the rest join it. "Upload creatives — 1 ad set each" keeps the old
+one-file-one-ad-set behaviour. An unnamed ad set is called
+"[Section B Ad Set Name] - N". Each ad shows a thumbnail, and its name
+starts as the file name.
+
+**Default ad copy** is a real form now: any ad that leaves primary text,
+headline or description blank uses it (shown as the placeholder), so the
+"Fill Empty Rows" button is gone. "Save current as default" stores it with
+the store (`supabase/store-ad-defaults-copy-migration.sql`) and "Apply store
+defaults" brings it back — in the single-ad wizard too.
+
+**Fixes.**
+- Saving store defaults no longer blanks columns the wizard did not send
+  (the name patterns were nulled on every save).
+- "Retry Failed" reused nothing and created a whole new campaign in New
+  Campaign mode; it now adds to the campaign and ad sets already made. The
+  create endpoint returns the campaign / ad set ids on failure too.
+- New Campaign mode could add the ads to a campaign picked earlier in
+  Existing Campaign mode instead of creating one.
+- Uploading more files than rows dropped the extras silently.
+- The "Creative Type" Image/Video toggle did nothing (type comes from the
+  file) and is removed.
+- Missing fields are outlined only after you press Submit.
+
 ## 2026-10-15: UGC Generator from text, and a gender choice
 
 Jap needs male models for FOLIQ. The generator only ever kept the gender of

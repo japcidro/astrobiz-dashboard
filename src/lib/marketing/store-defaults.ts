@@ -24,6 +24,9 @@ export interface StoreAdDefaults {
   default_countries: string[];
   default_age_min: number | null;
   default_age_max: number | null;
+  default_primary_text: string | null;
+  default_headline: string | null;
+  default_description: string | null;
   campaign_name_pattern: string | null;
   adset_name_pattern: string | null;
   ad_name_pattern: string | null;

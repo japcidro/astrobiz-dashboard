@@ -3,21 +3,12 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Loader2, CheckCircle, AlertCircle, X } from "lucide-react";
 import type { CampaignFormData, AdSetFormData, AdFormData } from "@/lib/facebook/types";
-
-export interface BulkAdRow {
-  id: string;
-  adset_name: string;
-  ad_name: string;
-  creative_type: "image" | "video";
-  image_hash: string | null;
-  video_id: string | null;
-  file_name: string | null;
-  primary_text: string;
-  headline: string;
-  description: string;
-  status: "pending" | "uploading" | "submitting" | "done" | "error";
-  error: string | null;
-}
+import {
+  groupRows,
+  resolveCopy,
+  type BulkAdRow,
+  type DefaultCopy,
+} from "./types";
 
 interface BulkSubmissionProgressProps {
   rows: BulkAdRow[];
@@ -33,6 +24,7 @@ interface BulkSubmissionProgressProps {
   urlParameters: string;
   callToAction: string;
   shopifyStoreId: string | null;
+  defaultCopy: DefaultCopy;
   onUpdateRowStatus: (
     id: string,
     status: BulkAdRow["status"],
@@ -55,13 +47,26 @@ export function BulkSubmissionProgress({
   urlParameters,
   callToAction,
   shopifyStoreId,
+  defaultCopy,
   onUpdateRowStatus,
   onClose,
 }: BulkSubmissionProgressProps) {
   const [isRunning, setIsRunning] = useState(false);
   const hasStarted = useRef(false);
+  const usingExistingAdset = mode === "existing_adset";
+
+  // What Facebook has already created, kept across "Retry Failed" so a retry
+  // adds to the same campaign and ad sets instead of making new ones.
+  // A stale existing-campaign pick must not leak into "new" mode.
+  const campaignIdRef = useRef<string | null>(
+    mode === "new" ? null : existingCampaignId
+  );
+  const adsetIdsRef = useRef(new Map<string, string>());
+
+  const groups = groupRows(rows);
 
   const buildAdData = (row: BulkAdRow): AdFormData => ({
+    ...resolveCopy(row, defaultCopy),
     name: row.ad_name,
     page_id: pageId,
     page_name: pageName,
@@ -70,47 +75,45 @@ export function BulkSubmissionProgress({
     video_id: row.video_id,
     file_name: row.file_name,
     file_preview_url: null,
-    primary_text: row.primary_text,
-    headline: row.headline,
-    description: row.description,
     call_to_action: callToAction,
     website_url: websiteUrl,
     url_parameters: urlParameters,
   } as AdFormData);
 
-  const buildAdSetData = (row: BulkAdRow, index: number) => ({
-    ...adsetTemplate,
-    name: row.adset_name || `${adsetTemplate.name} - Creative ${index + 1}`,
-  });
+  // A blank ad set name falls back to "<prefix> - <ad set number>".
+  const buildAdSetData = (row: BulkAdRow) => {
+    const number = groups.findIndex((g) => g.group_id === row.group_id) + 1;
+    return {
+      ...adsetTemplate,
+      name: row.adset_name.trim() || `${adsetTemplate.name} - ${number}`,
+    };
+  };
 
   const submitRows = useCallback(
     async (targetRows: BulkAdRow[]) => {
       setIsRunning(true);
-      let fbCampaignId: string | null = existingCampaignId ?? null;
-      const usingExistingAdset = mode === "existing_adset";
 
-      for (let i = 0; i < targetRows.length; i++) {
-        const row = targetRows[i];
-        const isFirstEver =
-          i === 0 && mode === "new" && fbCampaignId === null;
-
+      for (const row of targetRows) {
         onUpdateRowStatus(row.id, "submitting");
 
-        try {
-          const effectiveMode = usingExistingAdset
-            ? "existing_adset"
-            : isFirstEver
-            ? "new"
-            : "existing_campaign";
-          const effectiveCampaignId = isFirstEver ? null : fbCampaignId;
-          const effectiveCampaignData = isFirstEver ? campaign : null;
-          // An existing ad set brings its own budget, schedule and targeting —
-          // sending a template would only invite Facebook to reject it.
-          const rowAdsetData = usingExistingAdset
-            ? null
-            : buildAdSetData(row, rows.findIndex((r) => r.id === row.id));
-          const rowAdData = buildAdData(row);
+        // The first ad of a group creates its ad set; the rest join it.
+        const adsetId = usingExistingAdset
+          ? existingAdsetId
+          : adsetIdsRef.current.get(row.group_id) ?? null;
+        const createCampaign = mode === "new" && !campaignIdRef.current;
+        const effectiveMode = adsetId
+          ? "existing_adset"
+          : createCampaign
+          ? "new"
+          : "existing_campaign";
+        const effectiveCampaignId = createCampaign ? null : campaignIdRef.current;
+        const effectiveCampaignData = createCampaign ? campaign : null;
+        // An existing ad set brings its own budget, schedule and targeting —
+        // sending a template would only invite Facebook to reject it.
+        const rowAdsetData = adsetId ? null : buildAdSetData(row);
+        const rowAdData = buildAdData(row);
 
+        try {
           // If a store is selected, create an ad_draft first so the
           // shopify_store_id is persisted against the fb_ad_id that the
           // create endpoint later stamps.
@@ -124,7 +127,7 @@ export function BulkSubmissionProgress({
                 name: row.ad_name || row.adset_name || "Bulk Ad",
                 mode: effectiveMode,
                 existing_campaign_id: effectiveCampaignId,
-                existing_adset_id: usingExistingAdset ? existingAdsetId : null,
+                existing_adset_id: adsetId,
                 campaign_data: effectiveCampaignData,
                 adset_data: rowAdsetData,
                 ad_data: rowAdData,
@@ -146,7 +149,7 @@ export function BulkSubmissionProgress({
             ad_account_id: adAccountId,
             mode: effectiveMode,
             existing_campaign_id: effectiveCampaignId,
-            existing_adset_id: usingExistingAdset ? existingAdsetId : null,
+            existing_adset_id: adsetId,
             campaign_data: effectiveCampaignData,
             adset_data: rowAdsetData,
             ad_data: rowAdData,
@@ -157,19 +160,21 @@ export function BulkSubmissionProgress({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
           });
+          const data = await res.json().catch(() => null);
 
-          if (!res.ok) {
-            const errBody = await res.json().catch(() => null);
-            throw new Error(
-              errBody?.error || errBody?.message || `HTTP ${res.status}`
-            );
+          // Remember what got created even when the ad itself failed, so the
+          // next ad in this group (or a retry) doesn't duplicate it.
+          if (!campaignIdRef.current && data?.fb_campaign_id) {
+            campaignIdRef.current = data.fb_campaign_id;
+          }
+          if (!usingExistingAdset && data?.fb_adset_id) {
+            adsetIdsRef.current.set(row.group_id, data.fb_adset_id);
           }
 
-          const data = await res.json();
-
-          // Capture campaign id from first successful response
-          if (!fbCampaignId && data.fb_campaign_id) {
-            fbCampaignId = data.fb_campaign_id;
+          if (!res.ok) {
+            throw new Error(
+              data?.error || data?.message || `HTTP ${res.status}`
+            );
           }
 
           onUpdateRowStatus(row.id, "done");
@@ -186,7 +191,6 @@ export function BulkSubmissionProgress({
     [
       adAccountId,
       mode,
-      existingCampaignId,
       existingAdsetId,
       campaign,
       adsetTemplate,
@@ -196,6 +200,7 @@ export function BulkSubmissionProgress({
       urlParameters,
       callToAction,
       shopifyStoreId,
+      defaultCopy,
     ]
   );
 
@@ -250,43 +255,52 @@ export function BulkSubmissionProgress({
           {completedCount} / {rows.length} processed
         </p>
 
-        {/* Row list */}
-        <div className="space-y-2 mb-4">
-          {rows.map((row) => (
-            <div key={row.id}>
-              <div className="flex items-center gap-2">
-                {row.status === "pending" && (
-                  <div className="w-4 h-4 rounded-full border border-gray-500" />
-                )}
-                {row.status === "uploading" && (
-                  <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
-                )}
-                {row.status === "submitting" && (
-                  <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
-                )}
-                {row.status === "done" && (
-                  <CheckCircle className="w-4 h-4 text-green-400" />
-                )}
-                {row.status === "error" && (
-                  <AlertCircle className="w-4 h-4 text-red-400" />
-                )}
-                <span
-                  className={`text-sm ${
-                    row.status === "error"
-                      ? "text-red-300"
-                      : row.status === "done"
-                      ? "text-green-300"
-                      : "text-gray-300"
-                  }`}
-                >
-                  {row.ad_name}
-                </span>
-              </div>
-              {row.status === "error" && row.error && (
-                <p className="text-xs text-red-400 ml-6 mt-0.5">
-                  {row.error}
+        {/* Ads, grouped by ad set */}
+        <div className="space-y-3 mb-4">
+          {groups.map((group, gi) => (
+            <div key={group.group_id}>
+              {!usingExistingAdset && (
+                <p className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                  {group.adset_name.trim() || `${adsetTemplate.name} - ${gi + 1}`}
                 </p>
               )}
+              <div className="space-y-1.5">
+                {group.rows.map((row) => (
+                  <div key={row.id}>
+                    <div className="flex items-center gap-2">
+                      {row.status === "pending" && (
+                        <div className="w-4 h-4 rounded-full border border-gray-500" />
+                      )}
+                      {(row.status === "uploading" ||
+                        row.status === "submitting") && (
+                        <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
+                      )}
+                      {row.status === "done" && (
+                        <CheckCircle className="w-4 h-4 text-green-400" />
+                      )}
+                      {row.status === "error" && (
+                        <AlertCircle className="w-4 h-4 text-red-400" />
+                      )}
+                      <span
+                        className={`text-sm ${
+                          row.status === "error"
+                            ? "text-red-300"
+                            : row.status === "done"
+                            ? "text-green-300"
+                            : "text-gray-300"
+                        }`}
+                      >
+                        {row.ad_name}
+                      </span>
+                    </div>
+                    {row.status === "error" && row.error && (
+                      <p className="text-xs text-red-400 ml-6 mt-0.5">
+                        {row.error}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
             </div>
           ))}
         </div>

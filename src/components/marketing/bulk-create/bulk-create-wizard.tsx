@@ -23,6 +23,15 @@ import {
 } from "@/lib/marketing/store-defaults";
 import { AdRowsTable } from "./ad-rows-table";
 import { BulkSubmissionProgress } from "./bulk-submission-progress";
+import {
+  EMPTY_COPY,
+  groupRows,
+  hasCreative,
+  makeEmptyRow,
+  resolveCopy,
+  type BulkAdRow,
+  type DefaultCopy,
+} from "./types";
 
 // ─── Types ───
 
@@ -55,21 +64,6 @@ function statusSuffix(effectiveStatus: string): string {
 
 type BulkMode = "new" | "existing_campaign" | "existing_adset";
 
-export interface BulkAdRow {
-  id: string;
-  adset_name: string;
-  ad_name: string;
-  creative_type: "image" | "video";
-  image_hash: string | null;
-  video_id: string | null;
-  file_name: string | null;
-  primary_text: string;
-  headline: string;
-  description: string;
-  status: "pending" | "uploading" | "submitting" | "done" | "error";
-  error: string | null;
-}
-
 // ─── CTA Options ───
 
 const CTA_OPTIONS: { value: CTAType; label: string }[] = [
@@ -88,23 +82,6 @@ function getTomorrowDate(): string {
   const d = new Date();
   d.setDate(d.getDate() + 1);
   return `${d.toISOString().split("T")[0]}T00:00:00+08:00`;
-}
-
-function makeEmptyRow(): BulkAdRow {
-  return {
-    id: crypto.randomUUID(),
-    adset_name: "",
-    ad_name: "",
-    creative_type: "image",
-    image_hash: null,
-    video_id: null,
-    file_name: null,
-    primary_text: "",
-    headline: "",
-    description: "",
-    status: "pending",
-    error: null,
-  };
 }
 
 // ─── Defaults ───
@@ -203,21 +180,20 @@ export function BulkCreateWizard() {
     "utm_source=facebook&utm_medium=paid"
   );
   const [callToAction, setCallToAction] = useState<CTAType>("SHOP_NOW");
-  const [creativeType, setCreativeType] = useState<"image" | "video">("image");
+  // Copy any ad falls back to where its own field is blank.
+  const [defaultCopy, setDefaultCopy] = useState<DefaultCopy>(EMPTY_COPY);
 
   // Section 0: Store (drives per-store autofill; nullable)
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
   const [, setSelectedStoreName] = useState<string | null>(null);
 
-  // Ad rows
-  const [rows, setRows] = useState<BulkAdRow[]>(() => [
-    makeEmptyRow(),
-    makeEmptyRow(),
-    makeEmptyRow(),
-  ]);
+  // Ad rows — one per ad, grouped into ad sets by group_id
+  const [rows, setRows] = useState<BulkAdRow[]>(() => [makeEmptyRow()]);
 
   // Section D: Submission
   const [submitting, setSubmitting] = useState(false);
+  // Missing fields are only outlined once the user has tried to submit.
+  const [showErrors, setShowErrors] = useState(false);
 
   // ─── Fetch accounts on mount ───
   useEffect(() => {
@@ -322,6 +298,11 @@ export function BulkCreateWizard() {
       if (d.website_url) setWebsiteUrl(d.website_url);
       if (d.url_parameters) setUrlParameters(d.url_parameters);
       if (d.default_cta) setCallToAction(d.default_cta);
+      setDefaultCopy((prev) => ({
+        primary_text: d.default_primary_text || prev.primary_text,
+        headline: d.default_headline || prev.headline,
+        description: d.default_description || prev.description,
+      }));
 
       setAdset((prev) => ({
         ...prev,
@@ -374,8 +355,8 @@ export function BulkCreateWizard() {
   );
 
   // Snapshot of the current wizard's shared fields, sent to the API when
-  // user clicks "Save current as default". Per-ad fields (row copy, files)
-  // are not saved — those are script/creative specific, not store defaults.
+  // user clicks "Save current as default". The default ad copy is saved;
+  // per-ad overrides and files are not — those are creative specific.
   const buildStoreDefaultsSnapshot = useCallback(() => {
     return {
       ad_account_id: adAccountId || null,
@@ -389,8 +370,19 @@ export function BulkCreateWizard() {
       default_countries: adset.targeting.geo_locations.countries,
       default_age_min: adset.targeting.age_min ?? null,
       default_age_max: adset.targeting.age_max ?? null,
+      // Blank copy is left out so it can't wipe copy saved earlier.
+      ...(defaultCopy.primary_text.trim() && {
+        default_primary_text: defaultCopy.primary_text,
+      }),
+      ...(defaultCopy.headline.trim() && {
+        default_headline: defaultCopy.headline,
+      }),
+      ...(defaultCopy.description.trim() && {
+        default_description: defaultCopy.description,
+      }),
     };
   }, [
+    defaultCopy,
     adAccountId,
     pageId,
     pageName,
@@ -410,12 +402,44 @@ export function BulkCreateWizard() {
     []
   );
 
-  const handleAddRow = useCallback(() => {
-    setRows((prev) => [...prev, makeEmptyRow()]);
+  // New rows land at the end of their ad set, so each ad set stays together;
+  // rows for a new ad set go at the end.
+  const handleAddRows = useCallback((newRows: BulkAdRow[]) => {
+    setRows((prev) => {
+      const next = [...prev];
+      for (const row of newRows) {
+        let at = -1;
+        next.forEach((r, i) => {
+          if (r.group_id === row.group_id) at = i;
+        });
+        if (at === -1) next.push(row);
+        else next.splice(at + 1, 0, row);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleRenameGroup = useCallback((groupId: string, name: string) => {
+    setRows((prev) =>
+      prev.map((r) => (r.group_id === groupId ? { ...r, adset_name: name } : r))
+    );
   }, []);
 
   const handleRemoveRow = useCallback((id: string) => {
-    setRows((prev) => prev.filter((r) => r.id !== id));
+    setRows((prev) => {
+      const row = prev.find((r) => r.id === id);
+      if (row?.preview_url) URL.revokeObjectURL(row.preview_url);
+      return prev.filter((r) => r.id !== id);
+    });
+  }, []);
+
+  const handleRemoveGroup = useCallback((groupId: string) => {
+    setRows((prev) => {
+      for (const r of prev)
+        if (r.group_id === groupId && r.preview_url)
+          URL.revokeObjectURL(r.preview_url);
+      return prev.filter((r) => r.group_id !== groupId);
+    });
   }, []);
 
   const handleUpdateRowStatus = useCallback(
@@ -432,15 +456,22 @@ export function BulkCreateWizard() {
   );
 
   // ─── Validation ───
-  const allRowsHaveCreatives = rows.length > 0 && rows.every((r) => !!r.image_hash || !!r.video_id);
-
-  const allRowsHaveAdsetName =
-    usingExistingAdset ||
-    (rows.length > 0 && rows.every((r) => !!r.adset_name.trim()));
+  const groups = groupRows(rows);
+  const adsetCount = usingExistingAdset ? 1 : groups.length;
+  const anyUploading = rows.some((r) => r.status === "uploading");
+  const allRowsHaveCreatives = rows.length > 0 && rows.every(hasCreative);
   const allRowsHaveAdName = rows.length > 0 && rows.every((r) => !!r.ad_name.trim());
-  const allRowsHaveCopy = rows.length > 0 && rows.every((r) =>
-    !!r.primary_text.trim() && !!r.headline.trim() && !!r.description.trim()
-  );
+  const allRowsHaveCopy =
+    rows.length > 0 &&
+    rows.every((r) => {
+      const c = resolveCopy(r, defaultCopy);
+      return !!c.primary_text.trim() && !!c.headline.trim() && !!c.description.trim();
+    });
+  // A blank ad set name falls back to "<Section B name> - N", so Section B's
+  // name is only needed when some ad set was left unnamed.
+  const needsAdsetPrefix =
+    !usingExistingAdset && groups.some((g) => !g.adset_name.trim());
+  const hasAdsetPrefix = !needsAdsetPrefix || !!adset.name?.trim();
 
   // Build missing items list for the submit section
   const missingItems: string[] = [];
@@ -450,25 +481,31 @@ export function BulkCreateWizard() {
   if (usingExistingAdset && !existingAdsetId) missingItems.push("Select an existing ad set");
   if (!pageId) missingItems.push("Select a Facebook Page");
   if (!websiteUrl) missingItems.push("Enter a website URL");
-  if (rows.length === 0) missingItems.push("Add at least one row");
-  if (!allRowsHaveAdsetName) missingItems.push("Enter adset name for every row");
-  if (!allRowsHaveAdName) missingItems.push("Enter ad name for every row");
-  if (!allRowsHaveCreatives) missingItems.push("Upload creative for every row");
-  if (!allRowsHaveCopy) missingItems.push("Enter primary text, headline, and description for every row");
-  if (!usingExistingAdset && !adset.name?.trim())
-    missingItems.push("Enter adset name prefix in Section B");
+  if (rows.length === 0) missingItems.push("Add at least one ad");
+  if (!hasAdsetPrefix)
+    missingItems.push("Name every ad set, or set an Ad Set Name in Section B to number them");
+  if (!allRowsHaveAdName) missingItems.push("Enter a name for every ad");
+  if (anyUploading) missingItems.push("Wait for uploads to finish");
+  else if (!allRowsHaveCreatives) missingItems.push("Upload a creative for every ad");
+  if (!allRowsHaveCopy)
+    missingItems.push("Fill primary text, headline and description — per ad or as the default copy");
 
   const canSubmit =
     !!adAccountId &&
     !!pageId &&
     !!websiteUrl &&
+    !anyUploading &&
     allRowsHaveCreatives &&
-    allRowsHaveAdsetName &&
+    hasAdsetPrefix &&
     allRowsHaveAdName &&
     allRowsHaveCopy &&
     (mode === "new" ? !!campaign.name : !!existingCampaignId) &&
-    (!usingExistingAdset || !!existingAdsetId) &&
-    (usingExistingAdset || !!adset.name?.trim());
+    (!usingExistingAdset || !!existingAdsetId);
+
+  const adsLabel = `${rows.length} ${rows.length === 1 ? "ad" : "ads"}`;
+  const submitLabel = usingExistingAdset
+    ? adsLabel
+    : `${adsLabel} in ${adsetCount} ${adsetCount === 1 ? "ad set" : "ad sets"}`;
 
   // ─── Loading / Error ───
   if (loading) {
@@ -581,9 +618,9 @@ export function BulkCreateWizard() {
             </div>
             <p className="text-gray-500 text-xs mt-2">
               {mode === "new"
-                ? "One new campaign, one new ad set per row."
+                ? "One new campaign. Each ad set in Section C is created in it, with one or more ads."
                 : mode === "existing_campaign"
-                ? "New ad sets under a campaign you already run."
+                ? "New ad sets, each with one or more ads, under a campaign you already run."
                 : "Every ad below goes into one ad set you already run — no new ad sets are created."}
             </p>
           </div>
@@ -678,9 +715,9 @@ export function BulkCreateWizard() {
         ) : (
         <Section title="B. Adset Template">
           <p className="text-gray-500 text-xs mb-4">
-            The &quot;Adset Name Prefix&quot; below will be used as the base
-            name. Each ad will be created under an adset named
-            &quot;[prefix] - Creative N&quot;.
+            Budget, schedule and targeting below apply to every ad set in
+            Section C. An ad set you leave unnamed there is called
+            &quot;[Ad Set Name] - N&quot;.
           </p>
           <StepAdset
             data={adset}
@@ -759,79 +796,52 @@ export function BulkCreateWizard() {
               </div>
             </div>
 
-            {/* Creative Type Toggle */}
-            <div>
-              <label className="block text-sm text-gray-400 mb-2">
-                Creative Type
-              </label>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setCreativeType("image")}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${
-                    creativeType === "image"
-                      ? "bg-white text-gray-900"
-                      : "bg-gray-700 text-gray-400 hover:text-white"
-                  }`}
-                >
-                  Image
-                </button>
-                <button
-                  onClick={() => setCreativeType("video")}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${
-                    creativeType === "video"
-                      ? "bg-white text-gray-900"
-                      : "bg-gray-700 text-gray-400 hover:text-white"
-                  }`}
-                >
-                  Video
-                </button>
-              </div>
-            </div>
           </div>
 
-          {/* Default Copy (fill all rows) */}
-          <div className="mb-4 bg-gray-700/20 border border-gray-700/50 rounded-lg p-4">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-sm text-gray-400">Default ad copy (optional — fills all empty rows)</p>
-              <button
-                type="button"
-                onClick={() => {
-                  const defaultText = (document.getElementById("bulk-default-text") as HTMLTextAreaElement)?.value || "";
-                  const defaultHeadline = (document.getElementById("bulk-default-headline") as HTMLInputElement)?.value || "";
-                  const defaultDesc = (document.getElementById("bulk-default-desc") as HTMLInputElement)?.value || "";
-                  setRows((prev) =>
-                    prev.map((r) => ({
-                      ...r,
-                      primary_text: r.primary_text || defaultText,
-                      headline: r.headline || defaultHeadline,
-                      description: r.description || defaultDesc,
-                    }))
-                  );
-                }}
-                className="text-xs bg-gray-600 hover:bg-gray-500 text-white px-3 py-1 rounded transition-colors cursor-pointer"
-              >
-                Fill Empty Rows
-              </button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <textarea
-                id="bulk-default-text"
-                rows={2}
-                placeholder="Default primary text..."
-                className="rounded border border-gray-600 bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none resize-none"
-              />
-              <input
-                id="bulk-default-headline"
-                type="text"
-                placeholder="Default headline..."
-                className="rounded border border-gray-600 bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
-              />
-              <input
-                id="bulk-default-desc"
-                type="text"
-                placeholder="Default description..."
-                className="rounded border border-gray-600 bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
-              />
+          {/* Default Copy */}
+          <div className="mb-6 bg-gray-700/20 border border-gray-700/50 rounded-lg p-4">
+            <p className="text-sm text-white font-medium">Default ad copy</p>
+            <p className="text-xs text-gray-500 mt-0.5 mb-3">
+              Any ad that leaves a field blank uses this. Saved with the
+              store&apos;s defaults.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="md:col-span-2 block">
+                <span className="block text-xs text-gray-400 mb-1">Primary text</span>
+                <textarea
+                  rows={3}
+                  value={defaultCopy.primary_text}
+                  onChange={(e) =>
+                    setDefaultCopy((prev) => ({ ...prev, primary_text: e.target.value }))
+                  }
+                  placeholder="Default primary text…"
+                  className="w-full rounded-lg border border-gray-600 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none resize-y"
+                />
+              </label>
+              <label className="block">
+                <span className="block text-xs text-gray-400 mb-1">Headline</span>
+                <input
+                  type="text"
+                  value={defaultCopy.headline}
+                  onChange={(e) =>
+                    setDefaultCopy((prev) => ({ ...prev, headline: e.target.value }))
+                  }
+                  placeholder="Default headline…"
+                  className="w-full rounded-lg border border-gray-600 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+                />
+              </label>
+              <label className="block">
+                <span className="block text-xs text-gray-400 mb-1">Description</span>
+                <input
+                  type="text"
+                  value={defaultCopy.description}
+                  onChange={(e) =>
+                    setDefaultCopy((prev) => ({ ...prev, description: e.target.value }))
+                  }
+                  placeholder="Default description…"
+                  className="w-full rounded-lg border border-gray-600 bg-gray-900 px-3 py-1.5 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+                />
+              </label>
             </div>
           </div>
 
@@ -839,9 +849,14 @@ export function BulkCreateWizard() {
           <AdRowsTable
             rows={rows}
             showAdsetName={!usingExistingAdset}
+            adsetNamePrefix={adset.name ?? ""}
+            defaultCopy={defaultCopy}
+            showErrors={showErrors}
             onUpdateRow={handleUpdateRow}
-            onAddRow={handleAddRow}
+            onRenameGroup={handleRenameGroup}
+            onAddRows={handleAddRows}
             onRemoveRow={handleRemoveRow}
+            onRemoveGroup={handleRemoveGroup}
             adAccountId={adAccountId}
             shopifyStoreId={selectedStoreId}
           />
@@ -851,22 +866,29 @@ export function BulkCreateWizard() {
         <div className="bg-gray-800/30 border border-gray-700/50 rounded-xl p-6 mt-6">
           <div className="flex items-center gap-4">
             <button
-              disabled={!canSubmit}
-              onClick={() => setSubmitting(true)}
-              className={`px-6 py-3 rounded-lg text-sm font-semibold transition-colors ${
+              onClick={() => {
+                if (canSubmit) setSubmitting(true);
+                else setShowErrors(true);
+              }}
+              className={`shrink-0 px-6 py-3 rounded-lg text-sm font-semibold transition-colors cursor-pointer ${
                 canSubmit
-                  ? "bg-white text-gray-900 hover:bg-gray-200 cursor-pointer"
-                  : "bg-gray-700 text-gray-500 cursor-not-allowed"
+                  ? "bg-white text-gray-900 hover:bg-gray-200"
+                  : "bg-gray-700 text-gray-400 hover:bg-gray-600"
               }`}
             >
-              Submit All to Facebook ({rows.length} ads)
+              Submit to Facebook ({submitLabel})
             </button>
             {!canSubmit && (
               <div className="text-xs space-y-0.5">
                 {missingItems.length > 0 ? (
                   missingItems.map((item) => (
-                    <p key={item} className="text-red-400 flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
+                    <p
+                      key={item}
+                      className={`flex items-center gap-1.5 ${showErrors ? "text-red-400" : "text-gray-400"}`}
+                    >
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${showErrors ? "bg-red-400" : "bg-gray-500"}`}
+                      />
                       {item}
                     </p>
                   ))
@@ -876,7 +898,7 @@ export function BulkCreateWizard() {
               </div>
             )}
             {canSubmit && (
-              <p className="text-green-400 text-xs">Ready to submit {rows.length} ads</p>
+              <p className="text-green-400 text-xs">Ready to submit {submitLabel}</p>
             )}
           </div>
         </div>
@@ -898,6 +920,7 @@ export function BulkCreateWizard() {
           urlParameters={urlParameters}
           callToAction={callToAction}
           shopifyStoreId={selectedStoreId}
+          defaultCopy={defaultCopy}
           onClose={() => setSubmitting(false)}
           onUpdateRowStatus={handleUpdateRowStatus}
         />

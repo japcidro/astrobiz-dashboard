@@ -2331,6 +2331,9 @@ export type Database = {
           default_age_min: number | null
           default_countries: string[]
           default_cta: string | null
+          default_description: string | null
+          default_headline: string | null
+          default_primary_text: string | null
           default_daily_budget: number | null
           id: string
           page_id: string | null
@@ -2352,6 +2355,9 @@ export type Database = {
           default_age_min?: number | null
           default_countries?: string[]
           default_cta?: string | null
+          default_description?: string | null
+          default_headline?: string | null
+          default_primary_text?: string | null
           default_daily_budget?: number | null
           id?: string
           page_id?: string | null
@@ -2373,6 +2379,9 @@ export type Database = {
           default_age_min?: number | null
           default_countries?: string[]
           default_cta?: string | null
+          default_description?: string | null
+          default_headline?: string | null
+          default_primary_text?: string | null
           default_daily_budget?: number | null
           id?: string
           page_id?: string | null

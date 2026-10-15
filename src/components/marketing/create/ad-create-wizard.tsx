@@ -253,6 +253,10 @@ export function AdCreateWizard() {
           website_url: d.website_url ?? state.ad.website_url,
           url_parameters: d.url_parameters ?? state.ad.url_parameters,
           call_to_action: d.default_cta ?? state.ad.call_to_action,
+          // Copy only fills blanks — never replaces what was typed.
+          primary_text: state.ad.primary_text || d.default_primary_text || "",
+          headline: state.ad.headline || d.default_headline || "",
+          description: state.ad.description || d.default_description || "",
         },
       });
     },
@@ -272,6 +276,14 @@ export function AdCreateWizard() {
       default_countries: state.adset.targeting.geo_locations.countries,
       default_age_min: state.adset.targeting.age_min ?? null,
       default_age_max: state.adset.targeting.age_max ?? null,
+      // Blank copy is left out so it can't wipe copy saved earlier.
+      ...(state.ad.primary_text?.trim() && {
+        default_primary_text: state.ad.primary_text,
+      }),
+      ...(state.ad.headline?.trim() && { default_headline: state.ad.headline }),
+      ...(state.ad.description?.trim() && {
+        default_description: state.ad.description,
+      }),
     };
   }, [state]);
 

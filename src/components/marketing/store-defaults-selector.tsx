@@ -68,8 +68,8 @@ export function StoreDefaultsSelector({
         <StoreIcon size={16} className="text-gray-400" />
         <h3 className="text-sm font-semibold text-white">Store</h3>
         <span className="text-[11px] text-gray-500">
-          Picks pre-fill Page, pixel, URL, CTA, targeting. Doesn&apos;t
-          overwrite anything until you click Apply.
+          Picks pre-fill Page, pixel, URL, CTA, targeting and ad copy.
+          Doesn&apos;t overwrite anything until you click Apply.
         </span>
       </div>
 
@@ -101,7 +101,7 @@ export function StoreDefaultsSelector({
               ? "Pick a store first"
               : !hasDefaultsSaved
                 ? "No defaults saved yet for this store"
-                : "Fill Page, pixel, URL, CTA, targeting from saved defaults"
+                : "Fill Page, pixel, URL, CTA, targeting and ad copy from saved defaults"
           }
           className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-600/80 hover:bg-blue-600 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white font-medium transition-colors cursor-pointer"
         >
@@ -116,7 +116,7 @@ export function StoreDefaultsSelector({
           title={
             !selectedStoreId
               ? "Pick a store first"
-              : "Save the current Page / pixel / URL / CTA / targeting as this store's default"
+              : "Save the current Page / pixel / URL / CTA / targeting / ad copy as this store's default"
           }
           className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium transition-colors cursor-pointer"
         >
