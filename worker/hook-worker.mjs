@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
-const VERSION = "1.5.0";
+const VERSION = "1.6.0";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // ─── Config ───
@@ -429,12 +429,52 @@ async function remakeFrames(job, dir) {
   return `${rows.length} clips refreshed`;
 }
 
+/**
+ * Wait for a submitted Higgsfield job by asking for it every few seconds.
+ * `generate wait` was seen hanging after a network drop long after the job
+ * had finished; each `generate get` has its own short timeout instead.
+ */
+async function pollHiggsfieldJob(jobId, timeoutMs = 30 * 60_000) {
+  const until = Date.now() + timeoutMs;
+  let last = "";
+  while (Date.now() < until) {
+    const g = await run(HF, ["generate", "get", jobId, "--json"], { timeoutMs: 60_000 });
+    try {
+      const d = JSON.parse(g.out);
+      const status = String(d.status ?? "");
+      if (status === "completed") {
+        const found = findResultUrl(g.out);
+        if (found) return found;
+        throw new Error(`Higgsfield job ${jobId} finished without a result`);
+      }
+      if (/fail|nsfw|cancel|error|reject/i.test(status)) throw new Error(`Higgsfield job ${jobId} ${status}${d.error ? `: ${String(d.error).slice(0, 300)}` : ""}`);
+    } catch (e) {
+      if (e instanceof SyntaxError) last = (g.err || g.out).trim().slice(-300);
+      else throw e;
+    }
+    await new Promise((r) => setTimeout(r, 8_000));
+  }
+  throw new Error(`Higgsfield job ${jobId} still not done after ${Math.round(timeoutMs / 60_000)} min${last ? ` (${last})` : ""}`);
+}
+
 /** Run a CLI generation and bring the result file home. */
 async function generateToFile(job, args, dir) {
   const estimate = await estimateCredits(args);
   await updateJob(job.id, { estimate_credits: estimate, cli_command: redactCommand(args) });
   // Submit without waiting, give the slot back while Higgsfield renders, then wait on the job id.
-  const c = await run(HF, ["generate", "create", ...args, "--json"], { timeoutMs: 10 * 60_000 });
+  // The account runs at most 8 renders at once; past that the CLI answers rate_limit_reached,
+  // so wait (without holding a slot) and submit again.
+  let c;
+  for (let attempt = 0; ; attempt++) {
+    c = await run(HF, ["generate", "create", ...args, "--json"], { timeoutMs: 10 * 60_000 });
+    if (!/rate_limit_reached/.test(c.out + c.err) || attempt >= 90) break;
+    releaseSlot();
+    try {
+      await new Promise((r) => setTimeout(r, 20_000));
+    } finally {
+      await acquireSlot();
+    }
+  }
   let found = c.code === 0 ? findResultUrl(c.out) : null;
   if (!found) {
     const jobId = c.code === 0 ? findJobId(c.out) : null;
@@ -444,16 +484,10 @@ async function generateToFile(job, args, dir) {
     }
     await updateJob(job.id, { cli_job_id: jobId });
     releaseSlot();
-    let w;
     try {
-      w = await run(HF, ["generate", "wait", jobId, "--timeout", "30m", "--interval", "5s", "--quiet", "--json"]);
+      found = await pollHiggsfieldJob(jobId);
     } finally {
       await acquireSlot();
-    }
-    found = findResultUrl(w.out) || findResultUrl(w.err);
-    if (w.code !== 0 || !found) {
-      const tail = (w.err || w.out).trim().split("\n").slice(-6).join("\n").slice(-600);
-      throw new Error(tail || `Higgsfield job ${jobId} finished without a result`);
     }
     found.id = found.id ?? jobId;
   }
@@ -533,6 +567,219 @@ async function talkingHead(job, dir) {
   return r;
 }
 
+// ─── Cartoon Hooks ───
+// The app plans a hook (Claude writes each beat's prompts) and resets steps for
+// redos; this worker is the orchestrator. cartoonAdvance queues every step whose
+// status is null and whose inputs are ready: character image → starting image
+// per beat (Seedream 5.0 Flash, with the character as reference) → clip per beat
+// (Seedance 2.0 Mini) and voiceover per beat (ElevenLabs) → the joined hook.
+// Mirror of src/lib/cartoon/engines.ts.
+const CARTOON_IMAGE = "seedream_5_0_flash";
+const CARTOON_CLIP = "seedance_2_0_mini";
+const cartoonClipSeconds = (s) => Math.min(15, Math.max(4, Math.ceil(Number(s) + 0.3)));
+const CARTOON_W = 720;
+const CARTOON_H = 1280;
+
+const updateCartoonHook = (id, patch) =>
+  rest(`/cartoon_hooks?id=eq.${id}`, { method: "PATCH", body: patch, headers: { Prefer: "return=minimal" } });
+const updateCartoonBeat = (id, patch) =>
+  rest(`/cartoon_beats?id=eq.${id}`, { method: "PATCH", body: patch, headers: { Prefer: "return=minimal" } });
+
+/** Move a step from null (not started) to queued, only if nobody else did; true when this call won. */
+async function claimCartoonStep(table, id, step) {
+  const rows = await rest(`/${table}?id=eq.${id}&${step}_status=is.null`, {
+    method: "PATCH",
+    body: { [`${step}_status`]: "queued", [`${step}_error`]: null },
+    headers: { Prefer: "return=representation" },
+  });
+  return Array.isArray(rows) && rows.length > 0;
+}
+
+async function queueCartoonStep(table, id, step, kind, engine, params) {
+  if (!(await claimCartoonStep(table, id, step))) return;
+  try {
+    await rest("/hook_studio_jobs", { method: "POST", body: { kind, engine, status: "queued", params }, headers: { Prefer: "return=minimal" } });
+  } catch (e) {
+    await rest(`/${table}?id=eq.${id}`, { method: "PATCH", body: { [`${step}_status`]: null }, headers: { Prefer: "return=minimal" } }).catch(() => {});
+    throw e;
+  }
+}
+
+async function cartoonAdvance(hookId) {
+  const hook = (await rest(`/cartoon_hooks?id=eq.${hookId}&select=*`))?.[0];
+  if (!hook || hook.status !== "working") return;
+  const beats = (await rest(`/cartoon_beats?hook_id=eq.${hookId}&select=*&order=idx`)) ?? [];
+  if (beats.length === 0) return;
+
+  if (hook.character_prompt && hook.character_status === null) {
+    await queueCartoonStep("cartoon_hooks", hook.id, "character", "cartoon_character", CARTOON_IMAGE, { hook_id: hook.id, prompt: hook.character_prompt });
+  }
+  const characterReady = !hook.character_prompt || (hook.character_status === "done" && hook.character_path);
+  for (const b of beats) {
+    if (b.still_status === null && (!b.uses_character || characterReady)) {
+      await queueCartoonStep("cartoon_beats", b.id, "still", "cartoon_still", CARTOON_IMAGE, {
+        hook_id: hook.id,
+        beat_id: b.id,
+        prompt: b.still_prompt,
+        character_path: b.uses_character && hook.character_prompt ? hook.character_path : null,
+      });
+    }
+    if (b.still_status === "done" && b.still_path && b.clip_status === null) {
+      await queueCartoonStep("cartoon_beats", b.id, "clip", "cartoon_clip", CARTOON_CLIP, {
+        hook_id: hook.id,
+        beat_id: b.id,
+        prompt: b.motion_prompt,
+        still_path: b.still_path,
+        duration: cartoonClipSeconds(b.seconds),
+        resolution: hook.resolution === "720p" ? "720p" : "480p",
+      });
+    }
+    if (hook.voice_on && hook.voice_id && b.voice_status === null && b.line.trim()) {
+      await queueCartoonStep("cartoon_beats", b.id, "voice", "cartoon_voice", "elevenlabs_v4", {
+        hook_id: hook.id,
+        beat_id: b.id,
+        text: b.line,
+        voice_id: hook.voice_id,
+        voice_type: hook.voice_type,
+      });
+    }
+  }
+  const clipsDone = beats.every((b) => b.clip_status === "done" && b.clip_path);
+  const voicesSettled = !hook.voice_on || beats.every((b) => !b.line.trim() || b.voice_status === "done" || b.voice_status === "failed");
+  if (clipsDone && voicesSettled && hook.final_status === null) {
+    await queueCartoonStep("cartoon_hooks", hook.id, "final", "cartoon_join", "ffmpeg", { hook_id: hook.id });
+  }
+}
+
+/** Every hook still being made gets its next steps queued; runs from the main loop. */
+let lastCartoonSweep = 0;
+async function cartoonSweep() {
+  if (Date.now() - lastCartoonSweep < 10_000) return;
+  lastCartoonSweep = Date.now();
+  const hooks = (await rest("/cartoon_hooks?status=eq.working&select=id&order=created_at&limit=50")) ?? [];
+  for (const h of hooks) {
+    await cartoonAdvance(h.id).catch((e) => log(`cartoon ${h.id} advance: ${e.message}`));
+  }
+}
+
+/** A JPEG for thumbnails; the engines get the full image. */
+async function cartoonPreview(src, dir, path) {
+  const previewFile = join(dir, "preview.jpg");
+  const pv = await run(FFMPEG, ["-y", "-loglevel", "error", "-i", src, "-vf", "scale='min(720,iw)':-2", "-q:v", "3", previewFile], { timeoutMs: 60_000 });
+  if (pv.code !== 0) return null;
+  await storageUpload(path, previewFile, "image/jpeg", BOARD_BUCKET);
+  return path;
+}
+
+async function cartoonCharacter(job, dir) {
+  const p = job.params;
+  const args = [CARTOON_IMAGE, "--aspect_ratio", "9:16", "--resolution", "2k", "--prompt", safePrompt(p.prompt)];
+  await updateCartoonHook(p.hook_id, { character_status: "running" });
+  const r = await generateToFile(job, args, dir);
+  const base = `cartoon-hooks/${p.hook_id}/character-${job.id}`;
+  await storageUpload(`${base}.${r.ext}`, r.outFile, MIME[r.ext] || "image/png", BOARD_BUCKET);
+  const preview = await cartoonPreview(r.outFile, dir, `${base}-preview.jpg`);
+  await updateCartoonHook(p.hook_id, { character_path: `${base}.${r.ext}`, character_preview_path: preview, character_status: "done", character_error: null, character_credits: r.estimate });
+  return r;
+}
+
+async function cartoonStill(job, dir) {
+  const p = job.params;
+  const args = [CARTOON_IMAGE, "--aspect_ratio", "9:16", "--resolution", "2k"];
+  if (p.character_path) {
+    const ref = join(dir, `character.${extensionOf(p.character_path)}`);
+    await storageDownload(p.character_path, ref, BOARD_BUCKET);
+    args.push("--image", ref);
+  }
+  args.push("--prompt", safePrompt(p.prompt));
+  await updateCartoonBeat(p.beat_id, { still_status: "running" });
+  const r = await generateToFile(job, args, dir);
+  const base = `cartoon-hooks/${p.hook_id}/still-${p.beat_id}-${job.id}`;
+  await storageUpload(`${base}.${r.ext}`, r.outFile, MIME[r.ext] || "image/png", BOARD_BUCKET);
+  const preview = await cartoonPreview(r.outFile, dir, `${base}-preview.jpg`);
+  await updateCartoonBeat(p.beat_id, { still_path: `${base}.${r.ext}`, still_preview_path: preview, still_status: "done", still_error: null, still_credits: r.estimate });
+  return r;
+}
+
+async function cartoonClip(job, dir) {
+  const p = job.params;
+  const still = join(dir, `still.${extensionOf(p.still_path)}`);
+  await storageDownload(p.still_path, still, BOARD_BUCKET);
+  const args = [CARTOON_CLIP, "--start-image", still, "--duration", String(clampInt(p.duration, 4, 15)), "--resolution", p.resolution === "720p" ? "720p" : "480p", "--generate_audio", "false", "--aspect_ratio", "9:16", "--prompt", safePrompt(p.prompt)];
+  await updateCartoonBeat(p.beat_id, { clip_status: "running" });
+  const r = await generateToFile(job, args, dir);
+  const clipPath = `cartoon-hooks/${p.hook_id}/clip-${p.beat_id}-${job.id}.mp4`;
+  await storageUpload(clipPath, r.outFile, "video/mp4", BOARD_BUCKET);
+  await updateCartoonBeat(p.beat_id, { clip_path: clipPath, clip_status: "done", clip_error: null, clip_credits: r.estimate });
+  return r;
+}
+
+async function cartoonVoice(job, dir) {
+  const p = job.params;
+  const dialogueFile = join(dir, "dialogue.json");
+  await writeFile(dialogueFile, JSON.stringify([{ text: String(p.text).slice(0, 400), voice_id: p.voice_id, voice_type: p.voice_type }]));
+  await updateCartoonBeat(p.beat_id, { voice_status: "running" });
+  const r = await generateToFile(job, ["elevenlabs_v4", "--dialogue", `@${dialogueFile}`], dir);
+  const seconds = await probeDuration(r.outFile);
+  const voicePath = `cartoon-hooks/${p.hook_id}/voice-${p.beat_id}-${job.id}.${r.ext}`;
+  await storageUpload(voicePath, r.outFile, MIME[r.ext] || "audio/mpeg", BOARD_BUCKET);
+  await updateCartoonBeat(p.beat_id, { voice_path: voicePath, voice_seconds: seconds ? Math.round(seconds * 100) / 100 : null, voice_status: "done", voice_error: null, voice_credits: r.estimate });
+  return r;
+}
+
+/**
+ * The hook: each beat's clip cut to its length (the voiceover line's length when
+ * there is one, else the planned length; a short clip holds its last frame),
+ * scaled to 720x1280, joined in order, with the voiceover lines laid end to end.
+ */
+async function cartoonJoin(job, dir) {
+  const hookId = job.params.hook_id;
+  const hook = (await rest(`/cartoon_hooks?id=eq.${hookId}&select=*`))?.[0];
+  if (!hook) throw new Error("Hook was deleted");
+  const beats = (await rest(`/cartoon_beats?hook_id=eq.${hookId}&select=*&order=idx`)) ?? [];
+  if (beats.length === 0 || beats.some((b) => !b.clip_path)) throw new Error("A beat has no clip yet");
+  await updateCartoonHook(hookId, { final_status: "running" });
+
+  const inputs = [];
+  const filters = [];
+  const withVoice = hook.voice_on && beats.some((b) => b.voice_path);
+  let total = 0;
+  for (const [i, b] of beats.entries()) {
+    const clipFile = join(dir, `clip-${i}.mp4`);
+    await storageDownload(b.clip_path, clipFile, BOARD_BUCKET);
+    const vIn = inputs.push(clipFile) - 1;
+    const len = Math.round(Math.max(1, b.voice_path && b.voice_seconds ? Number(b.voice_seconds) + 0.15 : Number(b.seconds)) * 100) / 100;
+    total += len;
+    filters.push(
+      `[${vIn}:v]scale=${CARTOON_W}:${CARTOON_H}:force_original_aspect_ratio=increase,crop=${CARTOON_W}:${CARTOON_H},fps=30,setsar=1,tpad=stop_mode=clone:stop_duration=15,trim=0:${len},setpts=PTS-STARTPTS[v${i}]`
+    );
+    if (!withVoice) continue;
+    if (b.voice_path) {
+      const voiceFile = join(dir, `voice-${i}.${extensionOf(b.voice_path)}`);
+      await storageDownload(b.voice_path, voiceFile, BOARD_BUCKET);
+      const aIn = inputs.push(voiceFile) - 1;
+      filters.push(`[${aIn}:a]aresample=44100,aformat=channel_layouts=stereo,apad,atrim=0:${len},asetpts=PTS-STARTPTS[a${i}]`);
+    } else {
+      filters.push(`aevalsrc=0:c=stereo:s=44100:d=${len}[a${i}]`);
+    }
+  }
+  const order = beats.map((_, i) => (withVoice ? `[v${i}][a${i}]` : `[v${i}]`)).join("");
+  filters.push(`${order}concat=n=${beats.length}:v=1:a=${withVoice ? 1 : 0}${withVoice ? "[v][a]" : "[v]"}`);
+  const out = join(dir, "hook.mp4");
+  const args = ["-y", "-loglevel", "error", ...inputs.flatMap((f) => ["-i", f]), "-filter_complex", filters.join(";"), "-map", "[v]"];
+  if (withVoice) args.push("-map", "[a]", "-c:a", "aac", "-b:a", "160k");
+  args.push("-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out);
+  await updateJob(job.id, { cli_command: `ffmpeg join of ${beats.length} beats` });
+  const r = await run(FFMPEG, args, { timeoutMs: 10 * 60_000 });
+  if (r.code !== 0) throw new Error(`ffmpeg join failed: ${r.err.slice(-400)}`);
+  const finalPath = `cartoon-hooks/${hookId}/final-${job.id}.mp4`;
+  await storageUpload(finalPath, out, "video/mp4", BOARD_BUCKET);
+  await updateCartoonHook(hookId, { final_path: finalPath, final_status: "done", final_error: null, final_seconds: Math.round(total * 10) / 10, status: "done" });
+  return `${beats.length} beats, ${total.toFixed(1)} s`;
+}
+
+const CARTOON_RUN = { cartoon_character: cartoonCharacter, cartoon_still: cartoonStill, cartoon_clip: cartoonClip, cartoon_voice: cartoonVoice, cartoon_join: cartoonJoin };
+
 async function remakeClip(job, dir) {
   const p = job.params;
   const still = join(dir, `still.${extensionOf(p.still_path)}`);
@@ -600,6 +847,11 @@ const REMAKE_FAIL = {
   remake_split: (p, m) => updateProject(p.project_id, { status: "failed", error: m }),
   remake_frames: (p, m) => updateProject(p.project_id, { status: "failed", error: m }),
   talking_head: (p, m) => updateTalkingHead(p.talking_head_id, { status: "failed", error: m }),
+  cartoon_character: (p, m) => updateCartoonHook(p.hook_id, { character_status: "failed", character_error: m }),
+  cartoon_still: (p, m) => updateCartoonBeat(p.beat_id, { still_status: "failed", still_error: m }),
+  cartoon_clip: (p, m) => updateCartoonBeat(p.beat_id, { clip_status: "failed", clip_error: m }),
+  cartoon_voice: (p, m) => updateCartoonBeat(p.beat_id, { voice_status: "failed", voice_error: m }),
+  cartoon_join: (p, m) => updateCartoonHook(p.hook_id, { final_status: "failed", final_error: m }),
 };
 
 async function processRemakeJob(job) {
@@ -614,6 +866,7 @@ async function processRemakeJob(job) {
       : job.kind === "remake_tts" ? await remakeTts(job, dir)
       : job.kind === "remake_mix" ? await remakeMix(job, dir)
       : job.kind === "talking_head" ? await talkingHead(job, dir)
+      : CARTOON_RUN[job.kind] ? await CARTOON_RUN[job.kind](job, dir)
       : await remakeClip(job, dir);
     const patch = { status: "done", error: null, finished_at: new Date().toISOString() };
     if (r && typeof r === "object") Object.assign(patch, { cli_job_id: r.cliJobId ?? null, result_source_url: r.url ?? null });
@@ -632,6 +885,8 @@ async function processRemakeJob(job) {
     await REMAKE_FAIL[job.kind]?.(job.params ?? {}, message.slice(0, 500)).catch(() => {});
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
+    // A finished cartoon step usually unlocks the next one; queue it now rather than at the next sweep.
+    if (job.kind.startsWith("cartoon_") && job.params?.hook_id) await cartoonAdvance(job.params.hook_id).catch(() => {});
   }
 }
 
@@ -739,7 +994,7 @@ async function boardFetch(job) {
 
 // ─── One job ───
 async function processJob(job) {
-  if (job.kind.startsWith("remake_") || job.kind === "talking_head") return processRemakeJob(job);
+  if (job.kind.startsWith("remake_") || job.kind.startsWith("cartoon_") || job.kind === "talking_head") return processRemakeJob(job);
   if (job.kind === "board_fetch") {
     log(`job ${job.id} board_fetch start`);
     try {
@@ -909,6 +1164,7 @@ function acquireSlot() {
 async function tick() {
   await refreshBalance();
   await heartbeat({ ...balance, active, inflight });
+  await cartoonSweep().catch((e) => log("cartoon sweep:", e.message));
   while (active < CONCURRENCY && !stopping) {
     const job = await claimJob();
     if (!job) break;

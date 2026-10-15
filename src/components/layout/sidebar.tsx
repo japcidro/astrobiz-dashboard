@@ -390,6 +390,12 @@ const ownerNavEntries: NavEntry[] = [
         icon: <Mic size={18} />,
         roles: ownerRoles,
       },
+      {
+        label: "Cartoon Hooks",
+        href: "/owner/cartoon-hooks",
+        icon: <Sparkles size={18} />,
+        roles: ownerRoles,
+      },
     ],
   },
   {

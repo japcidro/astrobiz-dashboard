@@ -57,6 +57,27 @@ Clipper (`kind = remake_*`, tables kept the remake_ names):
   clip length kept) → `remake/<project>/mixed/`. Queued by the app when a
   voiceover and its clip both exist.
 
+Cartoon Hooks (`kind = cartoon_*`): the app only plans (Claude splits the
+script into beats and writes each beat's prompts) and resets steps for a redo.
+The worker is the orchestrator: every 10 s, and after each cartoon job,
+`cartoonAdvance` queues every step of a `working` hook whose status is null and
+whose inputs are ready. All files go to `cartoon-hooks/<hook>/` in the
+`marketing-board` bucket.
+- `cartoon_character`: Seedream 5.0 Flash character image, the reference for
+  every beat the main character is in.
+- `cartoon_still`: Seedream 5.0 Flash starting image per beat (with the
+  character image as `--image` when the beat uses it).
+- `cartoon_clip`: Seedance 2.0 Mini from the still, 4–15 s, 480p or 720p, no sound.
+- `cartoon_voice`: ElevenLabs v4 line per beat (only when the hook has a voice).
+- `cartoon_join`: ffmpeg cuts each clip to its beat (the voice line's length,
+  else the planned length; a short clip holds its last frame), scales to
+  720x1280, joins them with the voice lines → `final-<job>.mp4`; hook → `done`.
+
+Renders are submitted without waiting, then polled with `generate get` every
+8 s (`generate wait` was seen hanging after a network drop). The account runs
+at most 8 renders at once; a `rate_limit_reached` submit waits 20 s and tries
+again without holding a slot.
+
 Heartbeats `app_settings.hook_worker_status` each loop with the balance,
 the yt-dlp version (`ytdlp`, null when it is not installed) and the CLI's
 text-to-speech voices (`voices`, refreshed every ten minutes). The

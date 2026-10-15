@@ -15,6 +15,7 @@
     "db:query": "node scripts/db.mjs query"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.134.0",
     "@supabase/ssr": "^0.10.0",
     "@supabase/supabase-js": "^2.101.1",
     "@twilio/voice-sdk": "^2.18.2",
