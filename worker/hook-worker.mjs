@@ -1121,6 +1121,8 @@ async function refreshBalance() {
       const items = JSON.parse(v.out).items ?? [];
       voices = items
         .filter((x) => x.status === "completed" && (x.voice_type === "preset" || x.voice_type === "element"))
+        // The team's own voices first, so the 80 cap only ever trims presets.
+        .sort((a, b) => (a.voice_type === "element" ? 0 : 1) - (b.voice_type === "element" ? 0 : 1))
         .slice(0, 80)
         .map((x) => ({ id: x.id, name: x.name, type: x.voice_type }));
     } catch {

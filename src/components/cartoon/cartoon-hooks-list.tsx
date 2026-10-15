@@ -51,13 +51,21 @@ export function CartoonHooksList() {
 
   useEffect(() => {
     void refresh();
-    api<WorkerStatus>("/api/owner/hook-studio/status").then(setWorker).catch(() => {});
+    let saved = "";
     try {
-      const saved = localStorage.getItem(VOICE_KEY);
-      if (saved) setForm((f) => ({ ...f, voiceId: saved }));
+      saved = localStorage.getItem(VOICE_KEY) ?? "";
     } catch {
       // no storage: pick again
     }
+    api<WorkerStatus>("/api/owner/hook-studio/status")
+      .then((w) => {
+        setWorker(w);
+        // The last voice used here, else the team's own first voice.
+        const list = w.voices ?? [];
+        const pick = list.find((v) => v.id === saved) ?? list.find((v) => v.type === "element");
+        if (pick) setForm((f) => (f.voiceId ? f : { ...f, voiceId: pick.id }));
+      })
+      .catch(() => {});
   }, [refresh]);
 
   const working = !!hooks?.some((h) => h.status === "planning" || h.status === "working");
@@ -67,6 +75,9 @@ export function CartoonHooksList() {
   }, [refresh, working]);
 
   const voices = useMemo(() => worker?.voices ?? [], [worker]);
+  // Voices the team made on Higgsfield come first; the stock presets after.
+  const ownVoices = voices.filter((v) => v.type === "element");
+  const presetVoices = voices.filter((v) => v.type !== "element");
   const voice = voices.find((v) => v.id === form.voiceId) ?? null;
   const rough = roughEstimate(form.script, form.resolution, form.voiceOn);
 
@@ -189,11 +200,24 @@ export function CartoonHooksList() {
                   className={`${field} !py-1.5 text-xs`}
                 >
                   <option value="">Pick a voice…</option>
-                  {voices.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.name} {v.type === "element" ? "· yours" : ""}
-                    </option>
-                  ))}
+                  {ownVoices.length > 0 && (
+                    <optgroup label="Your voices">
+                      {ownVoices.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {presetVoices.length > 0 && (
+                    <optgroup label="Higgsfield presets">
+                      {presetVoices.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
               )}
               {!form.voiceOn && <p className="text-[11px] text-gray-600">Off: beats follow Claude&apos;s timing and the hook is silent, ready for your CapCut voiceover.</p>}
