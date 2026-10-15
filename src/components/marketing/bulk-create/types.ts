@@ -1,8 +1,8 @@
 // ── Bulk create: one row per ad ─────────────────────────────────────────────
 //
-// Rows stay a flat list (that is what gets submitted, one request per ad), and
-// `group_id` says which ad set each ad belongs to. Every row in a group carries
-// the same `adset_name`; the first ad submitted in a group creates the ad set
+// One row per ad. `group_id` says which ad set the ad belongs to: a row added
+// with "+" next to another shares its group, and every row in a group carries
+// the same `adset_name`. The first ad submitted in a group creates the ad set
 // and the rest are added to it.
 
 export interface BulkAdRow {
@@ -14,8 +14,6 @@ export interface BulkAdRow {
   image_hash: string | null;
   video_id: string | null;
   file_name: string | null;
-  // Local object URL for the thumbnail. Browser-only, never sent anywhere.
-  preview_url: string | null;
   primary_text: string;
   headline: string;
   description: string;
@@ -29,7 +27,7 @@ export interface AdSetGroup {
   rows: BulkAdRow[];
 }
 
-// Shared copy that any ad leaves blank falls back to.
+// The "Default ad copy" box above the table.
 export interface DefaultCopy {
   primary_text: string;
   headline: string;
@@ -55,7 +53,6 @@ export function makeEmptyRow(
     image_hash: null,
     video_id: null,
     file_name: null,
-    preview_url: null,
     primary_text: "",
     headline: "",
     description: "",
@@ -80,21 +77,6 @@ export function groupRows(rows: BulkAdRow[]): AdSetGroup[] {
   return [...groups.values()];
 }
 
-// The copy that will actually be sent for this ad: its own text, or the
-// default where it was left blank.
-export function resolveCopy(row: BulkAdRow, defaults: DefaultCopy): DefaultCopy {
-  return {
-    primary_text: row.primary_text.trim() ? row.primary_text : defaults.primary_text,
-    headline: row.headline.trim() ? row.headline : defaults.headline,
-    description: row.description.trim() ? row.description : defaults.description,
-  };
-}
-
 export function hasCreative(row: BulkAdRow): boolean {
   return !!row.image_hash || !!row.video_id;
-}
-
-// File name without its extension — a sensible starting ad name.
-export function baseFileName(name: string): string {
-  return name.replace(/\.[^.]+$/, "").slice(0, 80);
 }

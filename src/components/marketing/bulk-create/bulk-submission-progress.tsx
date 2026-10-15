@@ -3,12 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Loader2, CheckCircle, AlertCircle, X } from "lucide-react";
 import type { CampaignFormData, AdSetFormData, AdFormData } from "@/lib/facebook/types";
-import {
-  groupRows,
-  resolveCopy,
-  type BulkAdRow,
-  type DefaultCopy,
-} from "./types";
+import { groupRows, type BulkAdRow } from "./types";
 
 interface BulkSubmissionProgressProps {
   rows: BulkAdRow[];
@@ -24,7 +19,6 @@ interface BulkSubmissionProgressProps {
   urlParameters: string;
   callToAction: string;
   shopifyStoreId: string | null;
-  defaultCopy: DefaultCopy;
   onUpdateRowStatus: (
     id: string,
     status: BulkAdRow["status"],
@@ -47,7 +41,6 @@ export function BulkSubmissionProgress({
   urlParameters,
   callToAction,
   shopifyStoreId,
-  defaultCopy,
   onUpdateRowStatus,
   onClose,
 }: BulkSubmissionProgressProps) {
@@ -66,7 +59,6 @@ export function BulkSubmissionProgress({
   const groups = groupRows(rows);
 
   const buildAdData = (row: BulkAdRow): AdFormData => ({
-    ...resolveCopy(row, defaultCopy),
     name: row.ad_name,
     page_id: pageId,
     page_name: pageName,
@@ -75,6 +67,9 @@ export function BulkSubmissionProgress({
     video_id: row.video_id,
     file_name: row.file_name,
     file_preview_url: null,
+    primary_text: row.primary_text,
+    headline: row.headline,
+    description: row.description,
     call_to_action: callToAction,
     website_url: websiteUrl,
     url_parameters: urlParameters,
@@ -200,7 +195,6 @@ export function BulkSubmissionProgress({
       urlParameters,
       callToAction,
       shopifyStoreId,
-      defaultCopy,
     ]
   );
 
