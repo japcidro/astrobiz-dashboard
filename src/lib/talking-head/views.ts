@@ -12,7 +12,7 @@ const UUID = /^[0-9a-f-]{36}$/;
 async function loadStartingImages(db: SupabaseClient): Promise<StartingImage[]> {
   const { data } = await db
     .from("remake_shots")
-    .select("id, project_id, idx, still_path, still_preview_path, voice_gender, created_at, updated_at, remake_projects!inner(title, voice_profile)")
+    .select("id, project_id, idx, still_path, still_preview_path, voice_gender, created_at, updated_at, remake_projects!remake_shots_project_id_fkey!inner(title, voice_profile)")
     .eq("still_status", "done")
     .not("still_path", "is", null)
     .order("updated_at", { ascending: false })
