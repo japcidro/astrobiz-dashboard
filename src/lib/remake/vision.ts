@@ -54,10 +54,44 @@ function extractJson<T>(text: string): T | null {
     try {
       return JSON.parse(c) as T;
     } catch {
-      // try the next shape
+      // Models sometimes put raw line breaks inside strings; escape them and try again.
+      try {
+        return JSON.parse(escapeControlCharsInStrings(c)) as T;
+      } catch {
+        // try the next shape
+      }
     }
   }
   return null;
+}
+
+/** Escape raw control characters that sit inside JSON string literals (a raw newline in a long description is the usual offender). */
+function escapeControlCharsInStrings(text: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (const ch of text) {
+    if (inString) {
+      if (escaped) {
+        out += ch;
+        escaped = false;
+      } else if (ch === "\\") {
+        out += ch;
+        escaped = true;
+      } else if (ch === '"') {
+        out += ch;
+        inString = false;
+      } else if (ch === "\n") out += "\\n";
+      else if (ch === "\r") out += "\\r";
+      else if (ch === "\t") out += "\\t";
+      else if (ch < " ") out += " ";
+      else out += ch;
+    } else {
+      out += ch;
+      if (ch === '"') inString = true;
+    }
+  }
+  return out;
 }
 
 async function ask<T>(db: SupabaseClient, system: string, content: Array<Record<string, unknown>>, maxTokens = 1200): Promise<T | null> {
@@ -76,7 +110,9 @@ async function ask<T>(db: SupabaseClient, system: string, content: Array<Record<
     const json = (await res.json()) as { content?: Array<{ type: string; text?: string }>; stop_reason?: string };
     const text = (json.content ?? []).filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n");
     const parsed = extractJson<T>(text);
-    if (process.env.VISION_DEBUG && !parsed) console.error("[vision] unparsed", json.stop_reason, text.slice(0, 1500));
+    if (process.env.VISION_DEBUG && !parsed) {
+      console.error("[vision] unparsed", json.stop_reason, "len", text.length, "head:", text.slice(0, 200).replace(/\n/g, "⏎"), "tail:", text.slice(-200).replace(/\n/g, "⏎"));
+    }
     return parsed;
   } catch {
     return null;

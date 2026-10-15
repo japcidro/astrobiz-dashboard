@@ -35,8 +35,13 @@ Answer with JSON only, exactly this shape:
   ]
     .filter(Boolean)
     .join("\n\n");
-  const out = await askVision<AdaptPlan>(db, system, [{ url: input.referenceUrl, label: "The competitor's ad to adapt:" }], `${facts}\n\nAnswer with JSON only.`, 2500);
-  if (!out || !out.study || !out.plan || typeof out.plan.design_spec !== "string") return null;
+  // Long JSON with a 200-word design spec occasionally comes back malformed; one more try is cheap.
+  let out: AdaptPlan | null = null;
+  for (let attempt = 0; attempt < 2 && !out; attempt++) {
+    out = await askVision<AdaptPlan>(db, system, [{ url: input.referenceUrl, label: "The competitor's ad to adapt:" }], `${facts}\n\nAnswer with JSON only, no markdown fences, no line breaks inside strings (use \\n).`, 8000);
+    if (out && (!out.study || !out.plan || typeof out.plan.design_spec !== "string")) out = null;
+  }
+  if (!out) return null;
   return {
     study: {
       angle: String(out.study.angle ?? "").slice(0, 300),
@@ -68,7 +73,7 @@ export async function reviewAdaptation(
     system,
     images,
     `Planned text on the image, which must appear exactly:\n${input.finalText || "(no text planned)"}\n\nBrand profile excerpt: ${input.profile.slice(0, 1200)}\n\nAnswer with JSON only.`,
-    500
+    2000
   );
   if (!out || typeof out.ok !== "boolean") return null;
   const n = (v: unknown) => Math.max(0, Math.min(10, Math.round(Number(v) || 0)));
