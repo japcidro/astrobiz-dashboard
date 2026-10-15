@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
-const VERSION = "1.7.1";
+const VERSION = "1.7.2";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // ─── Config ───
@@ -990,12 +990,39 @@ async function imageUrlViaYtDlp(url, dir) {
       return s.replace(/\\\//g, "/").replace(/&amp;/g, "&");
     }
   };
-  for (const f of files) {
-    const html = await readFile(join(pagesDir, f), "utf8");
-    for (const key of ["original_image_url", "resized_image_url"]) {
-      const m = html.match(new RegExp(`"${key}":"((?:[^"\\\\]|\\\\.)*)"`));
+  // An Ads Library page lists many of the advertiser's ads; only the block
+  // for the requested ad id (ad_archive_id) may supply the image.
+  const wantedId = (() => {
+    try {
+      return new URL(url).searchParams.get("id");
+    } catch {
+      return null;
+    }
+  })();
+  const KEYS = ["original_image_url", "resized_image_url", "video_preview_image_url"];
+  const firstIn = (text) => {
+    for (const key of KEYS) {
+      const m = text.match(new RegExp(`"${key}":"((?:[^"\\\\]|\\\\.)*)"`));
       if (m && m[1]) return unescape(m[1]);
     }
+    return null;
+  };
+  for (const f of files) {
+    const html = await readFile(join(pagesDir, f), "utf8");
+    if (wantedId) {
+      const marker = new RegExp(`"ad_archive_id":"?${wantedId}"?`, "g");
+      let hit;
+      while ((hit = marker.exec(html))) {
+        const rest = html.slice(hit.index + hit[0].length);
+        const next = rest.search(/"ad_archive_id":/);
+        const found = firstIn(next === -1 ? rest : rest.slice(0, next));
+        if (found) return found;
+      }
+      // The page has the ad but no image in its block: do not fall back to someone else's ad.
+      if (marker.test(html)) continue;
+    }
+    const any = firstIn(html);
+    if (any) return any;
     const og = html.match(/<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']/i) || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::secure_url)?["']/i);
     if (og && og[1]) return og[1].replace(/&amp;/g, "&");
   }
