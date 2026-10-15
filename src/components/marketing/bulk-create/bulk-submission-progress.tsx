@@ -19,6 +19,8 @@ interface BulkSubmissionProgressProps {
   urlParameters: string;
   callToAction: string;
   shopifyStoreId: string | null;
+  // The campaign carries the budget (CBO): ad sets are sent without one.
+  campaignBudget: boolean;
   onUpdateRowStatus: (
     id: string,
     status: BulkAdRow["status"],
@@ -41,6 +43,7 @@ export function BulkSubmissionProgress({
   urlParameters,
   callToAction,
   shopifyStoreId,
+  campaignBudget,
   onUpdateRowStatus,
   onClose,
 }: BulkSubmissionProgressProps) {
@@ -75,13 +78,19 @@ export function BulkSubmissionProgress({
     url_parameters: urlParameters,
   } as AdFormData);
 
-  // A blank ad set name falls back to "<prefix> - <ad set number>".
-  const buildAdSetData = (row: BulkAdRow) => {
+  // A blank ad set name falls back to "<prefix> - <ad set number>"; a blank
+  // budget to Section B's, in whichever kind (daily / lifetime) it uses.
+  const buildAdSetData = (row: BulkAdRow): AdSetFormData => {
     const number = groups.findIndex((g) => g.group_id === row.group_id) + 1;
-    return {
+    const data = {
       ...adsetTemplate,
       name: row.adset_name.trim() || `${adsetTemplate.name} - ${number}`,
     };
+    if (campaignBudget) return { ...data, daily_budget: null, lifetime_budget: null };
+    if (row.adset_budget == null) return data;
+    return adsetTemplate.lifetime_budget != null
+      ? { ...data, lifetime_budget: row.adset_budget }
+      : { ...data, daily_budget: row.adset_budget };
   };
 
   const submitRows = useCallback(
@@ -195,6 +204,7 @@ export function BulkSubmissionProgress({
       urlParameters,
       callToAction,
       shopifyStoreId,
+      campaignBudget,
     ]
   );
 

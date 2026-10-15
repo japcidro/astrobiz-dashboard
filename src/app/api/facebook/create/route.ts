@@ -46,6 +46,30 @@ async function fbPost(
   return json;
 }
 
+// Does this campaign carry its own budget (CBO)? Then its ad sets must not.
+// A failed read counts as "no", which keeps the old behaviour.
+async function campaignHasBudget(
+  campaignId: string,
+  token: string
+): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `${FB_API_BASE}/${campaignId}?fields=daily_budget,lifetime_budget&access_token=${encodeURIComponent(token)}`,
+      { cache: "no-store" }
+    );
+    if (!res.ok) return false;
+    const json = (await res.json()) as {
+      daily_budget?: string;
+      lifetime_budget?: string;
+    };
+    return (
+      Number(json.daily_budget ?? 0) > 0 || Number(json.lifetime_budget ?? 0) > 0
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function POST(request: Request) {
   const employee = await getEmployee();
   if (!employee) {
@@ -165,12 +189,18 @@ export async function POST(request: Request) {
         targeting: JSON.stringify(adset_data.targeting),
       };
 
-      if (adset_data.daily_budget != null) {
+      // Under a campaign budget (CBO) Facebook rejects an ad set budget.
+      const cbo =
+        mode === "new"
+          ? !!campaign_data?.campaign_budget_optimization
+          : await campaignHasBudget(fbCampaignId, token);
+
+      if (!cbo && adset_data.daily_budget != null) {
         adsetParams.daily_budget = Math.round(
           adset_data.daily_budget * 100
         ).toString();
       }
-      if (adset_data.lifetime_budget != null) {
+      if (!cbo && adset_data.lifetime_budget != null) {
         adsetParams.lifetime_budget = Math.round(
           adset_data.lifetime_budget * 100
         ).toString();

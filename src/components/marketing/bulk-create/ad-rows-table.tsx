@@ -26,9 +26,16 @@ interface AdRowsTableProps {
   // False when every ad is going into one ad set the user already picked —
   // there is no per-row ad set to name.
   showAdsetName?: boolean;
+  // Per-ad-set budget column. Null hides it (CBO, or ads going into an
+  // existing ad set); otherwise it says which kind and Section B's amount,
+  // which a blank cell falls back to.
+  budget: { kind: "daily" | "lifetime"; fallback: number | null } | null;
   onUpdateRow: (id: string, updates: Partial<BulkAdRow>) => void;
-  // Sets the ad set name on every ad in that ad set.
-  onRenameGroup: (groupId: string, name: string) => void;
+  // Sets the ad set name / budget on every ad in that ad set.
+  onUpdateGroup: (
+    groupId: string,
+    updates: Partial<Pick<BulkAdRow, "adset_name" | "adset_budget">>
+  ) => void;
   // Adds rows, each placed after the last ad of its ad set (new ad sets go
   // at the end).
   onAddRows: (rows: BulkAdRow[]) => void;
@@ -199,8 +206,9 @@ export function AdRowsTable({
   adAccountId,
   shopifyStoreId,
   showAdsetName = true,
+  budget,
   onUpdateRow,
-  onRenameGroup,
+  onUpdateGroup,
   onAddRows,
   onRemoveRow,
 }: AdRowsTableProps) {
@@ -330,6 +338,14 @@ export function AdRowsTable({
               {showAdsetName && (
                 <th className="px-2 py-2 w-44">Adset Name</th>
               )}
+              {budget && (
+                <th
+                  className="px-2 py-2 w-28"
+                  title="Leave blank to use the budget in Section B"
+                >
+                  {budget.kind === "daily" ? "Daily Budget" : "Lifetime Budget"}
+                </th>
+              )}
               <th className="px-2 py-2 w-36">Ad Name</th>
               <th className="px-2 py-2 w-36">Creative</th>
               <th className="px-2 py-2">Primary Text</th>
@@ -375,12 +391,39 @@ export function AdRowsTable({
                       value={row.adset_name}
                       placeholder={`Adset ${idx + 1}`}
                       onChange={(e) =>
-                        onRenameGroup(row.group_id, e.target.value)
+                        onUpdateGroup(row.group_id, { adset_name: e.target.value })
                       }
                       className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
                         !row.adset_name.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
                       }`}
                     />
+                    )}
+                  </td>
+                )}
+
+                {/* Budget — one per ad set, on its first row */}
+                {budget && (
+                  <td className="px-2 py-1.5 bg-gray-800/50">
+                    {!sharesAdset && (
+                      <div className="flex items-center gap-1">
+                        <span className="text-xs text-gray-500">₱</span>
+                        <input
+                          type="number"
+                          min="1"
+                          value={row.adset_budget ?? ""}
+                          placeholder={
+                            budget.fallback != null ? String(budget.fallback) : "Budget"
+                          }
+                          title="Leave blank to use the budget in Section B"
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value);
+                            onUpdateGroup(row.group_id, {
+                              adset_budget: Number.isFinite(val) && val > 0 ? val : null,
+                            });
+                          }}
+                          className="w-full rounded border border-gray-600 bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none"
+                        />
+                      </div>
                     )}
                   </td>
                 )}
@@ -564,7 +607,9 @@ export function AdRowsTable({
                     <button
                       type="button"
                       onClick={() =>
-                        onAddRows([makeEmptyRow(row.group_id, row.adset_name)])
+                        onAddRows([
+                          makeEmptyRow(row.group_id, row.adset_name, row.adset_budget),
+                        ])
                       }
                       className="flex items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-xs text-gray-400 hover:bg-gray-700 hover:text-white transition-colors"
                       title="Add another ad to this ad set"

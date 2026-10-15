@@ -1,14 +1,17 @@
 // ── Bulk create: one row per ad ─────────────────────────────────────────────
 //
 // One row per ad. `group_id` says which ad set the ad belongs to: a row added
-// with "+" next to another shares its group, and every row in a group carries
-// the same `adset_name`. The first ad submitted in a group creates the ad set
+// with "+ Ad" next to another shares its group, and every row in a group
+// carries the same `adset_name` and `adset_budget`. The first ad submitted in a group creates the ad set
 // and the rest are added to it.
 
 export interface BulkAdRow {
   id: string;
   group_id: string;
   adset_name: string;
+  // This ad set's budget in pesos — daily or lifetime, whichever Section B
+  // uses. Null means Section B's amount.
+  adset_budget: number | null;
   ad_name: string;
   creative_type: "image" | "video";
   image_hash: string | null;
@@ -42,12 +45,14 @@ export const EMPTY_COPY: DefaultCopy = {
 
 export function makeEmptyRow(
   groupId: string = crypto.randomUUID(),
-  adsetName = ""
+  adsetName = "",
+  adsetBudget: number | null = null
 ): BulkAdRow {
   return {
     id: crypto.randomUUID(),
     group_id: groupId,
     adset_name: adsetName,
+    adset_budget: adsetBudget,
     ad_name: "",
     creative_type: "image",
     image_hash: null,

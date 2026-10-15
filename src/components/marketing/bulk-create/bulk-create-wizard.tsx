@@ -45,6 +45,8 @@ interface CampaignInfo {
   id: string;
   name: string;
   status: string;
+  // Campaign budget (CBO) — its ad sets get no budget of their own.
+  uses_campaign_budget?: boolean;
 }
 
 interface AdsetInfo {
@@ -435,11 +437,17 @@ export function BulkCreateWizard() {
     });
   }, []);
 
-  const handleRenameGroup = useCallback((groupId: string, name: string) => {
-    setRows((prev) =>
-      prev.map((r) => (r.group_id === groupId ? { ...r, adset_name: name } : r))
-    );
-  }, []);
+  const handleUpdateGroup = useCallback(
+    (
+      groupId: string,
+      updates: Partial<Pick<BulkAdRow, "adset_name" | "adset_budget">>
+    ) => {
+      setRows((prev) =>
+        prev.map((r) => (r.group_id === groupId ? { ...r, ...updates } : r))
+      );
+    },
+    []
+  );
 
   const handleRemoveRow = useCallback((id: string) => {
     setRows((prev) => prev.filter((r) => r.id !== id));
@@ -469,7 +477,33 @@ export function BulkCreateWizard() {
     !!r.primary_text.trim() && !!r.headline.trim() && !!r.description.trim()
   );
 
-  const adsetCount = usingExistingAdset ? 1 : groupRows(rows).length;
+  // Under a campaign budget (CBO) the ad sets carry none — new campaign with
+  // CBO switched on, or an existing campaign that has its own budget.
+  const campaignBudget =
+    mode === "new"
+      ? campaign.campaign_budget_optimization
+      : !!campaigns.find((c) => c.id === existingCampaignId)?.uses_campaign_budget;
+  const sectionBBudget = adset.daily_budget ?? adset.lifetime_budget ?? null;
+  // Per-ad-set budget column: only when we create ad sets and they own the
+  // budget. A blank cell uses Section B's amount.
+  const budgetColumn =
+    usingExistingAdset || campaignBudget
+      ? null
+      : {
+          kind: adset.lifetime_budget != null ? ("lifetime" as const) : ("daily" as const),
+          fallback: sectionBBudget,
+        };
+  const groups = groupRows(rows);
+  const allAdsetsHaveBudget =
+    !budgetColumn ||
+    sectionBBudget != null ||
+    groups.every((g) => g.rows[0].adset_budget != null);
+
+  // Facebook needs an end date on any ad set with a lifetime budget.
+  const hasEndDateIfLifetime =
+    budgetColumn?.kind !== "lifetime" || !!adset.end_time;
+
+  const adsetCount = usingExistingAdset ? 1 : groups.length;
   const adsLabel = `${rows.length} ${rows.length === 1 ? "ad" : "ads"}`;
   const submitLabel = usingExistingAdset
     ? adsLabel
@@ -485,6 +519,10 @@ export function BulkCreateWizard() {
   if (!websiteUrl) missingItems.push("Enter a website URL");
   if (rows.length === 0) missingItems.push("Add at least one row");
   if (!allRowsHaveAdsetName) missingItems.push("Enter adset name for every row");
+  if (!allAdsetsHaveBudget)
+    missingItems.push("Set a budget in Section B, or one for every ad set");
+  if (!hasEndDateIfLifetime)
+    missingItems.push("Set an end date in Section B — a lifetime budget needs one");
   if (!allRowsHaveAdName) missingItems.push("Enter ad name for every row");
   if (!allRowsHaveCreatives) missingItems.push("Upload creative for every row");
   if (!allRowsHaveCopy) missingItems.push("Enter primary text, headline, and description for every row");
@@ -497,6 +535,8 @@ export function BulkCreateWizard() {
     !!websiteUrl &&
     allRowsHaveCreatives &&
     allRowsHaveAdsetName &&
+    allAdsetsHaveBudget &&
+    hasEndDateIfLifetime &&
     allRowsHaveAdName &&
     allRowsHaveCopy &&
     (mode === "new" ? !!campaign.name : !!existingCampaignId) &&
@@ -654,6 +694,7 @@ export function BulkCreateWizard() {
                   {campaigns.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
+                      {c.uses_campaign_budget ? " — CBO" : ""}
                     </option>
                   ))}
                 </select>
@@ -711,14 +752,15 @@ export function BulkCreateWizard() {
         ) : (
         <Section title="B. Adset Template">
           <p className="text-gray-500 text-xs mb-4">
-            The &quot;Adset Name Prefix&quot; below will be used as the base
-            name. Each ad will be created under an adset named
-            &quot;[prefix] - Creative N&quot;.
+            Budget, schedule and targeting below apply to every ad set created
+            from the table in Section C.
           </p>
           <StepAdset
             data={adset}
             adAccountId={adAccountId}
             pageName={pageName}
+            campaignBudget={campaignBudget}
+            budgetHint="Each ad set gets this budget. To give one ad set a different amount, type it in the Budget column of the table in Section C."
             onUpdate={(updates) =>
               setAdset((prev) => ({ ...prev, ...updates }))
             }
@@ -851,7 +893,8 @@ export function BulkCreateWizard() {
             rows={rows}
             showAdsetName={!usingExistingAdset}
             onUpdateRow={handleUpdateRow}
-            onRenameGroup={handleRenameGroup}
+            budget={budgetColumn}
+            onUpdateGroup={handleUpdateGroup}
             onAddRows={handleAddRows}
             onRemoveRow={handleRemoveRow}
             adAccountId={adAccountId}
@@ -910,6 +953,7 @@ export function BulkCreateWizard() {
           urlParameters={urlParameters}
           callToAction={callToAction}
           shopifyStoreId={selectedStoreId}
+          campaignBudget={campaignBudget}
           onClose={() => setSubmitting(false)}
           onUpdateRowStatus={handleUpdateRowStatus}
         />

@@ -24,7 +24,9 @@ const DEFAULT_TTL = 5 * 60 * 1000; // 5 minutes
 //   v2 (2026-04-23): added campaign_status + adset_status to all-ads rows
 //   v3 (2026-09-17): /api/facebook/create/pages now merges the business Page
 //     edges, so a cached list from before the fix is missing whole Pages
-const STORAGE_KEY = "astrobiz_cache_v3";
+//   v4 (2026-10-15): /api/facebook/create/campaigns rows gained
+//     uses_campaign_budget (CBO), which Bulk Create reads for ad set budgets
+const STORAGE_KEY = "astrobiz_cache_v4";
 
 // Restore cache from sessionStorage on load
 function restoreCache() {

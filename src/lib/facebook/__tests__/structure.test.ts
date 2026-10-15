@@ -46,8 +46,28 @@ describe("fetchCampaigns", () => {
         status: "PAUSED",
         effective_status: "PAUSED",
         objective: "OUTCOME_SALES",
+        uses_campaign_budget: false,
       },
     ]);
+  });
+
+  it("flags campaigns with a campaign budget (CBO)", async () => {
+    mockGraph([
+      {
+        body: {
+          data: [
+            { ...campaign("1", "CBO daily"), daily_budget: "50000" },
+            { ...campaign("2", "CBO lifetime"), lifetime_budget: "900000" },
+            campaign("3", "ABO"),
+          ],
+        },
+      },
+    ]);
+
+    const { campaigns } = await fetchCampaigns("act_1", "tok");
+    expect(
+      Object.fromEntries(campaigns.map((c) => [c.name, c.uses_campaign_budget]))
+    ).toEqual({ "CBO daily": true, "CBO lifetime": true, ABO: false });
   });
 
   it("hides deleted and archived campaigns — they cannot take a new ad", async () => {

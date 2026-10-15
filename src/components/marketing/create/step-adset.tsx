@@ -61,10 +61,21 @@ interface StepAdsetProps {
   data: AdSetFormData;
   adAccountId: string;
   pageName: string;
+  // The campaign has its own budget (CBO), so the ad set gets none.
+  campaignBudget?: boolean;
+  // Extra line under the budget box (e.g. where per-ad-set budgets go).
+  budgetHint?: React.ReactNode;
   onUpdate: (updates: Partial<AdSetFormData>) => void;
 }
 
-export function StepAdset({ data, adAccountId, pageName, onUpdate }: StepAdsetProps) {
+export function StepAdset({
+  data,
+  adAccountId,
+  pageName,
+  campaignBudget = false,
+  budgetHint,
+  onUpdate,
+}: StepAdsetProps) {
   const [pixels, setPixels] = useState<PixelInfo[]>([]);
   const [loadingPixels, setLoadingPixels] = useState(false);
   const [automaticPlacement, setAutomaticPlacement] = useState(true);
@@ -169,6 +180,12 @@ export function StepAdset({ data, adAccountId, pageName, onUpdate }: StepAdsetPr
       {/* Budget */}
       <div>
         <label className="block text-sm text-gray-400 mb-2">Budget</label>
+        {campaignBudget ? (
+          <p className="max-w-lg rounded-xl border border-gray-700/50 bg-gray-800/50 p-4 text-sm text-gray-400">
+            Set on the campaign (CBO) — Facebook spreads it across the ad
+            sets, so they don&apos;t get a budget of their own.
+          </p>
+        ) : (
         <div className="bg-gray-800/50 rounded-xl p-4 border border-gray-700/50 max-w-lg">
           <div className="flex gap-3 mb-3">
             <button
@@ -220,6 +237,10 @@ export function StepAdset({ data, adAccountId, pageName, onUpdate }: StepAdsetPr
             />
           </div>
         </div>
+        )}
+        {!campaignBudget && budgetHint && (
+          <p className="mt-2 max-w-lg text-xs text-gray-500">{budgetHint}</p>
+        )}
       </div>
 
       {/* Schedule */}

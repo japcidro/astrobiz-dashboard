@@ -32,6 +32,9 @@ export interface FbCampaignRef {
   status: string;
   effective_status: string;
   objective: string | null;
+  // Campaign budget (CBO): the budget sits on the campaign, so a new ad set
+  // under it must not carry one of its own — Facebook rejects that.
+  uses_campaign_budget: boolean;
 }
 
 export interface FbAdsetRef {
@@ -97,8 +100,10 @@ export async function fetchCampaigns(
     status?: string;
     effective_status?: string;
     objective?: string;
+    daily_budget?: string;
+    lifetime_budget?: string;
   }>(
-    `/${accountId}/campaigns?fields=id,name,status,effective_status,objective`,
+    `/${accountId}/campaigns?fields=id,name,status,effective_status,objective,daily_budget,lifetime_budget`,
     token
   );
 
@@ -110,6 +115,8 @@ export async function fetchCampaigns(
       status: c.status || "UNKNOWN",
       effective_status: c.effective_status || c.status || "UNKNOWN",
       objective: c.objective ?? null,
+      uses_campaign_budget:
+        Number(c.daily_budget ?? 0) > 0 || Number(c.lifetime_budget ?? 0) > 0,
     }));
 
   // Active first, then alphabetical — the running ones are what you want.

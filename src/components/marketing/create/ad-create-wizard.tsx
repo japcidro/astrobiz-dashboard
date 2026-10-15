@@ -399,6 +399,9 @@ export function AdCreateWizard() {
             data={state.adset}
             adAccountId={state.adAccountId}
             pageName={state.ad.page_name}
+            campaignBudget={
+              state.mode === "new" && state.campaign.campaign_budget_optimization
+            }
             onUpdate={(updates) =>
               dispatch({ type: "SET_ADSET", payload: updates })
             }

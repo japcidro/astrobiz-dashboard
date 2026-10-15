@@ -9,6 +9,15 @@ the ad set and the rest join it. The table otherwise looks as before (a
 card-per-ad-set layout was tried the same day and dropped — the table is
 easier to work in).
 
+**Budget per ad set.** Without CBO, the table has a Daily (or Lifetime)
+Budget column — one amount per ad set, on its first row; blank uses the
+Section B budget. With CBO (switched on for a new campaign, or an existing
+campaign that has its own budget — marked "— CBO" in the dropdown) the
+column and Section B's budget give way to a note, and no ad set budget is
+sent: the create endpoint now drops it under CBO for both wizards, since
+Facebook rejects an ad set budget there. A lifetime budget now needs a
+Section B end date before Submit.
+
 **Default ad copy** is saved by "Save current as default"
 (`supabase/store-ad-defaults-copy-migration.sql`); "Apply store defaults"
 puts it back in the box and into any row whose copy is still empty. The
