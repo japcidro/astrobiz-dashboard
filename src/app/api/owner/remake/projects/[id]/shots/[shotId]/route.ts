@@ -24,6 +24,10 @@ export async function PATCH(request: Request, ctx: Ctx) {
   if (typeof b.approved === "boolean") patch.approved = b.approved;
   if (typeof b.script === "string") patch.script = b.script.slice(0, 1500);
   if (typeof b.voice_direction === "string") patch.voice_direction = b.voice_direction.trim().slice(0, 120);
+  if ("voice_gender" in b) {
+    if (b.voice_gender === "male" || b.voice_gender === "female" || b.voice_gender === null) patch.voice_gender = b.voice_gender;
+    else return Response.json({ error: "Voice is male or female" }, { status: 400 });
+  }
   if ("voice_id" in b) {
     if (b.voice_id === null) Object.assign(patch, { voice_id: null, voice_type: null, voice_name: null });
     else if (typeof b.voice_id === "string" && /^[0-9a-f-]{36}$/.test(b.voice_id) && (b.voice_type === "preset" || b.voice_type === "element")) {

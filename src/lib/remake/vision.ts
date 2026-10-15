@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { PRODUCT_FORMS, type BrandCheck, type ProductForm, type ShotKind } from "./types";
+import { PRODUCT_FORMS, type BrandCheck, type ProductForm, type ShotKind, type VoiceGender } from "./types";
 
 /**
  * Claude looks at frames for three jobs: label each clip (talking head or
@@ -134,7 +134,7 @@ export async function detectChanges(db: SupabaseClient, stripUrl: string, tiles:
 }
 
 /** Does the generated still show only our product and no competitor branding? */
-export async function brandCheck(db: SupabaseClient, stillUrl: string, productUrls: string[], rules: string): Promise<BrandCheck | null> {
+export async function brandCheck(db: SupabaseClient, stillUrl: string, productUrls: string[], rules: string): Promise<(BrandCheck & { voice: VoiceGender | null }) | null> {
   const blocks: Array<Record<string, unknown>> = [];
   const still = await imageBlock(stillUrl);
   if (!still) return null;
@@ -145,14 +145,15 @@ export async function brandCheck(db: SupabaseClient, stillUrl: string, productUr
   }
   blocks.push({
     type: "text",
-    text: `Check the generated still. ${rules.trim() ? `Brand rules: ${rules.trim()}. ` : ""}Answer with JSON only: {"ok": boolean, "notes": string}.`,
+    text: `Check the generated still. ${rules.trim() ? `Brand rules: ${rules.trim()}. ` : ""}Answer with JSON only: {"ok": boolean, "notes": string, "voice": "male" | "female" | null}.`,
   });
   const system = `You review AI-generated ad stills before they are animated.
 Fail (ok=false) when: a product, box or label in the still is not our product as shown in the reference photos; any other brand's name, logo or label is readable; leftover captions, UI, stickers or watermarks remain; the person is obviously deformed (extra fingers, warped face); the brand rules are broken.
-Pass (ok=true) otherwise. "notes" is one or two short sentences naming what to fix, or "Looks clean." when it passes. No brand names of competitors. Answer with JSON only.`;
-  const out = await ask<BrandCheck>(db, system, blocks, 400);
+Pass (ok=true) otherwise. "notes" is one or two short sentences naming what to fix, or "Looks clean." when it passes. No brand names of competitors.
+"voice": the voice the main person in the still would speak with, "male" or "female" from how they present; null only when no person is visible. Answer with JSON only.`;
+  const out = await ask<BrandCheck & { voice?: unknown }>(db, system, blocks, 400);
   if (!out || typeof out.ok !== "boolean") return null;
-  return { ok: out.ok, notes: typeof out.notes === "string" ? out.notes.slice(0, 400) : "" };
+  return { ok: out.ok, notes: typeof out.notes === "string" ? out.notes.slice(0, 400) : "", voice: out.voice === "male" || out.voice === "female" ? out.voice : null };
 }
 
 /** What a brand kit photo shows, so the still swap can pick the matching form. */

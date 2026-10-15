@@ -300,7 +300,7 @@ export async function queueClip(db: SupabaseClient, project: ProjectRow, shot: S
   const params: Record<string, unknown> = { project_id: project.id, shot_id: shot.id, engine: engine.id, quality: shot.clip_quality, still_path: shot.still_path };
   if (engine.mode === "speak") {
     params.duration = engine.id === "veo3" ? 8 : engine.lengths!.includes(Number(shot.clip_seconds)) ? Number(shot.clip_seconds) : veoLengthFor(seconds);
-    params.prompt = veoPrompt({ script: shot.kind === "talking_head" ? shot.script : "", voiceDirection: shot.voice_direction, shotDescription: shot.description, kind: shot.kind });
+    params.prompt = veoPrompt({ script: shot.kind === "talking_head" ? shot.script : "", voiceDirection: shot.voice_direction, shotDescription: shot.description, kind: shot.kind, voiceGender: shot.voice_gender });
   } else if (engine.mode === "motion") {
     if (!shot.ref_path) return "The real clip is not cut yet";
     params.ref_path = shot.ref_path;
@@ -458,7 +458,14 @@ export async function runPendingPasses(db: SupabaseClient, id: string): Promise<
         if (!locked || locked.length === 0) return;
         const url = (s.still_preview_path && signed.get(s.still_preview_path)) || signed.get(s.still_path!);
         const result = url ? await brandCheck(db, url, (kit?.images ?? []).map((i) => i.url).filter((u): u is string => !!u), kit?.rules ?? "") : null;
-        await db.from("remake_shots").update({ brand_check: result ?? { ok: true, notes: "Not checked: Claude could not read the still (no Anthropic key, or the image is too large)." } }).eq("id", s.id);
+        await db
+          .from("remake_shots")
+          .update({
+            brand_check: result ? { ok: result.ok, notes: result.notes } : { ok: true, notes: "Not checked: Claude could not read the still (no Anthropic key, or the image is too large)." },
+            // The voice follows the person in this still; a new still re-reads it.
+            ...(result?.voice ? { voice_gender: result.voice } : {}),
+          })
+          .eq("id", s.id);
       })
     );
   }

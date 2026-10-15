@@ -13,6 +13,9 @@ export interface BrandCheck {
   notes: string;
 }
 
+/** The voice Veo gives a talking head; read off the still, editable per clip. */
+export type VoiceGender = "male" | "female";
+
 export interface ProjectRow {
   id: string;
   title: string;
@@ -59,6 +62,8 @@ export interface ShotRow {
   approved: boolean;
   script: string;
   voice_direction: string;
+  /** Male or female voice for Veo talking heads; set by the brand check from the still, null until then. */
+  voice_gender: VoiceGender | null;
   voice_id: string | null;
   voice_type: string | null;
   voice_name: string | null;

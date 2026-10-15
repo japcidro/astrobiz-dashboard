@@ -58,11 +58,12 @@ const PHONE_LOOK = `Keep the person, clothing, product, room, framing and lighti
  * Veo: the still comes alive and, when there is a script, the person says
  * it. Veo makes the voice and the lip movement itself.
  */
-export function veoPrompt(i: { script: string; voiceDirection: string; shotDescription: string | null; kind: "talking_head" | "broll" }): string {
+export function veoPrompt(i: { script: string; voiceDirection: string; shotDescription: string | null; kind: "talking_head" | "broll"; voiceGender?: "male" | "female" | null }): string {
   const scene = i.shotDescription?.trim() ? ` ${i.shotDescription.trim()}.` : "";
   const script = i.script.trim().replace(/"/g, "'");
   if (script) {
-    const voice = i.voiceDirection.trim() ? `in a ${i.voiceDirection.trim()} voice` : "in a warm, casual, conversational voice";
+    const who = i.voiceGender ? `natural adult ${i.voiceGender} voice that matches this person` : "natural voice that matches this person's appearance";
+    const voice = `in a ${who}, ${i.voiceDirection.trim() || "warm, casual, conversational"}`;
     return (
       `Vertical 9:16 selfie-style video.${scene} The person looks at the camera and says ${voice}, with natural lip sync, small head movements, blinks and expressions: "${script}" ` +
       `Only this person speaks; no other voices, no music, quiet room ambience. ${PHONE_LOOK}`

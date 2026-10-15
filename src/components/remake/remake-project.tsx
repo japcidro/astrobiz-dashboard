@@ -113,7 +113,6 @@ export function RemakeProject({ id }: { id: string }) {
   };
 
   const shot = project?.shots.find((s) => s.id === selected) ?? null;
-  const voices = worker?.voices ?? [];
   const duration = Number(project?.source_duration ?? 0);
   const atPlayhead = project?.shots.find((s) => playhead >= Number(s.start_s) && playhead < Number(s.end_s)) ?? null;
 
@@ -303,7 +302,7 @@ export function RemakeProject({ id }: { id: string }) {
 
             <main className="min-w-0">
               {shot ? (
-                <ShotPanel key={shot.id} project={project} shot={shot} voices={voices} busy={busy} onPatch={(b) => patchShot(shot.id, b)} onAction={(a, b) => action(shot.id, a, b)} onProjectPatch={patchProject} onCastFrom={castFrom} />
+                <ShotPanel key={shot.id} project={project} shot={shot} busy={busy} onPatch={(b) => patchShot(shot.id, b)} onAction={(a, b) => action(shot.id, a, b)} onProjectPatch={patchProject} onCastFrom={castFrom} />
               ) : (
                 <p className="text-sm text-gray-500">Pick a clip.</p>
               )}

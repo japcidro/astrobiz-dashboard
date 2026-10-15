@@ -1,10 +1,10 @@
 "use client";
 
-import { AlertTriangle, Check, Download, Images, Info, Loader2, Maximize2, Mic, RefreshCw, Sparkles, UserCheck, Video } from "lucide-react";
+import { AlertTriangle, Check, Download, Images, Info, Loader2, Maximize2, RefreshCw, Sparkles, UserCheck, Video } from "lucide-react";
 import { useState } from "react";
 import type { Quality } from "@/lib/hook-studio/engines";
-import { CLIP_ENGINES, STILL_CREDITS, VO_CREDITS_PER_CHAR, clipEstimate, getClipEngine, veoLengthFor } from "@/lib/remake/engines";
-import { PRODUCT_FORMS, type CastSource, type ProjectView, type ShotView, type Voice } from "@/lib/remake/types";
+import { CLIP_ENGINES, STILL_CREDITS, clipEstimate, getClipEngine, veoLengthFor } from "@/lib/remake/engines";
+import { PRODUCT_FORMS, type CastSource, type ProjectView, type ShotView, type VoiceGender } from "@/lib/remake/types";
 import { Button, Label, Panel, Pill, credits } from "@/components/hook-studio/ui";
 import { CastPicker } from "./cast-picker";
 import { ClipVideo, ComparePlayer, Lightbox } from "./clip-video";
@@ -28,7 +28,6 @@ function Frame({ children, dashed = false }: { children: React.ReactNode; dashed
 export function ShotPanel({
   project,
   shot,
-  voices,
   busy,
   onPatch,
   onAction,
@@ -37,7 +36,6 @@ export function ShotPanel({
 }: {
   project: ProjectView;
   shot: ShotView;
-  voices: Voice[];
   busy: string | null;
   onPatch: (body: Record<string, unknown>) => Promise<void>;
   onAction: (action: string, body?: Record<string, unknown>) => Promise<void>;
@@ -55,13 +53,10 @@ export function ShotPanel({
   const engine = getClipEngine(shot.clip_engine) ?? CLIP_ENGINES[0];
   const swap = shot.mode === "swap";
   const speaks = swap && engine.mode === "speak" && shot.kind === "talking_head";
-  const showVoiceover = !speaks;
   const veoLen = engine.id === "veo3" ? 8 : engine.lengths ? (engine.lengths.includes(Number(shot.clip_seconds)) ? Number(shot.clip_seconds) : veoLengthFor(shot.seconds)) : shot.seconds;
   const estimate = clipEstimate(engine.id, shot.clip_quality, veoLen);
   const stillBusy = shot.still_status === "queued" || shot.still_status === "running";
-  const audioBusy = shot.audio_status === "queued" || shot.audio_status === "running";
   const clipBusy = shot.clip_status === "queued" || shot.clip_status === "running";
-  const mixBusy = shot.mixed_status === "queued" || shot.mixed_status === "running";
   const check = shot.brand_check;
   const checking = check?.notes === "Checking…";
   const unchecked = !!check && NOT_CHECKED.test(check.notes);
@@ -92,9 +87,15 @@ export function ShotPanel({
             ))}
           </select>
         </label>
-        <div className="ml-auto flex items-center gap-1 rounded-lg bg-gray-900 p-0.5">
+        <div className="ml-auto flex items-center gap-1 rounded-lg bg-gray-900 p-0.5" title="What this clip is. Talking head: the person faces the camera and Veo speaks the script with their lips and voice. B-roll: silent action; Genjutsu copies the real motion.">
           {(["talking_head", "broll"] as const).map((k) => (
-            <button key={k} type="button" onClick={() => k !== shot.kind && void onPatch({ kind: k })} className={`px-2 py-1 rounded-md text-[11px] font-semibold cursor-pointer ${shot.kind === k ? "bg-gray-700 text-white" : "text-gray-400 hover:text-white"}`}>
+            <button
+              key={k}
+              type="button"
+              onClick={() => k !== shot.kind && void onPatch({ kind: k })}
+              title={k === "talking_head" ? "Talking head: the person speaks the script (Veo makes the voice and lips)" : "B-roll: silent action, no speech (Genjutsu copies the real clip's motion)"}
+              className={`px-2 py-1 rounded-md text-[11px] font-semibold cursor-pointer ${shot.kind === k ? "bg-gray-700 text-white" : "text-gray-400 hover:text-white"}`}
+            >
               {k === "talking_head" ? "Talking head" : "B-roll"}
             </button>
           ))}
@@ -274,9 +275,22 @@ export function ShotPanel({
             <div className="space-y-2">
               <textarea value={script} onChange={(e) => setScript(e.target.value)} onBlur={() => script !== shot.script && void onPatch({ script })} rows={3} placeholder="What the person says. Veo makes the voice and the lips from this. One or two sentences for 8 seconds." className={`${field} resize-none`} />
               <input value={direction} onChange={(e) => setDirection(e.target.value)} onBlur={() => direction !== shot.voice_direction && void onPatch({ voice_direction: direction })} placeholder="Voice direction, e.g. warm, casual, slight smile" className={field} />
+              <div className="flex items-center gap-2 flex-wrap text-[11px]">
+                <span className="text-gray-400">Voice</span>
+                <div className="flex items-center gap-1 rounded-lg bg-gray-900 border border-gray-700 p-0.5">
+                  {(["male", "female"] as VoiceGender[]).map((g) => (
+                    <button key={g} type="button" onClick={() => g !== shot.voice_gender && void onPatch({ voice_gender: g })} className={`px-2.5 py-1 rounded-md text-xs font-semibold capitalize cursor-pointer ${shot.voice_gender === g ? "bg-gray-700 text-white" : "text-gray-400 hover:text-white"}`}>
+                      {g}
+                    </button>
+                  ))}
+                </div>
+                <span className={shot.voice_gender ? "text-gray-500" : "text-amber-300"}>
+                  {shot.voice_gender ? "Read from the still; a new still re-reads it. Change it here if it is wrong." : "Not read yet: it is set when the still's brand check runs. Pick one if you are rendering now."}
+                </span>
+              </div>
             </div>
           )}
-          {engine.mode === "speak" && shot.kind === "broll" && <p className="text-[11px] text-gray-500">B-roll: Veo animates the still with natural ambience and no speech. Add a voiceover below.</p>}
+          {engine.mode === "speak" && shot.kind === "broll" && <p className="text-[11px] text-gray-500">B-roll: Veo animates the still with natural ambience and no speech. Switch the clip to Talking head above if the person should speak.</p>}
           {engine.mode === "prompt" && (
             <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} onBlur={() => prompt !== (shot.clip_prompt ?? "") && void onPatch({ clip_prompt: prompt })} rows={2} placeholder="Optional motion prompt. Empty = natural small movement." className={`${field} resize-none`} />
           )}
@@ -309,58 +323,6 @@ export function ShotPanel({
         </div>
       )}
 
-      {showVoiceover && (
-        <div className="rounded-xl border border-gray-800 bg-gray-900/60 p-3 space-y-2">
-          <p className="text-xs font-semibold text-gray-300 inline-flex items-center gap-1.5">
-            <Mic size={12} /> Voiceover · ElevenLabs v4 <span className="text-gray-500 font-normal">· mixed onto the clip, MP3 saved too</span>
-          </p>
-          <textarea value={script} onChange={(e) => setScript(e.target.value)} onBlur={() => script !== shot.script && void onPatch({ script })} rows={2} placeholder="The line spoken over this clip. Leave empty for no voiceover." className={`${field} resize-none`} />
-          <div className="flex items-center gap-2 flex-wrap">
-            <select
-              value={shot.voice_id ?? ""}
-              onChange={(e) => {
-                const v = voices.find((x) => x.id === e.target.value);
-                void onPatch(v ? { voice_id: v.id, voice_type: v.type, voice_name: v.name } : { voice_id: null });
-              }}
-              className={`${field} sm:w-56`}
-            >
-              <option value="">Pick a voice…</option>
-              {voices.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {v.name}
-                  {v.type === "element" ? " (cloned)" : ""}
-                </option>
-              ))}
-            </select>
-            <Button onClick={() => onAction("voice")} busy={busy === "voice"} disabled={audioBusy || !script.trim() || !shot.voice_id || script !== shot.script}>
-              <Mic size={13} /> {shot.audio_url ? "Redo voiceover" : "Generate voiceover"}
-              <span className="text-[10px] text-gray-300 font-normal">≈ {credits(Math.max(0.2, script.length * VO_CREDITS_PER_CHAR))}</span>
-            </Button>
-            {audioBusy && <Loader2 size={14} className="animate-spin text-gray-400" />}
-            {mixBusy && (
-              <span className="text-xs text-gray-400 inline-flex items-center gap-1">
-                <Loader2 size={11} className="animate-spin" /> Mixing onto the clip…
-              </span>
-            )}
-            {shot.mixed_status === "done" && shot.mixed_url && (
-              <span className="text-xs text-green-400 inline-flex items-center gap-1">
-                <Check size={11} /> Mixed
-              </span>
-            )}
-            {shot.audio_status === "failed" && <span className="text-xs text-red-300">{shot.audio_error}</span>}
-          </div>
-          {shot.audio_url && (
-            <div className="flex items-center gap-2">
-              <audio key={shot.audio_url} src={shot.audio_url} controls className="h-8 flex-1" />
-              {shot.audio_seconds && <Pill tone={shot.audio_seconds > shot.seconds + 0.5 ? "warn" : "muted"}>{shot.audio_seconds}s{shot.audio_seconds > shot.seconds + 0.5 ? " · longer than the clip" : ""}</Pill>}
-              <a href={shot.audio_url} download className="text-[11px] text-gray-300 hover:text-white inline-flex items-center gap-1">
-                <Download size={11} /> MP3
-              </a>
-            </div>
-          )}
-          {voices.length === 0 && <p className="text-[11px] text-amber-300">No voices yet: the Mac worker lists them when it is online.</p>}
-        </div>
-      )}
     </Panel>
   );
 }
