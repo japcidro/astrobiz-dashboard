@@ -1,13 +1,13 @@
 "use client";
 
-import { AlertTriangle, Check, Download, Images, Info, Loader2, Mic, RefreshCw, Sparkles, UserCheck, Video } from "lucide-react";
+import { AlertTriangle, Check, Download, Images, Info, Loader2, Maximize2, Mic, RefreshCw, Sparkles, UserCheck, Video } from "lucide-react";
 import { useState } from "react";
 import type { Quality } from "@/lib/hook-studio/engines";
 import { CLIP_ENGINES, STILL_CREDITS, VO_CREDITS_PER_CHAR, clipEstimate, getClipEngine, veoLengthFor } from "@/lib/remake/engines";
 import { PRODUCT_FORMS, type CastSource, type ProjectView, type ShotView, type Voice } from "@/lib/remake/types";
 import { Button, Label, Panel, Pill, credits } from "@/components/hook-studio/ui";
 import { CastPicker } from "./cast-picker";
-import { ClipVideo, ComparePlayer } from "./clip-video";
+import { ClipVideo, ComparePlayer, Lightbox } from "./clip-video";
 
 const field =
   "w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-purple-500";
@@ -50,6 +50,7 @@ export function ShotPanel({
   const [direction, setDirection] = useState(shot.voice_direction);
   const [prompt, setPrompt] = useState(shot.clip_prompt ?? "");
   const [picker, setPicker] = useState(false);
+  const [zoom, setZoom] = useState<{ video?: string; image?: string } | null>(null);
 
   const engine = getClipEngine(shot.clip_engine) ?? CLIP_ENGINES[0];
   const swap = shot.mode === "swap";
@@ -73,6 +74,7 @@ export function ShotPanel({
   return (
     <Panel className="space-y-4">
       {picker && <CastPicker projectId={project.id} current={project.cast_url} onPick={onCastFrom} onClose={() => setPicker(false)} />}
+      {zoom && <Lightbox video={zoom.video} image={zoom.image} onClose={() => setZoom(null)} />}
 
       <div className="flex items-center gap-2 flex-wrap">
         <p className="text-sm font-semibold text-white">
@@ -121,7 +123,18 @@ export function ShotPanel({
         <div>
           <Label>Reference</Label>
           {shot.ref_url ? (
-            <ClipVideo src={shot.ref_url} className="aspect-[9/16]" />
+            <div className="relative group/ref">
+              <ClipVideo src={shot.ref_url} className="aspect-[9/16]" />
+              <button
+                type="button"
+                onClick={() => setZoom({ video: shot.ref_url! })}
+                aria-label="Open the reference clip full size"
+                title="Open full size with sound"
+                className="absolute top-1.5 right-1.5 text-white/90 bg-black/50 hover:bg-black/80 rounded-full p-1 opacity-70 group-hover/ref:opacity-100 cursor-pointer"
+              >
+                <Maximize2 size={11} />
+              </button>
+            </div>
           ) : (
             <Frame dashed>
               <Loader2 size={14} className="animate-spin" />
@@ -141,8 +154,13 @@ export function ShotPanel({
                     <p className="text-[11px]">{shot.still_status === "running" ? "Nano Banana Pro…" : "Queued on the Mac"}</p>
                   </Frame>
                 ) : shot.still_preview_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={shot.still_preview_url} alt="" className={`aspect-[9/16] w-full object-cover rounded-lg border bg-black ${shot.approved ? "border-green-600" : "border-gray-800"}`} />
+                  <button type="button" onClick={() => setZoom({ image: shot.still_url ?? shot.still_preview_url! })} title="Open the still full size" className="relative group/still block w-full cursor-zoom-in">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={shot.still_preview_url} alt="" className={`aspect-[9/16] w-full object-cover rounded-lg border bg-black ${shot.approved ? "border-green-600" : "border-gray-800"}`} />
+                    <span className="absolute top-1.5 right-1.5 text-white/90 bg-black/50 rounded-full p-1 opacity-70 group-hover/still:opacity-100">
+                      <Maximize2 size={11} />
+                    </span>
+                  </button>
                 ) : project.cast_url ? (
                   <Frame dashed>
                     {/* eslint-disable-next-line @next/next/no-img-element */}

@@ -39,7 +39,8 @@ export function stillPrompt(i: StillPromptInput): string {
           held
             ? `The person holds ${/^[aeiou]/.test(held) ? "an" : "a"} ${held} in the frame: replace it with our ${held} from those photos`
             : "Replace whatever product, bottle, box, pieces or packaging the person holds or shows with the matching form of our product from those photos"
-        }, exactly as it appears there (same shape, colors, label and text), at the same position, angle and scale, held the same way. Do not change the kind of object: a bottle stays a bottle, loose gummies stay loose gummies, a box stays a box.`
+        }, exactly as it appears there (same shape, colors, label and text), at the same position and angle and held the same way, but at the product's true real-world size relative to the person's hands and face: a supplement bottle or jar is palm-sized, the fingers wrap most of the way around it; a box or sachet is no bigger than a hand. Never enlarge the product to fill the frame. Do not change the kind of object: a bottle stays a bottle, loose gummies stay loose gummies, a box stays a box. ` +
+          `Copy the label from the product photo letter for letter: the brand name, product name and every line of text must be sharp, legible and spelled exactly as in the photo, with no invented, reworded, missing or extra words and no gibberish letters; small print stays faint small print rather than made-up characters.`
       : ` Remove or blur any brand name, logo or label on products in the frame so no competitor branding is visible.`;
   const rules = i.brandRules.trim() ? ` Brand rules: ${i.brandRules.trim()}.` : "";
   const note = i.castNote.trim() ? ` Also: ${i.castNote.trim()}.` : "";

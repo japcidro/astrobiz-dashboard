@@ -1,6 +1,6 @@
 "use client";
 
-import { Play, Volume2, VolumeX } from "lucide-react";
+import { Play, Volume2, VolumeX, X } from "lucide-react";
 import { useEffect, useRef, useState, type RefObject } from "react";
 
 /**
@@ -101,6 +101,28 @@ export function ComparePlayer({ refSrc, ourSrc, ourLabel }: { refSrc: string | n
           <Play size={11} /> Play both in sync
         </button>
       )}
+    </div>
+  );
+}
+
+/** Full-screen look at a clip (with sound and controls) or a still at full size. Click outside or Escape closes. */
+export function Lightbox({ video, image, onClose }: { video?: string | null; image?: string | null; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/90 flex items-center justify-center p-6" role="dialog" aria-modal="true" onClick={onClose}>
+      <button type="button" onClick={onClose} aria-label="Close" className="absolute top-4 right-4 text-white/80 hover:text-white cursor-pointer p-1">
+        <X size={22} />
+      </button>
+      {video ? (
+        <video src={video} controls autoPlay playsInline className="max-h-full max-w-full rounded-lg bg-black" onClick={(e) => e.stopPropagation()} />
+      ) : image ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={image} alt="" className="max-h-full max-w-full rounded-lg object-contain" onClick={(e) => e.stopPropagation()} />
+      ) : null}
     </div>
   );
 }
