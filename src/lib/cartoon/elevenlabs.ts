@@ -10,14 +10,14 @@ import type { CartoonBeatRow, CartoonHookRow, CartoonVoice } from "./types";
  */
 
 const API = "https://api.elevenlabs.io/v1";
-// Same model and settings as the call confirmer's voice preview.
-const MODEL = "eleven_multilingual_v2";
-const SETTINGS = { stability: 0.5, similarity_boost: 0.75, style: 0.3, use_speaker_boost: true };
+// Eleven v4 (Sep 2026): clones are more faithful than on multilingual v2. It only takes stability and similarity.
+const MODEL = "eleven_v4";
+const SETTINGS = { stability: 0.5, similarity_boost: 0.75 };
 const OWN = ["cloned", "generated", "professional"];
 
 const key = () => process.env.ELEVENLABS_API_KEY ?? null;
 
-/** The account's own voices (cloned, designed, professional), A to Z; ElevenLabs' stock voices are left out. */
+/** The account's own voices (cloned, designed, professional), the "v4" voices made for Eleven v4 first, then A to Z; ElevenLabs' stock voices are left out. */
 export async function listElevenLabsVoices(): Promise<{ voices: CartoonVoice[]; error: string | null }> {
   const apiKey = key();
   if (!apiKey) return { voices: [], error: "ELEVENLABS_API_KEY is not set" };
@@ -28,7 +28,7 @@ export async function listElevenLabsVoices(): Promise<{ voices: CartoonVoice[]; 
     const voices = (data.voices ?? [])
       .filter((v) => OWN.includes(v.category ?? ""))
       .map((v) => ({ provider: "elevenlabs" as const, id: v.voice_id, name: v.name.trim(), type: v.category ?? "cloned" }))
-      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+      .sort((a, b) => Number(/\bv4\b/i.test(b.name)) - Number(/\bv4\b/i.test(a.name)) || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
     return { voices, error: null };
   } catch (e) {
     return { voices: [], error: e instanceof Error ? e.message : "ElevenLabs unreachable" };
