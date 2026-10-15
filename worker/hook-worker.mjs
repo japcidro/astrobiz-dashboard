@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
-const VERSION = "1.4.1";
+const VERSION = "1.5.0";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // ─── Config ───
@@ -88,6 +88,9 @@ const claimJob = () =>
 
 const updateJob = (id, patch) =>
   rest(`/hook_studio_jobs?id=eq.${id}`, { method: "PATCH", body: patch, headers: { Prefer: "return=minimal" } });
+
+const updateTalkingHead = (id, patch) =>
+  rest(`/talking_heads?id=eq.${id}`, { method: "PATCH", body: patch, headers: { Prefer: "return=minimal" } });
 
 const getHook = (id) => rest(`/hook_studio_hooks?id=eq.${id}&select=*`).then((rows) => rows?.[0] ?? null);
 
@@ -237,6 +240,24 @@ async function estimateCredits(args) {
   const r = await run(HF, ["generate", "cost", ...args], { timeoutMs: 5 * 60_000 });
   const m = r.out.match(/([\d.]+)\s*credits?/i);
   return m ? Number(m[1]) : null;
+}
+
+/** The job id a non-waiting `generate create` printed: an object (or list / jobs[]) with an id, else the first UUID in the text. */
+function findJobId(text) {
+  try {
+    const parsed = JSON.parse(text);
+    const list = Array.isArray(parsed) ? parsed : [parsed];
+    for (const item of list) {
+      if (!item || typeof item !== "object") continue;
+      if (typeof item.id === "string") return item.id;
+      if (Array.isArray(item.jobs) && typeof item.jobs[0]?.id === "string") return item.jobs[0].id;
+      if (item.job && typeof item.job.id === "string") return item.job.id;
+    }
+  } catch {
+    // not JSON
+  }
+  const m = text.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  return m ? m[0] : null;
 }
 
 function findResultUrl(text) {
@@ -412,11 +433,29 @@ async function remakeFrames(job, dir) {
 async function generateToFile(job, args, dir) {
   const estimate = await estimateCredits(args);
   await updateJob(job.id, { estimate_credits: estimate, cli_command: redactCommand(args) });
-  const r = await run(HF, ["generate", "create", ...args, "--wait", "--wait-timeout", "30m", "--wait-interval", "5s", "--json"]);
-  const found = findResultUrl(r.out) || findResultUrl(r.err);
-  if (r.code !== 0 || !found) {
-    const tail = (r.err || r.out).trim().split("\n").slice(-6).join("\n").slice(-600);
-    throw new Error(tail || `CLI exited ${r.code} with no result`);
+  // Submit without waiting, give the slot back while Higgsfield renders, then wait on the job id.
+  const c = await run(HF, ["generate", "create", ...args, "--json"], { timeoutMs: 10 * 60_000 });
+  let found = c.code === 0 ? findResultUrl(c.out) : null;
+  if (!found) {
+    const jobId = c.code === 0 ? findJobId(c.out) : null;
+    if (!jobId) {
+      const tail = (c.err || c.out).trim().split("\n").slice(-6).join("\n").slice(-600);
+      throw new Error(tail || `CLI exited ${c.code} with no job id`);
+    }
+    await updateJob(job.id, { cli_job_id: jobId });
+    releaseSlot();
+    let w;
+    try {
+      w = await run(HF, ["generate", "wait", jobId, "--timeout", "30m", "--interval", "5s", "--quiet", "--json"]);
+    } finally {
+      await acquireSlot();
+    }
+    found = findResultUrl(w.out) || findResultUrl(w.err);
+    if (w.code !== 0 || !found) {
+      const tail = (w.err || w.out).trim().split("\n").slice(-6).join("\n").slice(-600);
+      throw new Error(tail || `Higgsfield job ${jobId} finished without a result`);
+    }
+    found.id = found.id ?? jobId;
   }
   const ext = extensionOf(found.url);
   const outFile = join(dir, `result.${ext}`);
@@ -474,6 +513,26 @@ async function remakeTts(job, dir) {
 }
 
 /** Every engine starts from our still. Veo makes voice and lips itself; Genjutsu copies the real clip. */
+/** Veo from a still: 3.1 (4/6/8 s, fast or preview) or 3 (8 s). */
+function veoArgs(engine, p, hi, still) {
+  if (engine === "veo3_1") return ["veo3_1", "--prompt", safePrompt(p.prompt), "--aspect_ratio", "9:16", "--duration", String([4, 6, 8].includes(Number(p.duration)) ? p.duration : 8), "--quality", hi ? "high" : "basic", "--variant", hi ? "veo-3-1-preview" : "veo-3-1-fast", "--start-image", still];
+  return ["veo3", "--prompt", safePrompt(p.prompt), "--aspect_ratio", "9:16", "--variant", hi ? "veo-3-preview" : "veo-3-fast", "--start-image", still];
+}
+
+/** Talking Head tool: a still from the library speaks the script with Veo. */
+async function talkingHead(job, dir) {
+  const p = job.params;
+  const still = join(dir, `still.${extensionOf(p.still_path)}`);
+  await storageDownload(p.still_path, still, BOARD_BUCKET);
+  const args = veoArgs(p.engine === "veo3" ? "veo3" : "veo3_1", p, p.quality === "high", still);
+  await updateTalkingHead(p.talking_head_id, { status: "running" });
+  const r = await generateToFile(job, args, dir);
+  const clipPath = `talking-heads/${p.talking_head_id}/${job.id}.mp4`;
+  await storageUpload(clipPath, r.outFile, "video/mp4", BOARD_BUCKET);
+  await updateTalkingHead(p.talking_head_id, { clip_path: clipPath, status: "done", error: null, credits: r.estimate });
+  return r;
+}
+
 async function remakeClip(job, dir) {
   const p = job.params;
   const still = join(dir, `still.${extensionOf(p.still_path)}`);
@@ -482,10 +541,8 @@ async function remakeClip(job, dir) {
   let args;
   switch (p.engine) {
     case "veo3_1":
-      args = ["veo3_1", "--prompt", safePrompt(p.prompt), "--aspect_ratio", "9:16", "--duration", String([4, 6, 8].includes(Number(p.duration)) ? p.duration : 8), "--quality", hi ? "high" : "basic", "--variant", hi ? "veo-3-1-preview" : "veo-3-1-fast", "--start-image", still];
-      break;
     case "veo3":
-      args = ["veo3", "--prompt", safePrompt(p.prompt), "--aspect_ratio", "9:16", "--variant", hi ? "veo-3-preview" : "veo-3-fast", "--start-image", still];
+      args = veoArgs(p.engine, p, hi, still);
       break;
     case "genjutsu": {
       const ref = join(dir, "reference.mp4");
@@ -542,6 +599,7 @@ const REMAKE_FAIL = {
   remake_mix: (p, m) => updateShot(p.shot_id, { mixed_status: "failed" }).then(() => log(`mix: ${m}`)),
   remake_split: (p, m) => updateProject(p.project_id, { status: "failed", error: m }),
   remake_frames: (p, m) => updateProject(p.project_id, { status: "failed", error: m }),
+  talking_head: (p, m) => updateTalkingHead(p.talking_head_id, { status: "failed", error: m }),
 };
 
 async function processRemakeJob(job) {
@@ -555,6 +613,7 @@ async function processRemakeJob(job) {
       : job.kind === "remake_still" ? await remakeStill(job, dir)
       : job.kind === "remake_tts" ? await remakeTts(job, dir)
       : job.kind === "remake_mix" ? await remakeMix(job, dir)
+      : job.kind === "talking_head" ? await talkingHead(job, dir)
       : await remakeClip(job, dir);
     const patch = { status: "done", error: null, finished_at: new Date().toISOString() };
     if (r && typeof r === "object") Object.assign(patch, { cli_job_id: r.cliJobId ?? null, result_source_url: r.url ?? null });
@@ -680,7 +739,7 @@ async function boardFetch(job) {
 
 // ─── One job ───
 async function processJob(job) {
-  if (job.kind.startsWith("remake_")) return processRemakeJob(job);
+  if (job.kind.startsWith("remake_") || job.kind === "talking_head") return processRemakeJob(job);
   if (job.kind === "board_fetch") {
     log(`job ${job.id} board_fetch start`);
     try {
@@ -818,18 +877,46 @@ async function refreshBalance() {
 let lastVoicesAt = 0;
 let voices = [];
 
+/**
+ * Slots: CONCURRENCY jobs may work on this Mac at once (downloads, ffmpeg,
+ * uploads). While Higgsfield renders a job remotely, that job hands its slot
+ * back (releaseSlot) and takes one again when the result is ready
+ * (acquireSlot), so ten renders can be in flight while two jobs do local work.
+ */
 let active = 0;
+let inflight = 0;
 let stopping = false;
+const slotWaiters = [];
+
+function releaseSlot() {
+  active = Math.max(0, active - 1);
+  const next = slotWaiters.shift();
+  if (next) next();
+}
+
+function acquireSlot() {
+  return new Promise((resolve) => {
+    const attempt = () => {
+      if (active < CONCURRENCY) {
+        active++;
+        resolve();
+      } else slotWaiters.push(attempt);
+    };
+    attempt();
+  });
+}
 
 async function tick() {
   await refreshBalance();
-  await heartbeat({ ...balance, active });
+  await heartbeat({ ...balance, active, inflight });
   while (active < CONCURRENCY && !stopping) {
     const job = await claimJob();
     if (!job) break;
     active++;
+    inflight++;
     processJob(job).finally(() => {
-      active--;
+      inflight--;
+      releaseSlot();
     });
   }
 }
@@ -844,7 +931,7 @@ async function main() {
     } catch (err) {
       log("loop error:", err instanceof Error ? err.message : err);
     }
-    if (stopping && active === 0) break;
+    if (stopping && inflight === 0) break;
     await new Promise((r) => setTimeout(r, POLL_MS));
   }
   log("stopped");

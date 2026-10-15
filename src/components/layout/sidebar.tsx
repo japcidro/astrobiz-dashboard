@@ -42,6 +42,7 @@ import {
   Smartphone,
   Kanban,
   Megaphone,
+  Mic,
   Film,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -381,6 +382,12 @@ const ownerNavEntries: NavEntry[] = [
         label: "Clipper",
         href: "/owner/clipper",
         icon: <Film size={18} />,
+        roles: ownerRoles,
+      },
+      {
+        label: "Talking Head",
+        href: "/owner/talking-head",
+        icon: <Mic size={18} />,
         roles: ownerRoles,
       },
     ],
