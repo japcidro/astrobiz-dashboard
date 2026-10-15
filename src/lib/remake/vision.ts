@@ -15,13 +15,23 @@ async function apiKey(db: SupabaseClient): Promise<string | null> {
   return (data?.value as string | undefined) ?? null;
 }
 
+/** The real image type from the first bytes; CDNs and renamed files lie in the header and Claude rejects a mismatch. */
+function sniffImageType(buf: Buffer): "image/png" | "image/jpeg" | "image/webp" | "image/gif" | null {
+  if (buf.length < 12) return null;
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return "image/png";
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return "image/jpeg";
+  if (buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") return "image/webp";
+  if (buf.toString("ascii", 0, 3) === "GIF") return "image/gif";
+  return null;
+}
+
 async function imageBlock(url: string): Promise<Record<string, unknown> | null> {
   try {
     const res = await fetch(url);
     if (!res.ok) return null;
-    const type = res.headers.get("content-type")?.split(";")[0] ?? "image/jpeg";
-    if (!/^image\/(png|jpeg|webp|gif)$/.test(type)) return null;
     const buf = Buffer.from(await res.arrayBuffer());
+    const type = sniffImageType(buf);
+    if (!type) return null;
     if (buf.byteLength > 4.9 * 1024 * 1024) return null;
     return { type: "image", source: { type: "base64", media_type: type, data: buf.toString("base64") } };
   } catch {

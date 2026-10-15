@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
-const VERSION = "1.7.2";
+const VERSION = "1.7.3";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // ─── Config ───
@@ -1042,11 +1042,14 @@ async function fetchImageFromLink(url, dir) {
     }
   };
   const save = async (res) => {
-    const type = (res.headers.get("content-type") || "").split(";")[0].trim();
-    const ext = type === "image/png" ? "png" : type === "image/webp" ? "webp" : type === "image/jpeg" ? "jpg" : null;
-    if (!ext) return null;
+    const header = (res.headers.get("content-type") || "").split(";")[0].trim();
+    if (!/^image\//.test(header) && !/^(application\/octet-stream|binary\/octet-stream)$/.test(header)) return null;
     const buf = Buffer.from(await res.arrayBuffer());
     if (buf.length < 2000) return null;
+    // Trust the bytes, not the header or the file name: Facebook's CDN hands out PNGs as .jpg.
+    const type = buf[0] === 0x89 && buf[1] === 0x50 ? "image/png" : buf[0] === 0xff && buf[1] === 0xd8 ? "image/jpeg" : buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP" ? "image/webp" : null;
+    const ext = type === "image/png" ? "png" : type === "image/webp" ? "webp" : type === "image/jpeg" ? "jpg" : null;
+    if (!ext) return null;
     const file = join(dir, `image.${ext}`);
     await writeFile(file, buf);
     return { file, ext, mime: type };
