@@ -185,7 +185,7 @@ export function ShotPanel({
                   <Frame>
                     <Loader2 size={18} className="animate-spin" />
                     <p className="text-[11px]">{shot.still_status === "running" ? `Nano Banana Pro… ${elapsedMin(shot.updated_at)}` : "Queued on the Mac"}</p>
-                    <p className="text-[10px] text-gray-600">usually 1–2 min</p>
+                    <p className="text-[10px] text-gray-600">{shot.still_attempts > 1 ? "2nd try: the first kept the original person" : "usually 1–2 min"}</p>
                   </Frame>
                 ) : shot.still_preview_url ? (
                   <button type="button" onClick={() => setZoom({ image: shot.still_url ?? shot.still_preview_url! })} title="Open the still full size" className="relative group/still block w-full cursor-zoom-in">

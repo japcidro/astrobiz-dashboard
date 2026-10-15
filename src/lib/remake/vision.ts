@@ -134,26 +134,47 @@ export async function detectChanges(db: SupabaseClient, stripUrl: string, tiles:
 }
 
 /** Does the generated still show only our product and no competitor branding? */
-export async function brandCheck(db: SupabaseClient, stillUrl: string, productUrls: string[], rules: string, copyScene = false): Promise<(BrandCheck & { voice: VoiceGender | null }) | null> {
+export async function brandCheck(
+  db: SupabaseClient,
+  stillUrl: string,
+  productUrls: string[],
+  rules: string,
+  copyScene = false,
+  people?: { castUrl: string | null; frameUrl: string | null }
+): Promise<(BrandCheck & { voice: VoiceGender | null; person_ok: boolean | null }) | null> {
   const blocks: Array<Record<string, unknown>> = [];
   const still = await imageBlock(stillUrl);
   if (!still) return null;
-  blocks.push({ type: "text", text: "Generated still:" }, still);
+  // Three people can be in play, so every image is named: A the still, B the picked person, C the original frame.
+  let checkPerson = false;
+  if (people?.castUrl) {
+    const cast = await imageBlock(people.castUrl);
+    if (cast) {
+      blocks.push({ type: "text", text: "IMAGE B — the PICKED PERSON. The still must show this same individual (same face):" }, cast);
+      checkPerson = true;
+    }
+    if (people.frameUrl) {
+      const frame = await imageBlock(people.frameUrl);
+      if (frame) blocks.push({ type: "text", text: "IMAGE C — the ORIGINAL FRAME the still was made from. The person in it was supposed to be replaced:" }, frame);
+    }
+  }
+  blocks.push({ type: "text", text: checkPerson ? "IMAGE A — the GENERATED STILL to check:" : "Generated still:" }, still);
   for (const u of productUrls.slice(0, 4)) {
     const img = await imageBlock(u);
     if (img) blocks.push({ type: "text", text: "Our product (reference):" }, img);
   }
   blocks.push({
     type: "text",
-    text: `Check the generated still. ${copyScene ? "This still copies the reference scene with a new person; none of our product is expected in it, so do not fail it for a missing or generic product. " : ""}${rules.trim() ? `Brand rules: ${rules.trim()}. ` : ""}Answer with JSON only: {"ok": boolean, "notes": string, "voice": "male" | "female" | null}.`,
+    text: `Check the generated still${checkPerson ? " (IMAGE A)" : ""}. ${checkPerson ? "person_ok is true only when the face in IMAGE A is the same individual as IMAGE B (the picked person); it is false when IMAGE A still shows the person from IMAGE C or someone else. Ignore clothing, which is meant to come from IMAGE C. " : ""}${copyScene ? "This still copies the reference scene with a new person; none of our product is expected in it, so do not fail it for a missing or generic product. " : ""}${rules.trim() ? `Brand rules: ${rules.trim()}. ` : ""}Answer with JSON only: {"ok": boolean, "notes": string, "voice": "male" | "female" | null${checkPerson ? ', "person_ok": boolean' : ""}}.`,
   });
   const system = `You review AI-generated ad stills before they are animated.
-Fail (ok=false) when: a product, box or label in the still is not our product as shown in the reference photos; any other brand's name, logo or label is readable; leftover captions, UI, stickers or watermarks remain; the person is obviously deformed (extra fingers, warped face); the brand rules are broken.
+Fail (ok=false) when: a product, box or label in the still is not our product as shown in the reference photos; any other brand's name, logo or label is readable; leftover captions, UI, stickers or watermarks remain; the person is obviously deformed (extra fingers, warped face); the brand rules are broken; or, when a picked person is given, the person in the still is not that individual (person_ok=false, and start "notes" with "Wrong person:"). Compare faces, not clothes: the clothing is meant to come from the original frame.
 Pass (ok=true) otherwise. "notes" is one or two short sentences naming what to fix, or "Looks clean." when it passes. No brand names of competitors.
 "voice": the voice the main person in the still would speak with, "male" or "female" from how they present; null only when no person is visible. Answer with JSON only.`;
-  const out = await ask<BrandCheck & { voice?: unknown }>(db, system, blocks, 400);
+  const out = await ask<BrandCheck & { voice?: unknown; person_ok?: unknown }>(db, system, blocks, 400);
   if (!out || typeof out.ok !== "boolean") return null;
-  return { ok: out.ok, notes: typeof out.notes === "string" ? out.notes.slice(0, 400) : "", voice: out.voice === "male" || out.voice === "female" ? out.voice : null };
+  const person_ok = checkPerson ? out.person_ok !== false : null;
+  return { ok: out.ok && person_ok !== false, notes: typeof out.notes === "string" ? out.notes.slice(0, 400) : "", voice: out.voice === "male" || out.voice === "female" ? out.voice : null, person_ok };
 }
 
 /** What a brand kit photo shows, so the still swap can pick the matching form. */

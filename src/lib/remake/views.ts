@@ -196,16 +196,26 @@ export async function queueFrames(db: SupabaseClient, project: Pick<ProjectRow, 
   });
 }
 
-/** Queue the still for a shot: frame + (cast image) + product photos → Nano Banana Pro. */
-export async function queueStill(db: SupabaseClient, project: ProjectRow, shot: ShotRow): Promise<string | null> {
+/** The person for a scene: the picked image, or the approved still the cast was locked to (never the shot's own still). */
+async function castPathFor(db: SupabaseClient, project: ProjectRow, shotId: string): Promise<string | null> {
+  if (project.cast_path) return project.cast_path;
+  if (project.cast_shot_id && project.cast_shot_id !== shotId) {
+    const { data: cast } = await db.from("remake_shots").select("still_path").eq("id", project.cast_shot_id).maybeSingle();
+    return (cast?.still_path as string | null) ?? null;
+  }
+  return null;
+}
+
+/**
+ * Queue the still for a shot: frame + (cast image) + product photos → Nano
+ * Banana Pro. `retry` is the check regenerating by itself after the wrong
+ * person came out; a fresh Generate starts the attempt count over.
+ */
+export async function queueStill(db: SupabaseClient, project: ProjectRow, shot: ShotRow, opts: { retry?: boolean } = {}): Promise<string | null> {
   if (!shot.frame_path) return "This clip has no frame yet";
   const kit = await loadBrandKit(db, project.store);
-  // The person for the scene: a picked image, or the approved still the cast was locked to.
-  let castPath: string | null = project.cast_path ?? null;
-  if (!castPath && project.cast_shot_id && project.cast_shot_id !== shot.id) {
-    const { data: cast } = await db.from("remake_shots").select("still_path").eq("id", project.cast_shot_id).maybeSingle();
-    castPath = (cast?.still_path as string | null) ?? null;
-  }
+  const castPath = await castPathFor(db, project, shot.id);
+  const attempt = opts.retry ? (shot.still_attempts ?? 0) + 1 : 1;
   // Products that match what is held come first; the rest fill up to four.
   // "none" means the person holds nothing: no product photos, no product in the still.
   // Copy mode keeps the reference scene as it is: no product photos either.
@@ -226,6 +236,7 @@ export async function queueStill(db: SupabaseClient, project: ProjectRow, shot: 
     brandRules: kit?.rules ?? "",
     castNote: project.cast_note,
     shotDescription: shot.description,
+    attempt,
   });
   const jobId = await queue(db, "remake_still", "nano_banana_pro", {
     project_id: project.id,
@@ -237,7 +248,7 @@ export async function queueStill(db: SupabaseClient, project: ProjectRow, shot: 
   });
   await db
     .from("remake_shots")
-    .update({ mode: "swap", still_job_id: jobId, still_status: "queued", still_error: null, still_preview_path: null, brand_check: null, approved: false, clip_status: "none", clip_path: null, mixed_status: "none", mixed_path: null })
+    .update({ mode: "swap", still_job_id: jobId, still_status: "queued", still_error: null, still_preview_path: null, brand_check: null, approved: false, clip_status: "none", clip_path: null, mixed_status: "none", mixed_path: null, still_attempts: attempt })
     .eq("id", shot.id);
   return null;
 }
@@ -452,22 +463,37 @@ export async function runPendingPasses(db: SupabaseClient, id: string): Promise<
   const { data: shotRows } = await db.from("remake_shots").select("*").eq("project_id", id).order("idx");
   const shots = (shotRows ?? []) as ShotRow[];
 
-  // Brand check for stills that came back and were not checked yet.
+  // Brand check for stills that came back and were not checked yet. It also
+  // sees the picked person and the original frame: a still that kept the
+  // original person fails, and is regenerated once by itself.
   const unchecked = shots.filter((s) => s.still_status === "done" && s.still_path && s.brand_check === null).slice(0, 3);
   if (unchecked.length) {
     const kit = await loadBrandKit(db, project.store);
-    const signed = await signBoardPaths(db, unchecked.flatMap((s) => [s.still_path, s.still_preview_path]));
+    const castPaths = new Map(await Promise.all(unchecked.map(async (s) => [s.id, await castPathFor(db, project, s.id)] as const)));
+    const signed = await signBoardPaths(db, unchecked.flatMap((s) => [s.still_path, s.still_preview_path, s.frame_path, castPaths.get(s.id)]));
     await Promise.all(
       unchecked.map(async (s) => {
         const { data: locked } = await db.from("remake_shots").update({ brand_check: { ok: true, notes: "Checking…" } }).eq("id", s.id).is("brand_check", null).select("id");
         if (!locked || locked.length === 0) return;
         const url = (s.still_preview_path && signed.get(s.still_preview_path)) || signed.get(s.still_path!);
         const copy = s.brand_mode === "copy";
-        const result = url ? await brandCheck(db, url, copy ? [] : (kit?.images ?? []).map((i) => i.url).filter((u): u is string => !!u), kit?.rules ?? "", copy) : null;
+        const castPath = castPaths.get(s.id) ?? null;
+        const people = castPath ? { castUrl: signed.get(castPath) ?? null, frameUrl: s.frame_path ? signed.get(s.frame_path) ?? null : null } : undefined;
+        const result = url ? await brandCheck(db, url, copy ? [] : (kit?.images ?? []).map((i) => i.url).filter((u): u is string => !!u), kit?.rules ?? "", copy, people) : null;
+        if (result && result.person_ok === false && (s.still_attempts ?? 0) < 2) {
+          // Wrong person: one more try with a prompt that says so, no click needed.
+          const problem = await queueStill(db, project, s, { retry: true });
+          if (!problem) {
+            await db.from("remake_shots").update({ brand_check: null }).eq("id", s.id);
+            return;
+          }
+        }
         await db
           .from("remake_shots")
           .update({
-            brand_check: result ? { ok: result.ok, notes: result.notes } : { ok: true, notes: "Not checked: Claude could not read the still (no Anthropic key, or the image is too large)." },
+            brand_check: result
+              ? { ok: result.ok, notes: result.person_ok === false ? `${result.notes.replace(/^Wrong person:\s*/i, "Wrong person: ")} Tried twice; check the picked image under Cast, it may be a still of the original model, then Regenerate.` : result.notes }
+              : { ok: true, notes: "Not checked: Claude could not read the still (no Anthropic key, or the image is too large)." },
             // The voice follows the person in this still; a new still re-reads it.
             ...(result?.voice ? { voice_gender: result.voice } : {}),
           })

@@ -24,11 +24,14 @@ export interface StillPromptInput {
   brandRules: string;
   castNote: string;
   shotDescription: string | null;
+  /** 2 when the first attempt kept the wrong person: the prompt says so and insists harder. */
+  attempt?: number;
 }
 
 export function stillPrompt(i: StillPromptInput): string {
+  const retry = (i.attempt ?? 1) > 1 ? `The previous attempt wrongly kept the person from image 1. ` : "";
   const who = i.hasCast
-    ? `Replace the person in the first image with the exact person shown in the second image (same face, hair, skin and body), keeping the second image's identity faithfully.`
+    ? `${retry}This is a person replacement. Image 1 is only the scene: keep its pose, framing, hand positions, clothing, background and lighting. Image 2 is the person who must appear in the result: put this exact person into image 1's pose, with image 2's face, facial features, skin tone, hair and body, recognisably the same individual. The person from image 1 must not appear at all: do not keep their face, hair or skin, and do not blend the two faces.`
     : `Replace the person in the first image with a completely different person who looks nothing like the original: ${i.recipe.who} of the same gender with ${i.recipe.skin}, ${i.recipe.hairColor} hair styled as ${i.recipe.hairCut}, ${i.recipe.eyes} eyes, and a different face shape, nose, lips, eyebrows and jawline. Attractive, fit and toned, healthy glowing skin, well groomed.`;
   const firstProduct = i.hasCast ? 3 : 2;
   const list = i.products
@@ -53,7 +56,7 @@ export function stillPrompt(i: StillPromptInput): string {
   return (
     `${who}${product} Keep the exact same pose, head angle, hand positions and facial expression, the same clothing, framing and crop, the same background, furniture, props, lighting and time of day.${scene} ` +
     `Remove every piece of text, caption, subtitle, sticker, emoji, watermark, logo, icon, button, progress bar and app interface anywhere in the frame, and rebuild the background behind them so nothing looks erased, except the text printed on our own product. ` +
-    `The output is a clean photograph, photoreal, candid phone-camera look with natural skin texture, 9:16.${rules}${note}`
+    `The output is a clean photograph, photoreal, candid phone-camera look with natural skin texture, 9:16.${rules}${note}${i.hasCast ? " Final check before answering: the face in the output is the face from image 2, not image 1." : ""}`
   );
 }
 

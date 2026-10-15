@@ -65,6 +65,8 @@ export interface ShotRow {
   still_status: StepStatus;
   still_error: string | null;
   brand_check: BrandCheck | null;
+  /** How many times the current still has been generated (the check regenerates once by itself when the wrong person came out). */
+  still_attempts: number;
   approved: boolean;
   script: string;
   voice_direction: string;
