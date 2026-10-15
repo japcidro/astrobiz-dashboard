@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, Download, ExternalLink, Film, Link2, Loader2, Paperclip, Send, Trash2, Upload, X } from "lucide-react";
+import { CalendarClock, Download, ExternalLink, Film, Link2, Loader2, Paperclip, Send, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -160,11 +160,42 @@ export function ItemDetail({
       <div className="flex-1 overflow-y-auto p-4 space-y-5">
         {error && <p className="text-xs text-red-300 bg-red-900/30 border border-red-800/60 rounded-lg px-3 py-2">{error}</p>}
 
-        <ReferencePlayer
-          item={item}
-          onRetry={() => call(() => api<{ item: BoardItem }>(`${base}/refetch`, { method: "POST" }))}
-        />
-        {item.video_url && (
+        {item.kind === "image" ? (
+          <div>
+            {item.image_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={item.image_url} alt="" className="max-h-80 mx-auto rounded-lg object-contain bg-black" />
+            ) : (
+              <div className="rounded-lg border border-dashed border-gray-800 p-6 text-center text-xs text-gray-500">
+                {item.video_status === "failed" ? (
+                  <>
+                    <p className="text-red-300">{item.video_error || "Could not save the image"}</p>
+                    <button type="button" onClick={() => call(() => api<{ item: BoardItem }>(`${base}/refetch`, { method: "POST" }))} className="mt-2 text-purple-300 hover:text-white cursor-pointer">Try again</button>
+                  </>
+                ) : (
+                  <p className="inline-flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Saving the image on the Mac…</p>
+                )}
+              </div>
+            )}
+            {item.image_url && (
+              <div className="mt-2 flex items-center justify-center gap-3 text-[11px] text-gray-500">
+                <span>Saved image{item.width && item.height ? ` · ${item.width}×${item.height}` : ""}</span>
+                <button type="button" onClick={() => router.push(`/owner/image-studio?item=${item.id}`)} className="inline-flex items-center gap-1 font-semibold text-purple-300 hover:text-white cursor-pointer">
+                  <Sparkles size={11} /> Make ours
+                </button>
+                <a href={downloadHref(item.image_url, item.title)} className="inline-flex items-center gap-1 font-semibold text-gray-300 hover:text-white">
+                  <Download size={11} /> Download
+                </a>
+              </div>
+            )}
+          </div>
+        ) : (
+          <ReferencePlayer
+            item={item}
+            onRetry={() => call(() => api<{ item: BoardItem }>(`${base}/refetch`, { method: "POST" }))}
+          />
+        )}
+        {item.kind !== "image" && item.video_url && (
           <div className="-mt-3 flex items-center justify-center gap-3 text-[11px] text-gray-500">
             <span>
               Saved copy{item.height ? ` · ${item.height}p` : ""}{item.duration ? ` · ${Math.round(item.duration)}s` : ""}
@@ -282,7 +313,7 @@ export function ItemDetail({
                     <div className="flex-1 min-w-0">
                       <p className="text-sm text-white truncate flex items-center gap-1.5">
                         {o.kind === "fb_ad" ? <Link2 size={12} className="text-blue-300 shrink-0" /> : <Paperclip size={12} className="text-gray-400 shrink-0" />}
-                        {o.kind === "fb_ad" ? o.ad_name : o.note || "Uploaded video"}
+                        {o.kind === "fb_ad" ? o.ad_name : o.note || (/\.(png|jpe?g|webp)$/i.test(o.file_path ?? "") ? "Uploaded image" : "Uploaded video")}
                       </p>
                       <p className="text-[11px] text-gray-500 flex items-center gap-1 flex-wrap">
                         {o.added_by_name && <span>{o.added_by_name}</span>}

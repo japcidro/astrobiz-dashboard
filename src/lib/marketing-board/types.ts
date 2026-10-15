@@ -18,8 +18,14 @@ export const SOURCE_LABEL: Record<SourceType, string> = {
 
 export type VideoStatus = "pending" | "saving" | "ready" | "failed";
 
+/** A video reference (today's cards) or an image reference for posts and image ads. */
+export type ItemKind = "video" | "image";
+
 export interface ItemRow {
   id: string;
+  kind: ItemKind;
+  /** Saved image for an image card (marketing-board bucket). */
+  image_path: string | null;
   source_url: string;
   source_type: SourceType;
   title: string | null;
@@ -81,6 +87,7 @@ export interface OutputView extends OutputRow {
 export interface BoardItem extends ItemRow {
   assignee_name: string | null;
   video_url: string | null;
+  image_url: string | null;
   thumb_url: string | null;
   comments: CommentView[];
   outputs: OutputView[];

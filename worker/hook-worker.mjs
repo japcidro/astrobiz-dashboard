@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
-const VERSION = "1.6.0";
+const VERSION = "1.7.0";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // ─── Config ───
@@ -88,6 +88,9 @@ const claimJob = () =>
 
 const updateJob = (id, patch) =>
   rest(`/hook_studio_jobs?id=eq.${id}`, { method: "PATCH", body: patch, headers: { Prefer: "return=minimal" } });
+
+const updateStudioResult = (id, patch) =>
+  rest(`/image_studio_results?id=eq.${id}`, { method: "PATCH", body: patch, headers: { Prefer: "return=minimal" } });
 
 const updateTalkingHead = (id, patch) =>
   rest(`/talking_heads?id=eq.${id}`, { method: "PATCH", body: patch, headers: { Prefer: "return=minimal" } });
@@ -553,6 +556,44 @@ function veoArgs(engine, p, hi, still) {
   return ["veo3", "--prompt", safePrompt(p.prompt), "--aspect_ratio", "9:16", "--variant", hi ? "veo-3-preview" : "veo-3-fast", "--start-image", still];
 }
 
+/** Image Studio: Nano Banana Pro from the prompt and the role-tagged attachments; a pair is one wide image split in two. */
+async function imageGen(job, dir) {
+  const p = job.params;
+  const files = [];
+  for (const [i, img] of (p.images ?? []).entries()) {
+    const f = join(dir, `in-${i}.${extensionOf(img.path)}`);
+    await storageDownload(img.path, f, img.bucket || BOARD_BUCKET);
+    files.push(f);
+  }
+  const args = ["nano_banana_pro", "--aspect_ratio", p.aspect_ratio || "1:1", "--resolution", "2k", ...files.flatMap((f) => ["--image", f]), "--prompt", safePrompt(p.prompt)];
+  await updateStudioResult(p.result_id, { status: "running" });
+  const r = await generateToFile(job, args, dir);
+  const base = `image-studio/${p.run_id}/${p.result_id}-${job.id}`;
+  const mainPath = `${base}.${r.ext}`;
+  await storageUpload(mainPath, r.outFile, MIME[r.ext] || "image/png", BOARD_BUCKET);
+  const preview = join(dir, "preview.jpg");
+  const pv = await run(FFMPEG, ["-y", "-loglevel", "error", "-i", r.outFile, "-vf", "scale='min(1000,iw)':-2", "-q:v", "3", preview], { timeoutMs: 60_000 });
+  let previewPath = null;
+  if (pv.code === 0) {
+    previewPath = `${base}-preview.jpg`;
+    await storageUpload(previewPath, preview, "image/jpeg", BOARD_BUCKET);
+  }
+  let pairPaths = null;
+  if (p.split) {
+    const before = join(dir, "before.png");
+    const after = join(dir, "after.png");
+    const a = await run(FFMPEG, ["-y", "-loglevel", "error", "-i", r.outFile, "-vf", "crop=floor(iw/2/2)*2:ih:0:0", before], { timeoutMs: 60_000 });
+    const b = await run(FFMPEG, ["-y", "-loglevel", "error", "-i", r.outFile, "-vf", "crop=floor(iw/2/2)*2:ih:floor(iw/2):0", after], { timeoutMs: 60_000 });
+    if (a.code === 0 && b.code === 0) {
+      pairPaths = [`${base}-before.png`, `${base}-after.png`];
+      await storageUpload(pairPaths[0], before, "image/png", BOARD_BUCKET);
+      await storageUpload(pairPaths[1], after, "image/png", BOARD_BUCKET);
+    }
+  }
+  await updateStudioResult(p.result_id, { path: mainPath, preview_path: previewPath, pair_paths: pairPaths, status: "done", error: null, credits: r.estimate });
+  return r;
+}
+
 /** Talking Head tool: a still from the library speaks the script with Veo. */
 async function talkingHead(job, dir) {
   const p = job.params;
@@ -848,6 +889,7 @@ const REMAKE_FAIL = {
   remake_split: (p, m) => updateProject(p.project_id, { status: "failed", error: m }),
   remake_frames: (p, m) => updateProject(p.project_id, { status: "failed", error: m }),
   talking_head: (p, m) => updateTalkingHead(p.talking_head_id, { status: "failed", error: m }),
+  image_gen: (p, m) => updateStudioResult(p.result_id, { status: "failed", error: m }),
   cartoon_character: (p, m) => updateCartoonHook(p.hook_id, { character_status: "failed", character_error: m }),
   cartoon_still: (p, m) => updateCartoonBeat(p.beat_id, { still_status: "failed", still_error: m }),
   cartoon_clip: (p, m) => updateCartoonBeat(p.beat_id, { clip_status: "failed", clip_error: m }),
@@ -867,6 +909,7 @@ async function processRemakeJob(job) {
       : job.kind === "remake_tts" ? await remakeTts(job, dir)
       : job.kind === "remake_mix" ? await remakeMix(job, dir)
       : job.kind === "talking_head" ? await talkingHead(job, dir)
+      : job.kind === "image_gen" ? await imageGen(job, dir)
       : CARTOON_RUN[job.kind] ? await CARTOON_RUN[job.kind](job, dir)
       : await remakeClip(job, dir);
     const patch = { status: "done", error: null, finished_at: new Date().toISOString() };
@@ -928,9 +971,65 @@ const clip = (v, n) => (typeof v === "string" && v.trim() ? v.trim().slice(0, n)
  * site splits them), and writes the page's metadata next to it. Ads
  * Library ads with several videos are playlists: the first one is taken.
  */
+/** The image behind a link: the file itself, or the page's og:image / twitter:image. */
+async function fetchImageFromLink(url, dir) {
+  const headers = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36", Accept: "text/html,image/*,*/*;q=0.8" };
+  const get = async (u) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 30_000);
+    try {
+      return await fetch(u, { headers, redirect: "follow", signal: ctrl.signal });
+    } finally {
+      clearTimeout(t);
+    }
+  };
+  const save = async (res) => {
+    const type = (res.headers.get("content-type") || "").split(";")[0].trim();
+    const ext = type === "image/png" ? "png" : type === "image/webp" ? "webp" : type === "image/jpeg" ? "jpg" : null;
+    if (!ext) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length < 2000) return null;
+    const file = join(dir, `image.${ext}`);
+    await writeFile(file, buf);
+    return { file, ext, mime: type };
+  };
+  let res = await get(url);
+  if (!res.ok) throw new Error(`The link answered ${res.status}`);
+  const direct = await save(res);
+  if (direct) return direct;
+  const html = await res.text();
+  const meta = html.match(/<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']/i) || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::secure_url)?["']/i) || html.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i);
+  if (!meta) throw new Error("No image found behind this link; upload the image instead");
+  const imgUrl = meta[1].replace(/&amp;/g, "&");
+  res = await get(imgUrl);
+  if (!res.ok) throw new Error(`The page's image answered ${res.status}`);
+  const fromMeta = await save(res);
+  if (!fromMeta) throw new Error("The page's image could not be read; upload it instead");
+  return fromMeta;
+}
+
+async function boardFetchImage(job, itemId, url) {
+  const dir = join(WORK_DIR, "jobs", job.id);
+  await mkdir(dir, { recursive: true });
+  try {
+    await updateBoardItem(itemId, { video_status: "saving", video_error: null });
+    const img = await fetchImageFromLink(url, dir);
+    const probe = await run(FFPROBE, ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", img.file], { timeoutMs: 30_000 });
+    const [w, h] = probe.code === 0 ? probe.out.trim().split(",").map(Number) : [null, null];
+    const imagePath = `board/images/${itemId}-${job.id}.${img.ext}`;
+    await storageUpload(imagePath, img.file, img.mime, BOARD_BUCKET);
+    await updateBoardItem(itemId, { image_path: imagePath, thumb_path: imagePath, video_status: "ready", video_error: null, width: w || null, height: h || null });
+    const { size } = await stat(img.file);
+    return { size };
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 async function boardFetch(job) {
   const { item_id: itemId, url } = job.params;
   if (!itemId || !url) throw new Error("board_fetch needs item_id and url");
+  if (job.params.kind === "image") return boardFetchImage(job, itemId, url);
   const dir = join(WORK_DIR, "jobs", job.id);
   await mkdir(dir, { recursive: true });
   try {
@@ -995,7 +1094,7 @@ async function boardFetch(job) {
 
 // ─── One job ───
 async function processJob(job) {
-  if (job.kind.startsWith("remake_") || job.kind.startsWith("cartoon_") || job.kind === "talking_head") return processRemakeJob(job);
+  if (job.kind.startsWith("remake_") || job.kind.startsWith("cartoon_") || job.kind === "talking_head" || job.kind === "image_gen") return processRemakeJob(job);
   if (job.kind === "board_fetch") {
     log(`job ${job.id} board_fetch start`);
     try {

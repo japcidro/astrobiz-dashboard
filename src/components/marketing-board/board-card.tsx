@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CalendarClock, Check, Loader2, MessageSquare, Play, Video } from "lucide-react";
+import { AlertTriangle, CalendarClock, Check, Image as ImageIcon, Loader2, MessageSquare, Play, Video } from "lucide-react";
 import type { BoardItem } from "@/lib/marketing-board/types";
 import { SourceBadge, fmtDue, isFuture, isOverdue } from "./format";
 
@@ -15,7 +15,8 @@ export function BoardCard({
   onSelect: () => void;
   onDragStart: () => void;
 }) {
-  const thumb = item.thumb_url ?? item.external_thumbnail_url;
+  const isImage = item.kind === "image";
+  const thumb = (isImage ? item.image_url : null) ?? item.thumb_url ?? item.external_thumbnail_url;
   const scheduled = item.outputs.some((o) => isFuture(o.start_time));
   return (
     <button
@@ -31,13 +32,13 @@ export function BoardCard({
         selected ? "border-purple-500 bg-purple-500/10" : "border-gray-700/80 bg-gray-800/60 hover:bg-gray-800"
       }`}
     >
-      <div className="relative w-14 shrink-0 aspect-[9/16] rounded-md bg-gray-950 overflow-hidden">
+      <div className={`relative w-14 shrink-0 ${isImage ? "aspect-square" : "aspect-[9/16]"} rounded-md bg-gray-950 overflow-hidden`}>
         {thumb ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={thumb} alt="" className="w-full h-full object-cover" />
         ) : (
           <div className="w-full h-full flex items-center justify-center text-gray-600">
-            <Play size={18} />
+            {isImage ? <ImageIcon size={18} /> : <Play size={18} />}
           </div>
         )}
         {item.video_status !== "ready" && (

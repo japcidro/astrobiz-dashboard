@@ -129,5 +129,9 @@ export function FbAdPlayer({ output }: { output: OutputView }) {
 /** An uploaded output file. */
 export function UploadPlayer({ output }: { output: OutputView }) {
   if (!output.file_url) return <p className="text-xs text-gray-500">File missing</p>;
+  if (/\.(png|jpe?g|webp)$/i.test(output.file_path ?? "")) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={output.file_url} alt="" className="max-h-80 mx-auto rounded-lg object-contain bg-black" />;
+  }
   return <video src={output.file_url} controls playsInline preload="metadata" className={FRAME} />;
 }

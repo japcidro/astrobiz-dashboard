@@ -1,9 +1,12 @@
 "use client";
 
-import { AlertTriangle, Check, Link as LinkIcon, Loader2, Plus, Wifi, WifiOff } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Check, Images, Link as LinkIcon, Loader2, Plus, Upload, Video, Wifi, WifiOff } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { createClient } from "@/lib/supabase/client";
 import type { WorkerStatus } from "@/lib/hook-studio/types";
 import {
+  type ItemKind,
   BOARD_STATUSES,
   STATUS_LABEL,
   type BoardItem,
@@ -34,6 +37,14 @@ export function MarketingBoard() {
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<BoardStatus | null>(null);
   const [worker, setWorker] = useState<WorkerStatus | null>(null);
+  const router = useRouter();
+  const params = useSearchParams();
+  const tab: ItemKind = params.get("tab") === "images" ? "image" : "video";
+  const setTab = (k: ItemKind) => router.replace(k === "image" ? "/owner/marketing-board?tab=images" : "/owner/marketing-board");
+  const [uploading, setUploading] = useState<{ done: number; total: number } | null>(null);
+  const [filesOver, setFilesOver] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const dragDepth = useRef(0);
 
   const refresh = useCallback(async () => {
     try {
@@ -70,7 +81,7 @@ export function MarketingBoard() {
     setAdding(true);
     setError(null);
     try {
-      const r = await api<{ item: BoardItem }>("/api/owner/marketing-board", { method: "POST", body: JSON.stringify({ url }) });
+      const r = await api<{ item: BoardItem }>("/api/owner/marketing-board", { method: "POST", body: JSON.stringify({ url, kind: tab }) });
       replaceItem(r.item);
       setSelectedId(r.item.id);
       setUrl("");
@@ -98,10 +109,43 @@ export function MarketingBoard() {
   const filtered = useMemo(
     () =>
       items.filter(
-        (i) => (!filterPerson || i.assignee_id === filterPerson) && (!filterStore || i.store === filterStore)
+        (i) => (i.kind ?? "video") === tab && (!filterPerson || i.assignee_id === filterPerson) && (!filterStore || i.store === filterStore)
       ),
-    [items, filterPerson, filterStore]
+    [items, tab, filterPerson, filterStore]
   );
+  const counts = useMemo(() => ({ video: items.filter((i) => (i.kind ?? "video") === "video").length, image: items.filter((i) => i.kind === "image").length }), [items]);
+
+  /** Upload image references straight to the bucket, then make a card for each. */
+  const uploadImages = async (list: FileList | File[]) => {
+    const files = Array.from(list).filter((f) => ["image/png", "image/jpeg", "image/webp"].includes(f.type));
+    if (files.length === 0) {
+      setError("Drop PNG, JPG or WebP images");
+      return;
+    }
+    setError(null);
+    setUploading({ done: 0, total: files.length });
+    const supabase = createClient();
+    const made: BoardItem[] = [];
+    let failed = 0;
+    for (const file of files) {
+      try {
+        const { path, token, bucket } = await api<{ path: string; token: string; bucket: string }>("/api/owner/marketing-board/upload-url", { method: "POST", body: JSON.stringify({ kind: "image", mime: file.type }) });
+        const up = await supabase.storage.from(bucket).uploadToSignedUrl(path, token, file, { contentType: file.type });
+        if (up.error) throw new Error(up.error.message);
+        const r = await api<{ item: BoardItem }>("/api/owner/marketing-board", { method: "POST", body: JSON.stringify({ upload_path: path, name: file.name.replace(/\.[a-z0-9]+$/i, ""), store: filterStore || undefined }) });
+        made.push(r.item);
+      } catch (e) {
+        failed += 1;
+        setError(e instanceof Error ? e.message : "Upload failed");
+      } finally {
+        setUploading((u) => (u ? { ...u, done: u.done + 1 } : u));
+      }
+    }
+    if (made.length) setView((v) => (v ? { ...v, items: [...made, ...v.items] } : v));
+    setUploading(null);
+    if (fileRef.current) fileRef.current.value = "";
+    if (failed && made.length) setError(`${failed} of ${files.length} failed`);
+  };
   const columns = useMemo(() => {
     const by: Record<BoardStatus, BoardItem[]> = { todo: [], in_progress: [], done: [] };
     for (const i of filtered) by[i.status].push(i);
@@ -128,8 +172,17 @@ export function MarketingBoard() {
     <div className="max-w-6xl">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-white">Marketing Board</h1>
-          <p className="text-sm text-gray-500 mt-1">Reference ads to copy, who makes them, and what came out.</p>
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-2xl font-bold text-white">Marketing Board</h1>
+            <div className="flex items-center gap-1 rounded-lg bg-gray-900 border border-gray-800 p-0.5" role="tablist" aria-label="Videos or images">
+              {(["video", "image"] as ItemKind[]).map((k) => (
+                <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => tab !== k && setTab(k)} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer ${tab === k ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"}`}>
+                  {k === "video" ? <Video size={12} /> : <Images size={12} />} {k === "video" ? "Videos" : "Images"} · {counts[k]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p className="text-sm text-gray-500 mt-1">{tab === "video" ? "Reference ads to copy, who makes them, and what came out." : "Image references for page posts and image ads; Make ours turns one into our own."}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Pill tone="ok">
@@ -161,20 +214,28 @@ export function MarketingBoard() {
           e.preventDefault();
           void add();
         }}
-        className="mt-6 flex gap-2"
+        className="mt-6 flex gap-2 flex-wrap"
       >
-        <div className="flex-1 flex items-center gap-2 bg-gray-900 border border-gray-700 rounded-lg px-3 focus-within:border-purple-500">
+        <div className="flex-1 min-w-64 flex items-center gap-2 bg-gray-900 border border-gray-700 rounded-lg px-3 focus-within:border-purple-500">
           <LinkIcon size={14} className="text-gray-500 shrink-0" />
           <input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="Paste a TikTok, Ads Library, Facebook, Instagram or YouTube link…"
+            placeholder={tab === "video" ? "Paste a TikTok, Ads Library, Facebook, Instagram or YouTube link…" : "Paste a Facebook post, Instagram post, Ads Library image ad or image link…"}
             className="flex-1 bg-transparent py-2.5 text-sm text-white placeholder:text-gray-600 focus:outline-none"
           />
         </div>
         <Button primary type="submit" busy={adding} disabled={!url.trim()}>
           <Plus size={14} /> Add reference
         </Button>
+        {tab === "image" && (
+          <>
+            <Button onClick={() => fileRef.current?.click()} busy={uploading !== null} disabled={uploading !== null} title="Add image references from your files (or drop them on the To do column)">
+              <Upload size={14} /> {uploading ? `Uploading ${uploading.done}/${uploading.total}…` : "Upload images"}
+            </Button>
+            <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp" multiple className="hidden" onChange={(e) => e.target.files?.length && void uploadImages(e.target.files)} />
+          </>
+        )}
       </form>
 
       <div className="mt-3 flex items-center gap-2 flex-wrap text-xs">
@@ -217,16 +278,31 @@ export function MarketingBoard() {
                   e.dataTransfer.dropEffect = "move";
                   if (dropTarget !== status) setDropTarget(status);
                 }}
-                onDragLeave={() => dropTarget === status && setDropTarget(null)}
                 onDrop={(e) => {
                   e.preventDefault();
                   const id = e.dataTransfer.getData("text/plain") || dragId;
                   setDropTarget(null);
                   setDragId(null);
                   if (id) void move(id, status);
+                  else if (tab === "image" && status === "todo" && e.dataTransfer.files?.length) {
+                    dragDepth.current = 0;
+                    setFilesOver(false);
+                    void uploadImages(e.dataTransfer.files);
+                  }
+                }}
+                onDragEnter={(e: DragEvent) => {
+                  if (tab !== "image" || status !== "todo" || !Array.from(e.dataTransfer.types).includes("Files")) return;
+                  dragDepth.current += 1;
+                  setFilesOver(true);
+                }}
+                onDragLeave={(e: DragEvent) => {
+                  if (dropTarget === status) setDropTarget(null);
+                  if (tab !== "image" || status !== "todo" || !Array.from(e.dataTransfer.types).includes("Files")) return;
+                  dragDepth.current = Math.max(0, dragDepth.current - 1);
+                  if (dragDepth.current === 0) setFilesOver(false);
                 }}
                 className={`rounded-xl border p-2.5 min-h-[160px] transition-colors ${
-                  over ? "border-purple-500 bg-purple-500/5" : "border-gray-800 bg-gray-900/40"
+                  over || (filesOver && status === "todo") ? "border-purple-500 bg-purple-500/5" : "border-gray-800 bg-gray-900/40"
                 }`}
               >
                 <header className="flex items-center justify-between px-1 pb-2">
@@ -245,8 +321,11 @@ export function MarketingBoard() {
                   ))}
                   {shown.length === 0 && (
                     <p className="text-xs text-gray-600 text-center py-6">
-                      {status === "todo" ? "Paste a link above to start." : "Drag a card here."}
+                      {status === "todo" ? (tab === "image" ? "Paste a link above, or drop images here." : "Paste a link above to start.") : "Drag a card here."}
                     </p>
+                  )}
+                  {tab === "image" && status === "todo" && shown.length > 0 && (
+                    <p className={`text-[11px] text-center py-2 rounded-lg border border-dashed ${filesOver ? "border-purple-500 text-purple-200" : "border-gray-800 text-gray-600"}`}>Drop images here to add them</p>
                   )}
                   {status === "done" && list.length > DONE_PREVIEW && (
                     <button type="button" onClick={() => setShowAllDone((v) => !v)} className="w-full text-xs text-gray-400 hover:text-white py-2 cursor-pointer">

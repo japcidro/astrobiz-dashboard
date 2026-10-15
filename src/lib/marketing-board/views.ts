@@ -4,6 +4,7 @@ import type {
   BoardItem,
   BoardView,
   CommentRow,
+  ItemKind,
   ItemRow,
   OutputRow,
   Person,
@@ -57,6 +58,7 @@ function assemble(
     ...it,
     assignee_name: name(it.assignee_id),
     video_url: it.video_path ? signed.get(it.video_path) ?? null : null,
+    image_url: it.image_path ? signed.get(it.image_path) ?? null : null,
     thumb_url: it.thumb_path ? signed.get(it.thumb_path) ?? null : null,
     comments: (commentsBy.get(it.id) ?? []).map((c) => ({ ...c, author_name: name(c.author_id) })),
     outputs: (outputsBy.get(it.id) ?? []).map((o) => ({
@@ -87,7 +89,7 @@ export async function loadBoard(db: SupabaseClient): Promise<BoardView> {
   const outputs = (outputRows ?? []) as OutputRow[];
 
   const signed = await signBoardPaths(db, [
-    ...items.flatMap((i) => [i.video_path, i.thumb_path]),
+    ...items.flatMap((i) => [i.video_path, i.thumb_path, i.image_path]),
     ...outputs.map((o) => o.file_path),
   ]);
 
@@ -106,16 +108,17 @@ export async function loadItem(db: SupabaseClient, id: string): Promise<BoardIte
   ]);
   const comments = (commentRows ?? []) as CommentRow[];
   const outputs = (outputRows ?? []) as OutputRow[];
-  const signed = await signBoardPaths(db, [item.video_path, item.thumb_path, ...outputs.map((o) => o.file_path)]);
+  const signed = await signBoardPaths(db, [item.video_path, item.thumb_path, item.image_path, ...outputs.map((o) => o.file_path)]);
   return assemble([item], comments, outputs, names, signed)[0];
 }
 
-/** Queue the Mac worker to save a high-quality copy of the reference. */
-export async function queueFetch(db: SupabaseClient, item: Pick<ItemRow, "id" | "source_url">) {
+/** Queue the Mac worker to save a copy of the reference: the video with yt-dlp, or the image behind a link. */
+export async function queueFetch(db: SupabaseClient, item: Pick<ItemRow, "id" | "source_url"> & { kind?: ItemKind }) {
+  const image = item.kind === "image";
   await db.from("hook_studio_jobs").insert({
     kind: "board_fetch",
-    engine: "yt-dlp",
-    params: { item_id: item.id, url: item.source_url },
+    engine: image ? "fetch" : "yt-dlp",
+    params: { item_id: item.id, url: item.source_url, ...(image ? { kind: "image" } : {}) },
     status: "queued",
   });
   await db.from("marketing_board_items").update({ video_status: "pending", video_error: null }).eq("id", item.id);
