@@ -16,6 +16,9 @@ export interface BrandCheck {
 /** The voice Veo gives a talking head; read off the still, editable per clip. */
 export type VoiceGender = "male" | "female";
 
+/** What the still does with the scene: put OUR product in ("product"), or copy the reference as it is and only swap the person ("copy"). */
+export type BrandMode = "product" | "copy";
+
 export interface ProjectRow {
   id: string;
   title: string;
@@ -48,6 +51,7 @@ export interface ShotRow {
   person: string | null;
   /** What the person holds or shows in the frame; a ProductForm or 'none'. */
   holds: string | null;
+  brand_mode: BrandMode;
   selected: boolean;
   brand_heavy: boolean;
   description: string | null;

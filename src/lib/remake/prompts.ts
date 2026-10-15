@@ -19,6 +19,8 @@ export interface StillPromptInput {
   products: Array<{ kind: string | null; description: string | null }>;
   /** What the person holds in the reference frame: a product form, "none" (holds nothing: add no product), or null when unknown. */
   holds: string | null;
+  /** Copy the reference scene as it is (whatever is held stays); only the person changes. No product photos are attached. */
+  copyScene?: boolean;
   brandRules: string;
   castNote: string;
   shotDescription: string | null;
@@ -33,8 +35,9 @@ export function stillPrompt(i: StillPromptInput): string {
     .map((p, n) => `image ${firstProduct + n} shows our ${p.kind && p.kind !== "other" ? p.kind : "product"}${p.description ? ` (${p.description})` : ""}`)
     .join("; ");
   const held = i.holds && i.holds !== "none" ? i.holds : null;
-  const product =
-    i.holds === "none"
+  const product = i.copyScene
+    ? ` Everything else is copied from the first image exactly as it is: whatever the person holds or shows stays the same object at the same position, angle and size; nothing is added. Remove or blur any brand name, logo or label on it so no competitor branding is readable, keeping its shape and colors.`
+    : i.holds === "none"
       ? ` The person holds nothing in this frame: do not add any product, bottle, box, pieces or packaging to their hands or the scene. If the original shows one, remove it and rebuild the hands, clothing and background naturally. Remove or blur any brand name, logo or label elsewhere in the frame.`
       : i.products.length > 0
       ? ` The remaining ${i.products.length === 1 ? "image is" : "images are"} our own product: ${list}. ${

@@ -4,7 +4,7 @@ import { AlertTriangle, Check, Download, Images, Info, Loader2, Maximize2, Refre
 import { useState } from "react";
 import type { Quality } from "@/lib/hook-studio/engines";
 import { CLIP_ENGINES, STILL_CREDITS, clipEstimate, getClipEngine, veoLengthFor } from "@/lib/remake/engines";
-import { PRODUCT_FORMS, type CastSource, type ProjectView, type ShotView, type VoiceGender } from "@/lib/remake/types";
+import { PRODUCT_FORMS, type BrandMode, type CastSource, type ProjectView, type ShotView, type VoiceGender } from "@/lib/remake/types";
 import { Button, Label, Panel, Pill, credits } from "@/components/hook-studio/ui";
 import { CastPicker } from "./cast-picker";
 import { ClipVideo, ComparePlayer, Lightbox } from "./clip-video";
@@ -30,6 +30,7 @@ export function ShotPanel({
   shot,
   busy,
   onPatch,
+  onPatchAll,
   onAction,
   onProjectPatch,
   onCastFrom,
@@ -38,6 +39,8 @@ export function ShotPanel({
   shot: ShotView;
   busy: string | null;
   onPatch: (body: Record<string, unknown>) => Promise<void>;
+  /** The same patch on every clip of the project. */
+  onPatchAll: (body: Record<string, unknown>) => Promise<void>;
   onAction: (action: string, body?: Record<string, unknown>) => Promise<void>;
   onProjectPatch: (body: Record<string, unknown>) => Promise<void>;
   /** Pick the person for every clip from an existing image. */
@@ -76,6 +79,7 @@ export function ShotPanel({
           Clip {shot.idx + 1} <span className="text-gray-500 font-normal">· {fmt(Number(shot.start_s))}–{fmt(Number(shot.end_s))} · {shot.seconds}s</span>
         </p>
         {shot.person && <Pill tone="muted">Person {shot.person}</Pill>}
+        {shot.brand_mode === "product" && (
         <label className="inline-flex items-center gap-1 text-[11px] text-gray-400" title="What the person holds in this frame. The still swap replaces it with our matching product; 'nothing' means no product at all goes into the still.">
           holds
           <select value={shot.holds ?? "none"} onChange={(e) => void onPatch({ holds: e.target.value })} className="bg-gray-900 border border-gray-700 rounded-md px-1 py-0.5 text-[11px] text-gray-300 focus:outline-none">
@@ -87,6 +91,7 @@ export function ShotPanel({
             ))}
           </select>
         </label>
+        )}
         <div className="ml-auto flex items-center gap-1 rounded-lg bg-gray-900 p-0.5" title="What this clip is. Talking head: the person faces the camera and Veo speaks the script with their lips and voice. B-roll: silent action; Genjutsu copies the real motion.">
           {(["talking_head", "broll"] as const).map((k) => (
             <button
@@ -112,6 +117,27 @@ export function ShotPanel({
           Export
         </label>
       </div>
+      {swap && (
+        <div className="flex items-center gap-2 flex-wrap -mt-2 text-[11px]">
+          <span className="text-gray-400">Scene</span>
+          <div className="flex items-center gap-1 rounded-lg bg-gray-900 p-0.5">
+            {(
+              [
+                ["product", "Our product in", "Our brand kit photos go in: the person holds or shows our product"],
+                ["copy", "Copy the reference", "Just the person changes; everything else, including whatever is held, stays as in the reference (competitor branding blurred)"],
+              ] as Array<[BrandMode, string, string]>
+            ).map(([m, label, tip]) => (
+              <button key={m} type="button" title={tip} onClick={() => m !== shot.brand_mode && void onPatch({ brand_mode: m })} className={`px-2 py-1 rounded-md font-semibold cursor-pointer ${shot.brand_mode === m ? "bg-gray-700 text-white" : "text-gray-400 hover:text-white"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <button type="button" onClick={() => void onPatchAll({ brand_mode: shot.brand_mode })} disabled={busy !== null} className="text-purple-300 hover:text-white cursor-pointer disabled:opacity-50" title="Set every clip of this project to the same scene choice">
+            Apply to all clips
+          </button>
+          <span className="text-gray-600">{shot.brand_mode === "copy" ? "No brand kit photos are attached to this still." : "Takes effect on the next Generate."}</span>
+        </div>
+      )}
       {shot.brand_heavy && (
         <p className="text-xs text-amber-300 bg-amber-900/20 border border-amber-800/50 rounded-lg px-3 py-2 inline-flex items-center gap-1.5">
           <AlertTriangle size={12} /> Mostly competitor packaging or a screen. Swapping the person won&apos;t make this ours; it is set to keep the original.
@@ -180,7 +206,7 @@ export function ShotPanel({
                 {!shot.still_preview_url && !stillBusy && (
                   <p className="text-gray-400">
                     {hasPerson ? "Generate puts the picked person into this clip's frame" : "Generate makes a new US person in this clip's frame"}
-                    {project.brand_kit?.images.length ? ", holding our product." : "."}
+                    {shot.brand_mode === "copy" ? ", everything else copied from the reference." : project.brand_kit?.images.length ? ", holding our product." : "."}
                   </p>
                 )}
                 {shot.still_status === "failed" && shot.still_preview_url && <p className="text-red-300">{shot.still_error}</p>}

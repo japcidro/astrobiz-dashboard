@@ -20,6 +20,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
   if (b.mode === "keep" || b.mode === "swap") patch.mode = b.mode;
   if ("person" in b) patch.person = typeof b.person === "string" && /^[A-F]$/.test(b.person) ? b.person : null;
   if (typeof b.holds === "string" && (b.holds === "none" || (PRODUCT_FORMS as string[]).includes(b.holds))) patch.holds = b.holds;
+  if (b.brand_mode === "product" || b.brand_mode === "copy") patch.brand_mode = b.brand_mode;
   if (typeof b.selected === "boolean") patch.selected = b.selected;
   if (typeof b.approved === "boolean") patch.approved = b.approved;
   if (typeof b.script === "string") patch.script = b.script.slice(0, 1500);

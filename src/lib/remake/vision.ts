@@ -134,7 +134,7 @@ export async function detectChanges(db: SupabaseClient, stripUrl: string, tiles:
 }
 
 /** Does the generated still show only our product and no competitor branding? */
-export async function brandCheck(db: SupabaseClient, stillUrl: string, productUrls: string[], rules: string): Promise<(BrandCheck & { voice: VoiceGender | null }) | null> {
+export async function brandCheck(db: SupabaseClient, stillUrl: string, productUrls: string[], rules: string, copyScene = false): Promise<(BrandCheck & { voice: VoiceGender | null }) | null> {
   const blocks: Array<Record<string, unknown>> = [];
   const still = await imageBlock(stillUrl);
   if (!still) return null;
@@ -145,7 +145,7 @@ export async function brandCheck(db: SupabaseClient, stillUrl: string, productUr
   }
   blocks.push({
     type: "text",
-    text: `Check the generated still. ${rules.trim() ? `Brand rules: ${rules.trim()}. ` : ""}Answer with JSON only: {"ok": boolean, "notes": string, "voice": "male" | "female" | null}.`,
+    text: `Check the generated still. ${copyScene ? "This still copies the reference scene with a new person; none of our product is expected in it, so do not fail it for a missing or generic product. " : ""}${rules.trim() ? `Brand rules: ${rules.trim()}. ` : ""}Answer with JSON only: {"ok": boolean, "notes": string, "voice": "male" | "female" | null}.`,
   });
   const system = `You review AI-generated ad stills before they are animated.
 Fail (ok=false) when: a product, box or label in the still is not our product as shown in the reference photos; any other brand's name, logo or label is readable; leftover captions, UI, stickers or watermarks remain; the person is obviously deformed (extra fingers, warped face); the brand rules are broken.

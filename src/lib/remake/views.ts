@@ -208,9 +208,11 @@ export async function queueStill(db: SupabaseClient, project: ProjectRow, shot: 
   }
   // Products that match what is held come first; the rest fill up to four.
   // "none" means the person holds nothing: no product photos, no product in the still.
+  // Copy mode keeps the reference scene as it is: no product photos either.
+  const copy = shot.brand_mode === "copy";
   const nothing = shot.holds === "none";
-  const held = shot.holds && !nothing ? shot.holds : null;
-  const images = nothing ? [] : kit?.images ?? [];
+  const held = shot.holds && !nothing && !copy ? shot.holds : null;
+  const images = nothing || copy ? [] : kit?.images ?? [];
   const ranked = held ? [...images.filter((i) => i.kind === held), ...images.filter((i) => i.kind !== held)] : images;
   const chosen = (held && ranked.some((i) => i.kind === held) ? ranked.filter((i) => i.kind === held) : ranked).slice(0, 4);
   const productPaths = chosen.map((i) => i.path);
@@ -219,7 +221,8 @@ export async function queueStill(db: SupabaseClient, project: ProjectRow, shot: 
     recipe: castRecipe(look),
     hasCast: !!castPath,
     products: chosen.map((i) => ({ kind: i.kind, description: i.description })),
-    holds: nothing ? "none" : held,
+    holds: copy ? null : nothing ? "none" : held,
+    copyScene: copy,
     brandRules: kit?.rules ?? "",
     castNote: project.cast_note,
     shotDescription: shot.description,
@@ -338,7 +341,7 @@ export async function splitShot(db: SupabaseClient, project: ProjectRow, shot: S
   await db.from("remake_shots").update({ end_s: t, ref_path: null, mode: shot.mode }).eq("id", shot.id);
   const { data: created, error } = await db
     .from("remake_shots")
-    .insert({ project_id: project.id, idx: shot.idx + 1, start_s: t, end_s: end, kind: shot.kind, person: shot.person, mode: shot.mode, selected: shot.selected, brand_heavy: shot.brand_heavy, clip_engine: shot.clip_engine })
+    .insert({ project_id: project.id, idx: shot.idx + 1, start_s: t, end_s: end, kind: shot.kind, person: shot.person, mode: shot.mode, selected: shot.selected, brand_heavy: shot.brand_heavy, clip_engine: shot.clip_engine, brand_mode: shot.brand_mode })
     .select("id, idx, start_s, end_s")
     .single();
   if (error || !created) return error?.message ?? "Could not split";
@@ -459,7 +462,8 @@ export async function runPendingPasses(db: SupabaseClient, id: string): Promise<
         const { data: locked } = await db.from("remake_shots").update({ brand_check: { ok: true, notes: "Checking…" } }).eq("id", s.id).is("brand_check", null).select("id");
         if (!locked || locked.length === 0) return;
         const url = (s.still_preview_path && signed.get(s.still_preview_path)) || signed.get(s.still_path!);
-        const result = url ? await brandCheck(db, url, (kit?.images ?? []).map((i) => i.url).filter((u): u is string => !!u), kit?.rules ?? "") : null;
+        const copy = s.brand_mode === "copy";
+        const result = url ? await brandCheck(db, url, copy ? [] : (kit?.images ?? []).map((i) => i.url).filter((u): u is string => !!u), kit?.rules ?? "", copy) : null;
         await db
           .from("remake_shots")
           .update({

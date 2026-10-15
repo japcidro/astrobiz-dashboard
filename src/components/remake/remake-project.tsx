@@ -82,6 +82,13 @@ export function RemakeProject({ id }: { id: string }) {
   const patchProject = (body: Record<string, unknown>) => call("project", () => api(`/api/owner/remake/projects/${id}`, { method: "PATCH", body: JSON.stringify(body) }));
   const patchShot = (shotId: string, body: Record<string, unknown>) =>
     call("approved" in body ? "approve" : "shot", () => api(`/api/owner/remake/projects/${id}/shots/${shotId}`, { method: "PATCH", body: JSON.stringify(body) }));
+  /** The same patch on every clip, one request after another; the last response is the project. */
+  const patchAllShots = (body: Record<string, unknown>) =>
+    call("shot", async () => {
+      let r = { project: project! };
+      for (const s of project?.shots ?? []) r = await api<{ project: ProjectView }>(`/api/owner/remake/projects/${id}/shots/${s.id}`, { method: "PATCH", body: JSON.stringify(body) });
+      return r;
+    });
   const action = (shotId: string, a: string, body?: Record<string, unknown>) =>
     call(a, () => api(`/api/owner/remake/projects/${id}/shots/${shotId}/${a}`, { method: "POST", body: JSON.stringify(body ?? {}) }));
 
@@ -378,7 +385,7 @@ export function RemakeProject({ id }: { id: string }) {
 
             <main className="min-w-0">
               {shot ? (
-                <ShotPanel key={shot.id} project={project} shot={shot} busy={busy} onPatch={(b) => patchShot(shot.id, b)} onAction={(a, b) => action(shot.id, a, b)} onProjectPatch={patchProject} onCastFrom={castFrom} />
+                <ShotPanel key={shot.id} project={project} shot={shot} busy={busy} onPatch={(b) => patchShot(shot.id, b)} onPatchAll={patchAllShots} onAction={(a, b) => action(shot.id, a, b)} onProjectPatch={patchProject} onCastFrom={castFrom} />
               ) : (
                 <p className="text-sm text-gray-500">Pick a clip.</p>
               )}
