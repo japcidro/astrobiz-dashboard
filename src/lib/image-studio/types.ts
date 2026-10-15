@@ -36,9 +36,23 @@ export interface RunInput {
   attachments: Attachment[];
 }
 
+/** What the adapt skill decided before generating. */
+export interface AdaptPlan {
+  study: { angle: string; structure: string; style: string; why_it_works: string };
+  plan: { text: Array<{ from: string; to: string }>; final_text: string; needs_person: boolean; needs_product: boolean; design_spec: string };
+  model_label?: string | null;
+}
+
+export interface ReviewScores {
+  design: number;
+  brand: number;
+  structure: number;
+}
+
 export interface RunRow extends RunInput {
   id: string;
   prompt: string;
+  plan: AdaptPlan | null;
   created_by: string | null;
   created_at: string;
 }
@@ -54,7 +68,8 @@ export interface ResultRow {
   path: string | null;
   preview_path: string | null;
   pair_paths: string[] | null;
-  brand_check: BrandCheck | null;
+  brand_check: (BrandCheck & { scores?: ReviewScores }) | null;
+  attempts: number;
   kept: boolean;
   credits: number | null;
   error: string | null;

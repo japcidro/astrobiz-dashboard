@@ -69,10 +69,15 @@ async function ask<T>(db: SupabaseClient, system: string, content: Array<Record<
       headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
       body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system, messages: [{ role: "user", content }] }),
     });
-    if (!res.ok) return null;
-    const json = (await res.json()) as { content?: Array<{ type: string; text?: string }> };
+    if (!res.ok) {
+      if (process.env.VISION_DEBUG) console.error("[vision]", res.status, (await res.text()).slice(0, 600));
+      return null;
+    }
+    const json = (await res.json()) as { content?: Array<{ type: string; text?: string }>; stop_reason?: string };
     const text = (json.content ?? []).filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n");
-    return extractJson<T>(text);
+    const parsed = extractJson<T>(text);
+    if (process.env.VISION_DEBUG && !parsed) console.error("[vision] unparsed", json.stop_reason, text.slice(0, 1500));
+    return parsed;
   } catch {
     return null;
   }
@@ -214,4 +219,16 @@ export async function readImageText(db: SupabaseClient, url: string): Promise<{ 
   );
   if (!out) return null;
   return { has_text: out.has_text === true, text: typeof out.text === "string" ? out.text.trim().slice(0, 600) : "" };
+}
+
+/** Ask Claude about one or more images with a question; JSON answer. Used by the Image Studio skill. */
+export async function askVision<T>(db: SupabaseClient, system: string, images: Array<{ url: string; label: string }>, question: string, maxTokens = 1200): Promise<T | null> {
+  const blocks: Array<Record<string, unknown>> = [];
+  for (const img of images) {
+    const b = await imageBlock(img.url);
+    if (b) blocks.push({ type: "text", text: img.label }, b);
+  }
+  if (blocks.length === 0) return null;
+  blocks.push({ type: "text", text: question });
+  return ask<T>(db, system, blocks, maxTokens);
 }

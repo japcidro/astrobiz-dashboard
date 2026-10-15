@@ -20,12 +20,17 @@ export async function GET(request: Request) {
 export async function PUT(request: Request) {
   const auth = await requireBoardUser();
   if (auth.error) return auth.error;
-  const b = (await request.json().catch(() => null)) as { store?: unknown; rules?: unknown; relabel?: unknown } | null;
+  const b = (await request.json().catch(() => null)) as { store?: unknown; rules?: unknown; profile?: unknown; relabel?: unknown } | null;
   const store = storeOf(b?.store);
   if (!store) return Response.json({ error: "Missing store" }, { status: 400 });
   if (typeof b?.rules === "string") {
     const rules = b.rules.trim().slice(0, 1500);
     const { error } = await auth.db.from("remake_brand_kits").upsert({ store, rules, updated_by: auth.employee.id, updated_at: new Date().toISOString() }, { onConflict: "store" });
+    if (error) return Response.json({ error: error.message }, { status: 500 });
+  }
+  if (typeof b?.profile === "string") {
+    const profile = b.profile.trim().slice(0, 6000);
+    const { error } = await auth.db.from("remake_brand_kits").upsert({ store, profile, updated_by: auth.employee.id, updated_at: new Date().toISOString() }, { onConflict: "store" });
     if (error) return Response.json({ error: error.message }, { status: 500 });
   }
   if (b?.relabel === true) {

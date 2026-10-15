@@ -3,8 +3,9 @@ import { HOOK_BUCKET, signPaths as signHookPaths } from "@/lib/hook-studio/stora
 import { BOARD_BUCKET, signBoardPaths } from "@/lib/marketing-board/storage";
 import { STILL_CREDITS } from "@/lib/remake/engines";
 import { brandCheck } from "@/lib/remake/vision";
+import { retryResult, reviewAdaptation } from "./adapt";
 import { aspectFor, studioPrompt } from "./prompt";
-import type { Attachment, AttachmentView, ResultRow, ResultView, RunInput, RunRow, RunView, StudioPage, StudioSources } from "./types";
+import type { AdaptPlan, Attachment, AttachmentView, ResultRow, ResultView, RunInput, RunRow, RunView, StudioPage, StudioSources } from "./types";
 
 const UUID = /^[0-9a-f-]{36}$/;
 const key = (bucket: string, path: string) => `${bucket}:${path}`;
@@ -163,20 +164,22 @@ export async function createRun(db: SupabaseClient, input: RunInput, createdBy: 
   return { id: runId };
 }
 
-/** Brand-check finished results once; a model attachment makes it a person check too. */
+/** Brand-check finished results once; a model attachment makes it a person check too. Adapt runs get the art-director review and one automatic fix. */
 export async function runPendingChecks(db: SupabaseClient, itemId: string | null): Promise<void> {
-  let q = db.from("image_studio_results").select("*, image_studio_runs!inner(id, item_id, store, product_mode, person_mode, attachments)").eq("status", "done").is("brand_check", null).limit(4);
+  let q = db.from("image_studio_results").select("*, image_studio_runs!inner(id, item_id, store, product_mode, person_mode, attachments, plan)").eq("status", "done").is("brand_check", null).limit(4);
   if (itemId) q = q.eq("image_studio_runs.item_id", itemId);
   const { data } = await q;
-  type Row = ResultRow & { image_studio_runs: { id: string; item_id: string | null; store: string | null; product_mode: string; person_mode: string; attachments: Attachment[] } };
+  type Row = ResultRow & { image_studio_runs: { id: string; item_id: string | null; store: string | null; product_mode: string; person_mode: string; attachments: Attachment[]; plan: AdaptPlan | null } };
   const rows = (data ?? []) as unknown as Row[];
   if (rows.length === 0) return;
   const kits = new Map<string, string>();
+  const profiles = new Map<string, string>();
   for (const r of rows) {
     const store = r.image_studio_runs.store;
     if (store && !kits.has(store)) {
-      const { data: kit } = await db.from("remake_brand_kits").select("rules").eq("store", store).maybeSingle();
+      const { data: kit } = await db.from("remake_brand_kits").select("rules, profile").eq("store", store).maybeSingle();
       kits.set(store, (kit?.rules as string | undefined) ?? "");
+      profiles.set(store, (kit?.profile as string | undefined) ?? "");
     }
   }
   const signed = await signAll(db, rows.flatMap((r) => [{ bucket: BOARD_BUCKET, path: r.preview_path ?? r.path }, ...r.image_studio_runs.attachments.map((a) => ({ bucket: a.bucket, path: a.path }))]));
@@ -187,6 +190,20 @@ export async function runPendingChecks(db: SupabaseClient, itemId: string | null
       const run = r.image_studio_runs;
       const url = signed.get(key(BOARD_BUCKET, (r.preview_path ?? r.path)!));
       const products = run.product_mode === "in" ? run.attachments.filter((a) => a.role === "product").map((a) => signed.get(key(a.bucket, a.path))).filter((u): u is string => !!u) : [];
+      if (run.plan && url) {
+        // The adapt skill's reviewer: scores, and one automatic retry when the problem is fixable.
+        const ref = run.attachments.find((a) => a.role === "reference");
+        const review = await reviewAdaptation(db, { resultUrl: url, referenceUrl: ref ? signed.get(key(ref.bucket, ref.path)) ?? null : null, productUrls: products, finalText: run.plan.plan.final_text, profile: profiles.get(run.store ?? "") ?? "" });
+        if (review && !review.ok && review.fixable && (r.attempts ?? 1) < 2) {
+          await retryResult(db, r.id, review.notes);
+          return;
+        }
+        await db
+          .from("image_studio_results")
+          .update({ brand_check: review ? { ok: review.ok, notes: review.notes, scores: review.scores } : { ok: true, notes: "Not reviewed: Claude could not read the image." } })
+          .eq("id", r.id);
+        return;
+      }
       const model = run.person_mode === "model" ? run.attachments.find((a) => a.role === "model") : undefined;
       const result = url ? await brandCheck(db, url, products, kits.get(run.store ?? "") ?? "", run.product_mode === "none", model ? { castUrl: signed.get(key(model.bucket, model.path)) ?? null, frameUrl: null } : undefined) : null;
       await db

@@ -33,7 +33,7 @@ export async function loadBrandKit(db: SupabaseClient, store: string | null, sig
   ]);
   const rows = (imgs ?? []) as Array<Omit<BrandImage, "url">>;
   const s = signed ?? (await signBoardPaths(db, rows.map((r) => r.path)));
-  return { store, rules: (kit?.rules as string | undefined) ?? "", images: rows.map((r) => ({ ...r, url: s.get(r.path) ?? null })) };
+  return { store, rules: (kit?.rules as string | undefined) ?? "", profile: (kit?.profile as string | undefined) ?? "", images: rows.map((r) => ({ ...r, url: s.get(r.path) ?? null })) };
 }
 
 // ─── Projects ───

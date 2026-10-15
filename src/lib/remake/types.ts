@@ -128,6 +128,8 @@ export interface BrandImage {
 export interface BrandKit {
   store: string;
   rules: string;
+  /** What the Image Studio planner knows about the brand: product, price, audience, angle, look, compliance. */
+  profile: string;
   images: BrandImage[];
 }
 
