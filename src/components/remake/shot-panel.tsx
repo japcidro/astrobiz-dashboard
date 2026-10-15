@@ -300,9 +300,12 @@ export function ShotPanel({
           <div className="max-w-sm">
             <ComparePlayer refSrc={shot.ref_url} ourSrc={result} ourLabel={shot.mixed_url ? "Ours + voiceover" : "Ours"} />
           </div>
-          <a href={result} download className="mt-1.5 text-[11px] text-gray-300 hover:text-white inline-flex items-center gap-1">
-            <Download size={11} /> Download{shot.clip_credits && swap ? ` · ${credits(shot.clip_credits)}` : ""}
-          </a>
+          <div className="mt-1.5 flex items-center gap-3 text-[11px]">
+            <a href={result} download className="text-gray-300 hover:text-white inline-flex items-center gap-1" title="Free: saves the finished clip">
+              <Download size={11} /> Download
+            </a>
+            {shot.clip_credits && swap ? <span className="text-gray-600">This render cost {credits(shot.clip_credits)}</span> : null}
+          </div>
         </div>
       )}
 
