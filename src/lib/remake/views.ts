@@ -207,8 +207,10 @@ export async function queueStill(db: SupabaseClient, project: ProjectRow, shot: 
     castPath = (cast?.still_path as string | null) ?? null;
   }
   // Products that match what is held come first; the rest fill up to four.
-  const held = shot.holds && shot.holds !== "none" ? shot.holds : null;
-  const images = kit?.images ?? [];
+  // "none" means the person holds nothing: no product photos, no product in the still.
+  const nothing = shot.holds === "none";
+  const held = shot.holds && !nothing ? shot.holds : null;
+  const images = nothing ? [] : kit?.images ?? [];
   const ranked = held ? [...images.filter((i) => i.kind === held), ...images.filter((i) => i.kind !== held)] : images;
   const chosen = (held && ranked.some((i) => i.kind === held) ? ranked.filter((i) => i.kind === held) : ranked).slice(0, 4);
   const productPaths = chosen.map((i) => i.path);
@@ -217,7 +219,7 @@ export async function queueStill(db: SupabaseClient, project: ProjectRow, shot: 
     recipe: castRecipe(look),
     hasCast: !!castPath,
     products: chosen.map((i) => ({ kind: i.kind, description: i.description })),
-    holds: held,
+    holds: nothing ? "none" : held,
     brandRules: kit?.rules ?? "",
     castNote: project.cast_note,
     shotDescription: shot.description,

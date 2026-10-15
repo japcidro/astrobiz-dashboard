@@ -76,7 +76,7 @@ export function ShotPanel({
           Clip {shot.idx + 1} <span className="text-gray-500 font-normal">· {fmt(Number(shot.start_s))}–{fmt(Number(shot.end_s))} · {shot.seconds}s</span>
         </p>
         {shot.person && <Pill tone="muted">Person {shot.person}</Pill>}
-        <label className="inline-flex items-center gap-1 text-[11px] text-gray-400" title="What the person holds in this frame; the still swap replaces it with our matching product">
+        <label className="inline-flex items-center gap-1 text-[11px] text-gray-400" title="What the person holds in this frame. The still swap replaces it with our matching product; 'nothing' means no product at all goes into the still.">
           holds
           <select value={shot.holds ?? "none"} onChange={(e) => void onPatch({ holds: e.target.value })} className="bg-gray-900 border border-gray-700 rounded-md px-1 py-0.5 text-[11px] text-gray-300 focus:outline-none">
             <option value="none">nothing</option>

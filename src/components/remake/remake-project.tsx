@@ -32,6 +32,9 @@ export function RemakeProject({ id }: { id: string }) {
   const [stores, setStores] = useState<string[]>([]);
   const [attachMsg, setAttachMsg] = useState<string | null>(null);
   const [playhead, setPlayhead] = useState(0);
+  /** Seconds selected by dragging on the strip; cut into its own clip so only that part is swapped. */
+  const [range, setRange] = useState<[number, number] | null>(null);
+  const drag = useRef<{ from: number; moved: boolean } | null>(null);
   const [tray, setTray] = useState<TrayMode>("both");
   const refVideo = useRef<HTMLVideoElement | null>(null);
 
@@ -84,6 +87,33 @@ export function RemakeProject({ id }: { id: string }) {
 
   const castFrom = (body: CastSource) =>
     call("cast", () => api(`/api/owner/remake/projects/${id}/cast`, { method: "POST", body: JSON.stringify(body) }));
+
+  /** Split at both ends of the selected range (ends already on a clip boundary are left alone), then select the clip that came out. */
+  const cutRange = async () => {
+    if (!project || !range) return;
+    const [a, b] = range;
+    setBusy("range");
+    setError(null);
+    try {
+      let p = project;
+      const splitAt = async (t: number) => {
+        const s = p.shots.find((x) => t > Number(x.start_s) + 0.15 && t < Number(x.end_s) - 0.15);
+        if (!s) return;
+        const r = await api<{ project: ProjectView }>(`/api/owner/remake/projects/${id}/shots/${s.id}/split`, { method: "POST", body: JSON.stringify({ at: t }) });
+        p = r.project;
+      };
+      await splitAt(b);
+      await splitAt(a);
+      setProject(p);
+      const made = p.shots.find((x) => Math.abs(Number(x.start_s) - a) < 0.2) ?? p.shots.find((x) => a >= Number(x.start_s) && a < Number(x.end_s));
+      if (made) setSelected(made.id);
+      setRange(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not cut the range");
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const renderAll = async () => {
     if (!project) return;
@@ -211,13 +241,44 @@ export function RemakeProject({ id }: { id: string }) {
               )}
             </div>
             <div className="min-w-0">
-              <p className="text-[11px] text-gray-500 mb-1.5">Timeline · one frame per second · click to seek, then split at the playhead. Purple lines are clip starts.</p>
+              <p className="text-[11px] text-gray-500 mb-1.5">
+                Timeline · one frame per second. Purple lines are where clips start; each clip is a card on the left. <span className="text-gray-400">Click</span> to move the playhead, then{" "}
+                <span className="text-gray-400">Split</span> to cut that clip in two. <span className="text-gray-400">Drag</span> across the seconds you want to redo and cut them into their own clip, then set that clip to Swap and leave the rest on Keep.
+              </p>
               <div
-                className="relative w-full overflow-hidden rounded-md bg-gray-950 cursor-crosshair select-none"
-                onClick={(e) => {
+                className="relative w-full overflow-hidden rounded-md bg-gray-950 cursor-crosshair select-none touch-none"
+                onPointerDown={(e) => {
                   if (!duration) return;
                   const r = e.currentTarget.getBoundingClientRect();
-                  seek(Math.max(0, Math.min(duration - 0.1, ((e.clientX - r.left) / r.width) * duration)));
+                  const t = Math.max(0, Math.min(duration, ((e.clientX - r.left) / r.width) * duration));
+                  drag.current = { from: t, moved: false };
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                }}
+                onPointerMove={(e) => {
+                  if (!drag.current || !duration) return;
+                  const r = e.currentTarget.getBoundingClientRect();
+                  const t = Math.max(0, Math.min(duration, ((e.clientX - r.left) / r.width) * duration));
+                  if (!drag.current.moved && Math.abs(t - drag.current.from) * (r.width / duration) < 4) return;
+                  drag.current.moved = true;
+                  const a = Math.round(Math.min(drag.current.from, t) * 10) / 10;
+                  const b = Math.round(Math.max(drag.current.from, t) * 10) / 10;
+                  setRange([a, b]);
+                }}
+                onPointerUp={(e) => {
+                  const d = drag.current;
+                  drag.current = null;
+                  if (!d || !duration) return;
+                  if (d.moved) {
+                    const r = e.currentTarget.getBoundingClientRect();
+                    const t = Math.max(0, Math.min(duration, ((e.clientX - r.left) / r.width) * duration));
+                    seek(Math.min(duration - 0.1, Math.round(Math.min(d.from, t) * 10) / 10));
+                  } else {
+                    setRange(null);
+                    seek(Math.max(0, Math.min(duration - 0.1, d.from)));
+                  }
+                }}
+                onPointerCancel={() => {
+                  drag.current = null;
                 }}
               >
                 {project.strip_url ? (
@@ -237,13 +298,28 @@ export function RemakeProject({ id }: { id: string }) {
                       <span className="absolute top-0.5 left-0.5 text-[9px] font-bold bg-black/60 text-white px-1 rounded">{s.idx + 1}{s.person ? ` ${s.person}` : ""}</span>
                     </div>
                   ))}
+                {duration > 0 && range && (
+                  <div className="absolute inset-y-0 bg-purple-400/25 border-x-2 border-purple-300 pointer-events-none" style={{ left: `${(range[0] / duration) * 100}%`, width: `${((range[1] - range[0]) / duration) * 100}%` }} />
+                )}
                 {duration > 0 && <div className="absolute inset-y-0 w-px bg-white" style={{ left: `${(playhead / duration) * 100}%` }} />}
               </div>
               <div className="mt-2 flex items-center gap-2 flex-wrap">
                 <span className="text-xs text-gray-400 tabular-nums">{playhead.toFixed(1)}s{atPlayhead ? ` · clip ${atPlayhead.idx + 1}` : ""}</span>
-                <Button onClick={() => atPlayhead && action(atPlayhead.id, "split", { at: playhead })} busy={busy === "split"} disabled={!atPlayhead}>
-                  <Scissors size={13} /> Split at playhead
-                </Button>
+                {range ? (
+                  <>
+                    <Button primary onClick={() => void cutRange()} busy={busy === "range"} disabled={range[1] - range[0] < 1} title="Cuts at both ends so these seconds become one clip you can swap on its own">
+                      <Scissors size={13} /> Make {range[0].toFixed(1)}–{range[1].toFixed(1)}s its own clip
+                    </Button>
+                    <Button ghost onClick={() => setRange(null)} disabled={busy === "range"}>
+                      Clear
+                    </Button>
+                    {range[1] - range[0] < 1 && <span className="text-[11px] text-amber-300">Drag at least 1 second</span>}
+                  </>
+                ) : (
+                  <Button onClick={() => atPlayhead && action(atPlayhead.id, "split", { at: playhead })} busy={busy === "split"} disabled={!atPlayhead} title="Cut the clip under the playhead in two">
+                    <Scissors size={13} /> Split at playhead
+                  </Button>
+                )}
                 <Button onClick={() => shot && action(shot.id, "merge")} busy={busy === "merge"} disabled={!shot || shot.idx === project.shots.length - 1}>
                   <Merge size={13} /> Merge clip {shot ? shot.idx + 1 : ""} with next
                 </Button>

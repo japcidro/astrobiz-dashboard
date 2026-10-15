@@ -17,7 +17,7 @@ export interface StillPromptInput {
   hasCast: boolean;
   /** Product photos attached after the frame (and cast), in order. */
   products: Array<{ kind: string | null; description: string | null }>;
-  /** What the person holds in the reference frame, when known. */
+  /** What the person holds in the reference frame: a product form, "none" (holds nothing: add no product), or null when unknown. */
   holds: string | null;
   brandRules: string;
   castNote: string;
@@ -34,7 +34,9 @@ export function stillPrompt(i: StillPromptInput): string {
     .join("; ");
   const held = i.holds && i.holds !== "none" ? i.holds : null;
   const product =
-    i.products.length > 0
+    i.holds === "none"
+      ? ` The person holds nothing in this frame: do not add any product, bottle, box, pieces or packaging to their hands or the scene. If the original shows one, remove it and rebuild the hands, clothing and background naturally. Remove or blur any brand name, logo or label elsewhere in the frame.`
+      : i.products.length > 0
       ? ` The remaining ${i.products.length === 1 ? "image is" : "images are"} our own product: ${list}. ${
           held
             ? `The person holds ${/^[aeiou]/.test(held) ? "an" : "a"} ${held} in the frame: replace it with our ${held} from those photos`
