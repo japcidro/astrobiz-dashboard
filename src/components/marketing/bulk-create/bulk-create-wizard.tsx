@@ -485,7 +485,8 @@ export function BulkCreateWizard() {
       : !!campaigns.find((c) => c.id === existingCampaignId)?.uses_campaign_budget;
   const sectionBBudget = adset.daily_budget ?? adset.lifetime_budget ?? null;
   // Per-ad-set budget column: only when we create ad sets and they own the
-  // budget. A blank cell uses Section B's amount.
+  // budget — then it is the only budget input (Section B shows a note). A
+  // blank cell uses the default amount (500, or the store's saved default).
   const budgetColumn =
     usingExistingAdset || campaignBudget
       ? null
@@ -520,14 +521,12 @@ export function BulkCreateWizard() {
   if (rows.length === 0) missingItems.push("Add at least one row");
   if (!allRowsHaveAdsetName) missingItems.push("Enter adset name for every row");
   if (!allAdsetsHaveBudget)
-    missingItems.push("Set a budget in Section B, or one for every ad set");
+    missingItems.push("Set a budget for every ad set");
   if (!hasEndDateIfLifetime)
     missingItems.push("Set an end date in Section B — a lifetime budget needs one");
   if (!allRowsHaveAdName) missingItems.push("Enter ad name for every row");
   if (!allRowsHaveCreatives) missingItems.push("Upload creative for every row");
   if (!allRowsHaveCopy) missingItems.push("Enter primary text, headline, and description for every row");
-  if (!usingExistingAdset && !adset.name?.trim())
-    missingItems.push("Enter adset name prefix in Section B");
 
   const canSubmit =
     !!adAccountId &&
@@ -540,8 +539,7 @@ export function BulkCreateWizard() {
     allRowsHaveAdName &&
     allRowsHaveCopy &&
     (mode === "new" ? !!campaign.name : !!existingCampaignId) &&
-    (!usingExistingAdset || !!existingAdsetId) &&
-    (usingExistingAdset || !!adset.name?.trim());
+    (!usingExistingAdset || !!existingAdsetId);
 
   // ─── Loading / Error ───
   if (loading) {
@@ -760,7 +758,13 @@ export function BulkCreateWizard() {
             adAccountId={adAccountId}
             pageName={pageName}
             campaignBudget={campaignBudget}
-            budgetHint="Each ad set gets this budget. To give one ad set a different amount, type it in the Budget column of the table in Section C."
+            // Every row names its own ad set, so the template's name is unused.
+            hideName
+            budgetNote={
+              budgetColumn
+                ? "Set per ad set in the Budget column of the table in Section C."
+                : undefined
+            }
             onUpdate={(updates) =>
               setAdset((prev) => ({ ...prev, ...updates }))
             }
@@ -894,6 +898,13 @@ export function BulkCreateWizard() {
             showAdsetName={!usingExistingAdset}
             onUpdateRow={handleUpdateRow}
             budget={budgetColumn}
+            onBudgetKindChange={(kind) =>
+              setAdset((prev) =>
+                kind === "daily"
+                  ? { ...prev, daily_budget: prev.daily_budget ?? 500, lifetime_budget: null }
+                  : { ...prev, lifetime_budget: prev.lifetime_budget ?? 5000, daily_budget: null }
+              )
+            }
             onUpdateGroup={handleUpdateGroup}
             onAddRows={handleAddRows}
             onRemoveRow={handleRemoveRow}

@@ -27,9 +27,10 @@ interface AdRowsTableProps {
   // there is no per-row ad set to name.
   showAdsetName?: boolean;
   // Per-ad-set budget column. Null hides it (CBO, or ads going into an
-  // existing ad set); otherwise it says which kind and Section B's amount,
+  // existing ad set); otherwise it says which kind and the default amount,
   // which a blank cell falls back to.
   budget: { kind: "daily" | "lifetime"; fallback: number | null } | null;
+  onBudgetKindChange: (kind: "daily" | "lifetime") => void;
   onUpdateRow: (id: string, updates: Partial<BulkAdRow>) => void;
   // Sets the ad set name / budget on every ad in that ad set.
   onUpdateGroup: (
@@ -207,6 +208,7 @@ export function AdRowsTable({
   shopifyStoreId,
   showAdsetName = true,
   budget,
+  onBudgetKindChange,
   onUpdateRow,
   onUpdateGroup,
   onAddRows,
@@ -331,7 +333,9 @@ export function AdRowsTable({
 
       {/* Table */}
       <div className="overflow-x-auto rounded border border-gray-700">
-        <table className="w-full text-sm text-left">
+        {/* Wide enough that the copy fields stay usable; scrolls sideways
+            on a narrow screen instead of squeezing them. */}
+        <table className="w-full min-w-[1280px] text-sm text-left">
           <thead>
             <tr className="border-b border-gray-700 bg-gray-800/80 text-gray-400 text-xs uppercase tracking-wide">
               <th className="px-2 py-2 w-8">#</th>
@@ -339,16 +343,23 @@ export function AdRowsTable({
                 <th className="px-2 py-2 w-44">Adset Name</th>
               )}
               {budget && (
-                <th
-                  className="px-2 py-2 w-28"
-                  title="Leave blank to use the budget in Section B"
-                >
-                  {budget.kind === "daily" ? "Daily Budget" : "Lifetime Budget"}
+                <th className="px-2 py-2 w-32">
+                  <select
+                    value={budget.kind}
+                    onChange={(e) =>
+                      onBudgetKindChange(e.target.value as "daily" | "lifetime")
+                    }
+                    title="Budget type for every ad set"
+                    className="rounded bg-transparent text-xs uppercase tracking-wide text-gray-400 hover:text-white focus:outline-none cursor-pointer"
+                  >
+                    <option value="daily">Daily Budget</option>
+                    <option value="lifetime">Lifetime Budget</option>
+                  </select>
                 </th>
               )}
               <th className="px-2 py-2 w-36">Ad Name</th>
               <th className="px-2 py-2 w-36">Creative</th>
-              <th className="px-2 py-2">Primary Text</th>
+              <th className="px-2 py-2 min-w-[300px]">Primary Text</th>
               <th className="px-2 py-2 w-40">Headline</th>
               <th className="px-2 py-2 w-40">Description</th>
               <th className="px-2 py-2 w-20 text-center">Actions</th>
@@ -414,7 +425,11 @@ export function AdRowsTable({
                           placeholder={
                             budget.fallback != null ? String(budget.fallback) : "Budget"
                           }
-                          title="Leave blank to use the budget in Section B"
+                          title={
+                            budget.fallback != null
+                              ? `Leave blank for ₱${budget.fallback}`
+                              : undefined
+                          }
                           onChange={(e) => {
                             const val = parseFloat(e.target.value);
                             onUpdateGroup(row.group_id, {
@@ -531,13 +546,13 @@ export function AdRowsTable({
                       />
                     </div>
                     <textarea
-                      rows={2}
+                      rows={3}
                       value={row.primary_text}
                       placeholder="Primary text..."
                       onChange={(e) =>
                         onUpdateRow(row.id, { primary_text: e.target.value })
                       }
-                      className={`w-full resize-none rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
+                      className={`w-full resize-y rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
                         !row.primary_text.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
                       }`}
                     />

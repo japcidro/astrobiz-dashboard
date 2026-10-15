@@ -63,8 +63,11 @@ interface StepAdsetProps {
   pageName: string;
   // The campaign has its own budget (CBO), so the ad set gets none.
   campaignBudget?: boolean;
-  // Extra line under the budget box (e.g. where per-ad-set budgets go).
-  budgetHint?: React.ReactNode;
+  // The ad set is named somewhere else (Bulk Create names one per row).
+  hideName?: boolean;
+  // The budget is set somewhere else (e.g. per ad set in a table): show this
+  // note instead of the budget box.
+  budgetNote?: React.ReactNode;
   onUpdate: (updates: Partial<AdSetFormData>) => void;
 }
 
@@ -73,7 +76,8 @@ export function StepAdset({
   adAccountId,
   pageName,
   campaignBudget = false,
-  budgetHint,
+  hideName = false,
+  budgetNote,
   onUpdate,
 }: StepAdsetProps) {
   const [pixels, setPixels] = useState<PixelInfo[]>([]);
@@ -164,6 +168,7 @@ export function StepAdset({
       </div>
 
       {/* Ad Set Name */}
+      {!hideName && (
       <div>
         <label className="block text-sm text-gray-400 mb-1.5">
           Ad Set Name
@@ -176,6 +181,7 @@ export function StepAdset({
           className="w-full max-w-lg bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
       </div>
+      )}
 
       {/* Budget */}
       <div>
@@ -184,6 +190,10 @@ export function StepAdset({
           <p className="max-w-lg rounded-xl border border-gray-700/50 bg-gray-800/50 p-4 text-sm text-gray-400">
             Set on the campaign (CBO) — Facebook spreads it across the ad
             sets, so they don&apos;t get a budget of their own.
+          </p>
+        ) : budgetNote ? (
+          <p className="max-w-lg rounded-xl border border-gray-700/50 bg-gray-800/50 p-4 text-sm text-gray-400">
+            {budgetNote}
           </p>
         ) : (
         <div className="bg-gray-800/50 rounded-xl p-4 border border-gray-700/50 max-w-lg">
@@ -237,9 +247,6 @@ export function StepAdset({
             />
           </div>
         </div>
-        )}
-        {!campaignBudget && budgetHint && (
-          <p className="mt-2 max-w-lg text-xs text-gray-500">{budgetHint}</p>
         )}
       </div>
 
