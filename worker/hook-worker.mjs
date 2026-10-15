@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
-const VERSION = "1.7.0";
+const VERSION = "1.7.1";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // ─── Config ───
@@ -134,9 +134,9 @@ async function downloadUrl(url, dest) {
 }
 
 // ─── Processes ───
-function run(cmd, args, { timeoutMs = CLI_TIMEOUT_MS } = {}) {
+function run(cmd, args, { timeoutMs = CLI_TIMEOUT_MS, cwd } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, NO_COLOR: "1" } });
+    const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, NO_COLOR: "1" }, cwd });
     let out = "";
     let err = "";
     child.stdout.on("data", (d) => (out += d));
@@ -971,6 +971,37 @@ const clip = (v, n) => (typeof v === "string" && v.trim() ? v.trim().slice(0, n)
  * site splits them), and writes the page's metadata next to it. Ads
  * Library ads with several videos are playlists: the first one is taken.
  */
+/**
+ * Facebook blocks a plain fetch of Ads Library / post pages (403), but
+ * yt-dlp gets through. It saves the pages it fetched (--write-pages), and an
+ * Ads Library page carries the creative as original_image_url (resized_image_url
+ * as a fallback), while posts carry og:image. Returns the first image URL found.
+ */
+async function imageUrlViaYtDlp(url, dir) {
+  const pagesDir = join(dir, "pages");
+  await mkdir(pagesDir, { recursive: true });
+  await run(YTDLP, ["--no-warnings", "--ignore-no-formats-error", "--write-pages", "-q", "--skip-download", url], { timeoutMs: 3 * 60_000, cwd: pagesDir });
+  const { readdir } = await import("node:fs/promises");
+  const files = (await readdir(pagesDir)).filter((f) => f.endsWith(".dump"));
+  const unescape = (s) => {
+    try {
+      return JSON.parse(`"${s}"`);
+    } catch {
+      return s.replace(/\\\//g, "/").replace(/&amp;/g, "&");
+    }
+  };
+  for (const f of files) {
+    const html = await readFile(join(pagesDir, f), "utf8");
+    for (const key of ["original_image_url", "resized_image_url"]) {
+      const m = html.match(new RegExp(`"${key}":"((?:[^"\\\\]|\\\\.)*)"`));
+      if (m && m[1]) return unescape(m[1]);
+    }
+    const og = html.match(/<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']/i) || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::secure_url)?["']/i);
+    if (og && og[1]) return og[1].replace(/&amp;/g, "&");
+  }
+  return null;
+}
+
 /** The image behind a link: the file itself, or the page's og:image / twitter:image. */
 async function fetchImageFromLink(url, dir) {
   const headers = { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36", Accept: "text/html,image/*,*/*;q=0.8" };
@@ -993,10 +1024,30 @@ async function fetchImageFromLink(url, dir) {
     await writeFile(file, buf);
     return { file, ext, mime: type };
   };
-  let res = await get(url);
-  if (!res.ok) throw new Error(`The link answered ${res.status}`);
-  const direct = await save(res);
-  if (direct) return direct;
+  const host = (() => {
+    try {
+      return new URL(url).hostname.replace(/^www\./, "");
+    } catch {
+      return "";
+    }
+  })();
+  const facebookish = /(^|\.)(facebook\.com|fb\.com|fb\.watch|instagram\.com)$/.test(host);
+  let res = facebookish ? null : await get(url);
+  if (res && !res.ok && res.status !== 403) throw new Error(`The link answered ${res.status}`);
+  if (res && res.ok) {
+    const direct = await save(res);
+    if (direct) return direct;
+  }
+  if (facebookish || !res || res.status === 403) {
+    // Facebook / Instagram: let yt-dlp fetch the page, then take the creative's own URL.
+    const found = await imageUrlViaYtDlp(url, dir);
+    if (!found) throw new Error("No image found behind this link; upload the image instead");
+    const img = await get(found);
+    if (!img.ok) throw new Error(`The ad image answered ${img.status}`);
+    const saved = await save(img);
+    if (!saved) throw new Error("The ad image could not be read; upload it instead");
+    return saved;
+  }
   const html = await res.text();
   const meta = html.match(/<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]+content=["']([^"']+)["']/i) || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image(?::secure_url)?["']/i) || html.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i);
   if (!meta) throw new Error("No image found behind this link; upload the image instead");
