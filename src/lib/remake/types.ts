@@ -33,6 +33,8 @@ export interface ProjectRow {
   cast_look: LookId;
   cast_note: string;
   cast_shot_id: string | null;
+  /** Who the voice is, for every Veo talking head (accent, age, tone). Empty = the Taglish default. */
+  voice_profile: string;
   /** A picked person image (UGC library or upload); wins over cast_shot_id. */
   cast_path: string | null;
   created_by: string | null;

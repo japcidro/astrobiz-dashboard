@@ -57,21 +57,25 @@ export function stillPrompt(i: StillPromptInput): string {
   );
 }
 
+/** Used when the project has no voice profile of its own: FOLIQ-style Taglish delivery. */
+export const DEFAULT_VOICE_PROFILE = "Filipino, 30s to 40s, speaks Taglish (English mixed with Tagalog) the way people in Manila talk: English words pronounced with a natural Filipino accent and intonation, relaxed and confident";
+
 const PHONE_LOOK = `Keep the person, clothing, product, room, framing and lighting exactly as in the image. Handheld phone-camera look, natural grain, natural skin. No on-screen text, no captions, no subtitles, no logos.`;
 
 /**
  * Veo: the still comes alive and, when there is a script, the person says
  * it. Veo makes the voice and the lip movement itself.
  */
-export function veoPrompt(i: { script: string; voiceDirection: string; shotDescription: string | null; kind: "talking_head" | "broll"; voiceGender?: "male" | "female" | null }): string {
+export function veoPrompt(i: { script: string; voiceDirection: string; shotDescription: string | null; kind: "talking_head" | "broll"; voiceGender?: "male" | "female" | null; voiceProfile?: string }): string {
   const scene = i.shotDescription?.trim() ? ` ${i.shotDescription.trim()}.` : "";
   const script = i.script.trim().replace(/"/g, "'");
   if (script) {
     const who = i.voiceGender ? `natural adult ${i.voiceGender} voice that matches this person` : "natural voice that matches this person's appearance";
-    const voice = `in a ${who}, ${i.voiceDirection.trim() || "warm, casual, conversational"}`;
+    const profile = (i.voiceProfile ?? "").trim() || DEFAULT_VOICE_PROFILE;
+    const voice = `in a ${who}: ${profile}; ${i.voiceDirection.trim() || "warm, casual, conversational"}`;
     return (
       `Vertical 9:16 selfie-style video.${scene} The person looks at the camera and says ${voice}, with natural lip sync, small head movements, blinks and expressions: "${script}" ` +
-      `Only this person speaks; no other voices, no music, quiet room ambience. ${PHONE_LOOK}`
+      `Say exactly these words, in this language mix, nothing added; Tagalog words with native Tagalog pronunciation. Only this person speaks; no other voices, no music, quiet room ambience. ${PHONE_LOOK}`
     );
   }
   return `Vertical 9:16 video.${scene} ${i.kind === "talking_head" ? "The person moves naturally, glances at the product and back at the camera, no speech." : "Natural small motion in the scene, hands and product move as a real clip would, no speech."} Quiet natural ambience, no music. ${PHONE_LOOK}`;

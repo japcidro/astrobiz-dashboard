@@ -1,6 +1,7 @@
 "use client";
 
 import { Loader2, Plus, Trash2, UserCheck } from "lucide-react";
+import { DEFAULT_VOICE_PROFILE } from "@/lib/remake/prompts";
 import { useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { LOOKS } from "@/lib/hook-studio/presets";
@@ -84,6 +85,16 @@ export function CastBrandPanel({
           placeholder="Optional: age range, vibe, hair… (e.g. late 20s, warm smile)"
           className={`${field} mt-2 resize-none`}
         />
+        <p className="text-[11px] text-gray-500 mt-3 mb-1">Voice · every talking head (Veo)</p>
+        <textarea
+          defaultValue={project.voice_profile}
+          key={`${project.id}-voice`}
+          onBlur={(e) => e.target.value.trim() !== project.voice_profile && void onPatch({ voice_profile: e.target.value })}
+          rows={3}
+          placeholder={DEFAULT_VOICE_PROFILE}
+          className={`${field} resize-none`}
+        />
+        <p className="text-[11px] text-gray-600 mt-1">Empty = the Taglish default above. Veo makes a fresh voice each render, so the same precise description on every clip is what keeps them sounding alike; male or female is read per clip from its still.</p>
         <div className="mt-3 flex items-center gap-2">
           {project.cast_url ? (
             // eslint-disable-next-line @next/next/no-img-element

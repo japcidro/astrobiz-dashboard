@@ -305,7 +305,7 @@ export async function queueClip(db: SupabaseClient, project: ProjectRow, shot: S
   const params: Record<string, unknown> = { project_id: project.id, shot_id: shot.id, engine: engine.id, quality: shot.clip_quality, still_path: shot.still_path };
   if (engine.mode === "speak") {
     params.duration = engine.id === "veo3" ? 8 : engine.lengths!.includes(Number(shot.clip_seconds)) ? Number(shot.clip_seconds) : veoLengthFor(seconds);
-    params.prompt = veoPrompt({ script: shot.kind === "talking_head" ? shot.script : "", voiceDirection: shot.voice_direction, shotDescription: shot.description, kind: shot.kind, voiceGender: shot.voice_gender });
+    params.prompt = veoPrompt({ script: shot.kind === "talking_head" ? shot.script : "", voiceDirection: shot.voice_direction, shotDescription: shot.description, kind: shot.kind, voiceGender: shot.voice_gender, voiceProfile: project.voice_profile });
   } else if (engine.mode === "motion") {
     if (!shot.ref_path) return "The real clip is not cut yet";
     params.ref_path = shot.ref_path;

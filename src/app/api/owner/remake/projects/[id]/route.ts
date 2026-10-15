@@ -36,6 +36,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
     patch.cast_look = b.cast_look;
   }
   if (typeof b.cast_note === "string") patch.cast_note = b.cast_note.trim().slice(0, 400);
+  if (typeof b.voice_profile === "string") patch.voice_profile = b.voice_profile.trim().slice(0, 400);
   if ("cast_shot_id" in b) {
     if (b.cast_shot_id === null) patch.cast_shot_id = null;
     else if (isUuid(b.cast_shot_id)) {

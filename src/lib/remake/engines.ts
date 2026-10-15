@@ -22,6 +22,8 @@ export interface ClipEngine {
   /** Credits for a clip of n seconds at a quality. */
   cost: (seconds: number, quality: Quality) => number;
   qualityLabels: Record<Quality, string> | null;
+  /** How long Higgsfield usually takes to render one clip, from our own job history. */
+  typicalMinutes: string;
 }
 
 const hookEngine = (id: "genjutsu" | "kling_i2v") => ENGINES.find((e) => e.id === id)!;
@@ -35,6 +37,7 @@ export const CLIP_ENGINES: ClipEngine[] = [
     lengths: [4, 6, 8],
     cost: (s, q) => (q === "high" ? 10 : 4) * (s === 4 ? 4 : s === 6 ? 6 : 8),
     qualityLabels: { standard: "Fast", high: "Preview · high" },
+    typicalMinutes: "10–20",
   },
   {
     id: "veo3",
@@ -44,6 +47,7 @@ export const CLIP_ENGINES: ClipEngine[] = [
     lengths: [8],
     cost: (_s, q) => (q === "high" ? 58 : 22),
     qualityLabels: { standard: "Fast", high: "Preview" },
+    typicalMinutes: "10–20",
   },
   {
     id: "genjutsu",
@@ -53,6 +57,7 @@ export const CLIP_ENGINES: ClipEngine[] = [
     lengths: null,
     cost: (s, q) => Math.round(hookEngine("genjutsu").perSecond[q] * Math.min(15, Math.max(3, s)) * 100) / 100,
     qualityLabels: { standard: "720p", high: "1080p" },
+    typicalMinutes: "4–7",
   },
   {
     id: "kling_i2v",
@@ -62,6 +67,7 @@ export const CLIP_ENGINES: ClipEngine[] = [
     lengths: null,
     cost: (s, q) => Math.round(hookEngine("kling_i2v").perSecond[q] * Math.min(15, Math.max(3, s)) * 100) / 100,
     qualityLabels: { standard: "Standard", high: "Pro" },
+    typicalMinutes: "2–5",
   },
 ];
 

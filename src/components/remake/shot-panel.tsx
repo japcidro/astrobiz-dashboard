@@ -16,6 +16,12 @@ const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).p
 
 const NOT_CHECKED = /^Not checked/;
 
+/** "3 min" since an ISO time; the still/clip row's updated_at is set when the worker starts it. */
+const elapsedMin = (iso: string) => {
+  const m = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+  return m < 1 ? "under a minute" : `${m} min`;
+};
+
 function Frame({ children, dashed = false }: { children: React.ReactNode; dashed?: boolean }) {
   return (
     <div className={`aspect-[9/16] rounded-lg bg-gray-950 border ${dashed ? "border-dashed" : ""} border-gray-800 flex flex-col items-center justify-center gap-2 text-gray-500 p-3 text-center`}>
@@ -178,7 +184,8 @@ export function ShotPanel({
                 {stillBusy ? (
                   <Frame>
                     <Loader2 size={18} className="animate-spin" />
-                    <p className="text-[11px]">{shot.still_status === "running" ? "Nano Banana Pro…" : "Queued on the Mac"}</p>
+                    <p className="text-[11px]">{shot.still_status === "running" ? `Nano Banana Pro… ${elapsedMin(shot.updated_at)}` : "Queued on the Mac"}</p>
+                    <p className="text-[10px] text-gray-600">usually 1–2 min</p>
                   </Frame>
                 ) : shot.still_preview_url ? (
                   <button type="button" onClick={() => setZoom({ image: shot.still_url ?? shot.still_preview_url! })} title="Open the still full size" className="relative group/still block w-full cursor-zoom-in">
@@ -297,9 +304,17 @@ export function ShotPanel({
             <p className="text-[11px] text-gray-500">{engine.blurb}</p>
           </div>
 
-          {speaks && (
+          {swap && engine.mode === "speak" && (
             <div className="space-y-2">
-              <textarea value={script} onChange={(e) => setScript(e.target.value)} onBlur={() => script !== shot.script && void onPatch({ script })} rows={3} placeholder="What the person says. Veo makes the voice and the lips from this. One or two sentences for 8 seconds." className={`${field} resize-none`} />
+              {shot.kind === "broll" && <p className="text-[11px] text-amber-300">This clip is B-roll, so Veo would animate it silently. Type the script below and it becomes a Talking head.</p>}
+              <textarea
+                value={script}
+                onChange={(e) => setScript(e.target.value)}
+                onBlur={() => script !== shot.script && void onPatch(shot.kind === "broll" && script.trim() ? { script, kind: "talking_head" } : { script })}
+                rows={3}
+                placeholder="What the person says, English or Taglish. Veo makes the voice and the lips from this. One or two sentences for 8 seconds."
+                className={`${field} resize-none`}
+              />
               <input value={direction} onChange={(e) => setDirection(e.target.value)} onBlur={() => direction !== shot.voice_direction && void onPatch({ voice_direction: direction })} placeholder="Voice direction, e.g. warm, casual, slight smile" className={field} />
               <div className="flex items-center gap-2 flex-wrap text-[11px]">
                 <span className="text-gray-400">Voice</span>
@@ -316,7 +331,6 @@ export function ShotPanel({
               </div>
             </div>
           )}
-          {engine.mode === "speak" && shot.kind === "broll" && <p className="text-[11px] text-gray-500">B-roll: Veo animates the still with natural ambience and no speech. Switch the clip to Talking head above if the person should speak.</p>}
           {engine.mode === "prompt" && (
             <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} onBlur={() => prompt !== (shot.clip_prompt ?? "") && void onPatch({ clip_prompt: prompt })} rows={2} placeholder="Optional motion prompt. Empty = natural small movement." className={`${field} resize-none`} />
           )}
@@ -327,6 +341,7 @@ export function ShotPanel({
             </Button>
             <span className="text-xs text-gray-400">
               ≈ {credits(estimate)} · {engine.lengths ? `${veoLen}s` : `${Math.ceil(shot.seconds)}s, follows the real clip`}
+              {clipBusy ? ` · ${shot.clip_status === "running" ? `${elapsedMin(shot.updated_at)} so far, ` : ""}Higgsfield usually takes ${engine.typicalMinutes} min` : ` · usually ${engine.typicalMinutes} min to render`}
             </span>
             {shot.clip_status === "failed" && <span className="text-xs text-red-300">{shot.clip_error}</span>}
             {!shot.approved && shot.still_status === "done" && <span className="text-xs text-amber-300">Approve the still first</span>}
