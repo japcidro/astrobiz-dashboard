@@ -1,7 +1,8 @@
 "use client";
 
-import { AlertTriangle, Check, Download, Loader2, Mic, RotateCcw, Trash2, Video } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Check, Download, Loader2, Mic, RotateCcw, Trash2, Upload, Video } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { createClient } from "@/lib/supabase/client";
 import type { Quality } from "@/lib/hook-studio/engines";
 import { CLIP_ENGINES, clipEstimate, getClipEngine } from "@/lib/remake/engines";
 import { DEFAULT_VOICE_PROFILE } from "@/lib/remake/prompts";
@@ -28,6 +29,10 @@ interface Form {
 }
 
 const EMPTY: Form = { script: "", direction: "", gender: null, profile: "", engine: "veo3_1", quality: "standard", seconds: 8 };
+const ACCEPT = "image/png,image/jpeg,image/webp";
+const IMAGE_TYPES = new Set(ACCEPT.split(","));
+const hasFiles = (e: DragEvent) => Array.from(e.dataTransfer.types).includes("Files");
+const stripExt = (name: string) => name.replace(/\.[a-z0-9]+$/i, "");
 
 /**
  * Talking Head: every still the Clipper generated is a starting image here.
@@ -42,6 +47,10 @@ export function TalkingHeadStudio() {
   const [busy, setBusy] = useState<"render" | "delete" | null>(null);
   const [projectFilter, setProjectFilter] = useState<string>("all");
   const [zoom, setZoom] = useState<{ video?: string; image?: string } | null>(null);
+  const [uploading, setUploading] = useState<{ done: number; total: number } | null>(null);
+  const [filesOver, setFilesOver] = useState<number | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const dragDepth = useRef(0);
 
   const refresh = useCallback(async () => {
     try {
@@ -66,18 +75,19 @@ export function TalkingHeadStudio() {
   const renders = useMemo(() => page?.renders ?? [], [page]);
   const projects = useMemo(() => {
     const seen = new Map<string, string>();
-    for (const s of stills) if (!seen.has(s.project_id)) seen.set(s.project_id, s.project_title);
+    for (const s of stills) if (s.project_id && !seen.has(s.project_id)) seen.set(s.project_id, s.title);
     return Array.from(seen, ([id, title]) => ({ id, title }));
   }, [stills]);
-  const shown = projectFilter === "all" ? stills : stills.filter((s) => s.project_id === projectFilter);
-  const still = stills.find((s) => s.shot_id === chosen) ?? null;
+  const hasUploads = stills.some((s) => s.source === "upload");
+  const shown = projectFilter === "all" ? stills : projectFilter === "uploads" ? stills.filter((s) => s.source === "upload") : stills.filter((s) => s.project_id === projectFilter);
+  const still = stills.find((s) => s.id === chosen) ?? null;
   const engine = getClipEngine(form.engine) ?? CLIP_ENGINES[0];
   const seconds = form.engine === "veo3" ? 8 : form.seconds;
   const estimate = clipEstimate(form.engine, form.quality, seconds);
   const inFlight = renders.filter((r) => r.status === "queued" || r.status === "running");
 
   const pick = (s: StartingImage) => {
-    setChosen(s.shot_id);
+    setChosen(s.id);
     setForm((f) => ({ ...f, gender: s.voice_gender ?? f.gender, profile: f.profile.trim() ? f.profile : s.voice_profile }));
   };
 
@@ -88,7 +98,7 @@ export function TalkingHeadStudio() {
     try {
       const r = await api<{ id: string; renders: TalkingHeadView[] }>("/api/owner/talking-head", {
         method: "POST",
-        body: JSON.stringify({ shot_id: still.shot_id, script: form.script, voice_direction: form.direction, voice_gender: form.gender, voice_profile: form.profile, engine: form.engine, quality: form.quality, seconds }),
+        body: JSON.stringify({ still_id: still.id, script: form.script, voice_direction: form.direction, voice_gender: form.gender, voice_profile: form.profile, engine: form.engine, quality: form.quality, seconds }),
       });
       setPage((p) => (p ? { ...p, renders: r.renders } : p));
     } catch (e) {
@@ -110,9 +120,60 @@ export function TalkingHeadStudio() {
     }
   };
 
+  /** Upload photos into the library a few at a time; a single new one is pre-selected. */
+  const uploadFiles = async (list: FileList | File[]) => {
+    const files = Array.from(list).filter((f) => IMAGE_TYPES.has(f.type));
+    if (files.length === 0) {
+      setError("Drop PNG, JPG or WebP photos");
+      return;
+    }
+    setError(null);
+    setUploading({ done: 0, total: files.length });
+    const supabase = createClient();
+    const ids: string[] = [];
+    const failures: string[] = [];
+    let latest: StartingImage[] | null = null;
+    const one = async (file: File) => {
+      try {
+        const { path, token, bucket } = await api<{ path: string; token: string; bucket: string }>("/api/owner/remake/upload-url", { method: "POST", body: JSON.stringify({ kind: "still", mime: file.type }) });
+        const up = await supabase.storage.from(bucket).uploadToSignedUrl(path, token, file, { contentType: file.type });
+        if (up.error) throw new Error(up.error.message);
+        const r = await api<{ id: string; stills: StartingImage[] }>("/api/owner/talking-head/stills", { method: "POST", body: JSON.stringify({ path, name: stripExt(file.name) }) });
+        ids.push(r.id);
+        latest = r.stills;
+      } catch (e) {
+        failures.push(e instanceof Error ? e.message : "Upload failed");
+      } finally {
+        setUploading((u) => (u ? { ...u, done: u.done + 1 } : u));
+      }
+    };
+    const queue = [...files];
+    await Promise.all(Array.from({ length: Math.min(3, queue.length) }, async () => {
+      while (queue.length) await one(queue.shift()!);
+    }));
+    if (latest) setPage((p) => (p ? { ...p, stills: latest! } : p));
+    setUploading(null);
+    if (fileRef.current) fileRef.current.value = "";
+    if (failures.length) setError(`${failures.length} of ${files.length} failed: ${failures[0]}`);
+    if (ids.length === 1) setChosen(ids[0]);
+  };
+
+  const removeStill = async (id: string) => {
+    setBusy("delete");
+    try {
+      const r = await api<{ stills: StartingImage[] }>(`/api/owner/talking-head/stills/${id}`, { method: "DELETE" });
+      setPage((p) => (p ? { ...p, stills: r.stills } : p));
+      if (chosen === id) setChosen(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   /** Load a past render's still and settings back into the form, to redo it or vary it. */
   const reuse = (r: TalkingHeadView) => {
-    if (r.source_shot_id && stills.some((s) => s.shot_id === r.source_shot_id)) setChosen(r.source_shot_id);
+    if (r.source_still_id && stills.some((s) => s.id === r.source_still_id)) setChosen(r.source_still_id);
     setForm({ script: r.script, direction: r.voice_direction, gender: r.voice_gender, profile: r.voice_profile, engine: r.engine, quality: r.quality, seconds: r.seconds });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -155,52 +216,102 @@ export function TalkingHeadStudio() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_380px] gap-4 items-start">
+        <div
+          className="relative"
+          onDragEnter={(e) => {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            dragDepth.current += 1;
+            setFilesOver(e.dataTransfer.items?.length || 1);
+          }}
+          onDragOver={(e) => {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+          }}
+          onDragLeave={(e) => {
+            if (!hasFiles(e)) return;
+            dragDepth.current = Math.max(0, dragDepth.current - 1);
+            if (dragDepth.current === 0) setFilesOver(null);
+          }}
+          onDrop={(e) => {
+            if (!hasFiles(e)) return;
+            e.preventDefault();
+            dragDepth.current = 0;
+            setFilesOver(null);
+            void uploadFiles(e.dataTransfer.files);
+          }}
+        >
         <Panel>
-          <div className="flex items-center gap-3 mb-3">
-            <Label>Starting images · from the Clipper</Label>
-            {projects.length > 1 && (
-              <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} className="ml-auto bg-gray-900 border border-gray-700 rounded-md px-2 py-1 text-xs text-gray-300 focus:outline-none">
-                <option value="all">All projects</option>
+          <div className="flex items-center gap-3 mb-3 flex-wrap">
+            <Label>Starting images · Clipper stills and your uploads</Label>
+            <span className="flex-1" />
+            {(projects.length > 1 || hasUploads) && (
+              <select value={projectFilter} onChange={(e) => setProjectFilter(e.target.value)} className="bg-gray-900 border border-gray-700 rounded-md px-2 py-1 text-xs text-gray-300 focus:outline-none">
+                <option value="all">All</option>
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.title}
                   </option>
                 ))}
+                {hasUploads && <option value="uploads">Uploads</option>}
               </select>
             )}
+            <Button onClick={() => fileRef.current?.click()} busy={uploading !== null} disabled={uploading !== null} className="!px-2.5 !py-1 !text-xs" title="Add photos to the library (or drop them anywhere on this panel)">
+              <Upload size={12} /> {uploading ? `Uploading ${uploading.done}/${uploading.total}…` : "Add photos"}
+            </Button>
+            <input ref={fileRef} type="file" accept={ACCEPT} multiple className="hidden" onChange={(e) => e.target.files?.length && void uploadFiles(e.target.files)} />
           </div>
           {page === null ? (
             <Loader2 size={20} className="mx-auto my-10 animate-spin text-gray-500" />
           ) : shown.length === 0 ? (
-            <p className="text-sm text-gray-500 text-center my-10">No stills yet. Every still you generate in the Clipper shows up here.</p>
+            <p className="text-sm text-gray-500 text-center my-10">Nothing here yet. Every still you generate in the Clipper shows up here, or drop photos on this panel.</p>
           ) : (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 xl:grid-cols-6 gap-3">
               {shown.map((s) => {
-                const on = chosen === s.shot_id;
+                const on = chosen === s.id;
                 return (
-                  <button key={s.shot_id} type="button" onClick={() => pick(s)} className={`text-left rounded-xl p-1 transition-colors cursor-pointer ${on ? "bg-purple-600/30 ring-2 ring-purple-500" : "hover:bg-white/5"}`}>
-                    <div className="relative aspect-[9/16] rounded-lg overflow-hidden bg-black">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={s.preview_url} alt="" className="w-full h-full object-cover" loading="lazy" />
-                      {on && (
-                        <span className="absolute top-1.5 right-1.5 bg-purple-600 text-white rounded-full p-1">
-                          <Check size={12} />
-                        </span>
-                      )}
-                      {s.voice_gender && <span className="absolute bottom-1.5 left-1.5 text-[9px] font-semibold bg-black/60 text-white px-1 rounded capitalize">{s.voice_gender}</span>}
-                    </div>
-                    <p className="text-[11px] text-gray-300 mt-1.5 truncate" title={s.project_title}>
-                      {s.project_title}
-                    </p>
-                    <p className="text-[10px] text-gray-600">
-                      clip {s.clip_idx + 1} · {timeAgo(s.created_at)}
-                    </p>
-                  </button>
+                  <div key={s.id} className="relative group">
+                    <button type="button" onClick={() => pick(s)} className={`w-full text-left rounded-xl p-1 transition-colors cursor-pointer ${on ? "bg-purple-600/30 ring-2 ring-purple-500" : "hover:bg-white/5"}`}>
+                      <div className="relative aspect-[9/16] rounded-lg overflow-hidden bg-black">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={s.preview_url} alt="" className="w-full h-full object-cover" loading="lazy" />
+                        {on && (
+                          <span className="absolute top-1.5 right-1.5 bg-purple-600 text-white rounded-full p-1">
+                            <Check size={12} />
+                          </span>
+                        )}
+                        {s.voice_gender && <span className="absolute bottom-1.5 left-1.5 text-[9px] font-semibold bg-black/60 text-white px-1 rounded capitalize">{s.voice_gender}</span>}
+                      </div>
+                      <p className="text-[11px] text-gray-300 mt-1.5 truncate" title={s.title}>
+                        {s.title}
+                      </p>
+                      <p className="text-[10px] text-gray-600">
+                        {s.clip_idx !== null ? `clip ${s.clip_idx + 1}` : "upload"} · {timeAgo(s.created_at)}
+                      </p>
+                    </button>
+                    <ConfirmButton
+                      question="Remove?"
+                      label="Remove"
+                      onConfirm={() => void removeStill(s.id)}
+                      className={`absolute top-2.5 left-2.5 rounded-md bg-black/60 text-white p-0.5 text-[10px] cursor-pointer transition-opacity ${on ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100"}`}
+                    >
+                      <Trash2 size={12} />
+                    </ConfirmButton>
+                  </div>
                 );
               })}
             </div>
           )}
         </Panel>
+          {filesOver !== null && (
+            <div className="absolute inset-1 rounded-xl border-2 border-dashed border-purple-500 bg-purple-600/15 flex items-center justify-center pointer-events-none">
+              <p className="text-sm font-semibold text-purple-100 bg-gray-950/80 rounded-lg px-4 py-2">
+                Drop to add {filesOver} {filesOver === 1 ? "photo" : "photos"} to the library
+              </p>
+            </div>
+          )}
+        </div>
 
         <Panel className="space-y-3 lg:sticky lg:top-4">
           <Label>New talking head</Label>
@@ -216,8 +327,8 @@ export function TalkingHeadStudio() {
             <div className="flex-1 min-w-0 text-xs text-gray-400">
               {still ? (
                 <>
-                  <p className="text-white font-semibold truncate">{still.project_title}</p>
-                  <p>clip {still.clip_idx + 1}</p>
+                  <p className="text-white font-semibold truncate">{still.title}</p>
+                  <p>{still.clip_idx !== null ? `clip ${still.clip_idx + 1}` : "uploaded photo"}</p>
                   <p className="mt-2 text-gray-500">The person in this still speaks the script. Voice and lips come from Veo.</p>
                 </>
               ) : (

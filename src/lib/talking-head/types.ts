@@ -4,12 +4,15 @@ import type { VoiceGender } from "@/lib/remake/types";
 export type TalkingHeadEngine = "veo3_1" | "veo3";
 export type TalkingHeadStatus = "queued" | "running" | "done" | "failed";
 
-/** A still the Clipper generated, offered as a starting image. */
+/** A starting image in the library: a Clipper still (mirrored) or an uploaded photo. */
 export interface StartingImage {
-  shot_id: string;
-  project_id: string;
-  project_title: string;
-  clip_idx: number;
+  id: string;
+  source: "clipper" | "upload";
+  source_shot_id: string | null;
+  project_id: string | null;
+  /** Project title for a Clipper still; the file name for an upload. */
+  title: string;
+  clip_idx: number | null;
   url: string;
   preview_url: string;
   voice_gender: VoiceGender | null;
@@ -23,6 +26,7 @@ export interface TalkingHeadRow {
   still_preview_path: string | null;
   source_shot_id: string | null;
   source_project_id: string | null;
+  source_still_id: string | null;
   title: string;
   script: string;
   voice_direction: string;

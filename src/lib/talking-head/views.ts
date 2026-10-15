@@ -8,36 +8,101 @@ import type { StartingImage, TalkingHeadEngine, TalkingHeadPage, TalkingHeadRow,
 
 const UUID = /^[0-9a-f-]{36}$/;
 
-/** Every finished Clipper still, newest first, with the project it belongs to. */
-async function loadStartingImages(db: SupabaseClient): Promise<StartingImage[]> {
+type StillRow = {
+  id: string;
+  path: string;
+  preview_path: string | null;
+  title: string;
+  source_shot_id: string | null;
+  source_project_id: string | null;
+  clip_idx: number | null;
+  voice_gender: VoiceGender | null;
+  voice_profile: string;
+  deleted_at: string | null;
+  created_at: string;
+};
+
+/** Mirror every finished Clipper still into the library (new shots join, regenerated stills refresh their path). Hidden rows stay hidden. */
+async function syncClipperStills(db: SupabaseClient): Promise<void> {
   const { data } = await db
     .from("remake_shots")
-    .select("id, project_id, idx, still_path, still_preview_path, voice_gender, created_at, updated_at, remake_projects!remake_shots_project_id_fkey!inner(title, voice_profile)")
+    .select("id, project_id, idx, still_path, still_preview_path, voice_gender, updated_at, remake_projects!remake_shots_project_id_fkey!inner(title, voice_profile)")
     .eq("still_status", "done")
     .not("still_path", "is", null)
     .order("updated_at", { ascending: false })
-    .limit(400);
-  type Row = { id: string; project_id: string; idx: number; still_path: string; still_preview_path: string | null; voice_gender: VoiceGender | null; created_at: string; updated_at: string; remake_projects: { title: string; voice_profile: string } | Array<{ title: string; voice_profile: string }> };
+    .limit(500);
+  type Row = { id: string; project_id: string; idx: number; still_path: string; still_preview_path: string | null; voice_gender: VoiceGender | null; updated_at: string; remake_projects: { title: string; voice_profile: string } | Array<{ title: string; voice_profile: string }> };
   const rows = (data ?? []) as unknown as Row[];
-  const signed = await signBoardPaths(db, rows.flatMap((r) => [r.still_path, r.still_preview_path]));
+  if (rows.length === 0) return;
+  await db.from("talking_head_stills").upsert(
+    rows.map((r) => {
+      const project = Array.isArray(r.remake_projects) ? r.remake_projects[0] : r.remake_projects;
+      return {
+        source_shot_id: r.id,
+        source_project_id: r.project_id,
+        path: r.still_path,
+        preview_path: r.still_preview_path,
+        title: project?.title || "Untitled",
+        clip_idx: r.idx,
+        voice_gender: r.voice_gender,
+        voice_profile: project?.voice_profile ?? "",
+      };
+    }),
+    { onConflict: "source_shot_id" }
+  );
+}
+
+/** The library, newest first: Clipper stills and uploads, minus the ones deleted here. */
+async function loadStartingImages(db: SupabaseClient): Promise<StartingImage[]> {
+  await syncClipperStills(db).catch(() => {});
+  const { data } = await db.from("talking_head_stills").select("*").is("deleted_at", null).order("created_at", { ascending: false }).limit(500);
+  const rows = (data ?? []) as StillRow[];
+  const signed = await signBoardPaths(db, rows.flatMap((r) => [r.path, r.preview_path]));
   const out: StartingImage[] = [];
   for (const r of rows) {
-    const url = signed.get(r.still_path);
+    const url = signed.get(r.path);
     if (!url) continue;
-    const project = Array.isArray(r.remake_projects) ? r.remake_projects[0] : r.remake_projects;
     out.push({
-      shot_id: r.id,
-      project_id: r.project_id,
-      project_title: project?.title || "Untitled",
-      clip_idx: r.idx,
+      id: r.id,
+      source: r.source_shot_id || r.source_project_id ? "clipper" : "upload",
+      source_shot_id: r.source_shot_id,
+      project_id: r.source_project_id,
+      title: r.title,
+      clip_idx: r.clip_idx,
       url,
-      preview_url: (r.still_preview_path && signed.get(r.still_preview_path)) || url,
+      preview_url: (r.preview_path && signed.get(r.preview_path)) || url,
       voice_gender: r.voice_gender,
-      voice_profile: project?.voice_profile ?? "",
-      created_at: r.updated_at,
+      voice_profile: r.voice_profile,
+      created_at: r.created_at,
     });
   }
   return out;
+}
+
+/** Register an uploaded photo (talking-heads/library/<uuid>.<ext>) as a starting image. */
+export async function addStartingImage(db: SupabaseClient, input: { path: string; name: string; created_by: string | null }): Promise<{ id: string } | { error: string }> {
+  if (!/^talking-heads\/library\/[0-9a-f-]{36}\.(png|jpg|webp)$/.test(input.path)) return { error: "Bad upload path" };
+  const { data, error } = await db
+    .from("talking_head_stills")
+    .insert({ path: input.path, title: input.name.trim().slice(0, 120) || "Upload", created_by: input.created_by })
+    .select("id")
+    .single();
+  if (error || !data) return { error: error?.message ?? "Could not add the image" };
+  return { id: data.id as string };
+}
+
+/** Remove a starting image: an upload is deleted with its file; a Clipper still is only hidden here. */
+export async function deleteStartingImage(db: SupabaseClient, id: string): Promise<string | null> {
+  const { data } = await db.from("talking_head_stills").select("*").eq("id", id).maybeSingle();
+  if (!data) return "Not found";
+  const r = data as StillRow;
+  if (r.source_shot_id || r.source_project_id || !r.path.startsWith("talking-heads/library/")) {
+    const { error } = await db.from("talking_head_stills").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+    return error ? error.message : null;
+  }
+  await db.storage.from(BOARD_BUCKET).remove([r.path, r.preview_path].filter((p): p is string => !!p));
+  const { error } = await db.from("talking_head_stills").delete().eq("id", id);
+  return error ? error.message : null;
 }
 
 function toView(r: TalkingHeadRow, signed: Map<string, string>): TalkingHeadView {
@@ -57,7 +122,7 @@ export async function loadTalkingHeadPage(db: SupabaseClient): Promise<TalkingHe
 }
 
 export interface CreateTalkingHead {
-  shot_id: string;
+  still_id: string;
   script: string;
   voice_direction: string;
   voice_gender: VoiceGender | null;
@@ -73,20 +138,21 @@ export interface CreateTalkingHead {
  * insert the row and queue the Veo job for the Mac worker.
  */
 export async function createTalkingHead(db: SupabaseClient, input: CreateTalkingHead): Promise<{ id: string } | { error: string }> {
-  if (!UUID.test(input.shot_id)) return { error: "Pick a starting image" };
+  if (!UUID.test(input.still_id)) return { error: "Pick a starting image" };
   if (!input.script.trim()) return { error: "Write the script first" };
-  const { data: shot } = await db.from("remake_shots").select("id, idx, project_id, still_path, still_preview_path, still_status").eq("id", input.shot_id).maybeSingle();
-  if (!shot || shot.still_status !== "done" || !shot.still_path) return { error: "That still is not ready" };
-  const { data: project } = await db.from("remake_projects").select("title").eq("id", shot.project_id as string).maybeSingle();
+  const { data: stillRow } = await db.from("talking_head_stills").select("*").eq("id", input.still_id).is("deleted_at", null).maybeSingle();
+  if (!stillRow) return { error: "That starting image is gone" };
+  const still = stillRow as StillRow;
 
   const { data: created, error } = await db
     .from("talking_heads")
     .insert({
-      still_path: shot.still_path,
-      still_preview_path: shot.still_preview_path,
-      source_shot_id: shot.id,
-      source_project_id: shot.project_id,
-      title: `${(project?.title as string | undefined) || "Untitled"} · clip ${Number(shot.idx) + 1}`,
+      still_path: still.path,
+      still_preview_path: still.preview_path,
+      source_shot_id: still.source_shot_id,
+      source_project_id: still.source_project_id,
+      source_still_id: still.id,
+      title: still.clip_idx !== null ? `${still.title} · clip ${still.clip_idx + 1}` : still.title,
       script: input.script.trim().slice(0, 1500),
       voice_direction: input.voice_direction.trim().slice(0, 120),
       voice_gender: input.voice_gender,
@@ -110,7 +176,7 @@ export async function createTalkingHead(db: SupabaseClient, input: CreateTalking
     const up = await db.storage.from(BOARD_BUCKET).upload(to, blob, { contentType: blob.type || "image/png", upsert: true });
     return up.error ? null : to;
   };
-  const [stillPath, previewPath] = await Promise.all([copy(shot.still_path as string, "still"), shot.still_preview_path ? copy(shot.still_preview_path as string, "preview") : Promise.resolve(null)]);
+  const [stillPath, previewPath] = await Promise.all([copy(still.path, "still"), still.preview_path ? copy(still.preview_path, "preview") : Promise.resolve(null)]);
   if (!stillPath) {
     await db.from("talking_heads").delete().eq("id", id);
     return { error: "Could not copy the still" };

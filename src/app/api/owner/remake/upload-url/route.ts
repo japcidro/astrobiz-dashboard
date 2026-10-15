@@ -14,6 +14,7 @@ const UUID = /^[0-9a-f-]{36}$/;
  *   kind "brand" + store: a product photo for the brand kit
  *   kind "cast" + project_id: the person to put into every clip
  *   kind "person": a photo for the person library (folders, reusable across projects)
+ *   kind "still": a starting image for the Talking Head library
  */
 export async function POST(request: Request) {
   const auth = await requireBoardUser();
@@ -40,8 +41,12 @@ export async function POST(request: Request) {
     const ext = IMAGE[mime];
     if (!ext) return Response.json({ error: "Upload PNG, JPG or WebP photos" }, { status: 400 });
     path = `people/${randomUUID()}.${ext}`;
+  } else if (b?.kind === "still") {
+    const ext = IMAGE[mime];
+    if (!ext) return Response.json({ error: "Upload PNG, JPG or WebP photos" }, { status: 400 });
+    path = `talking-heads/library/${randomUUID()}.${ext}`;
   } else {
-    return Response.json({ error: "kind must be source, brand, cast or person" }, { status: 400 });
+    return Response.json({ error: "kind must be source, brand, cast, person or still" }, { status: 400 });
   }
   const { data, error } = await auth.db.storage.from(BOARD_BUCKET).createSignedUploadUrl(path);
   if (error || !data) return Response.json({ error: error?.message ?? "Could not create upload URL" }, { status: 500 });

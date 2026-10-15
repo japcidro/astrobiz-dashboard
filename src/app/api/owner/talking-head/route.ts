@@ -10,14 +10,14 @@ export async function GET() {
   return Response.json(await loadTalkingHeadPage(auth.db));
 }
 
-/** POST — queue a talking head from a still: { shot_id, script, voice_direction?, voice_gender?, voice_profile?, engine?, quality?, seconds? }. */
+/** POST — queue a talking head from a library image: { still_id, script, voice_direction?, voice_gender?, voice_profile?, engine?, quality?, seconds? }. */
 export async function POST(request: Request) {
   const auth = await requireBoardUser();
   if (auth.error) return auth.error;
   const b = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   if (!b) return Response.json({ error: "Bad JSON" }, { status: 400 });
   const result = await createTalkingHead(auth.db, {
-    shot_id: typeof b.shot_id === "string" ? b.shot_id : "",
+    still_id: typeof b.still_id === "string" ? b.still_id : "",
     script: typeof b.script === "string" ? b.script : "",
     voice_direction: typeof b.voice_direction === "string" ? b.voice_direction : "",
     voice_gender: b.voice_gender === "male" || b.voice_gender === "female" ? b.voice_gender : null,
