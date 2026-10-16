@@ -3,7 +3,7 @@ import { HOOK_BUCKET, signPaths as signHookPaths } from "@/lib/hook-studio/stora
 import { BOARD_BUCKET, signBoardPaths } from "@/lib/marketing-board/storage";
 import { STILL_CREDITS } from "@/lib/remake/engines";
 import { brandCheck } from "@/lib/remake/vision";
-import { retryResult, reviewAdaptation } from "./adapt";
+import { isContents, retryResult, reviewAdaptation } from "./adapt";
 import { aspectFor, studioPrompt } from "./prompt";
 import type { AdaptPlan, Attachment, AttachmentView, ResultRow, ResultView, RunInput, RunRow, RunView, StudioPage, StudioSources } from "./types";
 
@@ -164,6 +164,25 @@ export async function createRun(db: SupabaseClient, input: RunInput, createdBy: 
   return { id: runId };
 }
 
+/**
+ * The result as the reviewer sees it: the full image at the most detail
+ * Claude reads (1568 px on the long side), so label text and colours can be
+ * checked; the 1000 px preview when that fails. Full 2K PNGs can pass
+ * Claude's 5 MB image limit, hence the re-encode.
+ */
+async function reviewImageUrl(fullUrl: string | undefined, previewUrl: string | undefined): Promise<string | undefined> {
+  if (!fullUrl) return previewUrl;
+  try {
+    const res = await fetch(fullUrl);
+    if (!res.ok) return previewUrl;
+    const sharp = (await import("sharp")).default;
+    const buf = await sharp(Buffer.from(await res.arrayBuffer())).resize(1568, 1568, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 90 }).toBuffer();
+    return `data:image/jpeg;base64,${buf.toString("base64")}`;
+  } catch {
+    return previewUrl;
+  }
+}
+
 /** Brand-check finished results once; a model attachment makes it a person check too. Adapt runs get the art-director review and one automatic fix. */
 export async function runPendingChecks(db: SupabaseClient, itemId: string | null): Promise<void> {
   let q = db.from("image_studio_results").select("*, image_studio_runs!inner(id, item_id, store, product_mode, person_mode, attachments, plan)").eq("status", "done").is("brand_check", null).limit(4);
@@ -182,7 +201,14 @@ export async function runPendingChecks(db: SupabaseClient, itemId: string | null
       profiles.set(store, (kit?.profile as string | undefined) ?? "");
     }
   }
-  const signed = await signAll(db, rows.flatMap((r) => [{ bucket: BOARD_BUCKET, path: r.preview_path ?? r.path }, ...r.image_studio_runs.attachments.map((a) => ({ bucket: a.bucket, path: a.path }))]));
+  const signed = await signAll(
+    db,
+    rows.flatMap((r) => [
+      { bucket: BOARD_BUCKET, path: r.preview_path ?? r.path },
+      ...(r.path && r.preview_path ? [{ bucket: BOARD_BUCKET, path: r.path }] : []),
+      ...r.image_studio_runs.attachments.map((a) => ({ bucket: a.bucket, path: a.path })),
+    ])
+  );
   await Promise.all(
     rows.map(async (r) => {
       const { data: locked } = await db.from("image_studio_results").update({ brand_check: { ok: true, notes: "Checking…" } }).eq("id", r.id).is("brand_check", null).select("id");
@@ -191,16 +217,34 @@ export async function runPendingChecks(db: SupabaseClient, itemId: string | null
       const url = signed.get(key(BOARD_BUCKET, (r.preview_path ?? r.path)!));
       const products = run.product_mode === "in" ? run.attachments.filter((a) => a.role === "product").map((a) => signed.get(key(a.bucket, a.path))).filter((u): u is string => !!u) : [];
       if (run.plan && url) {
-        // The adapt skill's reviewer: scores, and one automatic retry when the problem is fixable.
+        // The adapt skill's reviewer: scores, a strict product check, and one automatic retry when the problem is fixable.
         const ref = run.attachments.find((a) => a.role === "reference");
-        const review = await reviewAdaptation(db, { resultUrl: url, referenceUrl: ref ? signed.get(key(ref.bucket, ref.path)) ?? null : null, productUrls: products, finalText: run.plan.plan.final_text, profile: profiles.get(run.store ?? "") ?? "" });
+        // Only the pack is compared; a close-up of the capsules is not what the bottles must match.
+        const packs = run.product_mode === "in" ? run.attachments.filter((a) => a.role === "product" && !isContents(a.kind)).map((a) => signed.get(key(a.bucket, a.path))).filter((u): u is string => !!u) : [];
+        const reviewUrl = await reviewImageUrl(r.path ? signed.get(key(BOARD_BUCKET, r.path)) : undefined, url);
+        const review = await reviewAdaptation(db, {
+          resultUrl: reviewUrl ?? url,
+          referenceUrl: ref ? signed.get(key(ref.bucket, ref.path)) ?? null : null,
+          productUrls: packs,
+          productLock: run.plan.product_lock ?? null,
+          finalText: run.plan.plan.final_text,
+          profile: profiles.get(run.store ?? "") ?? "",
+        });
         if (review && !review.ok && review.fixable && (r.attempts ?? 1) < 2) {
-          await retryResult(db, r.id, review.notes);
+          const fix =
+            review.productOk === false
+              ? `${review.productIssue || "The product does not match our pack."} Every pack must look exactly like our product photo${run.plan.product_lock ? `: ${run.plan.product_lock}` : "."} Keep its own colours; do not recolour it to match the ad.`
+              : review.notes;
+          await retryResult(db, r.id, fix);
           return;
         }
         await db
           .from("image_studio_results")
-          .update({ brand_check: review ? { ok: review.ok, notes: review.notes, scores: review.scores } : { ok: true, notes: "Not reviewed: Claude could not read the image." } })
+          .update({
+            brand_check: review
+              ? { ok: review.ok, notes: review.notes, scores: review.scores, product_ok: review.productOk }
+              : { ok: true, notes: "Not reviewed: Claude could not read the image." },
+          })
           .eq("id", r.id);
         return;
       }

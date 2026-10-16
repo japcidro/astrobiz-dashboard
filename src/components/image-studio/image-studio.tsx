@@ -282,7 +282,8 @@ export function ImageStudio() {
         </Panel>
       ) : (
         runs.map((run) => {
-          const scored = run.results.filter((x) => overall(x) !== null);
+          // BEST only among results that passed review: a wrong bottle never wins on looks.
+          const scored = run.results.filter((x) => overall(x) !== null && x.brand_check?.ok !== false);
           const bestId = scored.length ? scored.reduce((a, b) => (overall(a)! >= overall(b)! ? a : b)).id : null;
           const planOpen = openPlan === run.id;
           const changing = change?.runId === run.id;
@@ -377,6 +378,7 @@ export function ImageStudio() {
                         )}
                         {score !== null && <span className="absolute top-1.5 left-1.5 rounded-full bg-black/70 text-white text-[11px] font-bold px-2 py-0.5">{score.toFixed(1)}</span>}
                         {bestId === x.id && <span className="absolute top-1.5 right-1.5 rounded-full bg-green-500 text-green-950 text-[10px] font-extrabold px-2 py-0.5">BEST</span>}
+                        {x.brand_check?.product_ok === false && <span className="absolute top-1.5 right-1.5 rounded-full bg-red-600 text-white text-[10px] font-extrabold px-2 py-0.5">WRONG PRODUCT</span>}
                         {x.kept && (
                           <span className="absolute bottom-1.5 left-1.5 bg-green-600 text-white rounded-full p-1">
                             <Check size={10} />

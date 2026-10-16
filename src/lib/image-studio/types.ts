@@ -8,6 +8,8 @@ export interface Attachment {
   path: string;
   role: AttachmentRole;
   label: string;
+  /** For a product: the brand image's kind. Capsules or gummies are what is inside, not the pack. */
+  kind?: string | null;
 }
 
 export interface AttachmentView extends Attachment {
@@ -39,8 +41,10 @@ export interface RunInput {
 /** What the adapt skill decided before generating. */
 export interface AdaptPlan {
   study: { angle: string; structure: string; style: string; why_it_works: string };
-  plan: { text: Array<{ from: string; to: string }>; final_text: string; needs_person: boolean; needs_product: boolean; design_spec: string };
+  plan: { text: Array<{ from: string; to: string }>; final_text: string; needs_person: boolean; needs_product: boolean; design_spec: string; /** Loose capsules or gummies outside the pack in the design. */ shows_contents?: boolean };
   model_label?: string | null;
+  /** The exact look of our pack (colours, every label line), from the brand photo; locks the product in the prompt and the review. */
+  product_lock?: string | null;
 }
 
 export interface ReviewScores {
@@ -68,7 +72,8 @@ export interface ResultRow {
   path: string | null;
   preview_path: string | null;
   pair_paths: string[] | null;
-  brand_check: (BrandCheck & { scores?: ReviewScores }) | null;
+  /** product_ok: the strict pack check (false = the bottle came out wrong; null = nothing to compare). */
+  brand_check: (BrandCheck & { scores?: ReviewScores; product_ok?: boolean | null }) | null;
   attempts: number;
   kept: boolean;
   credits: number | null;

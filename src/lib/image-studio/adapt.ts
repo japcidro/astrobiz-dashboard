@@ -7,6 +7,35 @@ import type { AdaptPlan, Attachment, ReviewScores } from "./types";
 
 const UUID = /^[0-9a-f-]{36}$/;
 
+/** Brand photos of what is inside the pack; the pack itself is any other kind (bottle, box, jar, …). */
+const CONTENT_KINDS = new Set(["capsules", "gummies"]);
+export const isContents = (kind: string | null | undefined) => CONTENT_KINDS.has(kind ?? "");
+
+type BrandImageRow = { id: string; path: string; kind: string | null; description: string | null; pack_spec: string | null };
+
+/**
+ * An exact description of a packshot, read once by Claude from the photo and
+ * cached on the brand image: the container, every colour, every label line.
+ * Saved descriptions are short and can be wrong ("gold accents" on a bottle
+ * with none), and the image model drifts toward the ad's palette without it.
+ */
+async function packSpecFor(db: SupabaseClient, img: BrandImageRow, url: string): Promise<string | null> {
+  if (img.pack_spec?.trim()) return img.pack_spec;
+  const system = `You describe product packaging so an image model can reproduce it exactly. Describe only what you see; never guess or embellish. Answer with JSON only: {"container":string,"colours":string,"label_lines":string[]}.
+- container: one sentence: the container type, proportions and cap or lid (e.g. "squat round plastic supplement bottle with a ribbed white screw cap").
+- colours: one sentence naming the colour of the body, the cap, the label background and every accent (stripes, icons, logo, text). Name each real colour; do not mention colours that are not there.
+- label_lines: every line of text on the front label, top to bottom, exact spelling and capitalisation, one string per line.`;
+  const out = await askVision<{ container?: unknown; colours?: unknown; label_lines?: unknown }>(db, system, [{ url, label: "The product packaging:" }], "Answer with JSON only.", 1200);
+  if (!out || typeof out.container !== "string" || typeof out.colours !== "string") return null;
+  const lines = Array.isArray(out.label_lines) ? out.label_lines.filter((l): l is string => typeof l === "string" && !!l.trim()).slice(0, 14) : [];
+  const spec = `${out.container.trim().replace(/\.$/, "")}. ${out.colours.trim().replace(/\.$/, "")}.${lines.length ? ` Front label, top to bottom: ${lines.map((l) => `"${l.trim().replace(/"/g, "'")}"`).join(" / ")}.` : ""}`.slice(0, 900);
+  await db.from("remake_brand_images").update({ pack_spec: spec }).eq("id", img.id);
+  return spec;
+}
+
+/** The pack's lock line for prompts and reviews: what it must look like, whatever the ad's colours. */
+const lockLine = (spec: string) => `Our product pack, exactly as in its photo: ${spec} It keeps these exact colours and label whatever the ad's palette: the palette is for the background, panels and type, never for the product. Every pack shown is this same pack.`;
+
 /**
  * The "adapt an ad" skill, step 1 + 2: read the competitor's static ad like
  * a creative director, then plan our version from the brand profile. One
@@ -15,21 +44,24 @@ const UUID = /^[0-9a-f-]{36}$/;
  */
 export async function planAdaptation(
   db: SupabaseClient,
-  input: { referenceUrl: string; store: string; profile: string; rules: string; products: Array<{ kind: string | null; description: string | null }>; notes: string; hasModel: boolean }
+  input: { referenceUrl: string; store: string; profile: string; rules: string; packs: Array<{ url: string; spec: string | null; kind: string | null; description: string | null }>; hasContents: boolean; notes: string; hasModel: boolean }
 ): Promise<AdaptPlan | null> {
   const system = `You are a senior creative director for direct-response static ads in the Philippines. You adapt a competitor's winning ad for our brand: keep what makes it win (the angle, the structure, the hierarchy, the mood) and replace everything that is theirs (product, brand, claims, prices, people) with ours, using only facts from the brand profile. Never invent prices, claims or numbers. Never keep the competitor's name, product or logo. Keep required compliance lines. Taglish is welcome when the reference is casual. The result must look like a designed ad, not a product photo: strong type hierarchy, one clear message, breathing room, real texture.
 Answer with JSON only, exactly this shape:
 {"study":{"angle":string,"structure":string,"style":string,"why_it_works":string},
- "plan":{"text":[{"from":string,"to":string}],"final_text":string,"needs_person":boolean,"needs_product":boolean,"design_spec":string}}
+ "plan":{"text":[{"from":string,"to":string}],"final_text":string,"needs_person":boolean,"needs_product":boolean,"shows_contents":boolean,"design_spec":string}}
 - study.structure: the zones top to bottom (e.g. "headline bar top; product in hand center; price badge right; CTA strip bottom").
 - plan.text: every text block in the reference mapped to our wording (keep the role: headline stays a headline). Leave out tiny legal print except our compliance line.
 - plan.final_text: all the text that will appear on our image, one block per line, in reading order. Exact wording, exact capitalisation.
 - plan.needs_person: true only when a human (face, hands, body) is part of the reference's composition.
-- plan.design_spec: 150–250 words for an image model: the composition zone by zone, where our product sits and how big (true size: a supplement bottle fits in a hand), the person if any (pose, expression, clothing), background and lighting, palette with hex codes from the brand, typography (weight, case, colour, placement) for each text block quoting the exact words, and a short line on finish (phone-real vs studio). Describe, do not list rules.`;
+- plan.shows_contents: true only when loose capsules or gummies appear outside the pack in our design (scattered, in a hand, spilling); label text that mentions capsules does not count.
+- plan.design_spec: 150–250 words for an image model: the composition zone by zone, where our product sits and how big (true size: a supplement bottle fits in a hand), the product described exactly as it looks in its photo (its real body, cap and label colours, never colours taken from the ad's palette; the palette is for background, panels and type), the person if any (pose, expression, clothing), background and lighting, palette with hex codes from the brand, typography (weight, case, colour, placement) for each text block quoting the exact words, and a short line on finish (phone-real vs studio). Describe, do not list rules.`;
   const facts = [
     `Brand profile for ${input.store}:\n${input.profile.trim() || "(no profile yet; use only what the product photos show)"}`,
     input.rules.trim() ? `Brand rules: ${input.rules.trim()}` : "",
-    input.products.length ? `Product photos available: ${input.products.map((p) => `${p.kind ?? "product"}${p.description ? ` (${p.description})` : ""}`).join("; ")}.` : "No product photos available.",
+    input.packs.length
+      ? `Our product pack (photo attached): ${input.packs.map((p) => p.spec ?? `${p.kind ?? "product"}${p.description ? ` (${p.description})` : ""}`).join(" Also: ")}${input.hasContents ? " A close-up of the capsules inside is also available." : ""}`
+      : "No product photos available.",
     input.hasModel ? "A photo of our model is available if a person is needed." : "No model photo is attached; if a person is needed, describe a Filipino man in his 30s.",
     input.notes.trim() ? `The marketer's notes, which win over everything above: ${input.notes.trim()}` : "",
   ]
@@ -38,7 +70,13 @@ Answer with JSON only, exactly this shape:
   // Long JSON with a 200-word design spec occasionally comes back malformed; one more try is cheap.
   let out: AdaptPlan | null = null;
   for (let attempt = 0; attempt < 2 && !out; attempt++) {
-    out = await askVision<AdaptPlan>(db, system, [{ url: input.referenceUrl, label: "The competitor's ad to adapt:" }], `${facts}\n\nAnswer with JSON only, no markdown fences, no line breaks inside strings (use \\n).`, 8000);
+    out = await askVision<AdaptPlan>(
+      db,
+      system,
+      [{ url: input.referenceUrl, label: "The competitor's ad to adapt:" }, ...input.packs.slice(0, 1).map((p) => ({ url: p.url, label: "OUR product pack, as it really looks:" }))],
+      `${facts}\n\nAnswer with JSON only, no markdown fences, no line breaks inside strings (use \\n).`,
+      8000
+    );
     if (out && (!out.study || !out.plan || typeof out.plan.design_spec !== "string")) out = null;
   }
   if (!out) return null;
@@ -54,6 +92,7 @@ Answer with JSON only, exactly this shape:
       final_text: String(out.plan.final_text ?? "").slice(0, 800),
       needs_person: out.plan.needs_person === true,
       needs_product: out.plan.needs_product !== false,
+      shows_contents: out.plan.shows_contents === true,
       design_spec: out.plan.design_spec.slice(0, 2500),
     },
   };
@@ -62,30 +101,45 @@ Answer with JSON only, exactly this shape:
 /** Step 4: score a result against the reference, the plan and the brand; say what to fix. */
 export async function reviewAdaptation(
   db: SupabaseClient,
-  input: { resultUrl: string; referenceUrl: string | null; productUrls: string[]; finalText: string; profile: string }
-): Promise<{ ok: boolean; notes: string; scores: ReviewScores; fixable: boolean } | null> {
-  const system = `You are an art director reviewing an AI-generated static ad before it ships. Score 0–10: "design" (hierarchy, readability, balance, polish, does it look like a real ad), "brand" (our product reproduced faithfully with legible correct label text, brand colours, no competitor branding, compliance line present when the bottle label is visible), "structure" (keeps the reference's winning structure and angle). ok=false when any text on the image is garbled, misspelled or different from the planned text, when the product label is wrong or unreadable, when a competitor name or logo appears, when the person is deformed, or when design < 6. "fixable" is true when a regeneration with a note could fix it (text, label, small artefacts), false when the whole concept is off. "notes": one or two short sentences, the most important fix first, or "Looks great." Answer with JSON only: {"ok":boolean,"fixable":boolean,"design":number,"brand":number,"structure":number,"notes":string}.`;
+  input: { resultUrl: string; referenceUrl: string | null; productUrls: string[]; productLock: string | null; finalText: string; profile: string }
+): Promise<{ ok: boolean; notes: string; scores: ReviewScores; fixable: boolean; productOk: boolean | null; productIssue: string } | null> {
+  const system = `You are an art director reviewing an AI-generated static ad before it ships. Score 0–10: "design" (hierarchy, readability, balance, polish, does it look like a real ad), "brand" (our product reproduced faithfully with legible correct label text, brand colours, no competitor branding, compliance line present when the bottle label is visible), "structure" (keeps the reference's winning structure and angle). ok=false when any text on the image is garbled, misspelled or different from the planned text, when the product label is wrong or unreadable, when a competitor name or logo appears, when the person is deformed, or when design < 6. "fixable" is true when a regeneration with a note could fix it (text, label, small artefacts, a wrong product), false when the whole concept is off. "notes": one or two short sentences, the most important fix first, or "Looks great."
+Product check, strictest of all because a wrong product wastes the ad: compare EVERY pack in IMAGE A with OUR PRODUCT photo and its description: the container shape, the body colour, the cap colour, the label colour, the stripes and accents, the logo and the label wording. "product_ok" is false if any pack differs in any of these (a body recoloured to match the ad, a different logo or icon, label lines invented, missing or reworded, a different kind of container), or if our product is missing when the ad shows a product. Small text you cannot read at this size is not a difference by itself; a wrong colour or a wrong word you can read is. When product_ok is false, ok is false and fixable is true, and "product_issue" says concretely what differs (e.g. "the bottles are dark green; ours is white with thin teal stripes"). When there is no product photo, product_ok is null.
+Answer with JSON only: {"ok":boolean,"fixable":boolean,"design":number,"brand":number,"structure":number,"product_ok":boolean|null,"product_issue":string,"notes":string}.`;
   const images = [{ url: input.resultUrl, label: "IMAGE A — the generated ad to review:" }];
   if (input.referenceUrl) images.push({ url: input.referenceUrl, label: "IMAGE B — the competitor's reference it adapts:" });
-  for (const u of input.productUrls.slice(0, 2)) images.push({ url: u, label: "Our product (the label must match this):" });
-  const out = await askVision<{ ok?: unknown; fixable?: unknown; design?: unknown; brand?: unknown; structure?: unknown; notes?: unknown }>(
+  for (const u of input.productUrls.slice(0, 2)) images.push({ url: u, label: "OUR PRODUCT — every pack in IMAGE A must look exactly like this:" });
+  const out = await askVision<{ ok?: unknown; fixable?: unknown; design?: unknown; brand?: unknown; structure?: unknown; product_ok?: unknown; product_issue?: unknown; notes?: unknown }>(
     db,
     system,
     images,
-    `Planned text on the image, which must appear exactly:\n${input.finalText || "(no text planned)"}\n\nBrand profile excerpt: ${input.profile.slice(0, 1200)}\n\nAnswer with JSON only.`,
+    `${input.productLock ? `Our product, described: ${input.productLock}\n\n` : ""}Planned text on the image, which must appear exactly:\n${input.finalText || "(no text planned)"}\n\nBrand profile excerpt: ${input.profile.slice(0, 1200)}\n\nAnswer with JSON only.`,
     2000
   );
   if (!out || typeof out.ok !== "boolean") return null;
   const n = (v: unknown) => Math.max(0, Math.min(10, Math.round(Number(v) || 0)));
-  return { ok: out.ok, fixable: out.fixable !== false, scores: { design: n(out.design), brand: n(out.brand), structure: n(out.structure) }, notes: typeof out.notes === "string" ? out.notes.slice(0, 300) : "" };
+  const productOk = input.productUrls.length ? (typeof out.product_ok === "boolean" ? out.product_ok : null) : null;
+  const productIssue = typeof out.product_issue === "string" ? out.product_issue.trim().slice(0, 300) : "";
+  // A wrong product never passes, whatever the other scores say.
+  const ok = out.ok && productOk !== false;
+  const notes = typeof out.notes === "string" ? out.notes.slice(0, 300) : "";
+  return {
+    ok,
+    fixable: productOk === false ? true : out.fixable !== false,
+    scores: { design: n(out.design), brand: productOk === false ? Math.min(n(out.brand), 4) : n(out.brand), structure: n(out.structure) },
+    notes: productOk === false && productIssue ? `Wrong product: ${productIssue}` : notes,
+    productOk,
+    productIssue,
+  };
 }
 
 /** The generation prompt for one result, written from the plan. */
 export function adaptPrompt(plan: AdaptPlan, attachments: Attachment[], rules: string, fix?: string): string {
   const roles = attachments.map((a, n) => {
     const k = n + 1;
-    if (a.role === "reference") return `Image ${k} is the competitor's ad: copy its layout, composition, hierarchy and mood exactly; do not copy its product, people, brand name, logo or words.`;
-    if (a.role === "product") return `Image ${k} is our product: reproduce it exactly, same bottle, colours and label, every word of the label copied letter for letter and legible, at true size (it fits in a hand).`;
+    if (a.role === "reference") return `Image ${k} is the competitor's ad: copy its layout, composition, hierarchy and mood exactly; do not copy its product, people, brand name, logo or words, and do not take its product's colours.`;
+    if (a.role === "product" && isContents(a.kind)) return `Image ${k} shows what is inside our pack (the ${a.kind}): use it only for loose ${a.kind} in the scene; it is not the packaging.`;
+    if (a.role === "product") return `Image ${k} is our product pack: reproduce it exactly, same container, same body, cap and label colours, every word of the label copied letter for letter and legible, at true size (it fits in a hand). Do not recolour it to match the ad.`;
     if (a.role === "model") return `Image ${k} is our model: whenever a person appears, it is this exact individual (same face, hair, skin), never anyone from the reference.`;
     return `Image ${k} is a look reference: style only.`;
   });
@@ -95,6 +149,7 @@ export function adaptPrompt(plan: AdaptPlan, attachments: Attachment[], rules: s
   return [
     plan.plan.design_spec.trim(),
     roles.join(" "),
+    plan.product_lock && attachments.some((a) => a.role === "product" && !isContents(a.kind)) ? lockLine(plan.product_lock) : "",
     text,
     plan.plan.needs_person ? "" : "No person in the image unless the design above asks for hands.",
     "Square 1:1. A finished, designed advertisement: photoreal product and people, clean vector-sharp typography, no watermark, no competitor branding, nothing that looks pasted on.",
@@ -134,11 +189,23 @@ export async function createAdaptRun(db: SupabaseClient, input: AdaptInput, crea
   if (input.item_id && !UUID.test(input.item_id)) return { error: "Bad board card" };
   const [{ data: kit }, { data: productRows }] = await Promise.all([
     db.from("remake_brand_kits").select("rules, profile").eq("store", input.store).maybeSingle(),
-    db.from("remake_brand_images").select("path, kind, description").eq("store", input.store).order("created_at"),
+    db.from("remake_brand_images").select("id, path, kind, description, pack_spec").eq("store", input.store).order("created_at"),
   ]);
   const rules = (kit?.rules as string | undefined) ?? "";
   const profile = (kit?.profile as string | undefined) ?? "";
-  const products = ((productRows ?? []) as Array<{ path: string; kind: string | null; description: string | null }>).slice(0, 3);
+  const brandImages = (productRows ?? []) as BrandImageRow[];
+  // The pack is what gets reproduced; a close-up of the capsules is only for scenes that show them loose.
+  let packRows = brandImages.filter((p) => !isContents(p.kind)).slice(0, 2);
+  if (packRows.length === 0) packRows = brandImages.slice(0, 1);
+  const contentRows = brandImages.filter((p) => isContents(p.kind) && !packRows.includes(p)).slice(0, 1);
+  const packSigned = await signBoardPaths(db, packRows.map((p) => p.path));
+  const packs = await Promise.all(
+    packRows.map(async (p) => {
+      const url = packSigned.get(p.path) ?? null;
+      return { row: p, url, spec: url ? await packSpecFor(db, p, url) : p.pack_spec };
+    })
+  );
+  const productLock = packs.map((p) => p.spec).filter((x): x is string => !!x).join(" Also: ") || null;
 
   let plan: AdaptPlan | null = null;
   let modelPic = input.model;
@@ -153,15 +220,29 @@ export async function createAdaptRun(db: SupabaseClient, input: AdaptInput, crea
     const refSigned = input.reference.bucket === HOOK_BUCKET ? await signHookPaths(db, [input.reference.path]) : await signBoardPaths(db, [input.reference.path]);
     const referenceUrl = refSigned.get(input.reference.path);
     if (!referenceUrl) return { error: "Reference image not found" };
-    plan = await planAdaptation(db, { referenceUrl, store: input.store, profile, rules, products, notes: input.notes, hasModel: true });
+    plan = await planAdaptation(db, {
+      referenceUrl,
+      store: input.store,
+      profile,
+      rules,
+      packs: packs.filter((p) => p.url).map((p) => ({ url: p.url!, spec: p.spec, kind: p.row.kind, description: p.row.description })),
+      hasContents: contentRows.length > 0,
+      notes: input.notes,
+      hasModel: true,
+    });
     if (!plan) return { error: "Claude could not study the reference (is the Anthropic key set?)" };
   }
   if (plan.plan.needs_person && !modelPic) modelPic = await autoModel(db, input.store);
   plan.model_label = modelPic?.label ?? null;
+  plan.product_lock = productLock;
+  const showsContents = plan.plan.shows_contents === true;
+  const productAttachments: Attachment[] = plan.plan.needs_product
+    ? [...packRows, ...(showsContents ? contentRows : [])].map((p) => ({ bucket: BOARD_BUCKET, path: p.path, role: "product" as const, label: `${input.store} · ${p.kind ?? "product"}`, kind: p.kind }))
+    : [];
 
   const attachments: Attachment[] = [
     { bucket: input.reference.bucket, path: input.reference.path, role: "reference", label: input.reference.label.slice(0, 80) },
-    ...(plan.plan.needs_product ? products.map((p) => ({ bucket: BOARD_BUCKET, path: p.path, role: "product" as const, label: `${input.store} · ${p.kind ?? "product"}` })) : []),
+    ...productAttachments,
     ...(plan.plan.needs_person && modelPic ? [{ bucket: modelPic.bucket, path: modelPic.path, role: "model" as const, label: modelPic.label.slice(0, 80) }] : []),
   ];
   const prompt = adaptPrompt(plan, attachments, rules);
