@@ -1,7 +1,7 @@
 import { after } from "next/server";
 import { requireBoardUser } from "@/lib/marketing-board/auth";
 import { isUuid } from "@/lib/remake/views";
-import { anotherTake, approveAll, deleteHook, loadHook, planAndStart, rejoin } from "@/lib/hook-generator/views";
+import { anotherTake, approveAll, deleteHook, drawStills, loadHook, planAndStart, rejoin } from "@/lib/hook-generator/views";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -24,6 +24,7 @@ export async function GET(_request: Request, ctx: Ctx) {
  *   "approve_all": approve every finished starting image; the worker animates the hook
  *   "replan": Claude plans again; the beats and their files are replaced
  *   "rejoin": join the current clips again
+ *   "draw": a hook held after planning: draw the starting images now
  *   "another_take": a new hook from the same inputs, planned in the background; answers { id }
  */
 export async function POST(request: Request, ctx: Ctx) {
@@ -44,6 +45,7 @@ export async function POST(request: Request, ctx: Ctx) {
   }
   if (b?.action === "approve_all") problem = await approveAll(db, id);
   else if (b?.action === "rejoin") problem = await rejoin(db, id);
+  else if (b?.action === "draw") problem = await drawStills(db, id);
   else if (b?.action === "replan") {
     const { error } = await db.from("hookgen_hooks").update({ status: "planning", error: null, title: "Planning…" }).eq("id", id);
     problem = error ? error.message : null;

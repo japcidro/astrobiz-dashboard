@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { beatSeconds, clipSecondsFor, estimateCredits, motionPrompt, stillPrompt } from "../engines";
+import { DEFAULT_BEATS, beatSeconds, clipLengths, clipSecondsFor, estimateCredits, motionPrompt, ownStillPrompt, stillPrompt, validClipSeconds } from "../engines";
 
 describe("beatSeconds", () => {
   it("times a line at about 2.6 words a second", () => {
@@ -61,5 +61,47 @@ describe("motionPrompt", () => {
     const p = motionPrompt({ motion: "He pats the crown.", line: "Look at this", voice: "", model: "seedance_2_0_mini" });
     expect(p).not.toContain("Look at this");
     expect(p).toContain("talks naturally");
+  });
+});
+
+describe("clip lengths", () => {
+  it("offers only what each model makes", () => {
+    expect(clipLengths("veo3_1")).toEqual([4, 6, 8]);
+    expect(clipLengths("seedance_2_0_mini")[0]).toBe(4);
+    expect(clipLengths("seedance_2_0_mini").at(-1)).toBe(15);
+  });
+
+  it("keeps a valid choice and drops the rest to fit-the-line", () => {
+    expect(validClipSeconds("veo3_1", 6)).toBe(6);
+    expect(validClipSeconds("veo3_1", "8")).toBe(8);
+    expect(validClipSeconds("veo3_1", 5)).toBeNull();
+    expect(validClipSeconds("seedance_2_0_mini", 12)).toBe(12);
+    expect(validClipSeconds("seedance_2_0_mini", 16)).toBeNull();
+    expect(validClipSeconds("veo3_1", null)).toBeNull();
+    expect(validClipSeconds("veo3_1", "")).toBeNull();
+  });
+
+  it("prices the chosen length", () => {
+    expect(estimateCredits({ beats: 1, image: "seedream_5_0_flash", video: "veo3_1", seconds: 8 })).toEqual({ stills: 0.5, total: 32.5 });
+    expect(estimateCredits({ beats: 1, image: "seedream_5_0_flash", video: "seedance_2_0_mini", seconds: 10 })).toEqual({ stills: 0.5, total: 5.5 });
+  });
+});
+
+describe("the marketer's own beats", () => {
+  it("starts new hooks with one move", () => {
+    expect(DEFAULT_BEATS).toEqual(["crown_pat"]);
+  });
+
+  it("drops the head-tap rule from the image and the clip", () => {
+    expect(stillPrompt("A doctor at a desk.", [], "", false)).not.toContain("hand is already on");
+    const p = motionPrompt({ motion: "She smiles and nods.", line: "Look at this", voice: "", model: "veo3_1", headTap: false });
+    expect(p).not.toContain("touches the client's hair");
+    expect(p).toContain("The main person looks into the camera and says");
+    expect(motionPrompt({ motion: "Slow push-in.", line: "", voice: "", model: "seedance_2_0_mini", headTap: false })).not.toContain("talks naturally");
+  });
+
+  it("uses their own image prompt as written, plus a fix", () => {
+    expect(ownStillPrompt("My exact prompt.", "")).toBe("My exact prompt.");
+    expect(ownStillPrompt("My exact prompt.", "warmer light")).toBe("My exact prompt. Change from the last attempt: warmer light.");
   });
 });

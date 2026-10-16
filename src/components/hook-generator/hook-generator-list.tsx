@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState, type DragEvent } from "react"
 import { createClient } from "@/lib/supabase/client";
 import type { WorkerStatus } from "@/lib/hook-studio/types";
 import type { CastSource, PersonLibrary } from "@/lib/remake/types";
-import { BEAT_KINDS, DEFAULT_BEATS, IMAGE_MODELS, MAX_REFS, MAX_VARIANTS, REF_ROLES, VIDEO_MODELS, estimateCredits } from "@/lib/hook-generator/engines";
+import { BEAT_KINDS, DEFAULT_BEATS, IMAGE_MODELS, MAX_REFS, MAX_VARIANTS, REF_ROLES, VIDEO_MODELS, clipLengths, estimateCredits, validClipSeconds } from "@/lib/hook-generator/engines";
 import type { BeatKind, HookgenSummary, ImageModel, RefRole, VideoModel } from "@/lib/hook-generator/types";
 import { Button, Chip, ConfirmButton, Label, Panel, Pill, api, credits, timeAgo } from "@/components/hook-studio/ui";
 import { ClipVideo } from "@/components/remake/clip-video";
@@ -33,6 +33,10 @@ interface Form {
   kinds: BeatKind[];
   image: ImageModel;
   video: VideoModel;
+  /** Clip length for every beat; null = fit each beat's line. */
+  seconds: number | null;
+  /** Stop after planning to read and edit the prompts. */
+  hold: boolean;
   variants: number;
 }
 
@@ -41,6 +45,7 @@ export function hookProgress(h: HookgenSummary): { tone: "run" | "ok" | "bad" | 
   if (h.status === "planning") return { tone: "run", label: "Claude is planning", detail: "Planning the beats…" };
   if (h.status === "failed") return { tone: "bad", label: "Failed", detail: h.error ?? "Failed" };
   if (h.status === "done") return { tone: "ok", label: "Ready", detail: `${h.beats_total} beats · ${h.final_seconds ?? "?"} s` };
+  if (h.status === "stills" && h.hold_stills) return { tone: "warn", label: "Check prompts", detail: "Read or edit the prompts, then draw the images" };
   if (h.status === "stills") {
     return h.stills_done < h.beats_total
       ? { tone: "run", label: "Drawing", detail: `Starting images ${h.stills_done}/${h.beats_total}` }
@@ -68,7 +73,7 @@ export function HookGeneratorList() {
   const [picker, setPicker] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const [form, setForm] = useState<Form>({ direction: "", line: "", kinds: DEFAULT_BEATS, image: "seedream_5_0_flash", video: "veo3_1", variants: 2 });
+  const [form, setForm] = useState<Form>({ direction: "", line: "", kinds: DEFAULT_BEATS, image: "seedream_5_0_flash", video: "veo3_1", seconds: null, hold: false, variants: 1 });
 
   const refresh = useCallback(async () => {
     try {
@@ -85,7 +90,7 @@ export function HookGeneratorList() {
       .catch(() => null);
   }, [refresh]);
 
-  const working = !!hooks?.some((h) => h.status === "planning" || h.status === "working" || (h.status === "stills" && h.stills_done < h.beats_total));
+  const working = !!hooks?.some((h) => h.status === "planning" || h.status === "working" || (h.status === "stills" && !h.hold_stills && h.stills_done < h.beats_total));
   useEffect(() => {
     const t = setInterval(() => void refresh(), working ? 6_000 : 45_000);
     return () => clearInterval(t);
@@ -134,7 +139,9 @@ export function HookGeneratorList() {
   const toggleKind = (k: BeatKind) =>
     setForm((f) => ({ ...f, kinds: f.kinds.includes(k) ? f.kinds.filter((x) => x !== k) : [...f.kinds, k] }));
 
-  const estimate = estimateCredits({ beats: form.kinds.length, image: form.image, video: form.video });
+  // With no move picked Claude plans from the direction, usually one beat.
+  const beats = Math.max(1, form.kinds.length);
+  const estimate = estimateCredits({ beats, image: form.image, video: form.video, seconds: form.seconds });
 
   const generate = async () => {
     setBusy(true);
@@ -149,6 +156,8 @@ export function HookGeneratorList() {
           refs: refs.map((r) => ({ path: r.path, person_id: r.person_id, role: r.role, name: r.name })),
           image_model: form.image,
           video_model: form.video,
+          clip_seconds: form.seconds,
+          hold_stills: form.hold,
           variants: form.variants,
         }),
       });
@@ -277,7 +286,7 @@ export function HookGeneratorList() {
 
           <div className="space-y-4">
             <div>
-              <p className="text-[11px] text-gray-400 mb-1.5">Head-tap moves · one beat each, in the order you pick them</p>
+              <p className="text-[11px] text-gray-400 mb-1.5">Head-tap moves (optional) · one beat each, in the order you pick them</p>
               <div className="flex flex-wrap gap-1.5">
                 {BEAT_KINDS.map((k) => {
                   const n = form.kinds.indexOf(k.id);
@@ -289,7 +298,9 @@ export function HookGeneratorList() {
                   );
                 })}
               </div>
-              {form.kinds.length === 0 && <p className="text-[11px] text-amber-300 mt-1">Pick at least one: the hand on the head is the scroll stopper.</p>}
+              {form.kinds.length === 0 && (
+                <p className="text-[11px] text-gray-500 mt-1">None picked: Claude plans from your direction alone and keeps your wording; no head-tap rule.</p>
+              )}
             </div>
             <div>
               <p className="text-[11px] text-gray-400 mb-1.5">Starting images</p>
@@ -308,7 +319,7 @@ export function HookGeneratorList() {
               <div className="flex flex-wrap gap-1.5">
                 {VIDEO_MODELS.map((m) => (
                   <span key={m.id} title={m.blurb}>
-                    <Chip on={form.video === m.id} onClick={() => setForm({ ...form, video: m.id })}>
+                    <Chip on={form.video === m.id} onClick={() => setForm({ ...form, video: m.id, seconds: validClipSeconds(m.id, form.seconds) })}>
                       {m.name}
                     </Chip>
                   </span>
@@ -316,6 +327,26 @@ export function HookGeneratorList() {
               </div>
               <p className="text-[11px] text-gray-600 mt-1">{VIDEO_MODELS.find((m) => m.id === form.video)?.blurb}</p>
             </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[11px] text-gray-400">Clip length</span>
+              <select
+                value={form.seconds ?? ""}
+                onChange={(e) => setForm({ ...form, seconds: validClipSeconds(form.video, e.target.value) })}
+                className="bg-gray-900 border border-gray-700 rounded-md px-2 py-1 text-xs text-gray-200"
+              >
+                <option value="">Fit the line (cut where it ends)</option>
+                {clipLengths(form.video).map((s) => (
+                  <option key={s} value={s}>
+                    {s} s per beat
+                  </option>
+                ))}
+              </select>
+              <span className="text-[11px] text-gray-600">{form.video === "veo3_1" ? "Veo makes 4, 6 or 8 s" : "Seedance makes 4 to 15 s"}</span>
+            </div>
+            <label className="flex items-center gap-2 text-xs text-gray-300 cursor-pointer select-none">
+              <input type="checkbox" checked={form.hold} onChange={(e) => setForm({ ...form, hold: e.target.checked })} className="accent-purple-500" />
+              Let me read and edit the prompts before the images are drawn
+            </label>
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-gray-400">Variations</span>
               <div className="flex items-center gap-1 rounded-lg bg-gray-900 border border-gray-700 p-0.5">
@@ -329,14 +360,15 @@ export function HookGeneratorList() {
           </div>
         </div>
         <div className="flex items-center gap-3 flex-wrap pt-1">
-          <Button primary onClick={() => void generate()} busy={busy} disabled={busy || uploading > 0 || form.kinds.length === 0 || (!form.direction.trim() && refs.length === 0)}>
-            <Wand2 size={13} /> Make starting images
+          <Button primary onClick={() => void generate()} busy={busy} disabled={busy || uploading > 0 || (!form.direction.trim() && (form.kinds.length === 0 || refs.length === 0))}>
+            <Wand2 size={13} /> {form.hold ? "Plan the prompts" : "Make starting images"}
           </Button>
-          {form.kinds.length > 0 && (
-            <span className="text-xs text-gray-400">
-              Now: {credits(estimate.stills * form.variants)} for {form.kinds.length * form.variants} starting images · each hook you approve: about {credits(estimate.total)} in all
-            </span>
-          )}
+          <span className="text-xs text-gray-400">
+            {form.kinds.length === 0 ? "About " : ""}
+            {credits(estimate.stills * form.variants)} for {beats * form.variants} starting {beats * form.variants === 1 ? "image" : "images"}
+            {form.hold ? " once you draw them" : ""} · each hook you approve: about {credits(estimate.total)} in all
+          </span>
+          {form.kinds.length === 0 && !form.direction.trim() && <span className="text-[11px] text-amber-300">Describe what you want, or pick a head-tap move</span>}
         </div>
       </Panel>
 

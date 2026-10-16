@@ -64,9 +64,12 @@ export const BEAT_KINDS: Array<{ id: BeatKind; name: string; scene: string; moti
   },
 ];
 
-export const beatKindName = (k: string) => BEAT_KINDS.find((b) => b.id === k)?.name ?? k;
+export const beatKindName = (k: string) => (k === "custom" ? "Your own" : BEAT_KINDS.find((b) => b.id === k)?.name ?? k);
+/** A head-tap preset the form can ask for; "custom" is only ever planned, never picked. */
 export const isBeatKind = (v: unknown): v is BeatKind => BEAT_KINDS.some((b) => b.id === v);
 export const DEFAULT_BEATS: BeatKind[] = ["crown_pat"];
+/** Preset beats keep the hand on the head (and are checked for it); the marketer's own beats do not. */
+export const hasHeadTap = (kind: string) => kind !== "custom";
 
 const words = (line: string) => line.trim().split(/\s+/).filter(Boolean).length;
 
@@ -76,7 +79,18 @@ export function beatSeconds(line: string): number {
   return Math.round(Math.min(7.5, Math.max(1.5, s)) * 10) / 10;
 }
 
-/** What the video model is asked for: Veo's shortest length that fits the line; Seedance's 4 to 15 seconds. */
+/** The clip lengths a model accepts (CLI, 2026-10-16): Veo 3.1 takes 4, 6 or 8 s; Seedance 2.0 Mini 4 to 15 s. */
+export function clipLengths(model: VideoModel): number[] {
+  return model === "veo3_1" ? VEO_LENGTHS : Array.from({ length: 12 }, (_, i) => i + 4);
+}
+
+/** A chosen length the model accepts, else null (fit the line). */
+export function validClipSeconds(model: VideoModel, v: unknown): number | null {
+  const n = Number(v);
+  return v !== null && v !== "" && Number.isInteger(n) && clipLengths(model).includes(n) ? n : null;
+}
+
+/** What the video model is asked for when no length is chosen: Veo's shortest length that fits the line; Seedance's 4 to 15 seconds. */
 export function clipSecondsFor(model: VideoModel, seconds: number): number {
   if (model === "veo3_1") return VEO_LENGTHS.find((l) => l >= seconds + 0.5) ?? 8;
   return Math.min(15, Math.max(4, Math.ceil(seconds + 0.3)));
@@ -84,10 +98,10 @@ export function clipSecondsFor(model: VideoModel, seconds: number): number {
 
 export const clipCredits = (model: VideoModel, clipSeconds: number) => CLIP_CREDITS_PER_SECOND[model] * clipSeconds;
 
-/** Before Claude has planned: every beat as a 4-second clip. */
-export function estimateCredits(input: { beats: number; image: ImageModel; video: VideoModel }): { stills: number; total: number } {
+/** Before Claude has planned: every beat at the chosen length, or as a 4-second clip when the line decides. */
+export function estimateCredits(input: { beats: number; image: ImageModel; video: VideoModel; seconds?: number | null }): { stills: number; total: number } {
   const stills = input.beats * imageCredits(input.image);
-  return { stills, total: Math.round((stills + input.beats * clipCredits(input.video, 4)) * 10) / 10 };
+  return { stills, total: Math.round((stills + input.beats * clipCredits(input.video, input.seconds ?? 4)) * 10) / 10 };
 }
 
 const PHOTO = "Photorealistic vertical 9:16 smartphone photo, candid UGC look, real skin texture and hair detail, natural indoor light, sharp focus. No text, no captions, no letters, no logos, no watermark.";
@@ -100,25 +114,33 @@ const ROLE_TEXT: Record<RefRole, string> = {
   style: "a look reference (match its light, colors and camera feel, not its people)",
 };
 
-/** The starting image: Claude's scene, the hand already on the head, which reference is who, and the latest fix. */
-export function stillPrompt(scene: string, roles: RefRole[], fix: string): string {
+const change = (fix: string) => (fix.trim() ? ` Change from the last attempt: ${fix.trim()}.` : "");
+
+/** The starting image: Claude's scene, for a head-tap beat the hand already on the head, which reference is who, and the latest fix. */
+export function stillPrompt(scene: string, roles: RefRole[], fix: string, headTap = true): string {
   const refs = roles.length ? ` Reference images, in order: ${roles.map((r, i) => `image ${i + 1} is ${ROLE_TEXT[r]}`).join("; ")}.` : "";
-  const change = fix.trim() ? ` Change from the last attempt: ${fix.trim()}.` : "";
-  return `${scene.trim()} In this frame the expert's hand is already on or touching the client's head or hair.${refs}${change} ${PHOTO}`;
+  const hand = headTap ? " In this frame the expert's hand is already on or touching the client's head or hair." : "";
+  return `${scene.trim()}${hand}${refs}${change(fix)} ${PHOTO}`;
 }
 
-const KEEP = "Keep the people, clothing, room, framing and light exactly as in the image. Handheld phone-camera look, natural grain. No on-screen text, no captions, no subtitles, no logos.";
-const TOUCH = "The expert's hand visibly touches the client's hair or scalp during the clip: taps, pats or parts it.";
+/** The marketer's own image prompt, used as written, plus their latest fix. */
+export const ownStillPrompt = (text: string, fix: string) => `${text.trim()}${change(fix)}`;
 
-/** The clip: the head-tap move, and for Veo the exact words in the voice Claude described. */
-export function motionPrompt(i: { motion: string; line: string; voice: string; model: VideoModel }): string {
+const KEEP = "Keep the people, clothing, room, framing and light exactly as in the image. Handheld phone-camera look, natural grain. No on-screen text, no captions, no subtitles, no logos.";
+const TOUCH = " The expert's hand visibly touches the client's hair or scalp during the clip: taps, pats or parts it.";
+
+/** The clip: the movement (for a head-tap beat, the hand on the head), and for Veo the exact words in the voice Claude described. */
+export function motionPrompt(i: { motion: string; line: string; voice: string; model: VideoModel; headTap?: boolean }): string {
+  const headTap = i.headTap ?? true;
+  const who = headTap ? "the expert" : "the main person";
+  const touch = headTap ? TOUCH : "";
   const line = i.line.trim().replace(/"/g, "'");
   if (i.model === "veo3_1" && line) {
-    const voice = i.voice.trim() || "a natural adult voice that matches the expert";
+    const voice = i.voice.trim() || `a natural adult voice that matches ${who}`;
     return (
-      `Vertical 9:16 smartphone video. ${i.motion.trim()} ${TOUCH} The expert looks into the camera and says, with natural lip sync (voice: ${voice}): "${line}" ` +
-      `Say exactly these words, nothing added. Only the expert speaks; no other voices, no music, quiet room ambience. ${KEEP}`
+      `Vertical 9:16 smartphone video. ${i.motion.trim()}${touch} ${headTap ? "The expert" : "The main person"} looks into the camera and says, with natural lip sync (voice: ${voice}): "${line}" ` +
+      `Say exactly these words, nothing added. Only ${who} speaks; no other voices, no music, quiet room ambience. ${KEEP}`
     );
   }
-  return `Vertical 9:16 smartphone video. ${i.motion.trim()} ${TOUCH} The expert looks into the camera and talks naturally. No music. ${KEEP}`;
+  return `Vertical 9:16 smartphone video. ${i.motion.trim()}${touch}${headTap ? " The expert looks into the camera and talks naturally." : ""} No music. ${KEEP}`;
 }

@@ -5,9 +5,11 @@ import { BEAT_KINDS } from "./engines";
 import type { BeatKind, RefRole } from "./types";
 
 /**
- * Claude plans a head-tap hook: one beat per move asked for, each with its
- * part of the spoken line, the starting image and the hand movement, looking
- * at the reference images so the scenes describe the right people and room.
+ * Claude plans a hook, looking at the reference images so the scenes describe
+ * the right people and room. With head-tap moves picked: one beat per move,
+ * each with its part of the spoken line, the starting image and the hand
+ * movement. With none: the marketer's own direction, kept in their words,
+ * with Claude only filling in what an image or video model needs.
  */
 
 const MODEL = "claude-opus-5-5";
@@ -54,7 +56,10 @@ const VARIANT_ANGLE = [
   "Make it more urgent: tighter on the thinning, a more dramatic delivery.",
 ];
 
-const SYSTEM = `You plan short vertical "head-tap" hook videos for a Philippine hair-care brand (hair loss, thinning hair). A hook is 3 to 8 seconds: an expert (stylist, trichologist or doctor) talks to the camera while touching a client's head: tapping and patting a thin crown, parting the hair to show the scalp, lifting thin strands. The hand on the head is what stops the scroll, so every beat shows it.
+/** At most this many beats when Claude splits a free direction into shots. */
+const MAX_FREE_BEATS = 3;
+
+const SYSTEM_MOVES = `You plan short vertical "head-tap" hook videos for a Philippine hair-care brand (hair loss, thinning hair). A hook is 3 to 8 seconds: an expert (stylist, trichologist or doctor) talks to the camera while touching a client's head: tapping and patting a thin crown, parting the hair to show the scalp, lifting thin strands. The hand on the head is what stops the scroll, so every beat shows it.
 
 You get the marketer's direction, the head-tap moves wanted (one beat each, in that order), the spoken line or none, and reference images with their roles.
 
@@ -64,6 +69,19 @@ Rules:
 - scene: what the starting image shows at the start of the move: who (the expert and the client as they look in the reference images; with no reference for someone, a believable Filipino person who fits the direction), where (the setting reference, else a bright salon or clinic that fits the direction), framing (vertical phone video, medium close-up), and where the expert's hand is. When a reference shows a person, refer to them as "the expert from the reference" or "the client from the reference" instead of describing the face. English. No text on screen, no brand names, no logos.
 - motion: one or two sentences: the exact hand movement on the head over the next few seconds (taps, pats, parting, lifting), the expert looking into the camera while talking, the camera mostly still and handheld. Simple and physical so an image-to-video model can do it.
 - voice: one line describing how the expert sounds: gender, age range, accent (a natural Filipino accent unless the direction says otherwise), tone.
+- Keep it tasteful: no nudity, no blood, no medical procedures.`;
+
+const SYSTEM_FREE = `You turn a marketer's own idea into a short vertical hook video for a Philippine hair-care brand (hair loss, thinning hair). The marketer is steering: you only make their idea ready for an image model (the starting image) and an image-to-video model (the clip).
+
+You get the marketer's direction, the spoken line or none, and reference images with their roles.
+
+Rules:
+- Keep their idea and their wording. The scene and the motion say what they wrote, translated to English when needed; add only what is missing for the models: who (as they look in the reference images), where, framing, light, and where hands and eyes are. Do not add head taps, product shots, people or actions they did not ask for, and do not change what they described.
+- beats: one beat, unless the direction clearly describes separate shots; then one beat per shot, in order, at most ${MAX_FREE_BEATS}.
+- line: if the marketer gave a line, split it across the beats in order using the words exactly: do not add, drop, translate or fix words; the beat lines joined with spaces must equal the line. If there is no line, write one only when the direction has someone talking to the camera: in the direction's language (Taglish if it mixes English and Tagalog, otherwise English), 3 to 8 words per beat, no medical claims, no promise of a cure, no brand names. Otherwise every line is empty.
+- scene: what the starting image shows. When a reference shows a person, refer to them as "the expert from the reference" or "the client from the reference" instead of describing the face. English. No text on screen, no brand names, no logos.
+- motion: what happens over the next few seconds and what the camera does, in the marketer's terms. Simple and physical so an image-to-video model can do it.
+- voice: one line describing how the person who talks sounds: gender, age range, accent (a natural Filipino accent unless the direction says otherwise), tone. Write it even when nobody talks.
 - Keep it tasteful: no nudity, no blood, no medical procedures.`;
 
 async function apiKey(db: SupabaseClient): Promise<string | null> {
@@ -87,6 +105,7 @@ export async function planHook(
   if (!key) return { error: "No Anthropic API key in Settings" };
   const client = new Anthropic({ apiKey: key });
 
+  const free = input.kinds.length === 0;
   const moves = input.kinds.map((k, i) => {
     const kind = BEAT_KINDS.find((b) => b.id === k)!;
     return `${i + 1}. ${kind.name}. Typical start: ${kind.scene} Typical movement: ${kind.motion}`;
@@ -97,8 +116,8 @@ export async function planHook(
       text: [
         VARIANT_ANGLE[(input.variant - 1) % VARIANT_ANGLE.length],
         `Direction: ${input.direction.trim() || "none; make a believable salon scene"}`,
-        `Head-tap moves (${input.kinds.length} beats, in this order):\n${moves.join("\n")}`,
-        input.line.trim() ? `Spoken line (split it, word for word): ${input.line.trim()}` : "Spoken line: none; write one.",
+        free ? "Head-tap moves: none picked. Plan from the direction alone." : `Head-tap moves (${input.kinds.length} beats, in this order):\n${moves.join("\n")}`,
+        input.line.trim() ? `Spoken line (split it, word for word): ${input.line.trim()}` : free ? "Spoken line: none given." : "Spoken line: none; write one.",
         input.refs.length ? `${input.refs.length} reference images follow.` : "No reference images.",
       ].join("\n\n"),
     },
@@ -116,15 +135,18 @@ export async function planHook(
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
       output_config: { effort: "medium", format: { type: "json_schema", schema: SCHEMA } },
-      system: SYSTEM,
+      system: free ? SYSTEM_FREE : SYSTEM_MOVES,
       messages: [{ role: "user", content }],
     });
     if (response.stop_reason === "refusal") return { error: "Claude declined to plan this hook" };
     if (response.stop_reason === "max_tokens") return { error: "The plan came back cut off; try again" };
     const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
     const raw = JSON.parse(text) as Plan;
-    const beats = raw.beats.slice(0, input.kinds.length).map((b) => ({ line: b.line.trim(), scene: b.scene.trim(), motion: b.motion.trim() }));
-    if (beats.length < input.kinds.length || beats.some((b) => !b.scene || !b.motion)) return { error: `Claude planned ${beats.length} of ${input.kinds.length} beats; plan again` };
+    const want = free ? MAX_FREE_BEATS : input.kinds.length;
+    const beats = raw.beats.slice(0, want).map((b) => ({ line: b.line.trim(), scene: b.scene.trim(), motion: b.motion.trim() }));
+    if (beats.length === 0 || (!free && beats.length < want) || beats.some((b) => !b.scene || !b.motion)) {
+      return { error: `Claude planned ${beats.length} of ${free ? "1 or more" : want} beats; plan again` };
+    }
     // The marketer's own words are kept exactly; when Claude's split does not add back up, split them evenly instead.
     if (input.line.trim() && norm(beats.map((b) => b.line).join(" ")).join(" ") !== norm(input.line).join(" ")) {
       splitEvenly(input.line, beats.length).forEach((part, i) => (beats[i].line = part));

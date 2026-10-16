@@ -1,7 +1,7 @@
 import { after } from "next/server";
 import { requireBoardUser } from "@/lib/marketing-board/auth";
 import { isUuid } from "@/lib/remake/views";
-import { isBeatKind } from "@/lib/hook-generator/engines";
+import { isBeatKind, validClipSeconds } from "@/lib/hook-generator/engines";
 import { createHooks, loadHooks, planAndStart, type RefInput } from "@/lib/hook-generator/views";
 import type { BeatKind, RefRole } from "@/lib/hook-generator/types";
 
@@ -17,7 +17,8 @@ export async function GET() {
 }
 
 /**
- * POST — make hooks: { direction, line?, kinds: BeatKind[], refs: [{ path | person_id, role, name? }], image_model?, video_model?, variants?, batch_id? }.
+ * POST — make hooks: { direction, line?, kinds?: BeatKind[], refs: [{ path | person_id, role, name? }], image_model?, video_model?, clip_seconds?, hold_stills?, variants?, batch_id? }.
+ * No kinds = planned from the direction alone. clip_seconds: a length the video model accepts, else each beat fits its line.
  * Rows are saved in "planning" and returned at once; Claude plans them in the background, then the Mac worker draws the starting images.
  */
 export async function POST(request: Request) {
@@ -32,13 +33,16 @@ export async function POST(request: Request) {
     role: str(r?.role) as RefRole,
     name: str(r?.name),
   }));
+  const video = b.video_model === "seedance_2_0_mini" ? "seedance_2_0_mini" : "veo3_1";
   const result = await createHooks(auth.db, {
     direction: str(b.direction),
     line: str(b.line),
     kinds: (Array.isArray(b.kinds) ? b.kinds : []).filter(isBeatKind) as BeatKind[],
     refs,
     image_model: b.image_model === "nano_banana_pro" ? "nano_banana_pro" : "seedream_5_0_flash",
-    video_model: b.video_model === "seedance_2_0_mini" ? "seedance_2_0_mini" : "veo3_1",
+    video_model: video,
+    clip_seconds: validClipSeconds(video, b.clip_seconds),
+    hold_stills: b.hold_stills === true,
     variants: typeof b.variants === "number" ? b.variants : 1,
     batch_id: isUuid(b.batch_id) ? b.batch_id : null,
     created_by: auth.employee.id,

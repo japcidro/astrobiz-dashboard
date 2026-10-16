@@ -1,11 +1,11 @@
 "use client";
 
-import { AlertTriangle, ArrowLeft, Check, Download, Hand, Image as ImageIcon, Loader2, Pencil, RefreshCw, Sparkles, ThumbsUp, Trash2, Video } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Check, Download, FileText, Hand, Image as ImageIcon, Loader2, Pencil, RefreshCw, Sparkles, ThumbsUp, Trash2, Video, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { IMAGE_MODELS, REF_ROLES, VIDEO_MODELS, beatKindName, clipCredits } from "@/lib/hook-generator/engines";
-import type { HookgenBeatView, HookgenView, StepStatus } from "@/lib/hook-generator/types";
+import { IMAGE_MODELS, REF_ROLES, VIDEO_MODELS, beatKindName, clipCredits, clipLengths, clipSecondsFor, hasHeadTap } from "@/lib/hook-generator/engines";
+import type { HookgenBeatView, HookgenView, StepStatus, VideoModel } from "@/lib/hook-generator/types";
 import { Button, ConfirmButton, Label, Panel, Pill, api, credits, timeAgo } from "@/components/hook-studio/ui";
 import { ClipVideo, Lightbox } from "@/components/remake/clip-video";
 import { hookProgress } from "./hook-generator-list";
@@ -63,10 +63,14 @@ export function HookGeneratorHook({ id }: { id: string }) {
   };
 
   const hookAction = (action: string) => act(action, () => api<HookgenView>(`/api/owner/hook-generator/${id}`, { method: "POST", body: JSON.stringify({ action }) }));
-  const beatAction = (beatId: string, action: string, text?: string) =>
-    act(`${action}:${beatId}`, () =>
-      api<HookgenView>(`/api/owner/hook-generator/${id}/beats/${beatId}`, { method: "POST", body: JSON.stringify(action === "set_line" ? { action, line: text } : { action, fix: text }) })
-    );
+  const beatAction = (beatId: string, action: BeatAction, value?: string | number | null) => {
+    const body =
+      action === "set_line" ? { action, line: value }
+      : action === "set_still_prompt" || action === "set_motion_prompt" ? { action, prompt: value }
+      : action === "set_seconds" ? { action, seconds: value ?? null }
+      : { action, fix: value };
+    return act(`${action}:${beatId}`, () => api<HookgenView>(`/api/owner/hook-generator/${id}/beats/${beatId}`, { method: "POST", body: JSON.stringify(body) }));
+  };
 
   const anotherTake = () =>
     act("take", async () => {
@@ -145,7 +149,21 @@ export function HookGeneratorHook({ id }: { id: string }) {
           </Button>
         </Panel>
       )}
-      {hook.status === "stills" && hook.beats.length > 0 && (
+      {hook.status === "stills" && hook.hold_stills && hook.beats.length > 0 && (
+        <Panel className="flex items-center gap-3 flex-wrap text-sm border-amber-700/60">
+          <FileText size={16} className="text-amber-300" />
+          <span className="text-gray-200 flex-1 min-w-0">
+            The prompts are ready. Open Prompts on a beat to read or rewrite its image and clip prompt, and set each clip&apos;s length. Nothing is drawn until you say so.
+            <span className="block text-[11px] text-gray-500 mt-0.5">
+              {hook.beats.length} {hook.beats.length === 1 ? "beat" : "beats"} · starting images about {credits(hook.beats.length * (IMAGE_MODELS.find((m) => m.id === hook.image_model)?.credits ?? 0.5))} · animating about {credits(animateCredits)}
+            </span>
+          </span>
+          <Button primary onClick={() => void hookAction("draw")} busy={busy === "draw"} disabled={busy !== null}>
+            <Wand2 size={13} /> Draw the images
+          </Button>
+        </Panel>
+      )}
+      {hook.status === "stills" && !hook.hold_stills && hook.beats.length > 0 && (
         <Panel className="flex items-center gap-3 flex-wrap text-sm border-amber-700/60">
           <ThumbsUp size={16} className="text-amber-300" />
           <span className="text-gray-200 flex-1 min-w-0">
@@ -232,11 +250,13 @@ export function HookGeneratorHook({ id }: { id: string }) {
                 <BeatCard
                   key={b.id}
                   beat={b}
+                  videoModel={hook.video_model}
+                  held={hook.hold_stills}
                   hookWorking={hook.status === "working" || hook.status === "done"}
                   canRemove={hook.beats.length > 1 && !b.clip_status}
                   busy={busy}
                   onZoom={setZoom}
-                  onAction={(action, fix) => void beatAction(b.id, action, fix)}
+                  onAction={(action, value) => void beatAction(b.id, action, value)}
                 />
               ))}
             </div>
@@ -247,8 +267,12 @@ export function HookGeneratorHook({ id }: { id: string }) {
   );
 }
 
+type BeatAction = "approve" | "unapprove" | "redo_still" | "redo_clip" | "set_line" | "remove" | "set_still_prompt" | "set_motion_prompt" | "set_seconds";
+
 function BeatCard({
   beat: b,
+  videoModel,
+  held,
   hookWorking,
   canRemove,
   busy,
@@ -256,14 +280,18 @@ function BeatCard({
   onAction,
 }: {
   beat: HookgenBeatView;
+  videoModel: VideoModel;
+  held: boolean;
   hookWorking: boolean;
   canRemove: boolean;
   busy: string | null;
   onZoom: (z: { video?: string; image?: string }) => void;
-  onAction: (action: "approve" | "unapprove" | "redo_still" | "redo_clip" | "set_line" | "remove", text?: string) => void;
+  onAction: (action: BeatAction, value?: string | number | null) => void;
 }) {
   const [fix, setFix] = useState("");
   const [line, setLine] = useState<string | null>(null);
+  // Open on a held hook: reading the prompts is what the marketer is there for.
+  const [prompts, setPrompts] = useState<{ still: string; motion: string } | null>(held ? { still: b.still_prompt, motion: b.motion_prompt } : null);
   const stillBusy = busyStep(b.still_status);
   const clipBusy = busyStep(b.clip_status);
   const checkBusy = busyStep(b.check_status);
@@ -296,7 +324,7 @@ function BeatCard({
         {(stillBusy || clipBusy || (!b.still_preview_url && !b.still_status)) && (
           <div className="absolute inset-x-0 bottom-0 bg-black/70 text-[10px] text-gray-200 px-2 py-1 flex items-center gap-1.5 pointer-events-none">
             <Loader2 size={10} className="animate-spin" />
-            {stillBusy ? "Drawing the starting image…" : clipBusy ? (b.clip_status === "running" ? "Animating, ~2–10 min…" : "Clip queued…") : "Waiting"}
+            {stillBusy ? "Drawing the starting image…" : clipBusy ? (b.clip_status === "running" ? "Animating, ~2–10 min…" : "Clip queued…") : held ? "Not drawn yet: check the prompts" : "Waiting"}
           </div>
         )}
         <span className="absolute top-1.5 left-1.5 text-[10px] font-semibold bg-black/60 text-white px-1.5 py-0.5 rounded">
@@ -304,9 +332,8 @@ function BeatCard({
         </span>
       </div>
       {line === null ? (
-        <button type="button" onClick={() => setLine(b.line)} className="text-left text-[12px] text-white leading-snug hover:text-purple-200 cursor-pointer group" title="Change what the expert says">
+        <button type="button" onClick={() => setLine(b.line)} className="text-left text-[12px] text-white leading-snug hover:text-purple-200 cursor-pointer group" title="Change what is said">
           {b.line ? `“${b.line}”` : <span className="text-gray-500">No words</span>} <Pencil size={10} className="inline text-gray-600 group-hover:text-purple-300" />
-          <span className="text-[10px] text-gray-500"> · {Number(b.seconds).toFixed(1)}s, {b.clip_seconds}s clip</span>
         </button>
       ) : (
         <div className="flex items-center gap-1.5">
@@ -334,6 +361,25 @@ function BeatCard({
           </Button>
         </div>
       )}
+      {line !== null && b.motion_custom && <p className="text-[10px] text-amber-300">Your own clip prompt is used as written: put the words in it too.</p>}
+      <div className="flex items-center gap-1.5 text-[11px] text-gray-400">
+        <span>Clip</span>
+        <select
+          value={b.clip_seconds_set ? b.clip_seconds : ""}
+          onChange={(e) => onAction("set_seconds", e.target.value ? Number(e.target.value) : null)}
+          disabled={busy !== null || clipBusy}
+          className="bg-gray-900 border border-gray-700 rounded-md px-1.5 py-0.5 text-[11px] text-gray-200"
+          title={b.clip_status ? "A new length makes the clip again" : "How long this beat animates"}
+        >
+          <option value="">Fit the line ({clipSecondsFor(videoModel, Number(b.seconds))} s, cut at {Number(b.seconds).toFixed(1)} s)</option>
+          {clipLengths(videoModel).map((s) => (
+            <option key={s} value={s}>
+              {s} s, kept whole
+            </option>
+          ))}
+        </select>
+        <span className="text-gray-600">{credits(clipCredits(videoModel, b.clip_seconds))}</span>
+      </div>
       <div className="flex items-center gap-1 flex-wrap">
         <StepPill label="Image" status={b.still_status} icon={<ImageIcon size={10} />} />
         {b.approved && (
@@ -352,6 +398,42 @@ function BeatCard({
       {err && <p className="text-[10px] text-red-300 line-clamp-3" title={err}>{err}</p>}
       {b.fix && <p className="text-[10px] text-gray-500 line-clamp-2" title={b.fix}>Last fix: {b.fix}</p>}
 
+      {prompts === null ? (
+        <button type="button" onClick={() => setPrompts({ still: b.still_prompt, motion: b.motion_prompt })} className="text-left text-[11px] text-purple-300 hover:text-white inline-flex items-center gap-1 cursor-pointer">
+          <FileText size={11} /> Prompts{b.still_custom || b.motion_custom ? " (yours)" : ""}
+        </button>
+      ) : (
+        <div className="space-y-1.5 rounded-lg border border-gray-800 p-1.5">
+          <p className="text-[10px] text-gray-400">Image prompt{b.still_custom ? " · yours, used as written" : ""}</p>
+          <textarea value={prompts.still} onChange={(e) => setPrompts({ ...prompts, still: e.target.value })} rows={6} className={`${field} resize-y`} />
+          <Button
+            onClick={() => onAction("set_still_prompt", prompts.still)}
+            busy={busy === `set_still_prompt:${b.id}`}
+            disabled={busy !== null || stillBusy || prompts.still.trim() === b.still_prompt.trim()}
+            className="!px-2 !py-1 !text-[11px]"
+            title={b.still_status ? "Draws the image again from this prompt (takes back its approval and clip)" : "Used when the image is drawn"}
+          >
+            {b.still_status ? "Save and redraw" : "Save"}
+          </Button>
+          <p className="text-[10px] text-gray-400 pt-1">Clip prompt{b.motion_custom ? " · yours, used as written" : ""}</p>
+          <textarea value={prompts.motion} onChange={(e) => setPrompts({ ...prompts, motion: e.target.value })} rows={6} className={`${field} resize-y`} />
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={() => onAction("set_motion_prompt", prompts.motion)}
+              busy={busy === `set_motion_prompt:${b.id}`}
+              disabled={busy !== null || clipBusy || prompts.motion.trim() === b.motion_prompt.trim()}
+              className="!px-2 !py-1 !text-[11px]"
+              title={b.clip_status ? "Makes the clip again from this prompt" : "Used when the beat is animated"}
+            >
+              {b.clip_status ? "Save and re-animate" : "Save"}
+            </Button>
+            <button type="button" onClick={() => setPrompts(null)} className="ml-auto text-[11px] text-gray-500 hover:text-white cursor-pointer">
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="mt-auto space-y-1.5 pt-1">
         {!b.approved && b.still_status === "done" && (
           <Button primary onClick={() => onAction("approve")} busy={busy === `approve:${b.id}`} disabled={busy !== null} className="w-full justify-center !py-1.5 !text-xs">
@@ -363,7 +445,7 @@ function BeatCard({
             value={fix}
             onChange={(e) => setFix(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && !stillBusy && onAction("redo_still", fix)}
-            placeholder="What to change, e.g. make the part wider"
+            placeholder={hasHeadTap(b.kind) ? "What to change, e.g. make the part wider" : "What to change in the image"}
             className={field}
           />
           <Button onClick={() => onAction("redo_still", fix)} busy={busy === `redo_still:${b.id}`} disabled={busy !== null || stillBusy} className="!px-2 !py-1.5 !text-[11px] shrink-0" title="Draw the image again with your change (resets this beat's clip)">

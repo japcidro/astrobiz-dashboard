@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { BOARD_BUCKET, signBoardPaths } from "@/lib/marketing-board/storage";
 import { HOOK_BUCKET, signPaths as signHookPaths } from "@/lib/hook-studio/storage";
-import { MAX_REFS, MAX_VARIANTS, beatSeconds, clipSecondsFor, isBeatKind, motionPrompt, stillPrompt } from "./engines";
+import { MAX_REFS, MAX_VARIANTS, beatSeconds, clipSecondsFor, hasHeadTap, isBeatKind, motionPrompt, ownStillPrompt, stillPrompt, validClipSeconds } from "./engines";
 import { planHook } from "./planner";
 import type {
   BeatKind,
@@ -101,6 +101,10 @@ export interface CreateHooks {
   refs: RefInput[];
   image_model: ImageModel;
   video_model: VideoModel;
+  /** A clip length for every beat; null = fit each beat's line. */
+  clip_seconds: number | null;
+  /** Wait after planning so the marketer can read and edit the prompts before images are drawn. */
+  hold_stills: boolean;
   variants: number;
   batch_id: string | null;
   created_by: string | null;
@@ -125,8 +129,9 @@ async function resolveRefs(db: SupabaseClient, input: RefInput[]): Promise<HookR
 
 /** Insert one row per variant in status "planning"; the caller plans them after responding. */
 export async function createHooks(db: SupabaseClient, input: CreateHooks): Promise<{ ids: string[] } | { error: string }> {
+  // No head-tap move is fine: the hook is then planned from the direction alone.
   const kinds = input.kinds.filter(isBeatKind);
-  if (kinds.length === 0) return { error: "Pick at least one head-tap move" };
+  if (kinds.length === 0 && !input.direction.trim()) return { error: "Describe what you want, or pick a head-tap move" };
   if (!input.direction.trim() && input.refs.length === 0) return { error: "Add reference images or describe what you want" };
   if (input.line.length > 400) return { error: "Keep the spoken line under 400 characters (a hook is 3 to 8 seconds)" };
   const refs = await resolveRefs(db, input.refs);
@@ -150,6 +155,8 @@ export async function createHooks(db: SupabaseClient, input: CreateHooks): Promi
     refs,
     image_model: input.image_model,
     video_model: input.video_model,
+    clip_seconds: validClipSeconds(input.video_model, input.clip_seconds),
+    hold_stills: input.hold_stills,
     created_by: input.created_by,
   }));
   const { data, error } = await db.from("hookgen_hooks").insert(rows).select("id");
@@ -175,6 +182,8 @@ export async function anotherTake(db: SupabaseClient, hookId: string, createdBy:
       refs: h.refs,
       image_model: h.image_model,
       video_model: h.video_model,
+      clip_seconds: h.clip_seconds,
+      hold_stills: h.hold_stills,
       created_by: createdBy,
     })
     .select("id")
@@ -183,7 +192,7 @@ export async function anotherTake(db: SupabaseClient, hookId: string, createdBy:
   return { id: row.id as string };
 }
 
-/** Claude plans the beats; they are saved with their prompts and the worker starts drawing the starting images. */
+/** Claude plans the beats; they are saved with their prompts and the worker draws the starting images (unless the hook is held). */
 export async function planAndStart(db: SupabaseClient, hookId: string): Promise<string | null> {
   const { data } = await db.from("hookgen_hooks").select("*").eq("id", hookId).maybeSingle();
   if (!data) return "Not found";
@@ -208,17 +217,22 @@ export async function planAndStart(db: SupabaseClient, hookId: string): Promise<
   const { error } = await db.from("hookgen_beats").insert(
     plan.beats.map((b, idx) => {
       const seconds = beatSeconds(b.line);
+      // No moves picked: every beat is the marketer's own, without the head-tap rule.
+      const kind = hook.beat_kinds[idx] ?? "custom";
+      const headTap = hasHeadTap(kind);
+      const chosen = validClipSeconds(hook.video_model, hook.clip_seconds);
       return {
         hook_id: hookId,
         idx,
-        kind: hook.beat_kinds[idx],
+        kind,
         line: b.line,
         seconds,
-        clip_seconds: clipSecondsFor(hook.video_model, seconds),
+        clip_seconds: chosen ?? clipSecondsFor(hook.video_model, seconds),
+        clip_seconds_set: chosen !== null,
         scene: b.scene,
         motion: b.motion,
-        still_prompt: stillPrompt(b.scene, roles, ""),
-        motion_prompt: motionPrompt({ motion: b.motion, line: b.line, voice: plan.voice, model: hook.video_model }),
+        still_prompt: stillPrompt(b.scene, roles, "", headTap),
+        motion_prompt: motionPrompt({ motion: b.motion, line: b.line, voice: plan.voice, model: hook.video_model, headTap }),
       };
     })
   );
@@ -292,7 +306,7 @@ export async function redoStill(db: SupabaseClient, hookId: string, beatId: stri
     .from("hookgen_beats")
     .update({
       fix: text,
-      still_prompt: stillPrompt(beat.scene, (hook.refs ?? []).map((r) => r.role), text),
+      still_prompt: beat.still_custom ? ownStillPrompt(beat.scene, text) : stillPrompt(beat.scene, (hook.refs ?? []).map((r) => r.role), text, hasHeadTap(beat.kind)),
       approved: false,
       ...stepReset("still"),
       ...stepReset("clip"),
@@ -325,13 +339,95 @@ export async function setLine(db: SupabaseClient, hookId: string, beatId: string
     .update({
       line: text,
       seconds,
-      clip_seconds: clipSecondsFor(hook.video_model, seconds),
-      motion_prompt: motionPrompt({ motion: beat.motion, line: text, voice: hook.voice, model: hook.video_model }),
+      clip_seconds: beat.clip_seconds_set ? beat.clip_seconds : clipSecondsFor(hook.video_model, seconds),
+      // The marketer's own clip prompt is used as written; the words are theirs to put in it.
+      motion_prompt: beat.motion_custom ? beat.motion_prompt : motionPrompt({ motion: beat.motion, line: text, voice: hook.voice, model: hook.video_model, headTap: hasHeadTap(beat.kind) }),
       ...(redo ? { ...stepReset("clip"), ...checkReset, rerolls: 0 } : {}),
     })
     .eq("id", beatId);
-  if (redo) await db.from("hookgen_hooks").update({ final_status: null, final_error: null }).eq("id", hookId);
+  if (redo) {
+    await db.from("hookgen_hooks").update({ final_status: null, final_error: null }).eq("id", hookId);
+    // A finished hook goes back to work so the worker makes the new clip.
+    await startWhenAllApproved(db, hookId);
+  }
   return null;
+}
+
+/** A beat and its hook, for the edits below. */
+async function beatAndHook(db: SupabaseClient, hookId: string, beatId: string): Promise<{ hook: HookgenHookRow; beat: HookgenBeatRow } | null> {
+  const [{ data: h }, { data: b }] = await Promise.all([
+    db.from("hookgen_hooks").select("*").eq("id", hookId).maybeSingle(),
+    db.from("hookgen_beats").select("*").eq("id", beatId).eq("hook_id", hookId).maybeSingle(),
+  ]);
+  return h && b ? { hook: h as HookgenHookRow, beat: b as HookgenBeatRow } : null;
+}
+
+/**
+ * The marketer's own image prompt for a beat, used as written from now on
+ * (a later fix in words is added to it). An image already drawn from the old
+ * prompt is drawn again, which takes back its approval and clip.
+ */
+export async function setStillPrompt(db: SupabaseClient, hookId: string, beatId: string, prompt: string): Promise<string | null> {
+  const found = await beatAndHook(db, hookId, beatId);
+  if (!found) return "Not found";
+  const text = prompt.trim().slice(0, 4000);
+  if (!text) return "Write the image prompt first";
+  if (found.hook.status === "planning") return "Still planning";
+  const redraw = found.beat.still_status !== null;
+  await db
+    .from("hookgen_beats")
+    .update({ scene: text, fix: "", still_custom: true, still_prompt: text, ...(redraw ? { approved: false, ...stepReset("still"), ...stepReset("clip"), ...checkReset, rerolls: 0 } : {}) })
+    .eq("id", beatId);
+  if (redraw) await db.from("hookgen_hooks").update({ status: "stills", final_status: null, final_error: null, error: null }).eq("id", hookId);
+  return null;
+}
+
+/** The marketer's own clip prompt, used as written. A clip already made is made again (and the hook joined again). */
+export async function setMotionPrompt(db: SupabaseClient, hookId: string, beatId: string, prompt: string): Promise<string | null> {
+  const found = await beatAndHook(db, hookId, beatId);
+  if (!found) return "Not found";
+  const text = prompt.trim().slice(0, 4000);
+  if (!text) return "Write the clip prompt first";
+  const redo = found.beat.clip_status !== null;
+  await db
+    .from("hookgen_beats")
+    .update({ motion: text, motion_custom: true, motion_prompt: text, ...(redo ? { ...stepReset("clip"), ...checkReset, rerolls: 0 } : {}) })
+    .eq("id", beatId);
+  if (redo) {
+    await db.from("hookgen_hooks").update({ final_status: null, final_error: null }).eq("id", hookId);
+    await startWhenAllApproved(db, hookId);
+  }
+  return null;
+}
+
+/**
+ * How long a beat's clip is: a length the hook's video model accepts, kept
+ * whole in the hook, or null to fit the line again (cut where it ends). A clip
+ * already made at another length is made again.
+ */
+export async function setClipSeconds(db: SupabaseClient, hookId: string, beatId: string, seconds: unknown): Promise<string | null> {
+  const found = await beatAndHook(db, hookId, beatId);
+  if (!found) return "Not found";
+  const { hook, beat } = found;
+  const chosen = validClipSeconds(hook.video_model, seconds);
+  if (seconds !== null && chosen === null) return "That length is not one this video model makes";
+  const next = chosen ?? clipSecondsFor(hook.video_model, Number(beat.seconds));
+  if (next === beat.clip_seconds && (chosen !== null) === beat.clip_seconds_set) return null;
+  const redo = beat.clip_status !== null && next !== beat.clip_seconds;
+  await db
+    .from("hookgen_beats")
+    .update({ clip_seconds: next, clip_seconds_set: chosen !== null, ...(redo ? { ...stepReset("clip"), ...checkReset, rerolls: 0 } : {}) })
+    .eq("id", beatId);
+  // Even without a new clip, the join cuts differently.
+  if (beat.clip_status !== null) await db.from("hookgen_hooks").update({ final_status: null, final_error: null }).eq("id", hookId).in("status", ["working", "done"]);
+  await startWhenAllApproved(db, hookId);
+  return null;
+}
+
+/** A held hook: the marketer has read the prompts; draw the starting images now. */
+export async function drawStills(db: SupabaseClient, hookId: string): Promise<string | null> {
+  const { error } = await db.from("hookgen_hooks").update({ hold_stills: false }).eq("id", hookId);
+  return error ? error.message : null;
 }
 
 /**

@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
-const VERSION = "1.8.0";
+const VERSION = "1.8.1";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // ─── Config ───
@@ -845,10 +845,12 @@ const CARTOON_RUN = { cartoon_character: cartoonCharacter, cartoon_still: cartoo
 // The app plans a hook (Claude writes each beat's prompts) and records the
 // marketer's approvals; this worker is the orchestrator. hookgenAdvance queues
 // every step whose status is null and whose inputs are ready: a starting image
-// per beat from the reference images while the hook is "stills" or "working";
-// once every beat is approved ("working"), a clip per beat (Veo 3.1 Fast saying
-// the beat's line, or silent Seedance 2.0 Mini), Claude's check that a hand
-// touches the head (one re-roll when it doesn't), then the joined hook.
+// per beat from the reference images while the hook is "stills" or "working"
+// (not while the marketer holds it to read the prompts); once every beat is
+// approved ("working"), a clip per beat (Veo 3.1 Fast saying the beat's line,
+// or silent Seedance 2.0 Mini), for head-tap beats Claude's check that a hand
+// touches the head (one re-roll when it doesn't), then the joined hook. Beats
+// of kind "custom" are the marketer's own idea and are not checked.
 // Mirror of src/lib/hook-generator/engines.ts.
 const HOOKGEN_W = 720;
 const HOOKGEN_H = 1280;
@@ -867,18 +869,18 @@ async function hookgenAdvance(hookId) {
   const base = { hook_id: hook.id };
   // claimCartoonStep / queueCartoonStep work on any table with <step>_status columns.
   for (const b of beats) {
-    if (b.still_status === null && b.still_prompt) {
+    if (b.still_status === null && b.still_prompt && !hook.hold_stills) {
       await queueCartoonStep("hookgen_beats", b.id, "still", "hookgen_still", hook.image_model, { ...base, beat_id: b.id, prompt: b.still_prompt, model: hook.image_model, refs: hook.refs ?? [] });
     }
     if (hook.status !== "working") continue;
     if (b.approved && b.still_status === "done" && b.still_path && b.clip_status === null) {
       await queueCartoonStep("hookgen_beats", b.id, "clip", "hookgen_clip", hook.video_model, { ...base, beat_id: b.id, prompt: b.motion_prompt, still_path: b.still_path, model: hook.video_model, duration: b.clip_seconds });
     }
-    if (b.clip_status === "done" && b.clip_path && b.check_status === null) {
+    if (b.kind !== "custom" && b.clip_status === "done" && b.clip_path && b.check_status === null) {
       await queueCartoonStep("hookgen_beats", b.id, "check", "hookgen_check", "claude", { ...base, beat_id: b.id, clip_path: b.clip_path, rerolls: b.rerolls });
     }
   }
-  const settled = beats.every((b) => b.clip_status === "done" && b.clip_path && (b.check_status === "done" || b.check_status === "failed"));
+  const settled = beats.every((b) => b.clip_status === "done" && b.clip_path && (b.kind === "custom" || b.check_status === "done" || b.check_status === "failed"));
   if (hook.status === "working" && settled && hook.final_status === null) {
     await queueCartoonStep("hookgen_hooks", hook.id, "final", "hookgen_join", "ffmpeg", base);
   }
@@ -1025,8 +1027,8 @@ async function speechEnd(file) {
 
 /**
  * The hook: each beat's clip cut where its line ends (a little after; the
- * planned length for silent clips), scaled to 720x1280, joined in order with
- * the clips' own sound.
+ * planned length for silent clips) or kept whole when the marketer chose its
+ * length, scaled to 720x1280, joined in order with the clips' own sound.
  */
 async function hookgenJoin(job, dir) {
   const hookId = job.params.hook_id;
@@ -1042,8 +1044,9 @@ async function hookgenJoin(job, dir) {
     await storageDownload(b.clip_path, file, BOARD_BUCKET);
     const dur = (await probeDuration(file)) || Number(b.clip_seconds) || 4;
     const audio = (await run(FFPROBE, ["-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", file], { timeoutMs: 60_000 })).out.trim().length > 0;
-    const end = audio && b.line.trim() ? await speechEnd(file) : null;
-    const len = Math.round(Math.min(dur, Math.max(1.2, end !== null ? end + 0.2 : Number(b.seconds) || 2)) * 100) / 100;
+    const end = !b.clip_seconds_set && audio && b.line.trim() ? await speechEnd(file) : null;
+    const want = b.clip_seconds_set ? dur : end !== null ? end + 0.2 : Number(b.seconds) || 2;
+    const len = Math.round(Math.min(dur, Math.max(1.2, want)) * 100) / 100;
     clips.push({ file, audio, len });
   }
   const withAudio = clips.some((c) => c.audio);
