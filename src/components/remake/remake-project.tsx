@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowLeft, Check, Download, Link2, Loader2, Merge, Scissors, Trash2, Video, Wand2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Check, Download, Link2, Loader2, Merge, Play, Scissors, Trash2, Video, Wand2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -11,6 +11,7 @@ import type { BrandKit, CastSource, ProjectView, ShotView } from "@/lib/remake/t
 import { Button, ConfirmButton, Pill, api, credits } from "@/components/hook-studio/ui";
 import { CastBrandPanel } from "./cast-brand-panel";
 import { ClipVideo } from "./clip-video";
+import { FilmStrip } from "./film-strip";
 import { ShotPanel } from "./shot-panel";
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -35,6 +36,12 @@ export function RemakeProject({ id }: { id: string }) {
   /** Seconds selected by dragging on the strip; cut into its own clip so only that part is swapped. */
   const [range, setRange] = useState<[number, number] | null>(null);
   const drag = useRef<{ from: number; moved: boolean } | null>(null);
+  /** Where the cursor is on the strip while not dragging (a hairline and its time). */
+  const [hover, setHover] = useState<number | null>(null);
+  /** Latest time the preview should show while scrubbing; applied when the current seek lands. */
+  const scrubTarget = useRef<number | null>(null);
+  /** requestAnimationFrame id of "Play selection", which pauses at the range end. */
+  const rangePlay = useRef(0);
   const [tray, setTray] = useState<TrayMode>("both");
   const refVideo = useRef<HTMLVideoElement | null>(null);
 
@@ -160,6 +167,56 @@ export function RemakeProject({ id }: { id: string }) {
     if (s) setSelected(s.id);
   };
 
+  const stopRangePlay = () => {
+    cancelAnimationFrame(rangePlay.current);
+    rangePlay.current = 0;
+  };
+  useEffect(() => () => cancelAnimationFrame(rangePlay.current), []);
+
+  /**
+   * Show the frame at `t` in the preview while the pointer moves. Seeks
+   * are coalesced: while one is in flight only the newest time is kept,
+   * and the preview catches up when it lands (onSeeked).
+   */
+  const scrub = (t: number) => {
+    setPlayhead(t);
+    const v = refVideo.current;
+    if (!v) return;
+    if (!v.paused) v.pause();
+    scrubTarget.current = t;
+    if (!v.seeking) v.currentTime = t;
+  };
+
+  /** Play just the selected seconds and stop on the last frame of the range. */
+  const playRange = () => {
+    const v = refVideo.current;
+    if (!v || !range) return;
+    const [a, b] = range;
+    stopRangePlay();
+    scrubTarget.current = null;
+    v.currentTime = a;
+    void v.play().catch(() => {});
+    const tick = () => {
+      if (v.paused || v.ended) {
+        rangePlay.current = 0;
+        return;
+      }
+      if (v.currentTime >= b) {
+        v.pause();
+        v.currentTime = b;
+        rangePlay.current = 0;
+        return;
+      }
+      rangePlay.current = requestAnimationFrame(tick);
+    };
+    rangePlay.current = requestAnimationFrame(tick);
+  };
+
+  const timeAt = (e: { clientX: number; currentTarget: Element }) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    return Math.max(0, Math.min(duration, ((e.clientX - r.left) / r.width) * duration));
+  };
+
   const people = useMemo(() => Array.from(new Set((project?.shots ?? []).map((s) => s.person).filter((p): p is string => !!p))).sort(), [project]);
   const setPersonMode = async (person: string, mode: "keep" | "swap") => {
     if (!project) return;
@@ -242,7 +299,24 @@ export function RemakeProject({ id }: { id: string }) {
           <section className="mt-5 rounded-xl border border-gray-800 bg-gray-900/40 p-3 grid grid-cols-1 md:grid-cols-[120px_minmax(0,1fr)] gap-3">
             <div className="aspect-[9/16] w-[120px]">
               {project.source_url ? (
-                <video ref={refVideo} src={project.source_url} controls playsInline preload="metadata" onTimeUpdate={(e) => setPlayhead(e.currentTarget.currentTime)} className="w-full h-full rounded-lg bg-black object-cover" />
+                <video
+                  ref={refVideo}
+                  src={project.source_url}
+                  controls
+                  playsInline
+                  preload="auto"
+                  onTimeUpdate={(e) => {
+                    // While dragging the cursor owns the playhead; the video catches up behind it.
+                    if (!drag.current) setPlayhead(e.currentTarget.currentTime);
+                  }}
+                  onSeeked={(e) => {
+                    const v = e.currentTarget;
+                    const t = scrubTarget.current;
+                    if (t !== null && Math.abs(v.currentTime - t) > 0.04) v.currentTime = t;
+                    else scrubTarget.current = null;
+                  }}
+                  className="w-full h-full rounded-lg bg-black object-cover"
+                />
               ) : (
                 <div className="w-full h-full rounded-lg bg-gray-950" />
               )}
@@ -250,35 +324,46 @@ export function RemakeProject({ id }: { id: string }) {
             <div className="min-w-0">
               <p className="text-[11px] text-gray-500 mb-1.5">
                 Timeline · one frame per second. Purple lines are where clips start; each clip is a card on the left. <span className="text-gray-400">Click</span> to move the playhead, then{" "}
-                <span className="text-gray-400">Split</span> to cut that clip in two. <span className="text-gray-400">Drag</span> across the seconds you want to redo and cut them into their own clip, then set that clip to Swap and leave the rest on Keep.
+                <span className="text-gray-400">Split</span> to cut that clip in two. <span className="text-gray-400">Drag</span> across the seconds you want to redo (the preview follows your cursor, so you see exactly where it starts and ends) and cut them into their own clip, then set that clip to Swap and leave the rest on Keep.
               </p>
               <div
                 className="relative w-full overflow-hidden rounded-md bg-gray-950 cursor-crosshair select-none touch-none"
                 onPointerDown={(e) => {
                   if (!duration) return;
-                  const r = e.currentTarget.getBoundingClientRect();
-                  const t = Math.max(0, Math.min(duration, ((e.clientX - r.left) / r.width) * duration));
+                  const t = timeAt(e);
                   drag.current = { from: t, moved: false };
+                  stopRangePlay();
+                  setHover(null);
+                  scrub(t);
                   e.currentTarget.setPointerCapture(e.pointerId);
                 }}
                 onPointerMove={(e) => {
-                  if (!drag.current || !duration) return;
+                  if (!duration) return;
+                  const t = timeAt(e);
+                  if (!drag.current) {
+                    setHover(t);
+                    return;
+                  }
                   const r = e.currentTarget.getBoundingClientRect();
-                  const t = Math.max(0, Math.min(duration, ((e.clientX - r.left) / r.width) * duration));
                   if (!drag.current.moved && Math.abs(t - drag.current.from) * (r.width / duration) < 4) return;
                   drag.current.moved = true;
                   const a = Math.round(Math.min(drag.current.from, t) * 10) / 10;
                   const b = Math.round(Math.max(drag.current.from, t) * 10) / 10;
                   setRange([a, b]);
+                  scrub(t);
                 }}
                 onPointerUp={(e) => {
                   const d = drag.current;
                   drag.current = null;
                   if (!d || !duration) return;
                   if (d.moved) {
-                    const r = e.currentTarget.getBoundingClientRect();
-                    const t = Math.max(0, Math.min(duration, ((e.clientX - r.left) / r.width) * duration));
-                    seek(Math.min(duration - 0.1, Math.round(Math.min(d.from, t) * 10) / 10));
+                    // Leave the preview on the frame the cursor let go of, the end
+                    // just chosen; select the clip the range starts in, as before.
+                    const t = timeAt(e);
+                    scrub(Math.min(duration - 0.1, t));
+                    const a = Math.min(duration - 0.1, Math.round(Math.min(d.from, t) * 10) / 10);
+                    const first = project.shots.find((x) => a >= Number(x.start_s) && a < Number(x.end_s));
+                    if (first) setSelected(first.id);
                   } else {
                     setRange(null);
                     seek(Math.max(0, Math.min(duration - 0.1, d.from)));
@@ -287,13 +372,9 @@ export function RemakeProject({ id }: { id: string }) {
                 onPointerCancel={() => {
                   drag.current = null;
                 }}
+                onPointerLeave={() => setHover(null)}
               >
-                {project.strip_url ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={project.strip_url} alt="" className="w-full h-[88px] object-cover object-left block" draggable={false} />
-                ) : (
-                  <div className="h-[88px]" />
-                )}
+                <FilmStrip src={project.source_url} duration={duration} spriteUrl={project.strip_url} spriteCount={project.strip_count} />
                 {duration > 0 &&
                   project.shots.map((s) => (
                     <div
@@ -306,9 +387,18 @@ export function RemakeProject({ id }: { id: string }) {
                     </div>
                   ))}
                 {duration > 0 && range && (
-                  <div className="absolute inset-y-0 bg-purple-400/25 border-x-2 border-purple-300 pointer-events-none" style={{ left: `${(range[0] / duration) * 100}%`, width: `${((range[1] - range[0]) / duration) * 100}%` }} />
+                  <div className="absolute inset-y-0 bg-purple-400/25 border-x-2 border-purple-300 pointer-events-none" style={{ left: `${(range[0] / duration) * 100}%`, width: `${((range[1] - range[0]) / duration) * 100}%` }}>
+                    {/* Times sit just outside the range, or just inside it at either end of the strip. */}
+                    <span className={`absolute bottom-0.5 text-[10px] font-bold tabular-nums bg-purple-600 text-white px-1 rounded whitespace-nowrap ${range[0] / duration < 0.06 ? "left-0.5" : "right-full mr-0.5"}`}>{range[0].toFixed(1)}s</span>
+                    <span className={`absolute bottom-0.5 text-[10px] font-bold tabular-nums bg-purple-600 text-white px-1 rounded whitespace-nowrap ${range[1] / duration > 0.94 ? "right-0.5" : "left-full ml-0.5"}`}>{range[1].toFixed(1)}s</span>
+                  </div>
                 )}
-                {duration > 0 && <div className="absolute inset-y-0 w-px bg-white" style={{ left: `${(playhead / duration) * 100}%` }} />}
+                {duration > 0 && hover !== null && (
+                  <div className="absolute inset-y-0 w-px bg-white/40 pointer-events-none" style={{ left: `${(hover / duration) * 100}%` }}>
+                    <span className={`absolute top-0.5 text-[10px] font-semibold tabular-nums bg-black/70 text-white px-1 rounded whitespace-nowrap ${hover / duration > 0.9 ? "right-1" : "left-1"}`}>{hover.toFixed(1)}s</span>
+                  </div>
+                )}
+                {duration > 0 && <div className="absolute inset-y-0 w-px bg-white pointer-events-none" style={{ left: `${(playhead / duration) * 100}%` }} />}
               </div>
               <div className="mt-2 flex items-center gap-2 flex-wrap">
                 <span className="text-xs text-gray-400 tabular-nums">{playhead.toFixed(1)}s{atPlayhead ? ` · clip ${atPlayhead.idx + 1}` : ""}</span>
@@ -316,6 +406,9 @@ export function RemakeProject({ id }: { id: string }) {
                   <>
                     <Button primary onClick={() => void cutRange()} busy={busy === "range"} disabled={range[1] - range[0] < 1} title="Cuts at both ends so these seconds become one clip you can swap on its own">
                       <Scissors size={13} /> Make {range[0].toFixed(1)}–{range[1].toFixed(1)}s its own clip
+                    </Button>
+                    <Button onClick={playRange} disabled={busy === "range"} title="Play just these seconds in the preview; it stops at the end of the range">
+                      <Play size={13} /> Play {range[0].toFixed(1)}–{range[1].toFixed(1)}s
                     </Button>
                     <Button ghost onClick={() => setRange(null)} disabled={busy === "range"}>
                       Clear
