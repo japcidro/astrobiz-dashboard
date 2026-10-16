@@ -31,7 +31,7 @@ const overall = (x: ResultView) => {
 };
 
 /**
- * Image Studio: a competitor's static ad in, our brand's ad out. The skill
+ * Static Ad Generator (Image Studio in code): a competitor's static ad in, our brand's ad out. The skill
  * behind the button studies the reference, plans our version from the brand
  * profile, generates the versions and reviews them with scores. Notes are
  * optional; everything else is decided for you and shown under the results.
@@ -161,7 +161,7 @@ export function ImageStudio() {
       <input ref={fileRef} type="file" accept={ACCEPT} className="hidden" onChange={(e) => e.target.files?.[0] && void upload(e.target.files[0])} />
       <div>
         <h1 className="text-2xl font-bold text-white inline-flex items-center gap-2">
-          <Images size={22} className="text-purple-400" /> Image Studio
+          <Images size={22} className="text-purple-400" /> Static Ad Generator
         </h1>
         <p className="text-sm text-gray-500 mt-1">
           {page?.item ? (

@@ -223,7 +223,7 @@ export async function keepResult(db: SupabaseClient, id: string, addedBy: string
   const itemId = r.image_studio_runs.item_id;
   if (itemId) {
     const files = r.pair_paths?.length ? r.pair_paths : [r.path];
-    await db.from("marketing_board_outputs").insert(files.map((f, i) => ({ item_id: itemId, kind: "upload", file_path: f, note: r.pair_paths ? (i === 0 ? "Image Studio · before" : "Image Studio · after") : "Image Studio", added_by: addedBy })));
+    await db.from("marketing_board_outputs").insert(files.map((f, i) => ({ item_id: itemId, kind: "upload", file_path: f, note: r.pair_paths ? (i === 0 ? "Static Ad Generator · before" : "Static Ad Generator · after") : "Static Ad Generator", added_by: addedBy })));
   }
   const { error } = await db.from("image_studio_results").update({ kept: true }).eq("id", id);
   return error ? error.message : null;

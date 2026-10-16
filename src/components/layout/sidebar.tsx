@@ -398,7 +398,7 @@ const ownerNavEntries: NavEntry[] = [
         roles: ownerRoles,
       },
       {
-        label: "Image Studio",
+        label: "Static Ad Generator",
         href: "/owner/image-studio",
         icon: <Images size={18} />,
         roles: ownerRoles,

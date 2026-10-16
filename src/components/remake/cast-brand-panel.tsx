@@ -229,7 +229,7 @@ export function CastBrandPanel({
               </button>
             )}
             <textarea value={rules} onChange={(e) => setRules(e.target.value)} rows={3} placeholder="Rules, e.g. keep the gold cap visible · no competitor text · US bathroom or kitchen settings" className={`${field} mt-3 resize-none`} />
-            <textarea value={profile} onChange={(e) => setProfile(e.target.value)} rows={5} placeholder="Brand profile for the Image Studio planner: product, price, audience, angle, proof points, tone, colors, compliance line…" className={`${field} mt-2 resize-none text-xs`} />
+            <textarea value={profile} onChange={(e) => setProfile(e.target.value)} rows={5} placeholder="Brand profile for the Static Ad Generator planner: product, price, audience, angle, proof points, tone, colors, compliance line…" className={`${field} mt-2 resize-none text-xs`} />
             {profile !== (kit?.profile ?? "") && (
               <button type="button" onClick={() => void api<{ kit: BrandKit }>("/api/owner/remake/brand-kit", { method: "PUT", body: JSON.stringify({ store: project.store, profile }) }).then((r) => onKit(r.kit)).catch((e) => onError(e instanceof Error ? e.message : "Could not save"))} className="mt-1.5 text-[11px] text-purple-300 hover:text-white cursor-pointer">
                 Save profile
