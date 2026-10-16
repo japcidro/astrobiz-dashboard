@@ -11,7 +11,12 @@ import {
   CornerDownRight,
 } from "lucide-react";
 import { PresetPicker } from "./preset-picker";
-import { makeEmptyRow, type BulkAdRow } from "./types";
+import {
+  existingAdsetLabel,
+  makeEmptyRow,
+  type BulkAdRow,
+  type ExistingAdset,
+} from "./types";
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
 
@@ -23,19 +28,26 @@ interface AdRowsTableProps {
   // Enables per-field Preset picker (ad name / primary text / headline /
   // description). Null disables the picker with a hint to select a store.
   shopifyStoreId?: string | null;
-  // False when every ad is going into one ad set the user already picked —
-  // there is no per-row ad set to name.
-  showAdsetName?: boolean;
+  // "Existing Ad Set" mode: the Adset Name column becomes a dropdown of
+  // these ad sets, picked once per ad set group. Null means the ads create
+  // their own ad sets and name them in the column instead.
+  existingAdsets?: {
+    adsets: ExistingAdset[];
+    loading: boolean;
+    error: string | null;
+  } | null;
   // Per-ad-set budget column. Null hides it (CBO, or ads going into an
   // existing ad set); otherwise it says which kind and the default amount,
   // which a blank cell falls back to.
   budget: { kind: "daily" | "lifetime"; fallback: number | null } | null;
   onBudgetKindChange: (kind: "daily" | "lifetime") => void;
   onUpdateRow: (id: string, updates: Partial<BulkAdRow>) => void;
-  // Sets the ad set name / budget on every ad in that ad set.
+  // Sets the ad set name / budget / existing ad set on every ad in that ad set.
   onUpdateGroup: (
     groupId: string,
-    updates: Partial<Pick<BulkAdRow, "adset_name" | "adset_budget">>
+    updates: Partial<
+      Pick<BulkAdRow, "adset_name" | "adset_budget" | "existing_adset_id">
+    >
   ) => void;
   // Adds rows, each placed after the last ad of its ad set (new ad sets go
   // at the end).
@@ -206,7 +218,7 @@ export function AdRowsTable({
   rows,
   adAccountId,
   shopifyStoreId,
-  showAdsetName = true,
+  existingAdsets = null,
   budget,
   onBudgetKindChange,
   onUpdateRow,
@@ -216,6 +228,26 @@ export function AdRowsTable({
 }: AdRowsTableProps) {
   const bulkInputRef = useRef<HTMLInputElement>(null);
   const rowInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  // Either column groups rows into ad sets; which one depends on the mode.
+  const pickExisting = existingAdsets != null;
+  const showAdsetName = !pickExisting;
+
+  // "Apply to all rows": every ad set group that has not picked one yet.
+  const applyAdsetToUnpicked = useCallback(
+    (adsetId: string) => {
+      const seen = new Set<string>();
+      for (const r of rows) {
+        if (r.existing_adset_id || seen.has(r.group_id)) continue;
+        seen.add(r.group_id);
+        onUpdateGroup(r.group_id, { existing_adset_id: adsetId });
+      }
+    },
+    [rows, onUpdateGroup],
+  );
+  const unpickedGroups = new Set(
+    rows.filter((r) => !r.existing_adset_id).map((r) => r.group_id),
+  ).size;
 
   // Upload a single file for a given row — detect type from file MIME
   const uploadFileForRow = useCallback(
@@ -342,6 +374,9 @@ export function AdRowsTable({
               {showAdsetName && (
                 <th className="px-2 py-2 w-44">Adset Name</th>
               )}
+              {pickExisting && (
+                <th className="px-2 py-2 w-64">Existing Ad Set</th>
+              )}
               {budget && (
                 <th className="px-2 py-2 w-32">
                   <select
@@ -370,9 +405,12 @@ export function AdRowsTable({
               // An ad added with "+ Ad" sits right under the ad set's first
               // ad and shares its ad set, so it has no name of its own.
               const firstOfGroup = rows.findIndex((r) => r.group_id === row.group_id);
-              const sharesAdset = showAdsetName && firstOfGroup !== idx;
+              const sharesAdset = firstOfGroup !== idx;
               const nextSharesAdset =
-                showAdsetName && rows[idx + 1]?.group_id === row.group_id;
+                rows[idx + 1]?.group_id === row.group_id;
+              const pickedAdset = pickExisting
+                ? existingAdsets.adsets.find((a) => a.id === row.existing_adset_id)
+                : undefined;
               return (
               <tr
                 key={row.id}
@@ -408,6 +446,73 @@ export function AdRowsTable({
                         !row.adset_name.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
                       }`}
                     />
+                    )}
+                  </td>
+                )}
+
+                {/* Existing ad set — one per ad set group, on its first row */}
+                {pickExisting && (
+                  <td className="px-2 py-1.5 bg-gray-800/50 align-top">
+                    {sharesAdset ? (
+                      <span
+                        className="flex items-center gap-1.5 pl-2 py-1 text-xs text-gray-500"
+                        title={pickedAdset ? existingAdsetLabel(pickedAdset) : undefined}
+                      >
+                        <CornerDownRight size={13} className="shrink-0" />
+                        Same ad set as #{firstOfGroup + 1}
+                      </span>
+                    ) : existingAdsets.loading ? (
+                      <span className="flex items-center gap-1.5 py-1 text-xs text-gray-500">
+                        <Loader2 size={12} className="animate-spin" />
+                        Loading ad sets...
+                      </span>
+                    ) : (
+                      <div className="space-y-1">
+                        <select
+                          value={row.existing_adset_id ?? ""}
+                          onChange={(e) =>
+                            onUpdateGroup(row.group_id, {
+                              existing_adset_id: e.target.value || null,
+                            })
+                          }
+                          title={pickedAdset ? existingAdsetLabel(pickedAdset) : undefined}
+                          className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm focus:outline-none ${
+                            row.existing_adset_id
+                              ? "border-gray-600 text-white focus:border-blue-500"
+                              : "border-red-500/50 text-gray-500 focus:border-red-500"
+                          }`}
+                        >
+                          <option value="">
+                            {existingAdsets.adsets.length === 0
+                              ? "No ad sets in this campaign"
+                              : "Select ad set..."}
+                          </option>
+                          {existingAdsets.adsets.map((a) => (
+                            <option key={a.id} value={a.id}>
+                              {existingAdsetLabel(a)}
+                            </option>
+                          ))}
+                        </select>
+                        {pickedAdset && pickedAdset.effective_status !== "ACTIVE" && (
+                          <p className="text-[11px] text-yellow-400">
+                            Ad set is {pickedAdset.effective_status.replace(/_/g, " ").toLowerCase()} —
+                            the ads will sit there until you turn it on.
+                          </p>
+                        )}
+                        {row.existing_adset_id && unpickedGroups > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => applyAdsetToUnpicked(row.existing_adset_id!)}
+                            className="text-[11px] text-blue-400 hover:text-blue-300 cursor-pointer"
+                            title="Use this ad set on every row that has not picked one"
+                          >
+                            Apply to all rows
+                          </button>
+                        )}
+                        {existingAdsets.error && (
+                          <p className="text-[11px] text-red-400">{existingAdsets.error}</p>
+                        )}
+                      </div>
                     )}
                   </td>
                 )}
@@ -618,12 +723,16 @@ export function AdRowsTable({
                 {/* Actions */}
                 <td className="px-2 py-1.5 bg-gray-800/50 text-center">
                   <div className="flex items-center justify-center gap-1">
-                  {showAdsetName && (
                     <button
                       type="button"
                       onClick={() =>
                         onAddRows([
-                          makeEmptyRow(row.group_id, row.adset_name, row.adset_budget),
+                          makeEmptyRow(
+                            row.group_id,
+                            row.adset_name,
+                            row.adset_budget,
+                            row.existing_adset_id,
+                          ),
                         ])
                       }
                       className="flex items-center gap-0.5 whitespace-nowrap rounded px-1.5 py-1 text-xs text-gray-400 hover:bg-gray-700 hover:text-white transition-colors"
@@ -632,7 +741,6 @@ export function AdRowsTable({
                       <Plus size={12} />
                       Ad
                     </button>
-                  )}
                   <button
                     type="button"
                     onClick={() => onRemoveRow(row.id)}

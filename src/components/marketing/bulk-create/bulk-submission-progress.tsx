@@ -3,14 +3,15 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Loader2, CheckCircle, AlertCircle, X } from "lucide-react";
 import type { CampaignFormData, AdSetFormData, AdFormData } from "@/lib/facebook/types";
-import { groupRows, type BulkAdRow } from "./types";
+import { groupRows, type BulkAdRow, type ExistingAdset } from "./types";
 
 interface BulkSubmissionProgressProps {
   rows: BulkAdRow[];
   adAccountId: string;
   mode: "new" | "existing_campaign" | "existing_adset";
   existingCampaignId: string | null;
-  existingAdsetId: string | null;
+  // "Existing ad set" mode: the campaign's ad sets, to name each group.
+  existingAdsets: ExistingAdset[];
   campaign: CampaignFormData;
   adsetTemplate: AdSetFormData;
   pageId: string;
@@ -34,7 +35,7 @@ export function BulkSubmissionProgress({
   adAccountId,
   mode,
   existingCampaignId,
-  existingAdsetId,
+  existingAdsets,
   campaign,
   adsetTemplate,
   pageId,
@@ -100,9 +101,10 @@ export function BulkSubmissionProgress({
       for (const row of targetRows) {
         onUpdateRowStatus(row.id, "submitting");
 
-        // The first ad of a group creates its ad set; the rest join it.
+        // The first ad of a group creates its ad set; the rest join it. In
+        // existing-ad-set mode the row says which ad set it joins.
         const adsetId = usingExistingAdset
-          ? existingAdsetId
+          ? row.existing_adset_id
           : adsetIdsRef.current.get(row.group_id) ?? null;
         const createCampaign = mode === "new" && !campaignIdRef.current;
         const effectiveMode = adsetId
@@ -195,7 +197,6 @@ export function BulkSubmissionProgress({
     [
       adAccountId,
       mode,
-      existingAdsetId,
       campaign,
       adsetTemplate,
       pageId,
@@ -263,11 +264,12 @@ export function BulkSubmissionProgress({
         <div className="space-y-3 mb-4">
           {groups.map((group, gi) => (
             <div key={group.group_id}>
-              {!usingExistingAdset && (
-                <p className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
-                  {group.adset_name.trim() || `${adsetTemplate.name} - ${gi + 1}`}
-                </p>
-              )}
+              <p className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">
+                {usingExistingAdset
+                  ? existingAdsets.find((a) => a.id === group.rows[0].existing_adset_id)
+                      ?.name ?? "Existing ad set"
+                  : group.adset_name.trim() || `${adsetTemplate.name} - ${gi + 1}`}
+              </p>
               <div className="space-y-1.5">
                 {group.rows.map((row) => (
                   <div key={row.id}>

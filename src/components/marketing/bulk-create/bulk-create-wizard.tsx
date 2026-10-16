@@ -29,6 +29,7 @@ import {
   makeEmptyRow,
   type BulkAdRow,
   type DefaultCopy,
+  type ExistingAdset,
 } from "./types";
 
 // ─── Types ───
@@ -47,19 +48,6 @@ interface CampaignInfo {
   status: string;
   // Campaign budget (CBO) — its ad sets get no budget of their own.
   uses_campaign_budget?: boolean;
-}
-
-interface AdsetInfo {
-  id: string;
-  name: string;
-  status: string;
-  effective_status: string;
-}
-
-// Paused is a normal thing to bulk-add ads to, but you should know first.
-function statusSuffix(effectiveStatus: string): string {
-  if (effectiveStatus === "ACTIVE") return "";
-  return ` — ${effectiveStatus.replace(/_/g, " ").toLowerCase()}`;
 }
 
 type BulkMode = "new" | "existing_campaign" | "existing_adset";
@@ -160,13 +148,12 @@ export function BulkCreateWizard() {
   );
   const [campaigns, setCampaigns] = useState<CampaignInfo[]>([]);
   const [loadingCampaigns, setLoadingCampaigns] = useState(false);
-  const [existingAdsetId, setExistingAdsetId] = useState<string | null>(null);
-  const [adsets, setAdsets] = useState<AdsetInfo[]>([]);
+  const [adsets, setAdsets] = useState<ExistingAdset[]>([]);
   const [loadingAdsets, setLoadingAdsets] = useState(false);
   const [adsetsError, setAdsetsError] = useState<string | null>(null);
 
-  // Every ad lands in one ad set the user picked, so the per-row adset name
-  // and the Section B template have nothing to do.
+  // Every ad lands in an ad set the user picks on its row, so the per-row
+  // adset name and the Section B template have nothing to do.
   const usingExistingAdset = mode === "existing_adset";
 
   // Section B: Adset
@@ -233,7 +220,6 @@ export function BulkCreateWizard() {
     setLoadingCampaigns(true);
     setCampaigns([]);
     setExistingCampaignId(null);
-    setExistingAdsetId(null);
 
     import("@/lib/client-cache").then(({ cachedFetch }) =>
       cachedFetch<Record<string, unknown>>(
@@ -254,7 +240,13 @@ export function BulkCreateWizard() {
   }, [adAccountId, needsExistingCampaign]);
 
   // ─── Fetch ad sets once a campaign is picked in existing-adset mode ───
+  // The rows' picks belong to the previous campaign, so they are cleared.
   useEffect(() => {
+    setRows((prev) =>
+      prev.some((r) => r.existing_adset_id)
+        ? prev.map((r) => ({ ...r, existing_adset_id: null }))
+        : prev
+    );
     if (!existingCampaignId || !usingExistingAdset) return;
     let cancelled = false;
     setLoadingAdsets(true);
@@ -272,7 +264,7 @@ export function BulkCreateWizard() {
             setAdsets([]);
             return;
           }
-          setAdsets((json.data as AdsetInfo[]) ?? []);
+          setAdsets((json.data as ExistingAdset[]) ?? []);
         })
         .catch((e: Error) => {
           if (!cancelled) setAdsetsError(e.message);
@@ -440,7 +432,9 @@ export function BulkCreateWizard() {
   const handleUpdateGroup = useCallback(
     (
       groupId: string,
-      updates: Partial<Pick<BulkAdRow, "adset_name" | "adset_budget">>
+      updates: Partial<
+        Pick<BulkAdRow, "adset_name" | "adset_budget" | "existing_adset_id">
+      >
     ) => {
       setRows((prev) =>
         prev.map((r) => (r.group_id === groupId ? { ...r, ...updates } : r))
@@ -495,6 +489,13 @@ export function BulkCreateWizard() {
           fallback: sectionBBudget,
         };
   const groups = groupRows(rows);
+  // Existing-ad-set mode: each group has picked an ad set of this campaign.
+  const existingAdsetIds = new Set(
+    groups.map((g) => g.rows[0].existing_adset_id).filter(Boolean)
+  );
+  const allGroupsHaveExistingAdset =
+    !usingExistingAdset ||
+    groups.every((g) => !!g.rows[0].existing_adset_id);
   const allAdsetsHaveBudget =
     !budgetColumn ||
     sectionBBudget != null ||
@@ -504,10 +505,10 @@ export function BulkCreateWizard() {
   const hasEndDateIfLifetime =
     budgetColumn?.kind !== "lifetime" || !!adset.end_time;
 
-  const adsetCount = usingExistingAdset ? 1 : groups.length;
+  const adsetCount = usingExistingAdset ? existingAdsetIds.size : groups.length;
   const adsLabel = `${rows.length} ${rows.length === 1 ? "ad" : "ads"}`;
   const submitLabel = usingExistingAdset
-    ? adsLabel
+    ? `${adsLabel} → ${adsetCount} existing ${adsetCount === 1 ? "ad set" : "ad sets"}`
     : `${adsLabel}, ${adsetCount} ${adsetCount === 1 ? "ad set" : "ad sets"}`;
 
   // Build missing items list for the submit section
@@ -515,7 +516,7 @@ export function BulkCreateWizard() {
   if (!adAccountId) missingItems.push("Select an ad account");
   if (mode === "new" && !campaign.name) missingItems.push("Enter a campaign name");
   if (mode !== "new" && !existingCampaignId) missingItems.push("Select an existing campaign");
-  if (usingExistingAdset && !existingAdsetId) missingItems.push("Select an existing ad set");
+  if (!allGroupsHaveExistingAdset) missingItems.push("Pick an existing ad set for every row");
   if (!pageId) missingItems.push("Select a Facebook Page");
   if (!websiteUrl) missingItems.push("Enter a website URL");
   if (rows.length === 0) missingItems.push("Add at least one row");
@@ -539,7 +540,7 @@ export function BulkCreateWizard() {
     allRowsHaveAdName &&
     allRowsHaveCopy &&
     (mode === "new" ? !!campaign.name : !!existingCampaignId) &&
-    (!usingExistingAdset || !!existingAdsetId);
+    allGroupsHaveExistingAdset;
 
   // ─── Loading / Error ───
   if (loading) {
@@ -614,10 +615,7 @@ export function BulkCreateWizard() {
             <label className="block text-sm text-gray-400 mb-2">Mode</label>
             <div className="flex flex-wrap gap-3">
               <button
-                onClick={() => {
-                  setMode("new");
-                  setExistingAdsetId(null);
-                }}
+                onClick={() => setMode("new")}
                 className={`px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${
                   mode === "new"
                     ? "bg-white text-gray-900"
@@ -627,10 +625,7 @@ export function BulkCreateWizard() {
                 New Campaign
               </button>
               <button
-                onClick={() => {
-                  setMode("existing_campaign");
-                  setExistingAdsetId(null);
-                }}
+                onClick={() => setMode("existing_campaign")}
                 className={`px-4 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors ${
                   mode === "existing_campaign"
                     ? "bg-white text-gray-900"
@@ -655,7 +650,7 @@ export function BulkCreateWizard() {
                 ? "One new campaign, one new ad set per row. \"+ Ad\" on a row adds another ad to that row's ad set."
                 : mode === "existing_campaign"
                 ? "New ad sets under a campaign you already run. \"+ Ad\" on a row adds another ad to that row's ad set."
-                : "Every ad below goes into one ad set you already run — no new ad sets are created."}
+                : "Every ad goes into an ad set you already run — pick the ad set on each row below. \"+ Ad\" adds another ad to that row's ad set. No new ad sets are created."}
             </p>
           </div>
 
@@ -682,10 +677,7 @@ export function BulkCreateWizard() {
               ) : (
                 <select
                   value={existingCampaignId || ""}
-                  onChange={(e) => {
-                    setExistingCampaignId(e.target.value || null);
-                    setExistingAdsetId(null);
-                  }}
+                  onChange={(e) => setExistingCampaignId(e.target.value || null)}
                   className="w-full max-w-md bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">Select campaign...</option>
@@ -698,41 +690,11 @@ export function BulkCreateWizard() {
                 </select>
               )}
 
-              {usingExistingAdset && existingCampaignId && (
-                <div className="mt-4">
-                  <label className="block text-sm text-gray-400 mb-1.5">
-                    Select Ad Set
-                  </label>
-                  {loadingAdsets ? (
-                    <div className="flex items-center gap-2 text-gray-500 text-sm py-2">
-                      <Loader2 size={14} className="animate-spin" />
-                      Loading ad sets...
-                    </div>
-                  ) : (
-                    <select
-                      value={existingAdsetId || ""}
-                      onChange={(e) =>
-                        setExistingAdsetId(e.target.value || null)
-                      }
-                      className="w-full max-w-md bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">
-                        {adsets.length === 0
-                          ? "No ad sets in this campaign"
-                          : "Select ad set..."}
-                      </option>
-                      {adsets.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.name}
-                          {statusSuffix(a.effective_status)}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  {adsetsError && (
-                    <p className="text-xs text-red-400 mt-1.5">{adsetsError}</p>
-                  )}
-                </div>
+              {usingExistingAdset && (
+                <p className="text-gray-500 text-xs mt-3">
+                  Pick the ad set for each row in the table below — the
+                  dropdown lists this campaign&apos;s ad sets.
+                </p>
               )}
             </div>
           )}
@@ -743,8 +705,8 @@ export function BulkCreateWizard() {
           <div className="bg-gray-800/30 border border-gray-700/50 rounded-xl px-6 py-4">
             <h2 className="text-white font-semibold">B. Adset Template</h2>
             <p className="text-gray-500 text-xs mt-1">
-              Not needed — the ads are going into an ad set that already
-              exists, with its own budget, schedule and targeting.
+              Not needed — the ads are going into ad sets that already
+              exist, with their own budget, schedule and targeting.
             </p>
           </div>
         ) : (
@@ -895,7 +857,11 @@ export function BulkCreateWizard() {
           {/* Ad Rows Table */}
           <AdRowsTable
             rows={rows}
-            showAdsetName={!usingExistingAdset}
+            existingAdsets={
+              usingExistingAdset
+                ? { adsets, loading: loadingAdsets, error: adsetsError }
+                : null
+            }
             onUpdateRow={handleUpdateRow}
             budget={budgetColumn}
             onBudgetKindChange={(kind) =>
@@ -955,7 +921,7 @@ export function BulkCreateWizard() {
           adAccountId={adAccountId}
           mode={mode}
           existingCampaignId={existingCampaignId}
-          existingAdsetId={existingAdsetId}
+          existingAdsets={adsets}
           campaign={campaign}
           adsetTemplate={adset}
           pageId={pageId}

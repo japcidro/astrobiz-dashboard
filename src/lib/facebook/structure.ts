@@ -43,6 +43,10 @@ export interface FbAdsetRef {
   status: string;
   effective_status: string;
   campaign_id: string | null;
+  // In pesos (Facebook sends minor units); null when the campaign holds the
+  // budget (CBO) or the ad set has none of that kind.
+  daily_budget: number | null;
+  lifetime_budget: number | null;
 }
 
 interface GraphPage<T> {
@@ -130,6 +134,12 @@ export async function fetchCampaigns(
 }
 
 /** Every ad set under a campaign that could accept a new ad. */
+// Facebook reports budgets in minor units ("80000" = ₱800); "0" means none.
+function minorToPesos(value: string | undefined): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n / 100 : null;
+}
+
 export async function fetchAdsets(
   campaignId: string,
   token: string
@@ -140,8 +150,10 @@ export async function fetchAdsets(
     status?: string;
     effective_status?: string;
     campaign_id?: string;
+    daily_budget?: string;
+    lifetime_budget?: string;
   }>(
-    `/${campaignId}/adsets?fields=id,name,status,effective_status,campaign_id`,
+    `/${campaignId}/adsets?fields=id,name,status,effective_status,campaign_id,daily_budget,lifetime_budget`,
     token
   );
 
@@ -153,6 +165,8 @@ export async function fetchAdsets(
       status: a.status || "UNKNOWN",
       effective_status: a.effective_status || a.status || "UNKNOWN",
       campaign_id: a.campaign_id ?? null,
+      daily_budget: minorToPesos(a.daily_budget),
+      lifetime_budget: minorToPesos(a.lifetime_budget),
     }));
 
   adsets.sort((a, b) => {
