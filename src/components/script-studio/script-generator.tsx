@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DnaView, ReferenceSource, RunView, ScriptRow, StudioPage } from "@/lib/script-studio/types";
 import { DEFAULT_VERSIONS } from "@/lib/script-studio/types";
+import { cleanScript, hasHiddenDetails } from "@/lib/script-studio/clean";
 import { Button, ConfirmButton, Label, Panel, Pill, api, timeAgo } from "@/components/hook-studio/ui";
 
 const field = "w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-purple-500";
@@ -33,6 +34,8 @@ export function ScriptGenerator() {
   const [page, setPage] = useState<StudioPage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [script, setScript] = useState("");
+  /** The full transcript behind a clean view: timestamps and captions the skill reads but the box hides. Dropped once the text is edited. */
+  const [hidden, setHidden] = useState<{ raw: string; clean: string } | null>(null);
   const [label, setLabel] = useState("");
   const [source, setSource] = useState<ReferenceSource>("paste");
   const [store, setStore] = useState("");
@@ -68,7 +71,9 @@ export function ScriptGenerator() {
       setError(null);
       try {
         const r = await api<{ text: string; label: string; seconds: number | null }>("/api/owner/script-generator/transcribe", { method: "POST", body: JSON.stringify({ item_id: id }) });
-        setScript(r.text);
+        const clean = cleanScript(r.text);
+        setScript(clean);
+        setHidden(hasHiddenDetails(r.text) ? { raw: r.text, clean } : null);
         setLabel(r.label);
         setSource("board");
         setPicker(null);
@@ -113,6 +118,9 @@ export function ScriptGenerator() {
 
   const dna: DnaView | null = store && page ? page.dna[store] ?? null : null;
   const canRun = script.trim().length >= 40 && !!store && busy === null;
+  /** What the skill gets: the full transcript while the clean view is untouched, else the text as edited. */
+  const detailsIntact = !!hidden && script === hidden.clean;
+  const scriptForSkill = detailsIntact ? hidden.raw : script;
 
   const adapt = async () => {
     setBusy("run");
@@ -120,7 +128,7 @@ export function ScriptGenerator() {
     try {
       const r = await api<{ id: string; runs: RunView[] }>("/api/owner/script-generator/adapt", {
         method: "POST",
-        body: JSON.stringify({ item_id: itemId, store, script, label, source, notes, versions }),
+        body: JSON.stringify({ item_id: itemId, store, script: scriptForSkill, label, source, notes, versions }),
       });
       setPage((p) => (p ? { ...p, runs: r.runs } : p));
     } catch (e) {
@@ -181,7 +189,9 @@ export function ScriptGenerator() {
   };
 
   const pickWinner = (w: DnaView["winners"][number]) => {
-    setScript(w.transcript);
+    const clean = cleanScript(w.transcript);
+    setScript(clean);
+    setHidden(hasHiddenDetails(w.transcript) ? { raw: w.transcript, clean } : null);
     setLabel(`${store} winner · ${w.ad}`);
     setSource("winner");
     setPicker(null);
@@ -220,6 +230,7 @@ export function ScriptGenerator() {
               value={script}
               onChange={(e) => {
                 setScript(e.target.value);
+                if (hidden && e.target.value !== hidden.clean) setHidden(null);
                 if (source !== "paste") setSource("paste");
               }}
               rows={14}
@@ -235,11 +246,12 @@ export function ScriptGenerator() {
                 <Trophy size={12} /> One of our winners
               </Button>
               {script && (
-                <Button ghost onClick={() => { setScript(""); setLabel(""); setSource("paste"); }} className="!px-2.5 !py-1 !text-xs">
+                <Button ghost onClick={() => { setScript(""); setHidden(null); setLabel(""); setSource("paste"); }} className="!px-2.5 !py-1 !text-xs">
                   <X size={12} /> Clear
                 </Button>
               )}
               {label && <span className="text-[11px] text-gray-500 truncate">{label}</span>}
+              {detailsIntact && <span className="text-[11px] text-gray-600">Spoken words only; the timestamps and on-screen captions stay hidden and still go to the skill.</span>}
               {transcribing && (
                 <span className="text-[11px] text-purple-300 inline-flex items-center gap-1">
                   <Loader2 size={11} className="animate-spin" /> Gemini is reading the video, about a minute
