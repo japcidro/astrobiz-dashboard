@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
-const VERSION = "1.7.4";
+const VERSION = "1.8.0";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // ─── Config ───
@@ -841,6 +841,236 @@ async function cartoonJoin(job, dir) {
 
 const CARTOON_RUN = { cartoon_character: cartoonCharacter, cartoon_still: cartoonStill, cartoon_clip: cartoonClip, cartoon_voice: cartoonVoice, cartoon_join: cartoonJoin };
 
+// ─── Hook Generator ───
+// The app plans a hook (Claude writes each beat's prompts) and records the
+// marketer's approvals; this worker is the orchestrator. hookgenAdvance queues
+// every step whose status is null and whose inputs are ready: a starting image
+// per beat from the reference images while the hook is "stills" or "working";
+// once every beat is approved ("working"), a clip per beat (Veo 3.1 Fast saying
+// the beat's line, or silent Seedance 2.0 Mini), Claude's check that a hand
+// touches the head (one re-roll when it doesn't), then the joined hook.
+// Mirror of src/lib/hook-generator/engines.ts.
+const HOOKGEN_W = 720;
+const HOOKGEN_H = 1280;
+const HOOKGEN_REROLLS = 1;
+
+const updateHookgenHook = (id, patch) =>
+  rest(`/hookgen_hooks?id=eq.${id}`, { method: "PATCH", body: patch, headers: { Prefer: "return=minimal" } });
+const updateHookgenBeat = (id, patch) =>
+  rest(`/hookgen_beats?id=eq.${id}`, { method: "PATCH", body: patch, headers: { Prefer: "return=minimal" } });
+
+async function hookgenAdvance(hookId) {
+  const hook = (await rest(`/hookgen_hooks?id=eq.${hookId}&select=*`))?.[0];
+  if (!hook || (hook.status !== "stills" && hook.status !== "working")) return;
+  const beats = (await rest(`/hookgen_beats?hook_id=eq.${hookId}&select=*&order=idx`)) ?? [];
+  if (beats.length === 0) return;
+  const base = { hook_id: hook.id };
+  // claimCartoonStep / queueCartoonStep work on any table with <step>_status columns.
+  for (const b of beats) {
+    if (b.still_status === null && b.still_prompt) {
+      await queueCartoonStep("hookgen_beats", b.id, "still", "hookgen_still", hook.image_model, { ...base, beat_id: b.id, prompt: b.still_prompt, model: hook.image_model, refs: hook.refs ?? [] });
+    }
+    if (hook.status !== "working") continue;
+    if (b.approved && b.still_status === "done" && b.still_path && b.clip_status === null) {
+      await queueCartoonStep("hookgen_beats", b.id, "clip", "hookgen_clip", hook.video_model, { ...base, beat_id: b.id, prompt: b.motion_prompt, still_path: b.still_path, model: hook.video_model, duration: b.clip_seconds });
+    }
+    if (b.clip_status === "done" && b.clip_path && b.check_status === null) {
+      await queueCartoonStep("hookgen_beats", b.id, "check", "hookgen_check", "claude", { ...base, beat_id: b.id, clip_path: b.clip_path, rerolls: b.rerolls });
+    }
+  }
+  const settled = beats.every((b) => b.clip_status === "done" && b.clip_path && (b.check_status === "done" || b.check_status === "failed"));
+  if (hook.status === "working" && settled && hook.final_status === null) {
+    await queueCartoonStep("hookgen_hooks", hook.id, "final", "hookgen_join", "ffmpeg", base);
+  }
+}
+
+/**
+ * Every hook waiting on the worker gets its next steps queued; runs from the
+ * main loop. Most recently touched first: takes nobody approves stay in
+ * "stills" for good and must not crowd out new hooks.
+ */
+let lastHookgenSweep = 0;
+async function hookgenSweep() {
+  if (Date.now() - lastHookgenSweep < 10_000) return;
+  lastHookgenSweep = Date.now();
+  const hooks = (await rest("/hookgen_hooks?status=in.(stills,working)&select=id&order=updated_at.desc&limit=50")) ?? [];
+  for (const h of hooks) {
+    await hookgenAdvance(h.id).catch((e) => log(`hookgen ${h.id} advance: ${e.message}`));
+  }
+}
+
+/** A starting image from the prompt and the reference images, in the order the prompt names them. */
+async function hookgenStill(job, dir) {
+  const p = job.params;
+  const args = [p.model === "nano_banana_pro" ? "nano_banana_pro" : "seedream_5_0_flash", "--aspect_ratio", "9:16", "--resolution", "2k"];
+  for (const [i, ref] of (p.refs ?? []).entries()) {
+    const f = join(dir, `ref-${i}.${extensionOf(ref.path)}`);
+    await storageDownload(ref.path, f, ref.bucket || BOARD_BUCKET);
+    args.push("--image", f);
+  }
+  args.push("--prompt", safePrompt(p.prompt));
+  await updateHookgenBeat(p.beat_id, { still_status: "running" });
+  const r = await generateToFile(job, args, dir);
+  const base = `hook-generator/${p.hook_id}/still-${p.beat_id}-${job.id}`;
+  await storageUpload(`${base}.${r.ext}`, r.outFile, MIME[r.ext] || "image/png", BOARD_BUCKET);
+  const preview = await cartoonPreview(r.outFile, dir, `${base}-preview.jpg`);
+  await updateHookgenBeat(p.beat_id, { still_path: `${base}.${r.ext}`, still_preview_path: preview, still_status: "done", still_error: null, still_credits: r.estimate });
+  return r;
+}
+
+async function hookgenClip(job, dir) {
+  const p = job.params;
+  const still = join(dir, `still.${extensionOf(p.still_path)}`);
+  await storageDownload(p.still_path, still, BOARD_BUCKET);
+  const args =
+    p.model === "seedance_2_0_mini"
+      ? ["seedance_2_0_mini", "--start-image", still, "--duration", String(clampInt(p.duration, 4, 15)), "--resolution", "480p", "--generate_audio", "false", "--aspect_ratio", "9:16", "--prompt", safePrompt(p.prompt)]
+      : veoArgs("veo3_1", { prompt: p.prompt, duration: p.duration }, false, still);
+  await updateHookgenBeat(p.beat_id, { clip_status: "running" });
+  const r = await generateToFile(job, args, dir);
+  const clipPath = `hook-generator/${p.hook_id}/clip-${p.beat_id}-${job.id}.mp4`;
+  await storageUpload(clipPath, r.outFile, "video/mp4", BOARD_BUCKET);
+  await updateHookgenBeat(p.beat_id, { clip_path: clipPath, clip_status: "done", clip_error: null, clip_credits: r.estimate });
+  return r;
+}
+
+const anthropicKey = () => rest("/app_settings?key=eq.anthropic_api_key&select=value").then((rows) => rows?.[0]?.value ?? null);
+
+const CHECK_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["touch", "notes"],
+  properties: {
+    touch: { type: "boolean", description: "A hand visibly touches the other person's head or hair in at least one frame" },
+    notes: { type: "string", description: "One short sentence on what the hands do" },
+  },
+};
+
+/**
+ * Did the clip keep the head tap? Six frames across the clip go to Claude in
+ * one 3x2 sheet. No touch: the clip is made again once (a new roll of the
+ * same prompt); after that it is kept and flagged, so a stubborn beat costs
+ * one extra clip at most.
+ */
+async function hookgenCheck(job, dir) {
+  const p = job.params;
+  const clip = join(dir, "clip.mp4");
+  await storageDownload(p.clip_path, clip, BOARD_BUCKET);
+  await updateHookgenBeat(p.beat_id, { check_status: "running" });
+  const dur = (await probeDuration(clip)) || 4;
+  const sheet = join(dir, "sheet.jpg");
+  const s = await run(FFMPEG, ["-y", "-loglevel", "error", "-i", clip, "-vf", `fps=6/${dur.toFixed(2)},scale=240:-2,tile=3x2`, "-frames:v", "1", "-q:v", "4", sheet], { timeoutMs: 2 * 60_000 });
+  if (s.code !== 0) throw new Error(`ffmpeg frames failed: ${s.err.slice(-300)}`);
+  const key = await anthropicKey();
+  if (!key) throw new Error("No Anthropic API key in Settings");
+  // Loaded here so the rest of the worker never depends on node_modules.
+  const { default: Anthropic } = await import("@anthropic-ai/sdk");
+  const client = new Anthropic({ apiKey: key });
+  await updateJob(job.id, { cli_command: "claude head-tap check (6 frames)" });
+  const response = await client.beta.messages.create({
+    model: "claude-opus-5-5",
+    max_tokens: 4000,
+    betas: ["server-side-fallback-2026-07-01"],
+    fallbacks: "default",
+    output_config: { effort: "low", format: { type: "json_schema", schema: CHECK_SCHEMA } },
+    system: "You review frames from short vertical ad clips where an expert should be touching a client's head: tapping, patting or parting the hair. Answer with JSON only.",
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: (await readFile(sheet)).toString("base64") } },
+          { type: "text", text: "Six frames from one clip, left to right then the second row, in time order. Does a hand visibly touch the other person's head or hair (tap, pat, part, lift) in any of them?" },
+        ],
+      },
+    ],
+  });
+  if (response.stop_reason === "refusal") throw new Error("Claude declined to check this clip");
+  const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
+  const out = JSON.parse(text);
+  const notes = String(out.notes ?? "").slice(0, 300);
+  if (!out.touch && Number(p.rerolls ?? 0) < HOOKGEN_REROLLS) {
+    await updateHookgenBeat(p.beat_id, { clip_status: null, clip_error: null, check_status: null, check_ok: false, check_notes: `No head tap, made again: ${notes}`, rerolls: Number(p.rerolls ?? 0) + 1 });
+    return "no head tap, re-rolled";
+  }
+  await updateHookgenBeat(p.beat_id, { check_status: "done", check_ok: !!out.touch, check_notes: notes });
+  return out.touch ? "head tap seen" : "no head tap, kept";
+}
+
+/**
+ * When a speaking clip's line ends: the last 50 ms window of the speech band
+ * (200-3500 Hz) within 12 dB of the clip's speech level (its 90th-percentile
+ * loudness). Room tone and breaths stay below that; ffmpeg's silencedetect
+ * does not work here (it always reports a silence end at the end of the file,
+ * and Veo's room tone sits above any fixed threshold). Null when there is no
+ * clear line.
+ */
+async function speechEnd(file) {
+  const af = "aresample=16000,highpass=f=200,lowpass=f=3500,asetnsamples=n=800:p=0,astats=metadata=1:reset=1,ametadata=mode=print:key=lavfi.astats.Overall.RMS_level:file=-";
+  const r = await run(FFMPEG, ["-hide_banner", "-nostats", "-loglevel", "error", "-i", file, "-af", af, "-f", "null", "-"], { timeoutMs: 60_000 });
+  const windows = [];
+  let t = null;
+  for (const line of r.out.split("\n")) {
+    const time = line.match(/pts_time:([\d.]+)/);
+    if (time) t = Number(time[1]);
+    const level = line.match(/RMS_level=(-?[\d.]+|-inf)/);
+    if (level && t !== null) windows.push({ t, db: level[1] === "-inf" ? -120 : Number(level[1]) });
+  }
+  if (windows.length < 10) return null;
+  const sorted = windows.map((w) => w.db).sort((a, b) => a - b);
+  const threshold = sorted[Math.floor(sorted.length * 0.9)] - 12;
+  const loud = windows.filter((w) => w.db >= threshold);
+  const end = loud.length ? loud[loud.length - 1].t + 0.05 : null;
+  return end !== null && end >= 0.8 ? end : null;
+}
+
+/**
+ * The hook: each beat's clip cut where its line ends (a little after; the
+ * planned length for silent clips), scaled to 720x1280, joined in order with
+ * the clips' own sound.
+ */
+async function hookgenJoin(job, dir) {
+  const hookId = job.params.hook_id;
+  const hook = (await rest(`/hookgen_hooks?id=eq.${hookId}&select=*`))?.[0];
+  if (!hook) throw new Error("Hook was deleted");
+  const beats = (await rest(`/hookgen_beats?hook_id=eq.${hookId}&select=*&order=idx`)) ?? [];
+  if (beats.length === 0 || beats.some((b) => !b.clip_path)) throw new Error("A beat has no clip yet");
+  await updateHookgenHook(hookId, { final_status: "running" });
+
+  const clips = [];
+  for (const [i, b] of beats.entries()) {
+    const file = join(dir, `clip-${i}.mp4`);
+    await storageDownload(b.clip_path, file, BOARD_BUCKET);
+    const dur = (await probeDuration(file)) || Number(b.clip_seconds) || 4;
+    const audio = (await run(FFPROBE, ["-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0", file], { timeoutMs: 60_000 })).out.trim().length > 0;
+    const end = audio && b.line.trim() ? await speechEnd(file) : null;
+    const len = Math.round(Math.min(dur, Math.max(1.2, end !== null ? end + 0.2 : Number(b.seconds) || 2)) * 100) / 100;
+    clips.push({ file, audio, len });
+  }
+  const withAudio = clips.some((c) => c.audio);
+  const filters = [];
+  for (const [i, c] of clips.entries()) {
+    filters.push(`[${i}:v]scale=${HOOKGEN_W}:${HOOKGEN_H}:force_original_aspect_ratio=increase,crop=${HOOKGEN_W}:${HOOKGEN_H},fps=30,setsar=1,trim=0:${c.len},setpts=PTS-STARTPTS[v${i}]`);
+    if (!withAudio) continue;
+    filters.push(c.audio ? `[${i}:a]aresample=44100,aformat=channel_layouts=stereo,apad,atrim=0:${c.len},asetpts=PTS-STARTPTS[a${i}]` : `aevalsrc=0:c=stereo:s=44100:d=${c.len}[a${i}]`);
+  }
+  const order = clips.map((_, i) => (withAudio ? `[v${i}][a${i}]` : `[v${i}]`)).join("");
+  filters.push(`${order}concat=n=${clips.length}:v=1:a=${withAudio ? 1 : 0}${withAudio ? "[v][a]" : "[v]"}`);
+  const out = join(dir, "hook.mp4");
+  const args = ["-y", "-loglevel", "error", ...clips.flatMap((c) => ["-i", c.file]), "-filter_complex", filters.join(";"), "-map", "[v]"];
+  if (withAudio) args.push("-map", "[a]", "-c:a", "aac", "-b:a", "160k");
+  args.push("-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out);
+  await updateJob(job.id, { cli_command: `ffmpeg join of ${clips.length} beats (${clips.map((c) => c.len).join(" + ")} s)` });
+  const r = await run(FFMPEG, args, { timeoutMs: 10 * 60_000 });
+  if (r.code !== 0) throw new Error(`ffmpeg join failed: ${r.err.slice(-400)}`);
+  const total = clips.reduce((a, c) => a + c.len, 0);
+  const finalPath = `hook-generator/${hookId}/final-${job.id}.mp4`;
+  await storageUpload(finalPath, out, "video/mp4", BOARD_BUCKET);
+  await updateHookgenHook(hookId, { final_path: finalPath, final_status: "done", final_error: null, final_seconds: Math.round(total * 10) / 10, status: "done" });
+  return `${clips.length} beats, ${total.toFixed(1)} s`;
+}
+
+const HOOKGEN_RUN = { hookgen_still: hookgenStill, hookgen_clip: hookgenClip, hookgen_check: hookgenCheck, hookgen_join: hookgenJoin };
+
 async function remakeClip(job, dir) {
   const p = job.params;
   const still = join(dir, `still.${extensionOf(p.still_path)}`);
@@ -914,6 +1144,11 @@ const REMAKE_FAIL = {
   cartoon_clip: (p, m) => updateCartoonBeat(p.beat_id, { clip_status: "failed", clip_error: m }),
   cartoon_voice: (p, m) => updateCartoonBeat(p.beat_id, { voice_status: "failed", voice_error: m }),
   cartoon_join: (p, m) => updateCartoonHook(p.hook_id, { final_status: "failed", final_error: m }),
+  hookgen_still: (p, m) => updateHookgenBeat(p.beat_id, { still_status: "failed", still_error: m }),
+  hookgen_clip: (p, m) => updateHookgenBeat(p.beat_id, { clip_status: "failed", clip_error: m }),
+  // A check that could not run does not hold the hook back: the join treats it as settled.
+  hookgen_check: (p, m) => updateHookgenBeat(p.beat_id, { check_status: "failed", check_error: m }),
+  hookgen_join: (p, m) => updateHookgenHook(p.hook_id, { final_status: "failed", final_error: m }),
 };
 
 async function processRemakeJob(job) {
@@ -930,6 +1165,7 @@ async function processRemakeJob(job) {
       : job.kind === "talking_head" ? await talkingHead(job, dir)
       : job.kind === "image_gen" ? await imageGen(job, dir)
       : CARTOON_RUN[job.kind] ? await CARTOON_RUN[job.kind](job, dir)
+      : HOOKGEN_RUN[job.kind] ? await HOOKGEN_RUN[job.kind](job, dir)
       : await remakeClip(job, dir);
     const patch = { status: "done", error: null, finished_at: new Date().toISOString() };
     if (r && typeof r === "object") Object.assign(patch, { cli_job_id: r.cliJobId ?? null, result_source_url: r.url ?? null });
@@ -950,6 +1186,7 @@ async function processRemakeJob(job) {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
     // A finished cartoon step usually unlocks the next one; queue it now rather than at the next sweep.
     if (job.kind.startsWith("cartoon_") && job.params?.hook_id) await cartoonAdvance(job.params.hook_id).catch(() => {});
+    if (job.kind.startsWith("hookgen_") && job.params?.hook_id) await hookgenAdvance(job.params.hook_id).catch(() => {});
   }
 }
 
@@ -1194,7 +1431,7 @@ async function boardFetch(job) {
 
 // ─── One job ───
 async function processJob(job) {
-  if (job.kind.startsWith("remake_") || job.kind.startsWith("cartoon_") || job.kind === "talking_head" || job.kind === "image_gen") return processRemakeJob(job);
+  if (job.kind.startsWith("remake_") || job.kind.startsWith("cartoon_") || job.kind.startsWith("hookgen_") || job.kind === "talking_head" || job.kind === "image_gen") return processRemakeJob(job);
   if (job.kind === "board_fetch") {
     log(`job ${job.id} board_fetch start`);
     try {
@@ -1367,6 +1604,7 @@ async function tick() {
   await refreshBalance();
   await heartbeat({ ...balance, active, inflight });
   await cartoonSweep().catch((e) => log("cartoon sweep:", e.message));
+  await hookgenSweep().catch((e) => log("hookgen sweep:", e.message));
   while (active < CONCURRENCY && !stopping) {
     const job = await claimJob();
     if (!job) break;

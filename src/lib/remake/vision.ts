@@ -25,7 +25,7 @@ function sniffImageType(buf: Buffer): "image/png" | "image/jpeg" | "image/webp" 
   return null;
 }
 
-async function imageBlock(url: string): Promise<Record<string, unknown> | null> {
+export async function imageBlock(url: string): Promise<Record<string, unknown> | null> {
   try {
     const res = await fetch(url);
     if (!res.ok) return null;

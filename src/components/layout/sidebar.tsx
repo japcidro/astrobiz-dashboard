@@ -31,6 +31,7 @@ import {
   Target,
   AlertTriangle,
   Sparkles,
+  Hand,
   FileSpreadsheet,
   Clapperboard,
   ShieldCheck,
@@ -395,6 +396,12 @@ const ownerNavEntries: NavEntry[] = [
         label: "Cartoon Hooks",
         href: "/owner/cartoon-hooks",
         icon: <Sparkles size={18} />,
+        roles: ownerRoles,
+      },
+      {
+        label: "Hook Generator",
+        href: "/owner/hook-generator",
+        icon: <Hand size={18} />,
         roles: ownerRoles,
       },
       {
