@@ -12,7 +12,9 @@ const IMAGE: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg",
  * POST { item_id, mime } — a one-time signed URL to upload an output video
  * straight to the bucket (too big for a Vercel function body).
  * POST { kind: "image", mime } — an image reference for an image card (board/images/).
- * POST { kind: "studio", mime } — an attachment for Image Studio (image-studio/uploads/).
+ * POST { kind: "video", mime } — a downloaded reference ad for a video card (board/videos/).
+ * POST { kind: "thumb", mime: "image/jpeg" } — that video's poster frame, grabbed in the browser (board/thumbs/).
+ * POST { kind: "studio", mime } — an attachment for the Static Ad Generator (image-studio/uploads/).
  */
 export async function POST(request: Request) {
   const auth = await requireBoardUser();
@@ -20,7 +22,14 @@ export async function POST(request: Request) {
 
   const b = (await request.json().catch(() => null)) as { item_id?: string; mime?: string; kind?: string } | null;
   let path: string;
-  if (b?.kind === "image" || b?.kind === "studio") {
+  if (b?.kind === "video") {
+    const ext = outputExtensionFor(b.mime ?? "");
+    if (!ext) return Response.json({ error: "Upload an MP4, MOV or WebM video" }, { status: 400 });
+    path = `board/videos/${randomUUID()}.${ext}`;
+  } else if (b?.kind === "thumb") {
+    if (b.mime !== "image/jpeg") return Response.json({ error: "Thumbnails are JPEG" }, { status: 400 });
+    path = `board/thumbs/${randomUUID()}.jpg`;
+  } else if (b?.kind === "image" || b?.kind === "studio") {
     const ext = IMAGE[b.mime ?? ""];
     if (!ext) return Response.json({ error: "Upload PNG, JPG or WebP images" }, { status: 400 });
     path = b.kind === "image" ? `board/images/${randomUUID()}.${ext}` : `image-studio/uploads/${randomUUID()}.${ext}`;

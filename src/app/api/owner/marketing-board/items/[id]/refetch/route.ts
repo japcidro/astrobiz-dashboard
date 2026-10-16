@@ -17,6 +17,8 @@ export async function POST(_request: Request, ctx: Ctx) {
   const { data: item } = await db.from("marketing_board_items").select("id, source_url, video_status").eq("id", id).maybeSingle();
   if (!item) return Response.json({ error: "Not found" }, { status: 404 });
   if (item.video_status === "saving") return Response.json({ error: "Already saving" }, { status: 409 });
+  // An uploaded file has no link to fetch from; it is already the saved copy.
+  if (item.source_url === "upload") return Response.json({ error: "This reference was uploaded; upload it again instead" }, { status: 400 });
 
   const { count } = await db
     .from("hook_studio_jobs")

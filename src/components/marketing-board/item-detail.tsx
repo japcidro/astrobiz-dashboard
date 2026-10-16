@@ -132,11 +132,13 @@ export function ItemDetail({
       <div className="flex items-start gap-3 p-4 border-b border-gray-800">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <SourceBadge type={item.source_type} />
+            <SourceBadge type={item.source_type}>{item.source_url === "upload" ? "Upload" : undefined}</SourceBadge>
             {item.author && <span className="text-xs text-gray-500 truncate">{item.author}</span>}
-            <a href={item.source_url} target="_blank" rel="noreferrer" className="text-xs text-gray-400 hover:text-white inline-flex items-center gap-1">
-              <ExternalLink size={11} /> original
-            </a>
+            {item.source_url !== "upload" && (
+              <a href={item.source_url} target="_blank" rel="noreferrer" className="text-xs text-gray-400 hover:text-white inline-flex items-center gap-1">
+                <ExternalLink size={11} /> original
+              </a>
+            )}
           </div>
           <input
             value={title}

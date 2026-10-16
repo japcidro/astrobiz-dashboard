@@ -57,7 +57,7 @@ export function BoardCard({
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5 flex-wrap">
-          <SourceBadge type={item.source_type} />
+          <SourceBadge type={item.source_type}>{item.source_url === "upload" ? "Upload" : undefined}</SourceBadge>
           {item.store && <span className="text-[10px] text-gray-500 truncate">{item.store}</span>}
         </div>
         <p className="text-sm text-white font-medium mt-1 leading-snug line-clamp-2">{item.title || item.source_url}</p>

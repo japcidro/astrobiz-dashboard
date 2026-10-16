@@ -65,12 +65,12 @@ export async function DELETE(_request: Request, ctx: Ctx) {
   const { db } = auth;
 
   const [{ data: item }, { data: outputs }] = await Promise.all([
-    db.from("marketing_board_items").select("video_path, thumb_path").eq("id", id).maybeSingle(),
+    db.from("marketing_board_items").select("video_path, thumb_path, image_path").eq("id", id).maybeSingle(),
     db.from("marketing_board_outputs").select("file_path").eq("item_id", id),
   ]);
   if (!item) return Response.json({ error: "Not found" }, { status: 404 });
 
-  const paths = [item.video_path, item.thumb_path, ...(outputs ?? []).map((o) => o.file_path)].filter(
+  const paths = [item.video_path, item.thumb_path, item.image_path, ...(outputs ?? []).map((o) => o.file_path)].filter(
     (p): p is string => typeof p === "string" && p.length > 0
   );
   if (paths.length) await db.storage.from(BOARD_BUCKET).remove(paths);
