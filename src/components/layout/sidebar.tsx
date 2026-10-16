@@ -410,6 +410,12 @@ const ownerNavEntries: NavEntry[] = [
         icon: <Images size={18} />,
         roles: ownerRoles,
       },
+      {
+        label: "Script Generator",
+        href: "/owner/script-generator",
+        icon: <FileText size={18} />,
+        roles: ownerRoles,
+      },
     ],
   },
   {

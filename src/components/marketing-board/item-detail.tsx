@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarClock, Download, ExternalLink, Film, Link2, Loader2, Paperclip, Send, Sparkles, Trash2, Upload, X } from "lucide-react";
+import { CalendarClock, Download, ExternalLink, FileText, Film, Link2, Loader2, Paperclip, Send, Sparkles, Trash2, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -211,6 +211,9 @@ export function ItemDetail({
             </span>
             <button type="button" onClick={startRemake} disabled={remaking} className="inline-flex items-center gap-1 font-semibold text-purple-300 hover:text-white cursor-pointer disabled:opacity-50">
               {remaking ? <Loader2 size={11} className="animate-spin" /> : <Film size={11} />} Open in Clipper
+            </button>
+            <button type="button" onClick={() => router.push(`/owner/script-generator?item=${item.id}`)} className="inline-flex items-center gap-1 font-semibold text-purple-300 hover:text-white cursor-pointer">
+              <FileText size={11} /> Adapt the script
             </button>
             <a href={downloadHref(item.video_url, item.title)} className="inline-flex items-center gap-1 font-semibold text-gray-300 hover:text-white">
               <Download size={11} /> Download

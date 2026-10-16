@@ -1,0 +1,523 @@
+"use client";
+
+import { AlertTriangle, Check, ChevronDown, ChevronUp, Copy, FileText, Film, Loader2, RefreshCw, Sparkles, Trash2, Trophy, X } from "lucide-react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { DnaView, ReferenceSource, RunView, ScriptRow, StudioPage } from "@/lib/script-studio/types";
+import { DEFAULT_VERSIONS } from "@/lib/script-studio/types";
+import { Button, ConfirmButton, Label, Panel, Pill, api, timeAgo } from "@/components/hook-studio/ui";
+
+const field = "w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-purple-500";
+
+/** One number for the card: the hook and the structure weigh double, since they are what won. */
+const overall = (s: ScriptRow) => {
+  const r = s.review;
+  if (!r || r.checking) return null;
+  const x = r.scores;
+  return Math.round(((x.hook * 2 + x.structure * 2 + x.language + x.compliance + x.brand) / 7) * 10) / 10;
+};
+
+const peso = (n: number | null) => (n === null ? "no buys" : `₱${n.toLocaleString("en-PH")}`);
+
+/**
+ * Script Generator: a winning video ad's script in, our brand's script out.
+ * The skill decodes what won in the reference, maps every beat onto our
+ * brand from the brand kit and the Winning DNA, writes the versions and
+ * reviews each with scores. Same structure and language as the reference;
+ * notes are the only steering.
+ */
+export function ScriptGenerator() {
+  const params = useSearchParams();
+  const itemId = params.get("item");
+  const [page, setPage] = useState<StudioPage | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [script, setScript] = useState("");
+  const [label, setLabel] = useState("");
+  const [source, setSource] = useState<ReferenceSource>("paste");
+  const [store, setStore] = useState("");
+  const [notes, setNotes] = useState("");
+  const [versions, setVersions] = useState(DEFAULT_VERSIONS);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [picker, setPicker] = useState<"board" | "winners" | null>(null);
+  const [transcribing, setTranscribing] = useState<string | null>(null);
+  const [openPlan, setOpenPlan] = useState<string | null>(null);
+  const [dnaOpen, setDnaOpen] = useState(false);
+  const [rewrite, setRewrite] = useState<{ id: string; note: string } | null>(null);
+  const [copied, setCopied] = useState<string | null>(null);
+  const seeded = useRef(false);
+  const reviewing = useRef(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const p = await api<StudioPage>(`/api/owner/script-generator${itemId ? `?item=${itemId}` : ""}`);
+      setPage(p);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load");
+    }
+  }, [itemId]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const transcribe = useCallback(
+    async (id: string) => {
+      setTranscribing(id);
+      setError(null);
+      try {
+        const r = await api<{ text: string; label: string; seconds: number | null }>("/api/owner/script-generator/transcribe", { method: "POST", body: JSON.stringify({ item_id: id }) });
+        setScript(r.text);
+        setLabel(r.label);
+        setSource("board");
+        setPicker(null);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Transcription failed");
+      } finally {
+        setTranscribing(null);
+      }
+    },
+    []
+  );
+
+  // First load: the brand from the card (FOLIQ otherwise), and a card's own video transcribed straight into the box.
+  useEffect(() => {
+    if (!page || seeded.current) return;
+    seeded.current = true;
+    setStore(page.item?.store ?? (page.stores.includes("FOLIQ") ? "FOLIQ" : page.stores[0] ?? ""));
+    if (page.item?.has_video && !script) void transcribe(page.item.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page]);
+
+  const runs = useMemo(() => page?.runs ?? [], [page]);
+  const writing = runs.some((r) => r.scripts.some((s) => s.status === "writing"));
+  const pendingReview = runs.some((r) => r.scripts.some((s) => s.status === "done" && (!s.review || s.review.checking)));
+
+  // Reviews run from here: the server scores whatever finished and has no review yet.
+  useEffect(() => {
+    if (!pendingReview || reviewing.current) return;
+    reviewing.current = true;
+    api<{ runs: RunView[] }>("/api/owner/script-generator/review", { method: "POST", body: JSON.stringify({ item_id: itemId }) })
+      .then((r) => setPage((p) => (p ? { ...p, runs: r.runs } : p)))
+      .catch(() => {})
+      .finally(() => {
+        reviewing.current = false;
+      });
+  }, [pendingReview, itemId, runs]);
+
+  useEffect(() => {
+    const t = setInterval(() => void refresh(), writing || pendingReview ? 10_000 : 60_000);
+    return () => clearInterval(t);
+  }, [refresh, writing, pendingReview]);
+
+  const dna: DnaView | null = store && page ? page.dna[store] ?? null : null;
+  const canRun = script.trim().length >= 40 && !!store && busy === null;
+
+  const adapt = async () => {
+    setBusy("run");
+    setError(null);
+    try {
+      const r = await api<{ id: string; runs: RunView[] }>("/api/owner/script-generator/adapt", {
+        method: "POST",
+        body: JSON.stringify({ item_id: itemId, store, script, label, source, notes, versions }),
+      });
+      setPage((p) => (p ? { ...p, runs: r.runs } : p));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start");
+      void refresh();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const rebuildDna = async () => {
+    setBusy("dna");
+    setError(null);
+    try {
+      const r = await api<{ dna: DnaView }>("/api/owner/script-generator/dna", { method: "POST", body: JSON.stringify({ store }) });
+      setPage((p) => (p ? { ...p, dna: { ...p.dna, [store]: r.dna } } : p));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not rebuild");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const act = async (id: string, body: Record<string, unknown>, key: string) => {
+    setBusy(key);
+    setError(null);
+    try {
+      await api(`/api/owner/script-generator/scripts/${id}`, { method: "POST", body: JSON.stringify(body) });
+      setRewrite(null);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not do that");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const removeRun = async (id: string) => {
+    setBusy("delete");
+    try {
+      await api(`/api/owner/script-generator/runs/${id}`, { method: "DELETE" });
+      setPage((p) => (p ? { ...p, runs: p.runs.filter((r) => r.id !== id) } : p));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const copy = async (s: ScriptRow) => {
+    try {
+      await navigator.clipboard.writeText(s.script_text);
+      setCopied(s.id);
+      setTimeout(() => setCopied((c) => (c === s.id ? null : c)), 1500);
+    } catch {
+      setError("Could not copy; select the text instead");
+    }
+  };
+
+  const pickWinner = (w: DnaView["winners"][number]) => {
+    setScript(w.transcript);
+    setLabel(`${store} winner · ${w.ad}`);
+    setSource("winner");
+    setPicker(null);
+  };
+
+  return (
+    <div className="max-w-7xl space-y-5">
+      <div>
+        <h1 className="text-2xl font-bold text-white inline-flex items-center gap-2">
+          <FileText size={22} className="text-purple-400" /> Script Generator
+        </h1>
+        <p className="text-sm text-gray-500 mt-1">
+          {page?.item ? (
+            <>
+              Adapting <span className="text-gray-300">{page.item.title || "a board video"}</span> ·{" "}
+              <Link href="/owner/marketing-board" className="text-purple-300 hover:text-white">
+                back to the board
+              </Link>
+            </>
+          ) : (
+            "A winning ad's script in, our script out. The skill decodes what won, keeps that structure and language, and swaps everything that is theirs for ours."
+          )}
+        </p>
+      </div>
+      {error && (
+        <p className="text-xs text-red-300 inline-flex items-center gap-1.5">
+          <AlertTriangle size={12} /> {error}
+        </p>
+      )}
+
+      <Panel>
+        <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-5 items-start">
+          <div>
+            <Label>Reference script · the ad we are adapting</Label>
+            <textarea
+              value={script}
+              onChange={(e) => {
+                setScript(e.target.value);
+                if (source !== "paste") setSource("paste");
+              }}
+              rows={14}
+              placeholder={transcribing ? "Transcribing the video…" : "Paste the reference ad's script here, or transcribe a board video below."}
+              className={`${field} resize-y leading-relaxed`}
+              disabled={!!transcribing}
+            />
+            <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+              <Button onClick={() => setPicker((v) => (v === "board" ? null : "board"))} busy={!!transcribing} className="!px-2.5 !py-1 !text-xs">
+                <Film size={12} /> Transcribe a board video
+              </Button>
+              <Button ghost onClick={() => setPicker((v) => (v === "winners" ? null : "winners"))} disabled={!dna || dna.winners.length === 0} className="!px-2.5 !py-1 !text-xs">
+                <Trophy size={12} /> One of our winners
+              </Button>
+              {script && (
+                <Button ghost onClick={() => { setScript(""); setLabel(""); setSource("paste"); }} className="!px-2.5 !py-1 !text-xs">
+                  <X size={12} /> Clear
+                </Button>
+              )}
+              {label && <span className="text-[11px] text-gray-500 truncate">{label}</span>}
+              {transcribing && (
+                <span className="text-[11px] text-purple-300 inline-flex items-center gap-1">
+                  <Loader2 size={11} className="animate-spin" /> Gemini is reading the video, about a minute
+                </span>
+              )}
+            </div>
+            {picker === "board" && (
+              <div className="mt-2 rounded-lg bg-gray-950 border border-gray-800 p-2 max-h-72 overflow-y-auto grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+                {(page?.board_videos ?? []).map((v) => (
+                  <button key={v.id} type="button" onClick={() => void transcribe(v.id)} className="text-left cursor-pointer hover:bg-white/5 rounded-md p-0.5" title={v.title}>
+                    {v.thumb_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={v.thumb_url} alt="" className="w-full aspect-[9/12] object-cover rounded" loading="lazy" />
+                    ) : (
+                      <div className="w-full aspect-[9/12] rounded bg-gray-900" />
+                    )}
+                    <p className="text-[9px] text-gray-400 truncate">{v.title}</p>
+                    <p className="text-[9px] text-gray-600 truncate">{[v.author, v.seconds ? `${v.seconds}s` : ""].filter(Boolean).join(" · ")}</p>
+                  </button>
+                ))}
+                {(page?.board_videos ?? []).length === 0 && (
+                  <p className="col-span-4 text-xs text-gray-500 p-2">
+                    No saved videos on the board yet. Paste a link on the{" "}
+                    <Link href="/owner/marketing-board" className="text-purple-300 hover:text-white">
+                      Marketing Board
+                    </Link>
+                    .
+                  </p>
+                )}
+              </div>
+            )}
+            {picker === "winners" && dna && (
+              <div className="mt-2 rounded-lg bg-gray-950 border border-gray-800 divide-y divide-gray-900 max-h-72 overflow-y-auto">
+                {dna.winners.map((w) => (
+                  <button key={w.ad_id} type="button" onClick={() => pickWinner(w)} className="w-full text-left cursor-pointer hover:bg-white/5 px-3 py-2 grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 items-center text-xs">
+                    <span className="text-gray-200 truncate">
+                      {w.hook || w.ad} <span className="text-gray-600">{w.seconds ? `· ${w.seconds}s` : ""}</span>
+                    </span>
+                    <span className="text-green-400 font-mono whitespace-nowrap">{w.purchases} buys</span>
+                    <span className="text-gray-400 font-mono whitespace-nowrap">{peso(w.cpa)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <Label>Adapt for</Label>
+              <select value={store} onChange={(e) => setStore(e.target.value)} className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-500">
+                {(page?.stores ?? []).map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+              {store && page && !page.profiled.includes(store) && <p className="text-[11px] text-amber-300 mt-1">No brand profile for {store} yet; the writer will only know the product&apos;s name. Add one in the Clipper&apos;s brand kit.</p>}
+            </div>
+            <div>
+              <Label>Notes · optional</Label>
+              <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} placeholder='e.g. "keep the barber pointing at the crown", "walang price", "gawing mas Tagalog yung hook", "mention the 2-bottle bundle"' className={`${field} resize-none`} />
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              <Button primary onClick={() => void adapt()} busy={busy === "run"} disabled={!canRun}>
+                <Sparkles size={13} /> Adapt for {store || "…"} · {versions} {versions === 1 ? "version" : "versions"}
+              </Button>
+              <div className="flex items-center gap-1 rounded-lg bg-gray-900 border border-gray-700 p-0.5">
+                {[1, 2, 4].map((n) => (
+                  <button key={n} type="button" onClick={() => setVersions(n)} className={`px-2.5 py-1 rounded-md text-xs font-semibold cursor-pointer ${versions === n ? "bg-gray-700 text-white" : "text-gray-400 hover:text-white"}`}>
+                    {n}
+                  </button>
+                ))}
+              </div>
+              <span className="text-xs text-gray-500">about 2 min: decode what won → map every beat → write → review</span>
+            </div>
+            <p className="text-[11px] text-gray-600">Same structure, same language mix and about the same length as the reference. Only what is theirs changes.</p>
+          </div>
+        </div>
+      </Panel>
+
+      {store && (
+        <Panel>
+          <div className="flex items-start gap-3 flex-wrap">
+            <div className="flex-1 min-w-64">
+              <Label>Winning DNA · {store}</Label>
+              {dna ? (
+                <p className="text-xs text-gray-400">
+                  {dna.ads_read > 0 ? `Built from ${dna.ads_read} of our deconstructed ads and their purchases` : "A hand-written first brief from our winning ads"} · {timeAgo(dna.built_at)}. The skill uses it to fill what the reference cannot give us: our mechanism, our proof, our offer wording.
+                </p>
+              ) : (
+                <p className="text-xs text-amber-300">No Winning DNA for {store} yet. Rebuild it from the deconstructed ads, or run without it (the writer then only has the brand profile).</p>
+              )}
+            </div>
+            <Button ghost onClick={() => void rebuildDna()} busy={busy === "dna"} className="!px-2.5 !py-1 !text-xs">
+              <RefreshCw size={12} /> Rebuild from winners
+            </Button>
+            {dna && (
+              <button type="button" onClick={() => setDnaOpen((v) => !v)} className="text-[11px] text-gray-400 hover:text-white inline-flex items-center gap-1 cursor-pointer">
+                {dnaOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />} Read the brief
+              </button>
+            )}
+          </div>
+          {dnaOpen && dna && <pre className="mt-3 text-xs text-gray-300 whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto rounded-lg bg-gray-950 border border-gray-800 p-3 font-sans">{dna.dna}</pre>}
+        </Panel>
+      )}
+
+      {page === null ? (
+        <Loader2 size={20} className="mx-auto my-10 animate-spin text-gray-500" />
+      ) : runs.length === 0 ? (
+        <Panel>
+          <p className="text-sm text-gray-500 text-center my-6">Nothing adapted yet.</p>
+        </Panel>
+      ) : (
+        runs.map((run) => {
+          const scored = run.scripts.filter((s) => overall(s) !== null && s.review?.ok !== false);
+          const bestId = scored.length > 1 ? scored.reduce((a, b) => (overall(a)! >= overall(b)! ? a : b)).id : null;
+          const planOpen = openPlan === run.id;
+          return (
+            <Panel key={run.id}>
+              <div className="flex items-start gap-3 flex-wrap mb-3">
+                <div className="flex-1 min-w-64">
+                  <p className="text-sm text-white">{run.study?.angle ?? (run.error ? "Could not read the reference" : "Reading the reference…")}</p>
+                  <p className="text-[11px] text-gray-500 mt-0.5">
+                    {timeAgo(run.created_at)} · {run.store}
+                    {run.reference_label ? ` · ${run.reference_label}` : ""}
+                    {run.study ? ` · ${run.study.language}` : ""}
+                    {run.plan ? ` · ${run.plan.target_seconds} s target` : ""}
+                    {run.notes ? ` · notes: ${run.notes}` : ""}
+                  </p>
+                  {run.error && <p className="text-[11px] text-red-300 mt-1">{run.error}</p>}
+                </div>
+                {run.study && run.plan && (
+                  <button type="button" onClick={() => setOpenPlan(planOpen ? null : run.id)} className="text-[11px] text-gray-400 hover:text-white inline-flex items-center gap-1 cursor-pointer">
+                    {planOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />} What the skill did
+                  </button>
+                )}
+                <ConfirmButton question="Delete run?" label="Delete" onConfirm={() => void removeRun(run.id)} className="text-[11px] text-gray-500 hover:text-red-300 inline-flex items-center gap-1 cursor-pointer">
+                  <Trash2 size={11} />
+                </ConfirmButton>
+              </div>
+
+              {planOpen && run.study && run.plan && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4 text-xs">
+                  <div className="rounded-lg bg-gray-950 border border-gray-800 p-3 space-y-1.5">
+                    <p className="text-white font-semibold">1 · What won in the reference</p>
+                    <p className="text-gray-400"><span className="text-gray-500">Hook move:</span> {run.study.hook_move}</p>
+                    <p className="text-gray-400"><span className="text-gray-500">Language:</span> {run.study.language} · <span className="text-gray-500">Tone:</span> {run.study.tone}</p>
+                    <p className="text-gray-400"><span className="text-gray-500">Why it works:</span> {run.study.why_it_works}</p>
+                    <div className="pt-1">
+                      {run.study.structure.map((b, i) => (
+                        <p key={i} className="text-gray-400 border-t border-gray-900 py-1">
+                          <span className="text-purple-300 font-mono">{b.range || `${i + 1}`}</span> <span className="text-white">{b.role}</span> · {b.summary}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-gray-950 border border-gray-800 p-3 space-y-1.5">
+                    <p className="text-white font-semibold">2 · Their line → our line</p>
+                    <div className="max-h-96 overflow-y-auto">
+                      {run.plan.beats.map((b, i) => (
+                        <div key={i} className="border-t border-gray-900 py-1.5">
+                          <p className="text-purple-300 font-semibold">{b.role}</p>
+                          <p className="text-gray-500">{b.theirs}</p>
+                          <p className="text-white mt-0.5">{b.ours}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-gray-950 border border-gray-800 p-3 space-y-2">
+                    <p className="text-white font-semibold">3 · Kept, replaced, added</p>
+                    <div>
+                      <p className="text-gray-500">Kept from the reference</p>
+                      <ul className="list-disc pl-4 text-gray-400">{run.plan.kept.map((k, i) => <li key={i}>{k}</li>)}</ul>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Theirs, replaced</p>
+                      <ul className="list-disc pl-4 text-gray-400">{run.study.theirs_to_replace.map((k, i) => <li key={i}>{k}</li>)}</ul>
+                    </div>
+                    <div>
+                      <p className="text-gray-500">Filled from the Winning DNA</p>
+                      <ul className="list-disc pl-4 text-gray-400">{run.plan.added_from_dna.length ? run.plan.added_from_dna.map((k, i) => <li key={i}>{k}</li>) : <li>nothing; the reference had every beat</li>}</ul>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid gap-3 grid-cols-1 md:grid-cols-2">
+                {run.scripts.map((s) => {
+                  const score = overall(s);
+                  const checking = s.status === "done" && (!s.review || s.review.checking);
+                  const rewriting = rewrite?.id === s.id;
+                  return (
+                    <div key={s.id} className="rounded-xl border border-gray-800 bg-gray-950 p-3 space-y-2 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {score !== null && <span className="rounded-full bg-black border border-gray-700 text-white text-[11px] font-bold px-2 py-0.5 font-mono">{score.toFixed(1)}</span>}
+                        {bestId === s.id && <span className="rounded-full bg-green-500 text-green-950 text-[10px] font-extrabold px-2 py-0.5">BEST</span>}
+                        {s.review?.ok === false && !s.review.checking && <span className="rounded-full bg-amber-500 text-amber-950 text-[10px] font-extrabold px-2 py-0.5">NEEDS A FIX</span>}
+                        {s.attempts > 1 && s.status === "done" && <Pill tone="muted">rewritten once by the reviewer</Pill>}
+                        {s.kept && (
+                          <span className="text-green-400 text-[11px] inline-flex items-center gap-1">
+                            <Check size={11} /> on the board
+                          </span>
+                        )}
+                      </div>
+                      {s.status === "writing" ? (
+                        <div className="py-10 text-center text-xs text-purple-300 inline-flex w-full items-center justify-center gap-2">
+                          <Loader2 size={14} className="animate-spin" /> Writing version {s.idx + 1}…
+                        </div>
+                      ) : s.status === "failed" ? (
+                        <p className="text-xs text-red-300 py-6">{s.error ?? "Failed"}</p>
+                      ) : (
+                        <>
+                          <div>
+                            <p className="text-sm text-white font-semibold">{s.title || `Version ${s.idx + 1}`}</p>
+                            <p className="text-[11px] text-gray-500">
+                              {s.seconds ? `${s.seconds} s` : ""}
+                              {s.beats.length ? ` · ${s.beats.length} beats` : ""}
+                            </p>
+                          </div>
+                          <p className="text-xs text-white font-semibold bg-gray-900 border-l-2 border-purple-500 rounded px-2 py-1.5">{s.hook}</p>
+                          <div className="max-h-80 overflow-y-auto space-y-1.5 pr-1">
+                            {s.beats.map((b, i) => (
+                              <div key={i} className="grid grid-cols-[52px_minmax(0,1fr)] gap-2 text-xs">
+                                <span className="font-mono text-[10px] text-purple-300 pt-0.5">{b.t || `${i + 1}`}</span>
+                                <div className="min-w-0">
+                                  <p className="text-gray-200 whitespace-pre-wrap">{b.line}</p>
+                                  {b.on_screen && <p className="text-[10px] text-amber-300">ON SCREEN: {b.on_screen}</p>}
+                                  {b.visual && <p className="text-[10px] text-gray-500">{b.visual}</p>}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                          {s.review && (
+                            <p className={`text-[11px] inline-flex items-start gap-1 ${checking ? "text-gray-500" : s.review.ok ? "text-green-400" : "text-amber-300"}`}>
+                              {checking ? <Loader2 size={10} className="animate-spin mt-0.5" /> : s.review.ok ? <Check size={10} className="mt-0.5" /> : <AlertTriangle size={10} className="mt-0.5" />}
+                              <span title={s.review.notes}>
+                                {checking ? "Reviewing…" : s.review.notes}
+                                {!checking ? ` (hook ${s.review.scores.hook}, structure ${s.review.scores.structure}, language ${s.review.scores.language}, compliance ${s.review.scores.compliance}, brand ${s.review.scores.brand})` : ""}
+                              </span>
+                            </p>
+                          )}
+                          {!s.review && <p className="text-[11px] text-gray-500 inline-flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Waiting for the reviewer</p>}
+                          <div className="flex items-center gap-3 flex-wrap text-[11px]">
+                            <button type="button" onClick={() => void copy(s)} className="text-gray-300 hover:text-white inline-flex items-center gap-1 cursor-pointer">
+                              {copied === s.id ? <Check size={11} /> : <Copy size={11} />} {copied === s.id ? "Copied" : "Copy"}
+                            </button>
+                            {run.item_id && (
+                              <button type="button" onClick={() => void act(s.id, { action: "keep" }, `keep:${s.id}`)} disabled={s.kept || busy !== null} className={`inline-flex items-center gap-1 cursor-pointer ${s.kept ? "text-green-400" : "text-purple-300 hover:text-white"}`}>
+                                <Check size={11} /> {s.kept ? "Kept" : "Keep on the board"}
+                              </button>
+                            )}
+                            {!rewriting && (
+                              <button type="button" onClick={() => setRewrite({ id: s.id, note: "" })} disabled={busy !== null} className="text-purple-300 hover:text-white cursor-pointer">
+                                Rewrite with a note
+                              </button>
+                            )}
+                          </div>
+                          {rewriting && (
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <input autoFocus value={rewrite.note} onChange={(e) => setRewrite({ id: s.id, note: e.target.value })} placeholder="What should change? e.g. shorter hook, more Tagalog, mention the bundle" className={`${field} flex-1 min-w-48 !py-1.5 !text-xs`} onKeyDown={(e) => e.key === "Enter" && rewrite.note.trim() && void act(s.id, { action: "rewrite", note: rewrite.note }, `rewrite:${s.id}`)} />
+                              <Button primary onClick={() => void act(s.id, { action: "rewrite", note: rewrite.note }, `rewrite:${s.id}`)} busy={busy === `rewrite:${s.id}`} disabled={!rewrite.note.trim() || busy !== null} className="!px-2.5 !py-1 !text-xs">
+                                Rewrite
+                              </Button>
+                              <Button ghost onClick={() => setRewrite(null)} className="!px-2.5 !py-1 !text-xs">
+                                Cancel
+                              </Button>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </Panel>
+          );
+        })
+      )}
+    </div>
+  );
+}
