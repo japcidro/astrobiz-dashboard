@@ -42,5 +42,6 @@ export async function POST(request: Request) {
   }
   const { data, error } = await auth.db.storage.from(BOARD_BUCKET).createSignedUploadUrl(path);
   if (error || !data) return Response.json({ error: error?.message ?? "Could not create upload URL" }, { status: 500 });
-  return Response.json({ path: data.path, token: data.token, bucket: BOARD_BUCKET });
+  // url: the full signed upload URL, for a plain PUT that can report progress.
+  return Response.json({ path: data.path, token: data.token, bucket: BOARD_BUCKET, url: data.signedUrl });
 }

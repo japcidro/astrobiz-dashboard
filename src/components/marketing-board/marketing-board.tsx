@@ -1,9 +1,8 @@
 "use client";
 
 import { AlertTriangle, Archive, Check, Images, LayoutGrid, Link as LinkIcon, Loader2, Plus, Search, Upload, Video, Wifi, WifiOff } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import type { WorkerStatus } from "@/lib/hook-studio/types";
 import {
   type ItemKind,
@@ -20,12 +19,9 @@ import { Button, Pill, api } from "@/components/hook-studio/ui";
 import { ArchiveView } from "./archive-view";
 import { BoardCard } from "./board-card";
 import { ItemDetail } from "./item-detail";
-import { probeVideoFile, videoMimeOf } from "./video-probe";
+import { DropOverlay, UploadPanel, useFileDrop, useUploadQueue } from "./upload-queue";
 
 const DONE_PREVIEW = 12;
-const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
-/** The bucket's limit for one file. */
-const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
 const WEEK_MS = 7 * 86400_000;
 
 /** Counts toward "done this week": finished in the last 7 days. */
@@ -74,10 +70,7 @@ export function MarketingBoard() {
   const [archiveQ, setArchiveQ] = useState("");
   const [archiveSearch, setArchiveSearch] = useState("");
   const archiveSeq = useRef(0);
-  const [uploading, setUploading] = useState<{ done: number; total: number } | null>(null);
-  const [filesOver, setFilesOver] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const dragDepth = useRef(0);
 
   const refresh = useCallback(async () => {
     try {
@@ -227,63 +220,20 @@ export function MarketingBoard() {
   );
   const counts = useMemo(() => ({ video: items.filter((i) => (i.kind ?? "video") === "video").length, image: items.filter((i) => i.kind === "image").length }), [items]);
 
-  /**
-   * Upload references straight to the bucket, then make a card for each:
-   * images for the Images tab, or videos for the Videos tab (ads downloaded
-   * from a spy tool whose links need its login). A video's poster frame,
-   * length and size are read in the browser, so the card is ready at once.
-   */
-  const uploadFiles = async (list: FileList | File[], kind: ItemKind) => {
-    const picked = Array.from(list);
-    const typed = picked.map((f) => ({ file: f, mime: kind === "image" ? (IMAGE_TYPES.includes(f.type) ? f.type : null) : videoMimeOf(f) }));
-    const files = typed.filter((t): t is { file: File; mime: string } => !!t.mime && t.file.size <= MAX_UPLOAD_BYTES);
-    const tooBig = typed.filter((t) => t.mime && t.file.size > MAX_UPLOAD_BYTES).length;
-    if (files.length === 0) {
-      setError(tooBig ? "Files must be under 500 MB" : kind === "image" ? "Drop PNG, JPG or WebP images" : "Drop MP4, MOV or WebM videos");
-      return;
-    }
-    setError(null);
-    setUploading({ done: 0, total: files.length });
-    const supabase = createClient();
-    const sign = (body: Record<string, string>) =>
-      api<{ path: string; token: string; bucket: string }>("/api/owner/marketing-board/upload-url", { method: "POST", body: JSON.stringify(body) });
-    const made: BoardItem[] = [];
-    let failed = 0;
-    for (const { file, mime } of files) {
-      try {
-        const name = file.name.replace(/\.[a-z0-9]+$/i, "");
-        const target = await sign({ kind, mime });
-        const up = await supabase.storage.from(target.bucket).uploadToSignedUrl(target.path, target.token, file, { contentType: mime });
-        if (up.error) throw new Error(up.error.message);
-        let body: Record<string, unknown> = { upload_path: target.path, name, store: filterStore || undefined };
-        if (kind === "video") {
-          const probe = await probeVideoFile(file);
-          let thumbPath: string | null = null;
-          if (probe.thumb) {
-            // A card without a poster still works, so a failed poster never fails the upload.
-            try {
-              const t = await sign({ kind: "thumb", mime: "image/jpeg" });
-              const tu = await supabase.storage.from(t.bucket).uploadToSignedUrl(t.path, t.token, probe.thumb, { contentType: "image/jpeg" });
-              if (!tu.error) thumbPath = t.path;
-            } catch {}
-          }
-          body = { ...body, thumb_path: thumbPath, duration: probe.duration, width: probe.width, height: probe.height };
-        }
-        const r = await api<{ item: BoardItem }>("/api/owner/marketing-board", { method: "POST", body: JSON.stringify(body) });
-        made.push(r.item);
-      } catch (e) {
-        failed += 1;
-        setError(e instanceof Error ? e.message : "Upload failed");
-      } finally {
-        setUploading((u) => (u ? { ...u, done: u.done + 1 } : u));
-      }
-    }
-    if (made.length) setView((v) => (v ? { ...v, items: [...made, ...v.items] } : v));
-    setUploading(null);
+  // Uploads: a queue (three at a time, progress per file, retry), fed by
+  // the Upload button or by dropping files anywhere on the page.
+  const addUploaded = useCallback((item: BoardItem) => setView((v) => (v && !v.items.some((i) => i.id === item.id) ? { ...v, items: [item, ...v.items] } : v)), []);
+  const uploads = useUploadQueue(addUploaded);
+  const queueFiles = (list: FileList | File[]) => {
+    const r = uploads.add(list, filterStore || undefined);
+    const skipped = [r.wrongType ? `${r.wrongType} not a video or image` : "", r.tooBig ? `${r.tooBig} over 500 MB` : ""].filter(Boolean).join(", ");
+    setError(skipped ? `Skipped ${skipped}` : null);
+    if (r.added && showArchive) setShowArchive(false);
     if (fileRef.current) fileRef.current.value = "";
-    const skipped = picked.length - files.length;
-    if ((failed || skipped) && made.length) setError([failed ? `${failed} failed` : "", skipped ? `${skipped} skipped (wrong type or over 500 MB)` : ""].filter(Boolean).join(", "));
   };
+  const fileDragOver = useFileDrop(queueFiles);
+  const uploadingCount = uploads.rows.filter((r) => r.status === "waiting" || r.status === "uploading" || r.status === "saving").length;
+
   const columns = useMemo(() => {
     const by: Record<BoardStatus, BoardItem[]> = { todo: [], in_progress: [], done: [] };
     for (const i of filtered) by[i.status].push(i);
@@ -375,11 +325,9 @@ export function MarketingBoard() {
           </Button>
           <Button
             onClick={() => fileRef.current?.click()}
-            busy={uploading !== null}
-            disabled={uploading !== null}
-            title={tab === "image" ? "Add image references from your files (or drop them on the To do column)" : "Add ads you downloaded, e.g. from a spy tool whose links need its login (or drop them on the To do column)"}
+            title={tab === "image" ? "Add image references from your files, or drop them anywhere on the page" : "Add ads you downloaded, e.g. from a spy tool whose links need its login, or drop them anywhere on the page"}
           >
-            <Upload size={14} /> {uploading ? `Uploading ${uploading.done}/${uploading.total}…` : tab === "image" ? "Upload images" : "Upload videos"}
+            {uploadingCount > 0 ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {tab === "image" ? "Upload images" : "Upload videos"}
           </Button>
           <input
             key={tab}
@@ -388,7 +336,7 @@ export function MarketingBoard() {
             accept={tab === "image" ? "image/png,image/jpeg,image/webp" : "video/mp4,video/quicktime,video/webm,.mp4,.m4v,.mov,.webm"}
             multiple
             className="hidden"
-            onChange={(e) => e.target.files?.length && void uploadFiles(e.target.files, tab)}
+            onChange={(e) => e.target.files?.length && queueFiles(e.target.files)}
           />
         </form>
       )}
@@ -465,27 +413,13 @@ export function MarketingBoard() {
                   const id = e.dataTransfer.getData("text/plain") || dragId;
                   setDropTarget(null);
                   setDragId(null);
+                  // Files dropped from the desktop are picked up by the page-wide drop.
                   if (id) void move(id, status);
-                  else if (status === "todo" && e.dataTransfer.files?.length) {
-                    dragDepth.current = 0;
-                    setFilesOver(false);
-                    void uploadFiles(e.dataTransfer.files, tab);
-                  }
                 }}
-                onDragEnter={(e: DragEvent) => {
-                  if (status !== "todo" || !Array.from(e.dataTransfer.types).includes("Files")) return;
-                  dragDepth.current += 1;
-                  setFilesOver(true);
-                }}
-                onDragLeave={(e: DragEvent) => {
+                onDragLeave={() => {
                   if (dropTarget === status) setDropTarget(null);
-                  if (status !== "todo" || !Array.from(e.dataTransfer.types).includes("Files")) return;
-                  dragDepth.current = Math.max(0, dragDepth.current - 1);
-                  if (dragDepth.current === 0) setFilesOver(false);
                 }}
-                className={`rounded-xl border p-2.5 min-h-[160px] transition-colors ${
-                  over || (filesOver && status === "todo") ? "border-purple-500 bg-purple-500/5" : "border-gray-800 bg-gray-900/40"
-                }`}
+                className={`rounded-xl border p-2.5 min-h-[160px] transition-colors ${over ? "border-purple-500 bg-purple-500/5" : "border-gray-800 bg-gray-900/40"}`}
               >
                 <header className="flex items-center justify-between px-1 pb-2">
                   <h2 className="text-xs font-semibold uppercase tracking-wider text-gray-400">{STATUS_LABEL[status]}</h2>
@@ -503,11 +437,11 @@ export function MarketingBoard() {
                   ))}
                   {shown.length === 0 && (
                     <p className="text-xs text-gray-600 text-center py-6">
-                      {status === "todo" ? `Paste a link above, or drop ${tab === "image" ? "images" : "videos"} here.` : "Drag a card here."}
+                      {status === "todo" ? `Paste a link above, or drop ${tab === "image" ? "images" : "videos"} anywhere on the page.` : "Drag a card here."}
                     </p>
                   )}
                   {status === "todo" && shown.length > 0 && (
-                    <p className={`text-[11px] text-center py-2 rounded-lg border border-dashed ${filesOver ? "border-purple-500 text-purple-200" : "border-gray-800 text-gray-600"}`}>Drop {tab === "image" ? "images" : "videos"} here to add them</p>
+                    <p className="text-[11px] text-center py-2 rounded-lg border border-dashed border-gray-800 text-gray-600">Drop videos or images anywhere on the page to add them, as many as you like</p>
                   )}
                   {status === "done" && list.length > DONE_PREVIEW && (
                     <button type="button" onClick={() => setShowAllDone((v) => !v)} className="w-full text-xs text-gray-400 hover:text-white py-2 cursor-pointer">
@@ -529,6 +463,9 @@ export function MarketingBoard() {
           })}
         </div>
       )}
+
+      <DropOverlay show={fileDragOver} />
+      <UploadPanel rows={uploads.rows} onRetry={uploads.retry} onDismiss={uploads.dismiss} onClear={uploads.clear} />
 
       {selected && view && (
         <>
