@@ -11,6 +11,28 @@ export const fmtWhen = (iso: string) =>
     minute: "2-digit",
   });
 
+/** "1:14 PM" in Manila time. */
+export const fmtTime = (iso: string) =>
+  new Date(iso).toLocaleTimeString("en-PH", { timeZone: "Asia/Manila", hour: "numeric", minute: "2-digit" });
+
+/** "2026-10-15": the Manila calendar day an instant falls on. */
+export const manilaDay = (iso: string | number) => new Date(iso).toLocaleDateString("en-CA", { timeZone: "Asia/Manila" });
+
+/** "Today", "Yesterday", or "Wed, Oct 15" (with the year when it is not this year) for a Manila day. */
+export const fmtDay = (ymd: string) => {
+  const today = manilaDay(Date.now());
+  if (ymd === today) return "Today";
+  if (ymd === manilaDay(Date.now() - 86400_000)) return "Yesterday";
+  const d = new Date(`${ymd}T12:00:00+08:00`);
+  return d.toLocaleDateString("en-PH", {
+    timeZone: "Asia/Manila",
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    ...(ymd.slice(0, 4) !== today.slice(0, 4) ? { year: "numeric" } : {}),
+  });
+};
+
 /** "Fri, Oct 17" for a date-only due date. */
 export const fmtDue = (ymd: string) =>
   new Date(`${ymd}T00:00:00`).toLocaleDateString("en-PH", { weekday: "short", month: "short", day: "numeric" });

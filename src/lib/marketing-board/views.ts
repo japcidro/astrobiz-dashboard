@@ -1,13 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { signBoardPaths } from "./storage";
-import type {
-  BoardItem,
-  BoardView,
-  CommentRow,
-  ItemKind,
-  ItemRow,
-  OutputRow,
-  Person,
+import {
+  archiveCutoff,
+  type ArchivePage,
+  type BoardItem,
+  type BoardView,
+  type CommentRow,
+  type ItemKind,
+  type ItemRow,
+  type OutputRow,
+  type Person,
 } from "./types";
 
 const MAX_ITEMS = 400;
@@ -69,16 +71,9 @@ function assemble(
   }));
 }
 
-/** The whole board: every card with its notes and outputs, URLs signed. */
-export async function loadBoard(db: SupabaseClient): Promise<BoardView> {
-  const [{ data: itemRows }, { names, people }, stores] = await Promise.all([
-    db.from("marketing_board_items").select("*").order("created_at", { ascending: false }).limit(MAX_ITEMS),
-    loadNames(db),
-    loadStores(db),
-  ]);
-  const items = (itemRows ?? []) as ItemRow[];
+/** Notes, outputs and signed URLs for a set of cards. */
+async function hydrate(db: SupabaseClient, items: ItemRow[], names: NameMap): Promise<BoardItem[]> {
   const ids = items.map((i) => i.id);
-
   const [{ data: commentRows }, { data: outputRows }] = ids.length
     ? await Promise.all([
         db.from("marketing_board_comments").select("*").in("item_id", ids).order("created_at", { ascending: true }),
@@ -92,24 +87,86 @@ export async function loadBoard(db: SupabaseClient): Promise<BoardView> {
     ...items.flatMap((i) => [i.video_path, i.thumb_path, i.image_path]),
     ...outputs.map((o) => o.file_path),
   ]);
+  return assemble(items, comments, outputs, names, signed);
+}
 
-  return { items: assemble(items, comments, outputs, names, signed), people, stores };
+/**
+ * Archived cards: Done, and finished at or before the cutoff. A Done card
+ * with no done_at (none today) counts as archived rather than vanishing.
+ */
+function archived(db: SupabaseClient, cutoff: string, select = "*", opts?: { count: "exact"; head?: boolean }) {
+  return db
+    .from("marketing_board_items")
+    .select(select, opts)
+    .eq("status", "done")
+    .or(`done_at.lte."${cutoff}",done_at.is.null`);
+}
+
+const countOf = (r: { count: number | null }) => r.count ?? 0;
+
+/**
+ * The live board: To do, In progress, and cards done in the last
+ * ARCHIVE_AFTER_HOURS, with their notes and outputs and URLs signed. Older
+ * Done cards live in the Archive (loadArchive) and are only counted here.
+ */
+export async function loadBoard(db: SupabaseClient): Promise<BoardView> {
+  const cutoff = archiveCutoff();
+  const weekAgo = new Date(Date.now() - 7 * 86400_000).toISOString();
+  const [{ data: itemRows }, { names, people }, stores, videoArchived, imageArchived, doneWeek] = await Promise.all([
+    db
+      .from("marketing_board_items")
+      .select("*")
+      .or(`status.neq.done,done_at.gt."${cutoff}"`)
+      .order("created_at", { ascending: false })
+      .limit(MAX_ITEMS),
+    loadNames(db),
+    loadStores(db),
+    archived(db, cutoff, "id", { count: "exact", head: true }).eq("kind", "video"),
+    archived(db, cutoff, "id", { count: "exact", head: true }).eq("kind", "image"),
+    db.from("marketing_board_items").select("id", { count: "exact", head: true }).eq("status", "done").gt("done_at", weekAgo),
+  ]);
+  const items = await hydrate(db, (itemRows ?? []) as ItemRow[], names);
+  return {
+    items,
+    people,
+    stores,
+    archived: { video: countOf(videoArchived), image: countOf(imageArchived) },
+    done_this_week: countOf(doneWeek),
+  };
+}
+
+export const ARCHIVE_PAGE = 48;
+
+/** One page of the Archive for a tab, newest finished first, with the board's filters. */
+export async function loadArchive(
+  db: SupabaseClient,
+  opts: { kind: ItemKind; assignee?: string | null; store?: string | null; q?: string | null; offset?: number }
+): Promise<ArchivePage> {
+  const offset = Math.max(0, opts.offset ?? 0);
+  let query = archived(db, archiveCutoff(), "*", { count: "exact" }).eq("kind", opts.kind);
+  if (opts.assignee) query = query.eq("assignee_id", opts.assignee);
+  if (opts.store) query = query.eq("store", opts.store);
+  if (opts.q) query = query.ilike("title", `%${opts.q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`);
+  const [{ data, count, error }, { names }] = await Promise.all([
+    query
+      .order("done_at", { ascending: false, nullsFirst: false })
+      .order("id", { ascending: true })
+      .range(offset, offset + ARCHIVE_PAGE - 1),
+    loadNames(db),
+  ]);
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as unknown as ItemRow[];
+  return { items: await hydrate(db, rows, names), total: count ?? rows.length };
 }
 
 /** One card, after a change. */
 export async function loadItem(db: SupabaseClient, id: string): Promise<BoardItem | null> {
-  const { data: row } = await db.from("marketing_board_items").select("*").eq("id", id).maybeSingle();
-  if (!row) return null;
-  const item = row as ItemRow;
-  const [{ data: commentRows }, { data: outputRows }, { names }] = await Promise.all([
-    db.from("marketing_board_comments").select("*").eq("item_id", id).order("created_at", { ascending: true }),
-    db.from("marketing_board_outputs").select("*").eq("item_id", id).order("created_at", { ascending: true }),
+  const [{ data: row }, { names }] = await Promise.all([
+    db.from("marketing_board_items").select("*").eq("id", id).maybeSingle(),
     loadNames(db),
   ]);
-  const comments = (commentRows ?? []) as CommentRow[];
-  const outputs = (outputRows ?? []) as OutputRow[];
-  const signed = await signBoardPaths(db, [item.video_path, item.thumb_path, item.image_path, ...outputs.map((o) => o.file_path)]);
-  return assemble([item], comments, outputs, names, signed)[0];
+  if (!row) return null;
+  return (await hydrate(db, [row as ItemRow], names))[0];
 }
 
 /** Queue the Mac worker to save a copy of the reference: the video with yt-dlp, or the image behind a link. */

@@ -9,11 +9,14 @@ export function BoardCard({
   selected,
   onSelect,
   onDragStart,
+  doneLabel = "done",
 }: {
   item: BoardItem;
   selected: boolean;
   onSelect: () => void;
-  onDragStart: () => void;
+  /** Omit to make the card click-only (the Archive has nowhere to drop it). */
+  onDragStart?: () => void;
+  doneLabel?: string;
 }) {
   const isImage = item.kind === "image";
   const thumb = (isImage ? item.image_url : null) ?? item.thumb_url ?? item.external_thumbnail_url;
@@ -21,8 +24,9 @@ export function BoardCard({
   return (
     <button
       type="button"
-      draggable
+      draggable={!!onDragStart}
       onDragStart={(e) => {
+        if (!onDragStart) return;
         e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData("text/plain", item.id);
         onDragStart();
@@ -79,7 +83,7 @@ export function BoardCard({
           )}
           {item.status === "done" && !scheduled && (
             <span className="inline-flex items-center gap-1 text-green-400">
-              <Check size={10} /> done
+              <Check size={10} /> {doneLabel}
             </span>
           )}
         </p>

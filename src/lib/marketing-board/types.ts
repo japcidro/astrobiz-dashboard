@@ -6,6 +6,21 @@ export const STATUS_LABEL: Record<BoardStatus, string> = {
   done: "Done",
 };
 
+/**
+ * A card stays in Done this long, then leaves the board for the Archive so
+ * the board only shows live work. Nothing is written when it happens: the
+ * archive is every Done card whose done_at is older than this, so moving a
+ * card back to To do or In progress takes it out again.
+ */
+export const ARCHIVE_AFTER_HOURS = 12;
+export const ARCHIVE_AFTER_MS = ARCHIVE_AFTER_HOURS * 3600_000;
+
+/** The done_at at or before which a Done card is archived. */
+export const archiveCutoff = (now = Date.now()) => new Date(now - ARCHIVE_AFTER_MS).toISOString();
+
+export const isArchived = (item: { status: BoardStatus; done_at: string | null }, now = Date.now()) =>
+  item.status === "done" && (!item.done_at || new Date(item.done_at).getTime() <= now - ARCHIVE_AFTER_MS);
+
 export type SourceType = "tiktok" | "fb_ads_library" | "facebook" | "instagram" | "youtube" | "other";
 export const SOURCE_LABEL: Record<SourceType, string> = {
   tiktok: "TikTok",
@@ -100,9 +115,21 @@ export interface Person {
 }
 
 export interface BoardView {
+  /** Live cards: To do, In progress, and Done for the last ARCHIVE_AFTER_HOURS. */
   items: BoardItem[];
   people: Person[];
   stores: string[];
+  /** Archived cards per tab. */
+  archived: Record<ItemKind, number>;
+  /** Cards finished in the last 7 days, archived ones included. */
+  done_this_week: number;
+}
+
+/** One page of the Archive, newest finished first. */
+export interface ArchivePage {
+  items: BoardItem[];
+  /** Matching archived cards, all pages. */
+  total: number;
 }
 
 /** A submitted ad the picker can attach as an output (from ad_drafts). */
