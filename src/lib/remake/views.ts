@@ -410,7 +410,12 @@ export async function redetect(db: SupabaseClient, project: ProjectRow): Promise
   const signed = await signBoardPaths(db, [project.strip_path]);
   const url = signed.get(project.strip_path);
   if (!url) return "Could not read the frame strip";
-  const cuts = await detectChanges(db, url, project.strip_count);
+  // Old strips have no span or columns: one row, one tile per second.
+  const cuts = await detectChanges(db, url, {
+    tiles: project.strip_count,
+    span: Number(project.strip_span ?? project.strip_count),
+    cols: project.strip_cols ?? null,
+  });
   if (!cuts) return "Claude could not read the strip (is the Anthropic key set?)";
   if (cuts.length === 0) return "No changes found; the clip list stays as it is";
   return rebuildShots(db, project, cuts);

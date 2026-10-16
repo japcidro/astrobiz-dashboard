@@ -374,7 +374,7 @@ export function RemakeProject({ id }: { id: string }) {
                 }}
                 onPointerLeave={() => setHover(null)}
               >
-                <FilmStrip src={project.source_url} duration={duration} spriteUrl={project.strip_url} spriteCount={project.strip_count} />
+                <FilmStrip src={project.source_url} duration={duration} spriteUrl={project.strip_url} spriteCount={project.strip_count} spriteSpan={project.strip_span} spriteCols={project.strip_cols} />
                 {duration > 0 &&
                   project.shots.map((s) => (
                     <div

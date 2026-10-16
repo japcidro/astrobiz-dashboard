@@ -13,21 +13,27 @@ const SEEK_TIMEOUT_MS = 10_000;
  * reference and shows the real frame from its middle, grabbed in the
  * browser from the reference video.
  *
- * Until a slot's frame is grabbed it borrows the worker's strip (one tile
- * per second, first `spriteCount` seconds), but only where that strip
- * has the right second; past it the slot stays dark rather than show a
- * frame from somewhere else.
+ * Until a slot's frame is grabbed it borrows the worker's strip:
+ * `spriteCount` tiles spread evenly over `spriteSpan` seconds (the whole
+ * reference) in rows of `spriteCols`, or, on older strips where both are
+ * null, one row with one tile per second for the first 60 s. Past the
+ * strip's span the slot stays dark rather than show a frame from somewhere
+ * else.
  */
 export function FilmStrip({
   src,
   duration,
   spriteUrl,
   spriteCount,
+  spriteSpan,
+  spriteCols,
 }: {
   src: string | null;
   duration: number;
   spriteUrl: string | null;
   spriteCount: number | null;
+  spriteSpan: number | null;
+  spriteCols: number | null;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const probe = useRef<HTMLVideoElement>(null);
@@ -102,18 +108,25 @@ export function FilmStrip({
   }, [src, duration, slots]);
 
   const n = spriteCount ?? 0;
+  const span = Number(spriteSpan ?? n);
+  const cols = Math.max(1, spriteCols ?? n);
+  const rows = Math.max(1, Math.ceil(n / cols));
   return (
     <div ref={wrap} className="relative h-[88px] w-full flex">
       {Array.from({ length: slots }, (_, i) => {
-        const second = Math.floor(((i + 0.5) / slots) * duration);
-        const tile = spriteUrl && n > 0 && duration > 0 && second < n ? second : null;
+        const t = ((i + 0.5) / slots) * duration;
+        const tile = spriteUrl && n > 0 && span > 0 && duration > 0 && t < span ? Math.min(n - 1, Math.floor((t / span) * n)) : null;
         return (
           <div
             key={`${slots}-${i}`}
             className="relative h-full flex-1 min-w-0 bg-gray-950 border-r border-black/40 last:border-r-0"
             style={
               tile !== null
-                ? { backgroundImage: `url(${spriteUrl})`, backgroundSize: `${n * 100}% 100%`, backgroundPosition: `${n > 1 ? (tile / (n - 1)) * 100 : 0}% 0` }
+                ? {
+                    backgroundImage: `url(${spriteUrl})`,
+                    backgroundSize: `${cols * 100}% ${rows * 100}%`,
+                    backgroundPosition: `${cols > 1 ? ((tile % cols) / (cols - 1)) * 100 : 0}% ${rows > 1 ? (Math.floor(tile / cols) / (rows - 1)) * 100 : 0}%`,
+                  }
                 : undefined
             }
           >

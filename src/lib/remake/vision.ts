@@ -4,7 +4,7 @@ import { PRODUCT_FORMS, type BrandCheck, type ProductForm, type ShotKind, type V
 /**
  * Claude looks at frames for three jobs: label each clip (talking head or
  * b-roll, which person, brand-heavy, what happens), find where the person
- * or scene changes in the one-frame-per-second strip, and check a generated
+ * or scene changes in the frame strip, and check a generated
  * still for leftover competitor branding.
  */
 
@@ -167,21 +167,35 @@ Answer with JSON only.`;
 }
 
 /**
- * Where does the person or scene change? Reads the strip (one tile per
- * second, left to right) and returns the seconds a new clip starts at.
+ * Where does the person or scene change? Reads the strip (`tiles` frames
+ * spread evenly over `span` seconds; tile i covers [i·span/tiles,
+ * (i+1)·span/tiles]) and returns the seconds a new clip starts at: the edge
+ * before the first tile of each new shot. `cols` is tiles per numbered row;
+ * null for old strips, one unnumbered row.
  */
-export async function detectChanges(db: SupabaseClient, stripUrl: string, tiles: number): Promise<number[] | null> {
+export async function detectChanges(db: SupabaseClient, stripUrl: string, strip: { tiles: number; span: number; cols: number | null }): Promise<number[] | null> {
+  const { tiles, span, cols } = strip;
   const img = await imageBlock(stripUrl);
   if (!img) return null;
+  const step = span / tiles;
+  const at = (i: number) => `${Math.round((i + 0.5) * step * 10) / 10}s`;
+  const rows = cols ? Math.ceil(tiles / cols) : 1;
+  const layout = cols
+    ? `${rows > 1 ? `in ${rows} rows of ${cols} (left to right, then the next row)` : "left to right"}, each with its number printed in the top-left corner`
+    : "left to right, numbered from 0";
   const blocks: Array<Record<string, unknown>> = [
-    { type: "text", text: `This strip has ${tiles} tiles, one per second of a vertical ad, left to right: tile 0 is second 0, tile ${tiles - 1} is second ${tiles - 1}.` },
+    {
+      type: "text",
+      text: `This image is ${tiles} frames from ${Math.round(span)} seconds of a vertical ad, in time order, ${layout}. One every ${Math.round(step * 100) / 100}s: tile 0 is at ${at(0)}, tile 1 at ${at(1)}, tile ${tiles - 1} at ${at(tiles - 1)}.`,
+    },
     img,
-    { type: "text", text: 'List the seconds where a new shot starts: a different person on screen, a cut to a product or hands, a new location, or a clear camera change. Answer with JSON only: {"cuts": number[]} (do not include 0).' },
+    { type: "text", text: 'List the tiles where a new shot starts: a different person on screen, a cut to a product or hands, a new location, or a clear camera change. Answer with JSON only: {"cuts": number[]} (tile numbers; do not include 0).' },
   ];
   const system = `You find shot boundaries in interview-style and UGC ads. Be sensitive to the speaker changing even when the room is the same. Answer with JSON only.`;
   const out = await ask<{ cuts?: unknown }>(db, system, blocks, 400);
   if (!out || !Array.isArray(out.cuts)) return null;
-  return Array.from(new Set(out.cuts.map(Number).filter((n) => Number.isInteger(n) && n > 0 && n < tiles))).sort((a, b) => a - b);
+  const firsts = Array.from(new Set(out.cuts.map(Number).filter((n) => Number.isInteger(n) && n > 0 && n < tiles))).sort((a, b) => a - b);
+  return firsts.map((i) => Math.round(i * step * 10) / 10);
 }
 
 /** Does the generated still show only our product and no competitor branding? */

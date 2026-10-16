@@ -13,7 +13,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { createWriteStream } from "node:fs";
+import { createWriteStream, existsSync } from "node:fs";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { hostname, homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
-const VERSION = "1.7.3";
+const VERSION = "1.7.4";
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 // ─── Config ───
@@ -358,11 +358,30 @@ async function cutClip(src, s, e, dest) {
   if (r.code !== 0) throw new Error(`ffmpeg cut failed: ${r.err.slice(-300)}`);
 }
 
-/** One frame per second, tiled left to right into a single JPEG, for the timeline and Claude's re-detect. */
+const STRIP_FONT = ["/System/Library/Fonts/Supplemental/Arial.ttf", "/System/Library/Fonts/Helvetica.ttc"].find((f) => existsSync(f));
+
+/**
+ * Up to 60 frames spread evenly over the whole reference, for the timeline and
+ * Claude's re-detect: numbered (so Claude doesn't miscount) and tiled into one
+ * JPEG in rows of up to 10, always full rows. Tile i covers
+ * [i·span/n, (i+1)·span/n]; fps keeps the last frame before (i+0.5)·span/n,
+ * so each tile shows the middle of its slot.
+ */
 async function makeStrip(src, duration, dest) {
-  const n = Math.max(1, Math.min(60, Math.ceil(duration)));
-  const r = await run(FFMPEG, ["-y", "-loglevel", "error", "-i", src, "-vf", `fps=1,scale=120:-2,tile=${n}x1`, "-frames:v", "1", "-q:v", "4", dest], { timeoutMs: 5 * 60_000 });
-  return r.code === 0 ? n : 0;
+  const cols = Math.max(1, Math.min(10, Math.ceil(duration)));
+  const n = Math.min(60, Math.ceil(Math.ceil(duration) / cols) * cols);
+  const span = Math.round(duration * 1000) / 1000;
+  const label = `drawtext=${STRIP_FONT ? `fontfile=${STRIP_FONT}:` : ""}text='%{n}':fontsize=22:fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=3:x=4:y=4`;
+  const r = await run(
+    FFMPEG,
+    ["-y", "-loglevel", "error", "-i", src, "-vf", `fps=${n}/${span},scale=120:-2,${label},tile=${cols}x${n / cols}`, "-frames:v", "1", "-q:v", "4", dest],
+    { timeoutMs: 5 * 60_000 }
+  );
+  if (r.code !== 0) {
+    log(`strip failed: ${r.err.slice(-300)}`);
+    return null;
+  }
+  return { count: n, span, cols };
 }
 
 /** Frame + real clip for a list of shots; shared by the first cut and later timeline edits. */
@@ -398,9 +417,9 @@ async function remakeSplit(job, dir) {
   if (!duration) throw new Error("Could not read the video's duration");
 
   const stripFile = join(dir, "strip.jpg");
-  const tiles = await makeStrip(src, duration, stripFile);
+  const strip = await makeStrip(src, duration, stripFile);
   let stripPath = null;
-  if (tiles) {
+  if (strip) {
     stripPath = `remake/${projectId}/strip-${job.id}.jpg`;
     await storageUpload(stripPath, stripFile, "image/jpeg", BOARD_BUCKET);
   }
@@ -413,7 +432,7 @@ async function remakeSplit(job, dir) {
     body: rows.map((r) => ({ project_id: projectId, idx: r.idx, start_s: r.start_s, end_s: r.end_s, frame_path: r.frame_path, ref_path: r.ref_path })),
     headers: { Prefer: "return=minimal" },
   });
-  await updateProject(projectId, { status: "classifying", source_duration: Math.round(duration * 10) / 10, strip_path: stripPath, strip_count: tiles || null, error: null });
+  await updateProject(projectId, { status: "classifying", source_duration: Math.round(duration * 10) / 10, strip_path: stripPath, strip_count: strip?.count ?? null, strip_span: strip?.span ?? null, strip_cols: strip?.cols ?? null, error: null });
   return `${rows.length} clips`;
 }
 

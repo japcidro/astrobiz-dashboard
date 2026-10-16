@@ -28,6 +28,10 @@ export interface ProjectRow {
   source_duration: number | null;
   strip_path: string | null;
   strip_count: number | null;
+  /** Seconds the strip's tiles spread over evenly (tile i covers [i·span/n, (i+1)·span/n]); null on old one-tile-per-second strips. */
+  strip_span: number | null;
+  /** Tiles per row, numbered in the corner; null on old strips (one unnumbered row). */
+  strip_cols: number | null;
   status: ProjectStatus;
   error: string | null;
   cast_look: LookId;
