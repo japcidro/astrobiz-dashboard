@@ -16,6 +16,8 @@ import { api, Button, ConfirmButton, downloadHref, Label, timeAgo } from "@/comp
 import { AdPicker } from "./ad-picker";
 import { SourceBadge, fmtWhen, isFuture } from "./format";
 import { FbAdPlayer, ReferencePlayer, UploadPlayer } from "./players";
+import { STORAGE_MAX_BYTES, fmtMB, shrinkVideo } from "./shrink-video";
+import { videoMimeOf } from "./video-probe";
 
 /**
  * Supabase serves a signed URL as an attachment when `download=<name>` is
@@ -79,20 +81,30 @@ export function ItemDetail({
   const attachAd = (ad: SubmittedAdOption) =>
     call(() => api<{ item: BoardItem }>(`${base}/outputs`, { method: "POST", body: JSON.stringify({ kind: "fb_ad", draft_id: ad.draft_id }) }));
 
-  const uploadOutput = async (file: File) => {
+  /** The finished ad as an output; a video over storage's 50 MB limit is shrunk in the browser first. */
+  const uploadOutput = async (original: File) => {
     setError(null);
     try {
+      const originalMime = videoMimeOf(original);
+      if (!originalMime) throw new Error("Upload an MP4, MOV or WebM video");
+      let file = original;
+      let mime = originalMime;
+      if (original.size > STORAGE_MAX_BYTES) {
+        setUploading(`Shrinking ${fmtMB(original.size)}…`);
+        file = await shrinkVideo(original, (f) => setUploading(`Shrinking to fit 50 MB · ${Math.round(f * 100)}%`));
+        mime = "video/mp4";
+      }
       setUploading("Uploading…");
       const { path, token, bucket } = await api<{ path: string; token: string; bucket: string }>(
         "/api/owner/marketing-board/upload-url",
-        { method: "POST", body: JSON.stringify({ item_id: item.id, mime: file.type }) }
+        { method: "POST", body: JSON.stringify({ item_id: item.id, mime }) }
       );
-      const up = await createClient().storage.from(bucket).uploadToSignedUrl(path, token, file, { contentType: file.type });
+      const up = await createClient().storage.from(bucket).uploadToSignedUrl(path, token, file, { contentType: mime });
       if (up.error) throw new Error(up.error.message);
       setUploading("Attaching…");
       const r = await api<{ item: BoardItem }>(`${base}/outputs`, {
         method: "POST",
-        body: JSON.stringify({ kind: "upload", file_path: path, note: file.name.slice(0, 120) }),
+        body: JSON.stringify({ kind: "upload", file_path: path, note: original.name.slice(0, 120) }),
       });
       onChange(r.item);
     } catch (e) {
@@ -343,7 +355,7 @@ export function ItemDetail({
               <input
                 ref={fileRef}
                 type="file"
-                accept="video/mp4,video/quicktime,video/webm"
+                accept="video/mp4,video/quicktime,video/webm,.mp4,.m4v,.mov,.webm"
                 className="hidden"
                 onChange={(e) => {
                   const f = e.target.files?.[0];

@@ -226,13 +226,13 @@ export function MarketingBoard() {
   const uploads = useUploadQueue(addUploaded);
   const queueFiles = (list: FileList | File[]) => {
     const r = uploads.add(list, filterStore || undefined);
-    const skipped = [r.wrongType ? `${r.wrongType} not a video or image` : "", r.tooBig ? `${r.tooBig} over 500 MB` : ""].filter(Boolean).join(", ");
+    const skipped = [r.wrongType ? `${r.wrongType} not a video or image` : "", r.tooBig ? `${r.tooBig} too big (images over 50 MB)` : ""].filter(Boolean).join(", ");
     setError(skipped ? `Skipped ${skipped}` : null);
     if (r.added && showArchive) setShowArchive(false);
     if (fileRef.current) fileRef.current.value = "";
   };
   const fileDragOver = useFileDrop(queueFiles);
-  const uploadingCount = uploads.rows.filter((r) => r.status === "waiting" || r.status === "uploading" || r.status === "saving").length;
+  const uploadingCount = uploads.rows.filter((r) => r.status === "waiting" || r.status === "shrinking" || r.status === "uploading" || r.status === "saving").length;
 
   const columns = useMemo(() => {
     const by: Record<BoardStatus, BoardItem[]> = { todo: [], in_progress: [], done: [] };

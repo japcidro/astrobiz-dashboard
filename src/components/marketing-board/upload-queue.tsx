@@ -4,16 +4,17 @@ import { AlertTriangle, Check, Image as ImageIcon, Loader2, RotateCcw, Upload, V
 import { useEffect, useRef, useState } from "react";
 import type { BoardItem, ItemKind } from "@/lib/marketing-board/types";
 import { api } from "@/components/hook-studio/ui";
+import { STORAGE_MAX_BYTES, shrinkVideo } from "./shrink-video";
 import { probeVideoFile, videoMimeOf } from "./video-probe";
 
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
 const IMAGE_BY_EXTENSION: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp" };
-/** The bucket's limit for one file. */
-export const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+/** Biggest video taken at all; anything over storage's 50 MB is shrunk in the browser first. */
+const MAX_VIDEO_INPUT_BYTES = 4 * 1024 * 1024 * 1024;
 /** Files uploading at once; the rest wait their turn. */
 const CONCURRENCY = 3;
 
-export type UploadStatus = "waiting" | "uploading" | "saving" | "done" | "failed";
+export type UploadStatus = "waiting" | "shrinking" | "uploading" | "saving" | "done" | "failed";
 
 export interface UploadRow {
   id: string;
@@ -21,7 +22,7 @@ export interface UploadRow {
   size: number;
   kind: ItemKind;
   status: UploadStatus;
-  /** 0–100 while the file goes up. */
+  /** 0–100 while the file is shrunk or goes up. */
   progress: number;
   error: string | null;
 }
@@ -75,6 +76,8 @@ export function useUploadQueue(onItem: (item: BoardItem) => void) {
   const [rows, setRows] = useState<UploadRow[]>([]);
   const files = useRef(new Map<string, { file: File; mime: string; store: string | undefined }>());
   const active = useRef(0);
+  /** Shrinking is heavy on the machine: one file at a time. */
+  const shrinking = useRef<Promise<unknown>>(Promise.resolve());
   const waiting = useRef<Array<() => void>>([]);
   const onItemRef = useRef(onItem);
   useEffect(() => {
@@ -100,11 +103,30 @@ export function useUploadQueue(onItem: (item: BoardItem) => void) {
   const run = async (id: string, kind: ItemKind) => {
     const entry = files.current.get(id);
     if (!entry) return;
-    const { file, mime, store } = entry;
+    const { store } = entry;
+    let { file, mime } = entry;
     update(id, { status: "waiting", progress: 0, error: null });
     await acquire();
     try {
-      update(id, { status: "uploading" });
+      if (kind === "video" && file.size > STORAGE_MAX_BYTES) {
+        const turn = shrinking.current.then(async () => {
+          update(id, { status: "shrinking", progress: 0 });
+          let shown = 0;
+          return shrinkVideo(file, (f) => {
+            const pct = Math.floor(f * 100);
+            if (pct >= shown + 2 || pct === 100) {
+              shown = pct;
+              update(id, { progress: pct });
+            }
+          });
+        });
+        shrinking.current = turn.catch(() => {});
+        file = await turn;
+        mime = "video/mp4";
+        // A retry after an upload failure skips shrinking again.
+        files.current.set(id, { file, mime, store });
+      }
+      update(id, { status: "uploading", progress: 0 });
       // Read the poster frame and length while the file goes up.
       const probe = kind === "video" ? probeVideoFile(file) : null;
       const target = await sign({ kind, mime });
@@ -153,7 +175,7 @@ export function useUploadQueue(onItem: (item: BoardItem) => void) {
         wrongType += 1;
         continue;
       }
-      if (file.size > MAX_UPLOAD_BYTES) {
+      if (file.size > (k.kind === "video" ? MAX_VIDEO_INPUT_BYTES : STORAGE_MAX_BYTES)) {
         tooBig += 1;
         continue;
       }
@@ -181,7 +203,7 @@ export function useUploadQueue(onItem: (item: BoardItem) => void) {
     setRows((rs) => rs.filter((r) => r.status !== "done" && r.status !== "failed"));
   };
 
-  const busy = rows.some((r) => r.status === "waiting" || r.status === "uploading" || r.status === "saving");
+  const busy = rows.some((r) => r.status === "waiting" || r.status === "shrinking" || r.status === "uploading" || r.status === "saving");
 
   // Leaving mid-upload loses the files still going up; ask first.
   useEffect(() => {
@@ -266,7 +288,7 @@ export function DropOverlay({ show }: { show: boolean }) {
         <Upload size={36} className="text-purple-200" />
         <p className="text-xl font-bold text-white">Drop to add to To do</p>
         <p className="text-sm text-purple-200">As many as you like. Videos go to Videos, images go to Images.</p>
-        <p className="text-xs text-purple-300/80">MP4, MOV, WebM, PNG, JPG or WebP · up to 500 MB each</p>
+        <p className="text-xs text-purple-300/80">MP4, MOV, WebM, PNG, JPG or WebP · videos over 50 MB are shrunk to fit</p>
       </div>
     </div>
   );
@@ -312,12 +334,12 @@ export function UploadPanel({ rows, onRetry, onDismiss, onClear }: { rows: Uploa
                 </>
               )}
             </div>
-            {(r.status === "uploading" || r.status === "waiting") && (
+            {(r.status === "uploading" || r.status === "waiting" || r.status === "shrinking") && (
               <div className="mt-1.5 flex items-center gap-2">
                 <div className="h-1 flex-1 rounded-full bg-gray-800 overflow-hidden">
-                  <div className="h-full bg-purple-500 transition-[width] duration-200" style={{ width: `${r.progress}%` }} />
+                  <div className={`h-full transition-[width] duration-200 ${r.status === "shrinking" ? "bg-amber-400" : "bg-purple-500"}`} style={{ width: `${r.progress}%` }} />
                 </div>
-                <span className="text-[10px] text-gray-500 tabular-nums w-14 text-right">{r.status === "waiting" ? "waiting" : `${r.progress}%`}</span>
+                <span className="text-[10px] text-gray-500 tabular-nums w-20 text-right">{r.status === "waiting" ? "waiting" : r.status === "shrinking" ? `shrinking ${r.progress}%` : `${r.progress}%`}</span>
               </div>
             )}
             {r.status === "saving" && <p className="mt-1 text-[10px] text-gray-500">Making the card…</p>}
