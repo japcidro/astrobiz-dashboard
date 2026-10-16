@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Loader2, CheckCircle, AlertCircle, X } from "lucide-react";
+import { Loader2, CheckCircle, AlertCircle, X, Square } from "lucide-react";
 import type { CampaignFormData, AdSetFormData, AdFormData } from "@/lib/facebook/types";
 import { groupRows, type BulkAdRow, type ExistingAdset } from "./types";
 
@@ -30,6 +30,37 @@ interface BulkSubmissionProgressProps {
   onClose: () => void;
 }
 
+// One ad is up to four Facebook calls server-side, each capped at 40s there.
+// If no answer comes back in this long the row is failed with a message —
+// never left spinning.
+const CREATE_TIMEOUT_MS = 150_000;
+const DRAFT_TIMEOUT_MS = 30_000;
+
+// A signal that fires on the user's Stop or after `ms`, whichever is first.
+function signalFor(stop: AbortSignal, ms: number): AbortSignal {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(new DOMException("Timed out", "TimeoutError")), ms);
+  if (stop.aborted) ctrl.abort(stop.reason);
+  else stop.addEventListener("abort", () => ctrl.abort(stop.reason), { once: true });
+  ctrl.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
+  return ctrl.signal;
+}
+
+// The ad may still have been created on Facebook: say so, so a retry is a
+// deliberate choice and not a reflex that makes duplicates.
+function describeFetchError(err: unknown, what: string): string {
+  if (err instanceof DOMException && err.name === "TimeoutError") {
+    return `${what} did not answer in time. Check Ads Manager before retrying — the ad may still have been created.`;
+  }
+  if (err instanceof DOMException && err.name === "AbortError") {
+    return "Stopped. Check Ads Manager before retrying — the ad may still have been created.";
+  }
+  if (err instanceof TypeError) {
+    return `Could not reach ${what} (network). Check Ads Manager before retrying.`;
+  }
+  return err instanceof Error ? err.message : "Unknown error";
+}
+
 export function BulkSubmissionProgress({
   rows,
   adAccountId,
@@ -50,6 +81,8 @@ export function BulkSubmissionProgress({
 }: BulkSubmissionProgressProps) {
   const [isRunning, setIsRunning] = useState(false);
   const hasStarted = useRef(false);
+  // Stop: aborts the request in flight and skips the rows after it.
+  const stopRef = useRef<AbortController>(new AbortController());
   const usingExistingAdset = mode === "existing_adset";
 
   // What Facebook has already created, kept across "Retry Failed" so a retry
@@ -97,8 +130,14 @@ export function BulkSubmissionProgress({
   const submitRows = useCallback(
     async (targetRows: BulkAdRow[]) => {
       setIsRunning(true);
+      const stop = new AbortController();
+      stopRef.current = stop;
 
       for (const row of targetRows) {
+        if (stop.signal.aborted) {
+          onUpdateRowStatus(row.id, "error", "Stopped before this ad was sent.");
+          continue;
+        }
         onUpdateRowStatus(row.id, "submitting");
 
         // The first ad of a group creates its ad set; the rest join it. In
@@ -139,6 +178,7 @@ export function BulkSubmissionProgress({
                 ad_data: rowAdData,
                 shopify_store_id: shopifyStoreId,
               }),
+              signal: signalFor(stop.signal, DRAFT_TIMEOUT_MS),
             });
             const draftJson = await draftRes.json();
             if (!draftRes.ok) {
@@ -165,6 +205,7 @@ export function BulkSubmissionProgress({
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
+            signal: signalFor(stop.signal, CREATE_TIMEOUT_MS),
           });
           const data = await res.json().catch(() => null);
 
@@ -178,16 +219,20 @@ export function BulkSubmissionProgress({
           }
 
           if (!res.ok) {
+            // A 504 is Vercel giving up on the function, not Facebook
+            // saying no — the ad may well exist.
             throw new Error(
-              data?.error || data?.message || `HTTP ${res.status}`
+              data?.error ||
+                data?.message ||
+                (res.status === 504
+                  ? "The server timed out. Check Ads Manager before retrying — the ad may still have been created."
+                  : `HTTP ${res.status}`)
             );
           }
 
           onUpdateRowStatus(row.id, "done");
         } catch (err: unknown) {
-          const message =
-            err instanceof Error ? err.message : "Unknown error";
-          onUpdateRowStatus(row.id, "error", message);
+          onUpdateRowStatus(row.id, "error", describeFetchError(err, "The server"));
         }
       }
 
@@ -216,6 +261,8 @@ export function BulkSubmissionProgress({
     submitRows(rows);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleStop = () => stopRef.current.abort();
 
   const handleRetryFailed = () => {
     const failedRows = rows.filter((r) => r.status === "error");
@@ -256,9 +303,21 @@ export function BulkSubmissionProgress({
             style={{ width: `${progressPct}%` }}
           />
         </div>
-        <p className="text-sm text-gray-400 mb-4">
-          {completedCount} / {rows.length} processed
-        </p>
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-sm text-gray-400">
+            {completedCount} / {rows.length} processed
+          </p>
+          {isRunning && (
+            <button
+              onClick={handleStop}
+              className="flex items-center gap-1.5 px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 rounded-lg"
+              title="Abort the ad being sent and skip the rest; Retry Failed sends them later"
+            >
+              <Square className="w-3 h-3" />
+              Stop
+            </button>
+          )}
+        </div>
 
         {/* Ads, grouped by ad set */}
         <div className="space-y-3 mb-4">

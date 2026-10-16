@@ -8,8 +8,15 @@ import type {
 } from "@/lib/facebook/types";
 
 export const dynamic = "force-dynamic";
+// Four Facebook calls at most (ad set, thumbnail, creative, ad), each capped
+// below; the whole thing must still finish inside this.
+export const maxDuration = 120;
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
+// Facebook now and then never answers a creative or ad call. Give up on it
+// so the row fails with a message instead of spinning until the function
+// is killed with no response.
+const FB_CALL_TIMEOUT_MS = 40_000;
 
 async function fbPost(
   endpoint: string,
@@ -18,13 +25,24 @@ async function fbPost(
 ): Promise<Record<string, unknown>> {
   // Send as POST body (form-urlencoded) instead of query params
   // This avoids URL length limits for complex JSON params
-  const res = await fetch(`${FB_API_BASE}${endpoint}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ access_token: token, ...params }).toString(),
-  });
-
-  const text = await res.text();
+  let res: Response;
+  let text: string;
+  try {
+    res = await fetch(`${FB_API_BASE}${endpoint}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ access_token: token, ...params }).toString(),
+      signal: AbortSignal.timeout(FB_CALL_TIMEOUT_MS),
+    });
+    text = await res.text();
+  } catch (e) {
+    if (e instanceof Error && e.name === "TimeoutError") {
+      throw new Error(
+        `Facebook did not answer within ${FB_CALL_TIMEOUT_MS / 1000}s [endpoint: ${endpoint}] — check Ads Manager before retrying, the ad may still have been created`
+      );
+    }
+    throw e;
+  }
 
   let json: Record<string, unknown>;
   try {
@@ -245,7 +263,8 @@ export async function POST(request: Request) {
       let videoThumbnailUrl: string | undefined;
       try {
         const thumbRes = await fetch(
-          `${FB_API_BASE}/${ad_data.video_id}?fields=picture,thumbnails&access_token=${token}`
+          `${FB_API_BASE}/${ad_data.video_id}?fields=picture,thumbnails&access_token=${token}`,
+          { signal: AbortSignal.timeout(15_000) }
         );
         const thumbJson = await thumbRes.json();
 
