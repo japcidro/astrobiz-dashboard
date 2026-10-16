@@ -334,6 +334,32 @@ export async function setLine(db: SupabaseClient, hookId: string, beatId: string
   return null;
 }
 
+/**
+ * Drop a beat the marketer does not want, before it is animated. The others
+ * move up, and the hook animates by itself when every remaining image is
+ * approved. Its words go with it; edit another beat's line to keep them.
+ */
+export async function removeBeat(db: SupabaseClient, hookId: string, beatId: string): Promise<string | null> {
+  const { data } = await db.from("hookgen_beats").select("id, idx, kind, clip_status").eq("hook_id", hookId).order("idx");
+  const beats = (data ?? []) as Array<Pick<HookgenBeatRow, "id" | "idx" | "kind" | "clip_status">>;
+  const beat = beats.find((b) => b.id === beatId);
+  if (!beat) return "Not found";
+  if (beats.length === 1) return "A hook needs at least one beat";
+  if (beat.clip_status) return "This beat is already animated; it stays in the hook";
+  await db.from("hook_studio_jobs").update({ status: "canceled" }).like("kind", "hookgen_%").eq("status", "queued").eq("params->>beat_id", beatId);
+  const { error } = await db.from("hookgen_beats").delete().eq("id", beatId);
+  if (error) return error.message;
+  const { data: files } = await db.storage.from(BOARD_BUCKET).list(`hook-generator/${hookId}`, { limit: 1000 });
+  const paths = (files ?? []).filter((f) => f.name.includes(beatId)).map((f) => `hook-generator/${hookId}/${f.name}`);
+  if (paths.length) await db.storage.from(BOARD_BUCKET).remove(paths);
+  // Close the gap in order (unique per hook), lowest first so no two beats share a place.
+  const rest = beats.filter((b) => b.id !== beatId);
+  for (const [i, b] of rest.entries()) if (b.idx !== i) await db.from("hookgen_beats").update({ idx: i }).eq("id", b.id);
+  await db.from("hookgen_hooks").update({ beat_kinds: rest.map((b) => b.kind), final_status: null, final_error: null }).eq("id", hookId);
+  await startWhenAllApproved(db, hookId);
+  return null;
+}
+
 /** Animate an approved beat again (the same image); the hook is joined again afterwards. */
 export async function redoClip(db: SupabaseClient, hookId: string, beatId: string): Promise<string | null> {
   const { data } = await db.from("hookgen_beats").select("approved, still_status").eq("id", beatId).eq("hook_id", hookId).maybeSingle();

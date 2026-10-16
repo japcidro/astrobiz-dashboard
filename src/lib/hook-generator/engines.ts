@@ -66,7 +66,7 @@ export const BEAT_KINDS: Array<{ id: BeatKind; name: string; scene: string; moti
 
 export const beatKindName = (k: string) => BEAT_KINDS.find((b) => b.id === k)?.name ?? k;
 export const isBeatKind = (v: unknown): v is BeatKind => BEAT_KINDS.some((b) => b.id === v);
-export const DEFAULT_BEATS: BeatKind[] = ["crown_pat", "part_hair"];
+export const DEFAULT_BEATS: BeatKind[] = ["crown_pat"];
 
 const words = (line: string) => line.trim().split(/\s+/).filter(Boolean).length;
 

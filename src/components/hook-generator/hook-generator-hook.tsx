@@ -4,7 +4,7 @@ import { AlertTriangle, ArrowLeft, Check, Download, Hand, Image as ImageIcon, Lo
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { IMAGE_MODELS, REF_ROLES, VIDEO_MODELS, beatKindName } from "@/lib/hook-generator/engines";
+import { IMAGE_MODELS, REF_ROLES, VIDEO_MODELS, beatKindName, clipCredits } from "@/lib/hook-generator/engines";
 import type { HookgenBeatView, HookgenView, StepStatus } from "@/lib/hook-generator/types";
 import { Button, ConfirmButton, Label, Panel, Pill, api, credits, timeAgo } from "@/components/hook-studio/ui";
 import { ClipVideo, Lightbox } from "@/components/remake/clip-video";
@@ -88,6 +88,9 @@ export function HookGeneratorHook({ id }: { id: string }) {
   const allApproved = hook.beats.length > 0 && hook.beats.every((b) => b.approved);
   const video = VIDEO_MODELS.find((m) => m.id === hook.video_model)?.name ?? hook.video_model;
   const image = IMAGE_MODELS.find((m) => m.id === hook.image_model)?.name ?? hook.image_model;
+  // What approving starts: one clip per beat; the hook runs about as long as its lines.
+  const animateCredits = hook.beats.reduce((a, b) => a + clipCredits(hook.video_model, b.clip_seconds), 0);
+  const plannedSeconds = hook.beats.reduce((a, b) => a + Number(b.seconds), 0);
 
   return (
     <div className="max-w-7xl space-y-5">
@@ -149,6 +152,10 @@ export function HookGeneratorHook({ id }: { id: string }) {
             {allStills
               ? "Approve each starting image, or type what to change and redo it. When every image is approved, the Mac animates the hook by itself."
               : "The Mac is drawing the starting images. Approve each one as it lands, or type what to change and redo it."}
+            <span className="block text-[11px] text-gray-500 mt-0.5">
+              {hook.beats.length} {hook.beats.length === 1 ? "beat" : "beats"} · about {plannedSeconds.toFixed(1)} s · animating costs about {credits(animateCredits)}
+              {hook.beats.length > 1 ? " · don't need a beat? Remove it on its card" : ""}
+            </span>
           </span>
           <Button primary onClick={() => void hookAction("approve_all")} busy={busy === "approve_all"} disabled={!allStills || busy !== null}>
             <Check size={13} /> Approve all and animate
@@ -222,7 +229,15 @@ export function HookGeneratorHook({ id }: { id: string }) {
             <Label>Beats · {hook.beats.length}</Label>
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
               {hook.beats.map((b) => (
-                <BeatCard key={b.id} beat={b} hookWorking={hook.status === "working" || hook.status === "done"} busy={busy} onZoom={setZoom} onAction={(action, fix) => void beatAction(b.id, action, fix)} />
+                <BeatCard
+                  key={b.id}
+                  beat={b}
+                  hookWorking={hook.status === "working" || hook.status === "done"}
+                  canRemove={hook.beats.length > 1 && !b.clip_status}
+                  busy={busy}
+                  onZoom={setZoom}
+                  onAction={(action, fix) => void beatAction(b.id, action, fix)}
+                />
               ))}
             </div>
           </Panel>
@@ -235,15 +250,17 @@ export function HookGeneratorHook({ id }: { id: string }) {
 function BeatCard({
   beat: b,
   hookWorking,
+  canRemove,
   busy,
   onZoom,
   onAction,
 }: {
   beat: HookgenBeatView;
   hookWorking: boolean;
+  canRemove: boolean;
   busy: string | null;
   onZoom: (z: { video?: string; image?: string }) => void;
-  onAction: (action: "approve" | "unapprove" | "redo_still" | "redo_clip" | "set_line", text?: string) => void;
+  onAction: (action: "approve" | "unapprove" | "redo_still" | "redo_clip" | "set_line" | "remove", text?: string) => void;
 }) {
   const [fix, setFix] = useState("");
   const [line, setLine] = useState<string | null>(null);
@@ -363,6 +380,11 @@ function BeatCard({
             <button type="button" onClick={() => onAction("redo_clip")} className="text-gray-400 hover:text-white inline-flex items-center gap-1 cursor-pointer" title="Animate the same image again">
               <RefreshCw size={11} /> Clip again
             </button>
+          )}
+          {canRemove && (
+            <ConfirmButton question="Remove this beat?" label="Remove beat" onConfirm={() => onAction("remove")} className="text-gray-500 hover:text-red-300 inline-flex items-center gap-1 cursor-pointer">
+              <Trash2 size={11} /> Remove beat
+            </ConfirmButton>
           )}
           {b.clip_url && (
             <a href={b.clip_url} download className="ml-auto text-gray-400 hover:text-white" title="Download this beat's clip">
