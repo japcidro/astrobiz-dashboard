@@ -25,6 +25,8 @@ interface Analysis {
   hook_anatomy?: Record<string, unknown>;
   beat_map?: Record<string, unknown>;
   uvp?: Record<string, unknown>;
+  scenes?: Array<{ t?: string; description?: string }>;
+  visual_style?: string;
 }
 
 const DNA_SCHEMA = { type: "object", additionalProperties: false, required: ["dna"], properties: { dna: { type: "string" } } } as const;
@@ -34,7 +36,7 @@ const DNA_SYSTEM = `You write the Winning DNA brief for one brand's video ads: w
 The ads come in two groups. WINNING NOW: launched inside the anchor window; they carry the weight, and the first section is about them. EARLIER: older winners and losers; background, kept only for what still holds. An ad marked EARLY is new, has little spend and a strong cost per purchase: read it as a signal of where the winning is going, and say that its numbers are early. A creative's purchases and spend include its scaled copies.
 
 Write plain text with exactly these headed sections, about 600 words in all:
-WHAT IS WINNING NOW: for each current winner, its name, purchases and cost per purchase; the format (a skit, a talking head, an expert, an update, a voice-over…), who is on screen, the hook move; then, across them: why they win, and how the script is built beat by beat with the actual lines (quote them); the lines and devices to reuse in the next scripts.
+WHAT IS WINNING NOW: for each current winner, its name, purchases and cost per purchase; the format (a skit, a talking head, an expert, an update, a voice-over…), who is on screen and how it is staged (from the scenes and visual style), the hook move; then, across them: why they win, and how the script is built beat by beat with the actual lines (quote them) and what is on screen at each beat; the lines, shots and devices to reuse in the next scripts.
 STILL TRUE FROM EARLIER WINNERS: the beats, lines and proof that the earlier winners share and the current ones keep (quote them), and anything the current winners dropped.
 WHAT LOST: the hooks and shapes with the worst cost per purchase and what they did differently.
 COMPLIANCE WORDING: the phrasing the newest winners use for the mechanism and results, and what to avoid.
@@ -78,6 +80,8 @@ export async function buildDna(db: SupabaseClient, store: string, builtBy: strin
       x?.hook_anatomy ? `Hook anatomy: ${JSON.stringify(x.hook_anatomy)}` : "",
       x?.beat_map ? `Beat map: ${JSON.stringify(x.beat_map).slice(0, 1500)}` : "",
       x?.uvp ? `UVP: ${JSON.stringify(x.uvp).slice(0, 800)}` : "",
+      x?.visual_style ? `Visual style: ${String(x.visual_style).slice(0, 400)}` : "",
+      Array.isArray(x?.scenes) && x.scenes.length ? `Scenes, in order: ${x.scenes.slice(0, 24).map((sc) => `[${sc.t ?? ""}] ${sc.description ?? ""}`).join(" · ").slice(0, 1600)}` : "",
       w.transcript ? `Transcript: ${w.transcript.slice(0, MAX_TRANSCRIPT)}` : "Transcript: not available yet.",
     ]
       .filter(Boolean)

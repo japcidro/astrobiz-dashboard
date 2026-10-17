@@ -340,7 +340,7 @@ export function ScriptGenerator() {
               <div className="mt-2 rounded-lg bg-gray-950 border border-gray-800">
                 <div className="flex items-center gap-2 px-3 py-2 text-[11px] text-gray-500 border-b border-gray-900">
                   <span className="flex-1">
-                    Our {store} creatives that sold, newest first, scaled copies counted in{winners ? ` · ${winners.winners.length}` : ""}
+                    Our {store} creatives, latest submitted to Facebook first (every one from the last {dna?.anchor_days ?? 45} days, older ones that sold), scaled copies counted in{winners ? ` · ${winners.winners.length}` : ""}
                   </span>
                   {winBusy === "refresh" ? (
                     <span className="inline-flex items-center gap-1 text-purple-300">
@@ -381,7 +381,7 @@ export function ScriptGenerator() {
                             {w.hook ? ` · ${w.hook}` : " · no script yet"}
                           </p>
                           <p className="font-mono text-[11px]">
-                            <span className="text-green-400">{w.purchases} buys</span> <span className="text-gray-500">· {peso(w.cpa)} per buy · ₱{w.spend.toLocaleString("en-PH")} spent</span>
+                            {w.purchases > 0 ? <span className="text-green-400">{w.purchases} buys</span> : <span className="text-gray-500">no buys yet</span>} <span className="text-gray-500">· {w.cpa === null ? "" : `${peso(w.cpa)} per buy · `}₱{w.spend.toLocaleString("en-PH")} spent</span>
                           </p>
                         </div>
                         {w.transcript ? (

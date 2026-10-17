@@ -116,6 +116,8 @@ export interface Winner {
   spend: number;
   cpa: number | null;
   verdict: "winner" | "early" | "middle" | "loser";
+  /** From the creative on Facebook: a video, an image (never listed), or not looked up yet. */
+  kind?: "video" | "image" | null;
   thumbnail_url: string | null;
   /** The spoken words with timestamps and [ON-SCREEN] markers, or "" until the ad is deconstructed. */
   transcript: string;

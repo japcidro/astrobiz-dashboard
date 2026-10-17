@@ -14,14 +14,16 @@ import { DEFAULT_ANCHOR_DAYS, isRecent } from "./types";
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
 const STALE_MS = 24 * 60 * 60 * 1000;
-const MAX_WINNERS = 80;
-/** Every creative that sold is listed, whatever it spent. */
+const MAX_WINNERS = 100;
+/** Outside the anchor window a creative needs a sale to be listed; inside it, every submission is listed. */
 const MIN_PURCHASES = 1;
 /** The scaled copies of an ad: "DHT-072226LIN2 - Copy", "… - Copy 2". */
 const COPY_SUFFIX = /\s*-\s*copy(\s*\d+)?\s*$/i;
 export const baseName = (ad: string) => ad.replace(COPY_SUFFIX, "").trim();
-/** Thumbnail lookups per refresh, to spare the Graph budget; the rest come on later refreshes. */
-const MAX_THUMB_LOOKUPS = 12;
+/** Creative lookups (thumbnail + video or image) per refresh, to spare the Graph budget; the rest come on later refreshes. */
+const MAX_CREATIVE_LOOKUPS = 20;
+/** Static-image campaigns and ad sets are named with STATIC; there is no script in them. */
+const STATIC = /static/i;
 
 interface MetricRow {
   ad_id: string;
@@ -49,13 +51,18 @@ async function fbToken(db: SupabaseClient): Promise<string | null> {
   return (data?.value as string | undefined) ?? null;
 }
 
-/** One Graph call: the creative's thumbnail. Null on any failure. */
-async function fetchThumbnail(adId: string, token: string): Promise<string | null> {
+/** One Graph call: the creative's thumbnail and whether it is a video. Null on any failure. */
+async function fetchCreative(adId: string, token: string): Promise<{ thumbnail: string | null; kind: "video" | "image" | null } | null> {
   try {
-    const res = await fetch(`${FB_API_BASE}/${adId}?fields=creative{thumbnail_url}&access_token=${encodeURIComponent(token)}`, { cache: "no-store" });
+    const res = await fetch(`${FB_API_BASE}/${adId}?fields=creative{thumbnail_url,video_id,object_type,object_story_spec}&access_token=${encodeURIComponent(token)}`, { cache: "no-store" });
     if (!res.ok) return null;
-    const json = (await res.json()) as { creative?: { thumbnail_url?: string } };
-    return json.creative?.thumbnail_url ?? null;
+    const json = (await res.json()) as { creative?: { thumbnail_url?: string; video_id?: string; object_type?: string; object_story_spec?: { video_data?: unknown; photo_data?: unknown; link_data?: { video_id?: string; image_hash?: string } } } };
+    const c = json.creative;
+    if (!c) return null;
+    const spec = c.object_story_spec;
+    const video = !!(c.video_id || spec?.video_data || spec?.link_data?.video_id || c.object_type === "VIDEO");
+    const image = !video && !!(spec?.photo_data || spec?.link_data?.image_hash || c.object_type === "PHOTO");
+    return { thumbnail: c.thumbnail_url ?? null, kind: video ? "video" : image ? "image" : null };
   } catch {
     return null;
   }
@@ -112,11 +119,14 @@ export async function refreshWinners(db: SupabaseClient, store: string, force = 
     if (cpa >= blended * 1.2 && g.spend >= 1500) return "loser";
     return "middle";
   };
-  // Every creative that sold, newest launch first, so the current winners lead the list: the proven ones and the new ones on little spend alike.
+  // Newest submission to Facebook first: inside the window every creative, sold or not yet; before it, the ones that sold.
+  const when = (t: string | null) => (t ? new Date(t).getTime() || 0 : 0);
   const picked = [...groups.values()]
     .map((g) => ({ ...g, verdict: verdict(g) }))
-    .filter((g) => g.purchases >= MIN_PURCHASES)
-    .sort((a, b) => (b.created_time ?? "").localeCompare(a.created_time ?? "") || b.purchases - a.purchases)
+    .filter((g) => g.purchases >= MIN_PURCHASES || isRecent(g.created_time, anchorDays))
+    // Static image ads have no script: skip the STATIC campaigns and ad sets, and anything Facebook already said is an image.
+    .filter((g) => !STATIC.test(`${g.lead.campaign ?? ""} ${g.lead.adset ?? ""}`) && previous.get(g.lead.ad_id)?.kind !== "image")
+    .sort((a, b) => when(b.created_time) - when(a.created_time) || b.purchases - a.purchases)
     .slice(0, MAX_WINNERS);
   const allIds = picked.flatMap((g) => g.ad_ids);
   const { data: analysisRows } = allIds.length ? await db.from("ad_creative_analyses").select("ad_id, thumbnail_url, analysis").in("ad_id", allIds) : { data: [] };
@@ -132,11 +142,19 @@ export async function refreshWinners(db: SupabaseClient, store: string, force = 
     const transcript = cleanTranscript(a?.analysis?.transcript ?? "").slice(0, 8000);
     const prev = g.ad_ids.map((id) => previous.get(id)).find((x) => x?.thumbnail_url);
     let thumbnail = a?.thumbnail_url ?? g.ad_ids.map((id) => analyses.get(id)?.thumbnail_url).find(Boolean) ?? prev?.thumbnail_url ?? null;
-    if (!thumbnail && token && lookups < MAX_THUMB_LOOKUPS) {
+    // A deconstructed ad is a video by definition; otherwise ask Facebook once what the creative is.
+    let kind: Winner["kind"] = a?.analysis?.transcript ? "video" : (previous.get(g.lead.ad_id)?.kind ?? null);
+    if ((!thumbnail || !kind) && token && lookups < MAX_CREATIVE_LOOKUPS) {
       lookups += 1;
-      thumbnail = await fetchThumbnail(g.lead.ad_id, token);
+      const c = await fetchCreative(g.lead.ad_id, token);
+      if (c) {
+        thumbnail = thumbnail ?? c.thumbnail;
+        kind = kind ?? c.kind;
+      }
     }
+    if (kind === "image") continue;
     winners.push({
+      kind,
       ad_id: g.lead.ad_id,
       ad_ids: g.ad_ids,
       account_id: g.lead.account_id,
