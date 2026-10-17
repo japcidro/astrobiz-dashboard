@@ -1,30 +1,20 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { matchAdToStore } from "@/lib/profit/store-matching";
 import { WRITER_MODEL, askJson, isError } from "./claude";
-import type { DnaView, DnaWinner } from "./types";
+import type { DnaView, Winner } from "./types";
+import { DEFAULT_ANCHOR_DAYS, isRecent } from "./types";
+import { refreshWinners, transcribeWinner } from "./winners";
 
 /**
  * The Winning DNA: a brief Claude writes from the brand's own deconstructed
- * video ads (ad_creative_analyses) joined to their purchases and cost per
- * purchase (the cached ads_v3 payloads, summed by script_studio_ad_metrics).
- * The adapter reads it to fill what a reference cannot give us.
+ * ads and their purchases, anchored on the ads launched inside the anchor
+ * window (what is winning now); older winners are background. The adapter
+ * reads it to fill what a reference cannot give us.
  */
 
 const MAX_ADS = 30;
 const MAX_TRANSCRIPT = 2200;
-
-interface MetricRow {
-  ad_id: string;
-  ad: string;
-  campaign: string | null;
-  adset: string | null;
-  account: string | null;
-  purchases: number;
-  spend: number;
-  revenue: number;
-  impressions: number;
-  created_time: string | null;
-}
+/** Recent winners deconstructed on the fly before the brief is written; more go through the list's Transcribe button. */
+const MAX_TRANSCRIBE_ON_REBUILD = 2;
 
 interface Analysis {
   transcript?: string;
@@ -35,106 +25,103 @@ interface Analysis {
   hook_anatomy?: Record<string, unknown>;
   beat_map?: Record<string, unknown>;
   uvp?: Record<string, unknown>;
-  viral_mechanism?: string;
-  cta?: string;
 }
 
 const DNA_SCHEMA = { type: "object", additionalProperties: false, required: ["dna"], properties: { dna: { type: "string" } } } as const;
 
-const DNA_SYSTEM = `You write the Winning DNA brief for one brand's video ads: what has actually sold, read from the brand's own ads with their real purchase numbers. A scriptwriter will read it before adapting a competitor's script for this brand, to fill what that script cannot give us. Be concrete and quote real lines from the winners; never invent a line, a number or a claim.
+const DNA_SYSTEM = `You write the Winning DNA brief for one brand's video ads: what has actually sold, read from the brand's own ads with their real purchase numbers. A scriptwriter will read it before adapting a competitor's script for this brand, to fill what that script cannot give us, and to make the next scripts win the way the current winners win. Be concrete and quote real lines from the transcripts; never invent a line, a number or a claim.
 
-Write plain text with exactly these headed sections, about 500 words in all:
-WHAT A WINNER LOOKS LIKE: the hooks that won (quote the opening lines with their purchases and cost per purchase), length, language mix and where Tagalog vs English lands, tone, the kind of proof that worked.
-THE SPINE: the beats every winner runs, in order, with the actual lines used for each beat (quote them).
+The ads come in two groups. WINNING NOW: launched inside the anchor window; they carry the weight, and the first section is about them. EARLIER: older winners and losers; background, kept only for what still holds.
+
+Write plain text with exactly these headed sections, about 600 words in all:
+WHAT IS WINNING NOW: for each current winner, its name, purchases and cost per purchase; the format (a skit, a talking head, an expert, an update, a voice-over…), who is on screen, the hook move; then, across them: why they win, and how the script is built beat by beat with the actual lines (quote them); the lines and devices to reuse in the next scripts.
+STILL TRUE FROM EARLIER WINNERS: the beats, lines and proof that the earlier winners share and the current ones keep (quote them), and anything the current winners dropped.
 WHAT LOST: the hooks and shapes with the worst cost per purchase and what they did differently.
-COMPLIANCE WORDING: the phrasing the newer winners use for the mechanism and results, and what to avoid.
+COMPLIANCE WORDING: the phrasing the newest winners use for the mechanism and results, and what to avoid.
 BRAND FACTS: the product facts that appear in the winning ads (name, what it is, dose, offer, guarantee, proof), only as the ads state them.
+
+When a current winner has no transcript yet, say so in WHAT IS WINNING NOW with its numbers and format unknown, and do not guess its lines.
 
 Answer with JSON only: {"dna": "<the brief>"}.`;
 
-const cleanTranscript = (t: string) => t.replace(/\b\d{1,2}:\d{2}\b/g, "").replace(/\s+/g, " ").trim();
-const hookOf = (t: string) => cleanTranscript(t).replace(/\[ON-SCREEN:[^\]]*\]/g, "").trim().slice(0, 140);
+async function dnaRow(db: SupabaseClient, store: string) {
+  const { data } = await db.from("script_brand_dna").select("store, dna, built_from, built_at, marketer_brief, anchor_days").eq("store", store).maybeSingle();
+  return data as { store: string; dna: string; built_from: unknown; built_at: string; marketer_brief: string | null; anchor_days: number | null } | null;
+}
 
 /** Rebuild the brief for a brand from its data; returns the saved view. */
 export async function buildDna(db: SupabaseClient, store: string, builtBy: string | null): Promise<DnaView | { error: string }> {
-  const [{ data: metricRows, error: mErr }, { data: analysisRows }] = await Promise.all([
-    db.rpc("script_studio_ad_metrics"),
-    db.from("ad_creative_analyses").select("ad_id, analysis, created_at"),
-  ]);
-  if (mErr) return { error: `Could not read the ad metrics: ${mErr.message}` };
-  const upper = store.trim().toUpperCase();
-  const metrics = new Map<string, MetricRow>();
-  for (const r of (metricRows ?? []) as MetricRow[]) {
-    if (matchAdToStore(r.campaign ?? "", r.adset ?? "", r.account ?? "") !== upper) continue;
-    metrics.set(r.ad_id, { ...r, purchases: Number(r.purchases) || 0, spend: Number(r.spend) || 0, revenue: Number(r.revenue) || 0, impressions: Number(r.impressions) || 0 });
+  const existing = await dnaRow(db, store);
+  const anchorDays = existing?.anchor_days ?? DEFAULT_ANCHOR_DAYS;
+  let view = await refreshWinners(db, store, true);
+  if ("error" in view) return view;
+  // The newest winners first: deconstruct the ones the cron never reached, a couple per rebuild.
+  const missing = view.winners.filter((w) => isRecent(w.created_time, anchorDays) && !w.transcript && w.verdict !== "loser").sort((a, b) => b.purchases - a.purchases).slice(0, MAX_TRANSCRIBE_ON_REBUILD);
+  for (const w of missing) {
+    const r = await transcribeWinner(db, store, w.ad_id);
+    if (!("error" in r)) view = r;
   }
-  const analyzed = ((analysisRows ?? []) as Array<{ ad_id: string; analysis: Analysis; created_at: string }>).filter((a) => metrics.has(a.ad_id));
-  if (analyzed.length === 0) return { error: `No deconstructed ads with metrics for ${store} yet. The nightly cron deconstructs the top ads; the Ad Performance page has to have viewed the weeks the ads ran.` };
+  const withText = view.winners.filter((w) => w.transcript);
+  if (withText.length === 0) return { error: `No deconstructed ads for ${store} yet. Transcribe a winner from the list first.` };
 
-  const all = [...metrics.values()];
-  const spend = all.reduce((s, r) => s + r.spend, 0);
-  const buys = all.reduce((s, r) => s + r.purchases, 0);
-  const blended = buys > 0 ? spend / buys : null;
-  const verdict = (r: MetricRow): DnaWinner["verdict"] => {
-    const cpa = r.purchases > 0 ? r.spend / r.purchases : null;
-    if (!blended || cpa === null) return r.spend >= 1500 ? "loser" : "middle";
-    if (cpa <= blended * 0.95 && r.purchases >= 10) return "winner";
-    if (cpa >= blended * 1.2 && r.spend >= 1500) return "loser";
-    return "middle";
-  };
-  const picked = analyzed
-    .map((a) => ({ a, m: metrics.get(a.ad_id)! }))
-    .sort((x, y) => y.m.purchases - x.m.purchases || y.m.spend - x.m.spend)
-    .slice(0, MAX_ADS);
-  const winners: DnaWinner[] = picked.map(({ a, m }) => ({
-    ad_id: m.ad_id,
-    ad: m.ad,
-    purchases: m.purchases,
-    spend: Math.round(m.spend),
-    cpa: m.purchases > 0 ? Math.round(m.spend / m.purchases) : null,
-    verdict: verdict(m),
-    hook: hookOf(a.analysis.transcript ?? ""),
-    transcript: cleanTranscript(a.analysis.transcript ?? "").slice(0, 6000),
-    seconds: typeof a.analysis.duration_seconds === "number" ? a.analysis.duration_seconds : null,
-  }));
-
-  const blocks = picked.map(({ a, m }, i) => {
-    const w = winners[i];
-    const x = a.analysis;
+  const { data: analysisRows } = await db.from("ad_creative_analyses").select("ad_id, analysis").in("ad_id", withText.map((w) => w.ad_id));
+  const analyses = new Map(((analysisRows ?? []) as Array<{ ad_id: string; analysis: Analysis }>).map((a) => [a.ad_id, a.analysis]));
+  const now = view.winners.filter((w) => isRecent(w.created_time, anchorDays));
+  const earlier = view.winners.filter((w) => !isRecent(w.created_time, anchorDays) && w.transcript).slice(0, MAX_ADS - now.length);
+  const block = (w: Winner, i: number) => {
+    const x = analyses.get(w.ad_id);
+    const launched = w.created_time ? w.created_time.slice(0, 10) : "unknown date";
     return [
-      `AD ${i + 1}: ${m.ad} · ${w.verdict.toUpperCase()} · ${m.purchases} purchases · ₱${Math.round(m.spend)} spend · ${w.cpa === null ? "no purchases" : `₱${w.cpa} per purchase`} · ${w.seconds ?? "?"} s · ${x.language ?? ""}`,
-      x.fingerprint ? `Fingerprint: ${x.fingerprint}` : "",
-      x.classification ? `Classification: ${JSON.stringify(x.classification)}` : "",
-      x.hook_anatomy ? `Hook anatomy: ${JSON.stringify(x.hook_anatomy)}` : "",
-      x.beat_map ? `Beat map: ${JSON.stringify(x.beat_map).slice(0, 1500)}` : "",
-      x.uvp ? `UVP: ${JSON.stringify(x.uvp).slice(0, 800)}` : "",
-      `Transcript: ${w.transcript.slice(0, MAX_TRANSCRIPT)}`,
+      `AD ${i + 1}: ${w.ad} · ${w.verdict.toUpperCase()} · launched ${launched} · ${w.purchases} purchases · ₱${w.spend} spend · ${w.cpa === null ? "no purchases" : `₱${w.cpa} per purchase`} · ${w.seconds ?? "?"} s${x?.language ? ` · ${x.language}` : ""}`,
+      x?.fingerprint ? `Fingerprint: ${x.fingerprint}` : "",
+      x?.classification ? `Classification: ${JSON.stringify(x.classification)}` : "",
+      x?.hook_anatomy ? `Hook anatomy: ${JSON.stringify(x.hook_anatomy)}` : "",
+      x?.beat_map ? `Beat map: ${JSON.stringify(x.beat_map).slice(0, 1500)}` : "",
+      x?.uvp ? `UVP: ${JSON.stringify(x.uvp).slice(0, 800)}` : "",
+      w.transcript ? `Transcript: ${w.transcript.slice(0, MAX_TRANSCRIPT)}` : "Transcript: not available yet.",
     ]
       .filter(Boolean)
       .join("\n");
-  });
+  };
+  const metrics = view.winners;
+  const spend = metrics.reduce((s, r) => s + r.spend, 0);
+  const buys = metrics.reduce((s, r) => s + r.purchases, 0);
   const user = [
-    `Brand: ${store}. ${all.length} ads with metrics, ₱${Math.round(spend)} spend, ${buys} purchases${blended ? `, blended ₱${Math.round(blended)} per purchase` : ""}. Winner = at most 95% of the blended cost per purchase with 10+ purchases; loser = 120% or more with ₱1,500+ spend.`,
-    `${picked.length} deconstructed ads, most purchases first:\n\n${blocks.join("\n\n")}`,
+    `Brand: ${store}. Anchor window: the last ${anchorDays} days. Across the ${metrics.length} ads that sold: ₱${spend} spend, ${buys} purchases. Winner = at most 95% of the brand's blended cost per purchase with 10+ purchases; loser = 120% or more with ₱1,500+ spend.`,
+    `WINNING NOW (${now.length} ads launched in the last ${anchorDays} days, most purchases first):\n\n${now.length ? now.sort((a, b) => b.purchases - a.purchases).map(block).join("\n\n") : "(none launched in the window)"}`,
+    `EARLIER (${earlier.length} deconstructed ads, background):\n\n${earlier.sort((a, b) => b.purchases - a.purchases).map((w, i) => block(w, now.length + i)).join("\n\n")}`,
     "Write the Winning DNA brief. Answer with JSON only.",
   ].join("\n\n");
-  const out = await askJson<{ dna: string }>(db, { model: WRITER_MODEL, system: DNA_SYSTEM, user, schema: DNA_SCHEMA as unknown as Record<string, unknown>, maxTokens: 8000, effort: "high" });
+  const out = await askJson<{ dna: string }>(db, { model: WRITER_MODEL, system: DNA_SYSTEM, user, schema: DNA_SCHEMA as unknown as Record<string, unknown>, maxTokens: 10000, effort: "high" });
   if (isError(out)) return out;
-  const dna = String(out.dna ?? "").trim().slice(0, 12000);
+  const dna = String(out.dna ?? "").trim().slice(0, 14000);
   if (dna.length < 200) return { error: "Claude's brief came back empty" };
   const built_at = new Date().toISOString();
-  const { error } = await db.from("script_brand_dna").upsert({ store, dna, built_from: winners, built_at, built_by: builtBy }, { onConflict: "store" });
+  const built_from = [...now, ...earlier].map((w) => ({ ad_id: w.ad_id, ad: w.ad, created_time: w.created_time, purchases: w.purchases, cpa: w.cpa, verdict: w.verdict, has_transcript: !!w.transcript }));
+  const { error } = await db.from("script_brand_dna").upsert({ store, dna, built_from, built_at, built_by: builtBy, anchor_days: anchorDays }, { onConflict: "store" });
   if (error) return { error: error.message };
-  return toDnaView({ store, dna, built_from: winners, built_at });
+  return toDnaView({ store, dna, built_from, built_at, marketer_brief: existing?.marketer_brief ?? "", anchor_days: anchorDays });
 }
 
-export function toDnaView(row: { store: string; dna: string; built_from: unknown; built_at: string }): DnaView {
-  const from = (Array.isArray(row.built_from) ? row.built_from : []) as DnaWinner[];
+/** The marketer's standing brief, kept on the brand's DNA row (made when missing). */
+export async function saveBrief(db: SupabaseClient, store: string, brief: string): Promise<DnaView | { error: string }> {
+  const existing = await dnaRow(db, store);
+  const row = { store, dna: existing?.dna ?? "", built_from: existing?.built_from ?? [], built_at: existing?.built_at ?? new Date().toISOString(), marketer_brief: brief, anchor_days: existing?.anchor_days ?? DEFAULT_ANCHOR_DAYS };
+  const { error } = await db.from("script_brand_dna").upsert(row, { onConflict: "store" });
+  if (error) return { error: error.message };
+  return toDnaView(row);
+}
+
+export function toDnaView(row: { store: string; dna: string; built_from: unknown; built_at: string; marketer_brief?: string | null; anchor_days?: number | null }): DnaView {
+  const from = (Array.isArray(row.built_from) ? row.built_from : []) as Array<{ created_time?: string | null }>;
+  const anchor = row.anchor_days ?? DEFAULT_ANCHOR_DAYS;
   return {
     store: row.store,
     dna: row.dna,
     built_at: row.built_at,
     ads_read: from.length,
-    winners: from.filter((w) => w.verdict === "winner" && w.transcript).slice(0, 8),
+    winning_now: from.filter((w) => isRecent(w.created_time ?? null, anchor)).length,
+    anchor_days: anchor,
+    brief: row.marketer_brief ?? "",
   };
 }

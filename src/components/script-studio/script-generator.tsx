@@ -4,8 +4,8 @@ import { AlertTriangle, Check, ChevronDown, ChevronUp, Copy, FileText, Film, Loa
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { DnaView, ReferenceSource, RunView, ScriptRow, StudioPage } from "@/lib/script-studio/types";
-import { DEFAULT_VERSIONS } from "@/lib/script-studio/types";
+import type { DnaView, ReferenceSource, RunView, ScriptRow, StudioPage, Winner, WinnersView } from "@/lib/script-studio/types";
+import { DEFAULT_VERSIONS, isRecent } from "@/lib/script-studio/types";
 import { cleanScript, hasHiddenDetails } from "@/lib/script-studio/clean";
 import { Button, ConfirmButton, Label, Panel, Pill, api, timeAgo } from "@/components/hook-studio/ui";
 
@@ -48,6 +48,10 @@ export function ScriptGenerator() {
   const [dnaOpen, setDnaOpen] = useState(false);
   const [rewrite, setRewrite] = useState<{ id: string; note: string } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+  /** "refresh", or the ad id being transcribed. */
+  const [winBusy, setWinBusy] = useState<string | null>(null);
+  const [brief, setBrief] = useState("");
+  const [briefStore, setBriefStore] = useState("");
   const seeded = useRef(false);
   const reviewing = useRef(false);
 
@@ -117,7 +121,41 @@ export function ScriptGenerator() {
   }, [refresh, writing, pendingReview]);
 
   const dna: DnaView | null = store && page ? page.dna[store] ?? null : null;
+  const winners: WinnersView | null = store && page ? page.winners[store] ?? null : null;
   const canRun = script.trim().length >= 40 && !!store && busy === null;
+
+  // The brand's standing brief follows the brand picked; unsaved typing is kept until the brand changes.
+  useEffect(() => {
+    if (!store || store === briefStore) return;
+    setBriefStore(store);
+    setBrief(dna?.brief ?? "");
+  }, [store, briefStore, dna]);
+
+  const winnersCall = useCallback(
+    async (body: Record<string, unknown>, key: string) => {
+      setWinBusy(key);
+      setError(null);
+      try {
+        const r = await api<{ winners: WinnersView }>("/api/owner/script-generator/winners", { method: "POST", body: JSON.stringify({ store, ...body }) });
+        setPage((p) => (p ? { ...p, winners: { ...p.winners, [store]: r.winners } } : p));
+        return r.winners;
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not load the winners");
+        return null;
+      } finally {
+        setWinBusy(null);
+      }
+    },
+    [store]
+  );
+
+  // The winners list comes from the ad data: built when missing, refreshed when a day old.
+  const stale = !winners || Date.now() - new Date(winners.refreshed_at).getTime() > 24 * 3_600_000;
+  useEffect(() => {
+    if (!page || !store || !stale || winBusy) return;
+    void winnersCall({}, "refresh");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, store, stale]);
   /** What the skill gets: the full transcript while the clean view is untouched, else the text as edited. */
   const detailsIntact = !!hidden && script === hidden.clean;
   const scriptForSkill = detailsIntact ? hidden.raw : script;
@@ -188,7 +226,7 @@ export function ScriptGenerator() {
     }
   };
 
-  const pickWinner = (w: DnaView["winners"][number]) => {
+  const pickWinner = (w: Winner) => {
     const clean = cleanScript(w.transcript);
     setScript(clean);
     setHidden(hasHiddenDetails(w.transcript) ? { raw: w.transcript, clean } : null);
@@ -196,6 +234,21 @@ export function ScriptGenerator() {
     setSource("winner");
     setPicker(null);
   };
+
+  const saveBrief = async () => {
+    setBusy("brief");
+    setError(null);
+    try {
+      const r = await api<{ dna: DnaView }>("/api/owner/script-generator/brief", { method: "PUT", body: JSON.stringify({ store, brief }) });
+      setPage((p) => (p ? { ...p, dna: { ...p.dna, [store]: r.dna } } : p));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save the brief");
+    } finally {
+      setBusy(null);
+    }
+  };
+  const briefDirty = brief !== (dna?.brief ?? "");
+  const launched = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("en-PH", { month: "short", day: "numeric" }) : "");
 
   return (
     <div className="max-w-7xl space-y-5">
@@ -242,7 +295,7 @@ export function ScriptGenerator() {
               <Button onClick={() => setPicker((v) => (v === "board" ? null : "board"))} busy={!!transcribing} className="!px-2.5 !py-1 !text-xs">
                 <Film size={12} /> Transcribe a board video
               </Button>
-              <Button ghost onClick={() => setPicker((v) => (v === "winners" ? null : "winners"))} disabled={!dna || dna.winners.length === 0} className="!px-2.5 !py-1 !text-xs">
+              <Button ghost onClick={() => setPicker((v) => (v === "winners" ? null : "winners"))} disabled={!store} className="!px-2.5 !py-1 !text-xs">
                 <Trophy size={12} /> One of our winners
               </Button>
               {script && (
@@ -283,17 +336,64 @@ export function ScriptGenerator() {
                 )}
               </div>
             )}
-            {picker === "winners" && dna && (
-              <div className="mt-2 rounded-lg bg-gray-950 border border-gray-800 divide-y divide-gray-900 max-h-72 overflow-y-auto">
-                {dna.winners.map((w) => (
-                  <button key={w.ad_id} type="button" onClick={() => pickWinner(w)} className="w-full text-left cursor-pointer hover:bg-white/5 px-3 py-2 grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 items-center text-xs">
-                    <span className="text-gray-200 truncate">
-                      {w.hook || w.ad} <span className="text-gray-600">{w.seconds ? `· ${w.seconds}s` : ""}</span>
+            {picker === "winners" && (
+              <div className="mt-2 rounded-lg bg-gray-950 border border-gray-800">
+                <div className="flex items-center gap-2 px-3 py-2 text-[11px] text-gray-500 border-b border-gray-900">
+                  <span className="flex-1">
+                    Our {store} ads that sold, newest first{winners ? ` · ${winners.winners.length}` : ""}
+                  </span>
+                  {winBusy === "refresh" ? (
+                    <span className="inline-flex items-center gap-1 text-purple-300">
+                      <Loader2 size={10} className="animate-spin" /> Reading the ad data
                     </span>
-                    <span className="text-green-400 font-mono whitespace-nowrap">{w.purchases} buys</span>
-                    <span className="text-gray-400 font-mono whitespace-nowrap">{peso(w.cpa)}</span>
-                  </button>
-                ))}
+                  ) : (
+                    <button type="button" onClick={() => void winnersCall({ refresh: true }, "refresh")} className="inline-flex items-center gap-1 hover:text-white cursor-pointer">
+                      <RefreshCw size={10} /> {winners ? `refreshed ${timeAgo(winners.refreshed_at)}` : "refresh"}
+                    </button>
+                  )}
+                </div>
+                <div className="divide-y divide-gray-900 max-h-96 overflow-y-auto">
+                  {(winners?.winners ?? []).map((w) => {
+                    const fresh = isRecent(w.created_time, dna?.anchor_days ?? 45);
+                    const transcribing = winBusy === w.ad_id;
+                    return (
+                      <div key={w.ad_id} className="px-3 py-2 grid grid-cols-[40px_minmax(0,1fr)_auto] gap-3 items-center text-xs">
+                        <div className="w-10 h-[52px] rounded bg-gray-900 overflow-hidden border border-gray-800">
+                          {w.thumbnail_url && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={w.thumbnail_url} alt="" className="w-full h-full object-cover" loading="lazy" />
+                          )}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-gray-200 truncate">
+                            <span className="font-mono text-[11px]">{w.ad}</span>
+                            {fresh && <span className="ml-1.5 rounded-full bg-purple-900 text-purple-200 text-[9px] font-extrabold px-1.5 py-px tracking-wide">NEW</span>}
+                            {w.verdict === "loser" && <span className="ml-1.5 text-[9px] text-red-400 font-semibold">high CPA</span>}
+                          </p>
+                          <p className="text-gray-500 truncate">
+                            {launched(w.created_time)}
+                            {w.seconds ? ` · ${w.seconds}s` : ""}
+                            {w.hook ? ` · ${w.hook}` : " · no script yet"}
+                          </p>
+                          <p className="font-mono text-[11px]">
+                            <span className="text-green-400">{w.purchases} buys</span> <span className="text-gray-500">· {peso(w.cpa)} per buy · ₱{w.spend.toLocaleString("en-PH")} spent</span>
+                          </p>
+                        </div>
+                        {w.transcript ? (
+                          <Button primary onClick={() => pickWinner(w)} className="!px-2.5 !py-1 !text-[11px]">
+                            Use as reference
+                          </Button>
+                        ) : (
+                          <Button ghost onClick={() => void winnersCall({ ad_id: w.ad_id }, w.ad_id)} busy={transcribing} disabled={winBusy !== null} className="!px-2.5 !py-1 !text-[11px]">
+                            {transcribing ? "Reading, about a minute" : "Transcribe"}
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {winners && winners.winners.length === 0 && <p className="text-xs text-gray-500 p-3">No {store} ads with purchases in the cached ad data yet. Open the Ad Performance page for the weeks the ads ran, then refresh.</p>}
+                  {!winners && winBusy !== "refresh" && <p className="text-xs text-gray-500 p-3">No list yet; refresh to read the ad data.</p>}
+                </div>
               </div>
             )}
           </div>
@@ -337,24 +437,35 @@ export function ScriptGenerator() {
           <div className="flex items-start gap-3 flex-wrap">
             <div className="flex-1 min-w-64">
               <Label>Winning DNA · {store}</Label>
-              {dna ? (
+              {dna && dna.dna ? (
                 <p className="text-xs text-gray-400">
-                  {dna.ads_read > 0 ? `Built from ${dna.ads_read} of our deconstructed ads and their purchases` : "A hand-written first brief from our winning ads"} · {timeAgo(dna.built_at)}. The skill uses it to fill what the reference cannot give us: our mechanism, our proof, our offer wording.
+                  {dna.ads_read > 0 ? `Built from ${dna.ads_read} of our ads and their purchases, ${dna.winning_now} of them launched in the last ${dna.anchor_days} days (what is winning now)` : "A hand-written first brief from our winning ads; rebuild it to anchor on the newest winners"} · {timeAgo(dna.built_at)}. The skill reads it to fill what the reference cannot give us, newest winners first.
                 </p>
               ) : (
-                <p className="text-xs text-amber-300">No Winning DNA for {store} yet. Rebuild it from the deconstructed ads, or run without it (the writer then only has the brand profile).</p>
+                <p className="text-xs text-amber-300">No Winning DNA for {store} yet. Rebuild it from our winners, or run without it (the writer then only has the brand profile and your brief).</p>
               )}
             </div>
             <Button ghost onClick={() => void rebuildDna()} busy={busy === "dna"} className="!px-2.5 !py-1 !text-xs">
               <RefreshCw size={12} /> Rebuild from winners
             </Button>
-            {dna && (
+            {dna && dna.dna && (
               <button type="button" onClick={() => setDnaOpen((v) => !v)} className="text-[11px] text-gray-400 hover:text-white inline-flex items-center gap-1 cursor-pointer">
                 {dnaOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />} Read the brief
               </button>
             )}
           </div>
-          {dnaOpen && dna && <pre className="mt-3 text-xs text-gray-300 whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto rounded-lg bg-gray-950 border border-gray-800 p-3 font-sans">{dna.dna}</pre>}
+          {busy === "dna" && <p className="text-[11px] text-purple-300 mt-2">Reading the newest winners (transcribing up to two that have no script yet), then writing the brief. Two to four minutes.</p>}
+          {dnaOpen && dna && dna.dna && <pre className="mt-3 text-xs text-gray-300 whitespace-pre-wrap leading-relaxed max-h-96 overflow-y-auto rounded-lg bg-gray-950 border border-gray-800 p-3 font-sans">{dna.dna}</pre>}
+          <div className="mt-4">
+            <Label>Your brief for {store} · read before every run</Label>
+            <textarea value={brief} onChange={(e) => setBrief(e.target.value)} rows={4} placeholder={`Standing facts and rules the skill must follow for every ${store} script: the offer running now, the skit setup and cast, lines to always keep, things never to say.`} className={`${field} resize-y`} />
+            <div className="flex items-center gap-3 mt-2 flex-wrap">
+              <Button primary={briefDirty} ghost={!briefDirty} onClick={() => void saveBrief()} busy={busy === "brief"} disabled={!briefDirty || busy !== null} className="!px-2.5 !py-1 !text-xs">
+                {briefDirty ? "Save the brief" : "Saved"}
+              </Button>
+              <span className="text-[11px] text-gray-600">Applied above the Winning DNA and the brand profile; only a run&apos;s own notes can override it.</span>
+            </div>
+          </div>
         </Panel>
       )}
 

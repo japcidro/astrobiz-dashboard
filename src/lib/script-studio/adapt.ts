@@ -145,7 +145,7 @@ Score 0-10, strict:
 - "structure": the same beats in the same order with about the same length as the reference (within 15%); nothing of the competitor's left in: product, brand, category words, mechanism, claims, names, offers.
 - "language": the same mix as the reference, natural Manila Taglish or English, speakable out loud, no stiff translation, Tagalog and English landing where the reference lands them.
 - "compliance": food supplement rules: no cure, block, reverse, treat, heal, guaranteed results; no doctor or dermatologist claims unless the profile allows; no invented studies or percentages; uses supports / helps / promotes.
-- "brand": every fact matches the brand profile (product name, what it is, count, dose, price, offer, guarantee, ingredients, social proof); nothing invented.
+- "brand": every fact matches the brand profile and the marketer's standing brief (product name, what it is, count, dose, price, offer, guarantee, ingredients, social proof); nothing invented; the brief's rules are followed.
 ok is false when: anything of the competitor's remains; a fact or number is invented or wrong; a forbidden claim appears; the language mix differs from the reference; structure is under 6; hook is under 5; compliance is under 8. fixable is true when a rewrite with a note would fix it (wording, a fact, a claim, a missing beat), false when the whole adaptation is off.
 "notes": one or two short sentences, the most important fix first; or "Looks great." followed by one useful observation. Plain words, no scores inside the notes.
 
@@ -163,13 +163,16 @@ export interface BrandContext {
   profile: string;
   rules: string;
   dna: string;
+  /** The marketer's standing brief for the brand: read first, wins over everything but the run's notes. */
+  brief: string;
 }
 
 function facts(ctx: BrandContext, notes: string): string {
   return [
+    ctx.brief.trim() ? `The marketer's standing brief for ${ctx.store} (follow it in every script; only the notes below can override it):\n${ctx.brief.trim()}` : "",
     `Brand profile for ${ctx.store}:\n${ctx.profile.trim() || "(no profile yet; say nothing about the product beyond its name)"}`,
     ctx.rules.trim() ? `Brand rules: ${ctx.rules.trim()}` : "",
-    ctx.dna.trim() ? `Winning DNA for ${ctx.store} (what has already sold; use it to fill gaps, never to reorder the reference):\n${ctx.dna.trim()}` : "No Winning DNA brief for this brand yet.",
+    ctx.dna.trim() ? `Winning DNA for ${ctx.store} (what has already sold; its WHAT IS WINNING NOW section is the first place to fill a gap; never use it to reorder the reference):\n${ctx.dna.trim()}` : "No Winning DNA brief for this brand yet.",
     notes.trim() ? `The marketer's notes, which win over everything else: ${notes.trim()}` : "",
   ]
     .filter(Boolean)
@@ -257,8 +260,10 @@ export async function reviewScript(db: SupabaseClient, input: { reference: strin
     model: REVIEWER_MODEL,
     system: REVIEW_SYSTEM,
     user: [
+      input.ctx.brief.trim() ? `The marketer's standing brief for ${input.ctx.store}, which the script must follow: ${input.ctx.brief.trim()}` : "",
       `Brand profile for ${input.ctx.store}:\n${input.ctx.profile.trim() || "(none)"}`,
       input.ctx.rules.trim() ? `Brand rules: ${input.ctx.rules.trim()}` : "",
+      input.ctx.dna.trim() ? `What is winning now for the brand (from its Winning DNA; a script that ignores it when the reference left a gap loses structure points):\n${input.ctx.dna.trim().slice(0, 3000)}` : "",
       `What won in the reference: ${input.study.angle} Hook move: ${input.study.hook_move} Language: ${input.study.language}. Beats: ${input.study.structure.map((b) => b.role).join(" → ")}.`,
       `The reference script:\n"""\n${input.reference.trim().slice(0, 8000)}\n"""`,
       `OUR ADAPTED SCRIPT (${input.script.seconds ?? "?"} s):\n"""\n${input.script.script_text.slice(0, 8000)}\n"""`,
@@ -278,9 +283,9 @@ export async function reviewScript(db: SupabaseClient, input: { reference: strin
 export async function brandContext(db: SupabaseClient, store: string): Promise<BrandContext> {
   const [{ data: kit }, { data: dna }] = await Promise.all([
     db.from("remake_brand_kits").select("rules, profile").eq("store", store).maybeSingle(),
-    db.from("script_brand_dna").select("dna, built_at").eq("store", store).maybeSingle(),
+    db.from("script_brand_dna").select("dna, built_at, marketer_brief").eq("store", store).maybeSingle(),
   ]);
-  return { store, profile: (kit?.profile as string | undefined) ?? "", rules: (kit?.rules as string | undefined) ?? "", dna: (dna?.dna as string | undefined) ?? "" };
+  return { store, profile: (kit?.profile as string | undefined) ?? "", rules: (kit?.rules as string | undefined) ?? "", dna: (dna?.dna as string | undefined) ?? "", brief: (dna?.marketer_brief as string | undefined) ?? "" };
 }
 
 export interface AdaptInput {

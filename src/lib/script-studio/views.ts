@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { signBoardPaths } from "@/lib/marketing-board/storage";
 import { toDnaView } from "./dna";
-import type { BoardVideo, DnaView, RunRow, RunView, ScriptRow, StudioPage } from "./types";
+import type { BoardVideo, DnaView, RunRow, RunView, ScriptRow, StudioPage, Winner, WinnersView } from "./types";
 
 async function loadRuns(db: SupabaseClient, itemId: string | null): Promise<RunView[]> {
   let q = db.from("script_studio_runs").select("*").order("created_at", { ascending: false }).limit(30);
@@ -23,21 +23,25 @@ async function loadBoardVideos(db: SupabaseClient): Promise<BoardVideo[]> {
 }
 
 export async function loadStudioPage(db: SupabaseClient, itemId: string | null): Promise<StudioPage> {
-  const [itemRow, { data: storeRows }, { data: kits }, { data: dnaRows }, board_videos, runs] = await Promise.all([
+  const [itemRow, { data: storeRows }, { data: kits }, { data: dnaRows }, { data: winnerRows }, board_videos, runs] = await Promise.all([
     itemId ? db.from("marketing_board_items").select("id, title, store, video_path").eq("id", itemId).maybeSingle().then((r) => r.data) : Promise.resolve(null),
     db.from("shopify_stores").select("name").eq("is_active", true).order("name"),
     db.from("remake_brand_kits").select("store, profile"),
-    db.from("script_brand_dna").select("store, dna, built_from, built_at"),
+    db.from("script_brand_dna").select("store, dna, built_from, built_at, marketer_brief, anchor_days"),
+    db.from("script_brand_winners").select("store, winners, refreshed_at"),
     loadBoardVideos(db),
     loadRuns(db, itemId),
   ]);
   const dna: Record<string, DnaView> = {};
-  for (const row of (dnaRows ?? []) as Array<{ store: string; dna: string; built_from: unknown; built_at: string }>) dna[row.store] = toDnaView(row);
+  for (const row of (dnaRows ?? []) as Array<{ store: string; dna: string; built_from: unknown; built_at: string; marketer_brief: string | null; anchor_days: number | null }>) dna[row.store] = toDnaView(row);
+  const winners: Record<string, WinnersView> = {};
+  for (const row of (winnerRows ?? []) as Array<{ store: string; winners: Winner[]; refreshed_at: string }>) winners[row.store] = { store: row.store, winners: row.winners ?? [], refreshed_at: row.refreshed_at };
   return {
     item: itemRow ? { id: itemRow.id as string, title: (itemRow.title as string | null) ?? null, store: (itemRow.store as string | null) ?? null, has_video: !!itemRow.video_path } : null,
     stores: ((storeRows ?? []) as Array<{ name: string }>).map((s) => s.name),
     profiled: ((kits ?? []) as Array<{ store: string; profile: string | null }>).filter((k) => (k.profile ?? "").trim()).map((k) => k.store),
     dna,
+    winners,
     board_videos,
     runs,
   };

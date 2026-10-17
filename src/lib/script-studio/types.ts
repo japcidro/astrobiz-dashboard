@@ -98,26 +98,40 @@ export interface RunView extends RunRow {
   scripts: ScriptRow[];
 }
 
-/** A winner the DNA was built from; its transcript can be the next reference. */
-export interface DnaWinner {
+/** One of our ads that sold, from the cached ad metrics; its transcript (when deconstructed) can be the next reference. */
+export interface Winner {
   ad_id: string;
+  account_id: string | null;
   ad: string;
+  created_time: string | null;
   purchases: number;
   spend: number;
   cpa: number | null;
   verdict: "winner" | "middle" | "loser";
-  hook: string;
+  thumbnail_url: string | null;
+  /** The spoken words with timestamps and [ON-SCREEN] markers, or "" until the ad is deconstructed. */
   transcript: string;
+  hook: string;
   seconds: number | null;
+}
+
+export interface WinnersView {
+  store: string;
+  winners: Winner[];
+  refreshed_at: string;
 }
 
 export interface DnaView {
   store: string;
   dna: string;
   built_at: string;
-  winners: DnaWinner[];
   /** How many ads the brief was written from (0 for the hand-written seed). */
   ads_read: number;
+  /** How many of those launched inside the anchor window. */
+  winning_now: number;
+  anchor_days: number;
+  /** The marketer's standing brief for the brand, read before every run. */
+  brief: string;
 }
 
 export interface BoardVideo {
@@ -134,9 +148,13 @@ export interface StudioPage {
   /** Stores with a brand profile in the Clipper's brand kit. */
   profiled: string[];
   dna: Record<string, DnaView>;
+  winners: Record<string, WinnersView>;
   board_videos: BoardVideo[];
   runs: RunView[];
 }
 
 export const MAX_VERSIONS = 4;
 export const DEFAULT_VERSIONS = 2;
+export const DEFAULT_ANCHOR_DAYS = 45;
+/** Ads launched inside the window count as "winning now". */
+export const isRecent = (createdTime: string | null, anchorDays: number) => !!createdTime && Date.now() - new Date(createdTime).getTime() <= anchorDays * 86_400_000;
