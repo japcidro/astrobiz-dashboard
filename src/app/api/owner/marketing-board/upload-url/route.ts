@@ -15,6 +15,7 @@ const IMAGE: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg",
  * POST { kind: "video", mime } — a downloaded reference ad for a video card (board/videos/).
  * POST { kind: "thumb", mime: "image/jpeg" } — that video's poster frame, grabbed in the browser (board/thumbs/).
  * POST { kind: "studio", mime } — an attachment for the Static Ad Generator (image-studio/uploads/).
+ * POST { kind: "script", mime } — an ad video for the Script Generator to transcribe (script-studio/uploads/).
  */
 export async function POST(request: Request) {
   const auth = await requireBoardUser();
@@ -22,10 +23,10 @@ export async function POST(request: Request) {
 
   const b = (await request.json().catch(() => null)) as { item_id?: string; mime?: string; kind?: string } | null;
   let path: string;
-  if (b?.kind === "video") {
+  if (b?.kind === "video" || b?.kind === "script") {
     const ext = outputExtensionFor(b.mime ?? "");
     if (!ext) return Response.json({ error: "Upload an MP4, MOV or WebM video" }, { status: 400 });
-    path = `board/videos/${randomUUID()}.${ext}`;
+    path = b.kind === "video" ? `board/videos/${randomUUID()}.${ext}` : `script-studio/uploads/${randomUUID()}.${ext}`;
   } else if (b?.kind === "thumb") {
     if (b.mime !== "image/jpeg") return Response.json({ error: "Thumbnails are JPEG" }, { status: 400 });
     path = `board/thumbs/${randomUUID()}.jpg`;

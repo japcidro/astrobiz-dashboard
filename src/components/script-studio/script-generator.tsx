@@ -1,12 +1,16 @@
 "use client";
 
-import { AlertTriangle, Check, ChevronDown, ChevronUp, Copy, FileText, Film, Loader2, RefreshCw, Sparkles, Trash2, Trophy, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, ChevronUp, Copy, FileText, Film, Loader2, RefreshCw, Sparkles, Trash2, Trophy, Upload, X } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DnaView, ReferenceSource, RunView, ScriptRow, StudioPage, Winner, WinnersView } from "@/lib/script-studio/types";
 import { DEFAULT_VERSIONS, isRecent } from "@/lib/script-studio/types";
 import { cleanScript, hasHiddenDetails } from "@/lib/script-studio/clean";
+import { createClient } from "@/lib/supabase/client";
+import { STORAGE_MAX_BYTES, fmtMB, shrinkVideo } from "@/components/marketing-board/shrink-video";
+
+const VIDEO_TYPES = new Set(["video/mp4", "video/quicktime", "video/webm"]);
 import { Button, ConfirmButton, Label, Panel, Pill, api, timeAgo } from "@/components/hook-studio/ui";
 
 const field = "w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-purple-500";
@@ -44,6 +48,9 @@ export function ScriptGenerator() {
   const [busy, setBusy] = useState<string | null>(null);
   const [picker, setPicker] = useState<"board" | "winners" | null>(null);
   const [transcribing, setTranscribing] = useState<string | null>(null);
+  /** What the upload is doing right now, shown under the box. */
+  const [uploadStep, setUploadStep] = useState<string | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [openPlan, setOpenPlan] = useState<string | null>(null);
   const [dnaOpen, setDnaOpen] = useState(false);
   const [rewrite, setRewrite] = useState<{ id: string; note: string } | null>(null);
@@ -89,6 +96,42 @@ export function ScriptGenerator() {
     },
     []
   );
+
+  /** An ad video from the marketer's computer: shrunk under the storage cap when needed, uploaded, then read by Gemini. */
+  const uploadVideo = async (file: File) => {
+    if (!VIDEO_TYPES.has(file.type)) {
+      setError("Upload an MP4, MOV or WebM video");
+      return;
+    }
+    setTranscribing("upload");
+    setError(null);
+    try {
+      let upload = file;
+      if (file.size > STORAGE_MAX_BYTES) {
+        setUploadStep(`Shrinking ${fmtMB(file.size)} to fit storage…`);
+        upload = await shrinkVideo(file, (f) => setUploadStep(`Shrinking ${fmtMB(file.size)} to fit storage… ${Math.round(f * 100)}%`));
+      }
+      setUploadStep(`Uploading ${fmtMB(upload.size)}…`);
+      const { path, token, bucket } = await api<{ path: string; token: string; bucket: string }>("/api/owner/marketing-board/upload-url", { method: "POST", body: JSON.stringify({ kind: "script", mime: upload.type }) });
+      const up = await createClient().storage.from(bucket).uploadToSignedUrl(path, token, upload, { contentType: upload.type });
+      if (up.error) throw new Error(up.error.message);
+      setUploadStep("Gemini is reading the video, about a minute…");
+      const name = file.name.replace(/\.[a-z0-9]+$/i, "");
+      const r = await api<{ text: string; label: string; seconds: number | null }>("/api/owner/script-generator/transcribe", { method: "POST", body: JSON.stringify({ path, label: name }) });
+      const clean = cleanScript(r.text);
+      setScript(clean);
+      setHidden(hasHiddenDetails(r.text) ? { raw: r.text, clean } : null);
+      setLabel(`Uploaded · ${r.label}${r.seconds ? ` · ${r.seconds}s` : ""}`);
+      setSource("paste");
+      setPicker(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setTranscribing(null);
+      setUploadStep(null);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
 
   // First load: the brand from the card (FOLIQ otherwise), and a card's own video transcribed straight into the box.
   useEffect(() => {
@@ -252,6 +295,7 @@ export function ScriptGenerator() {
 
   return (
     <div className="max-w-7xl space-y-5">
+      <input ref={fileRef} type="file" accept="video/mp4,video/quicktime,video/webm" className="hidden" onChange={(e) => e.target.files?.[0] && void uploadVideo(e.target.files[0])} />
       <div>
         <h1 className="text-2xl font-bold text-white inline-flex items-center gap-2">
           <FileText size={22} className="text-purple-400" /> Script Generator
@@ -287,12 +331,15 @@ export function ScriptGenerator() {
                 if (source !== "paste") setSource("paste");
               }}
               rows={14}
-              placeholder={transcribing ? "Transcribing the video…" : "Paste the reference ad's script here, or transcribe a board video below."}
+              placeholder={transcribing ? "Transcribing the video…" : "Paste the reference ad's script here, upload the ad video, or transcribe a board video below."}
               className={`${field} resize-y leading-relaxed`}
               disabled={!!transcribing}
             />
             <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-              <Button onClick={() => setPicker((v) => (v === "board" ? null : "board"))} busy={!!transcribing} className="!px-2.5 !py-1 !text-xs">
+              <Button onClick={() => fileRef.current?.click()} busy={transcribing === "upload"} disabled={!!transcribing} className="!px-2.5 !py-1 !text-xs">
+                <Upload size={12} /> Upload the ad video
+              </Button>
+              <Button ghost onClick={() => setPicker((v) => (v === "board" ? null : "board"))} busy={!!transcribing && transcribing !== "upload"} disabled={!!transcribing} className="!px-2.5 !py-1 !text-xs">
                 <Film size={12} /> Transcribe a board video
               </Button>
               <Button ghost onClick={() => setPicker((v) => (v === "winners" ? null : "winners"))} disabled={!store} className="!px-2.5 !py-1 !text-xs">
@@ -307,7 +354,7 @@ export function ScriptGenerator() {
               {detailsIntact && <span className="text-[11px] text-gray-600">Spoken words only; the timestamps and on-screen captions stay hidden and still go to the skill.</span>}
               {transcribing && (
                 <span className="text-[11px] text-purple-300 inline-flex items-center gap-1">
-                  <Loader2 size={11} className="animate-spin" /> Gemini is reading the video, about a minute
+                  <Loader2 size={11} className="animate-spin" /> {uploadStep ?? "Gemini is reading the video, about a minute"}
                 </span>
               )}
             </div>
