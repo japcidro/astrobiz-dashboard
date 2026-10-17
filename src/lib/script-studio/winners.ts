@@ -3,6 +3,7 @@ import { resolveAdVideo } from "@/lib/facebook/video";
 import { deconstructAdVideo } from "@/lib/gemini/deconstruct";
 import { matchAdToStore } from "@/lib/profit/store-matching";
 import type { Winner, WinnersView } from "./types";
+import { DEFAULT_ANCHOR_DAYS, isRecent } from "./types";
 
 /**
  * The brand's winners, from the cached ad metrics joined to the
@@ -13,8 +14,15 @@ import type { Winner, WinnersView } from "./types";
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
 const STALE_MS = 24 * 60 * 60 * 1000;
-const MAX_WINNERS = 24;
+const MAX_WINNERS = 30;
+/** A creative that sold this much is listed whatever its age. */
 const MIN_PURCHASES = 5;
+/** A creative launched inside the anchor window is listed from this many purchases, when its cost per purchase is strong. */
+const EARLY_MIN_PURCHASES = 2;
+const EARLY_MAX_SPEND = 6000;
+/** The scaled copies of an ad: "DHT-072226LIN2 - Copy", "… - Copy 2". */
+const COPY_SUFFIX = /\s*-\s*copy(\s*\d+)?\s*$/i;
+export const baseName = (ad: string) => ad.replace(COPY_SUFFIX, "").trim();
 /** Thumbnail lookups per refresh, to spare the Graph budget; the rest come on later refreshes. */
 const MAX_THUMB_LOOKUPS = 12;
 
@@ -80,41 +88,66 @@ export async function refreshWinners(db: SupabaseClient, store: string, force = 
   const spend = rows.reduce((s, r) => s + r.spend, 0);
   const buys = rows.reduce((s, r) => s + r.purchases, 0);
   const blended = buys > 0 ? spend / buys : null;
-  const verdict = (purchases: number, spendOf: number): Winner["verdict"] => {
-    const cpa = purchases > 0 ? spendOf / purchases : null;
-    if (!blended || cpa === null) return spendOf >= 1500 ? "loser" : "middle";
-    if (cpa <= blended * 0.95 && purchases >= 10) return "winner";
-    if (cpa >= blended * 1.2 && spendOf >= 1500) return "loser";
+  const { data: dnaRow } = await db.from("script_brand_dna").select("anchor_days").eq("store", store).maybeSingle();
+  const anchorDays = (dnaRow?.anchor_days as number | undefined) ?? DEFAULT_ANCHOR_DAYS;
+
+  // One creative = the test ad plus its scaled copies: summed, launched when the first went live, represented by the ad that spent most.
+  const groups = new Map<string, { ad: string; ad_ids: string[]; lead: MetricRow & { purchases: number; spend: number }; created_time: string | null; purchases: number; spend: number }>();
+  for (const r of rows) {
+    const key = baseName(r.ad).toUpperCase();
+    const g = groups.get(key);
+    if (!g) {
+      groups.set(key, { ad: baseName(r.ad), ad_ids: [r.ad_id], lead: r, created_time: r.created_time, purchases: r.purchases, spend: r.spend });
+      continue;
+    }
+    g.ad_ids.push(r.ad_id);
+    g.purchases += r.purchases;
+    g.spend += r.spend;
+    if (r.spend > g.lead.spend) g.lead = r;
+    if (r.created_time && (!g.created_time || r.created_time < g.created_time)) g.created_time = r.created_time;
+  }
+  const verdict = (g: { purchases: number; spend: number; created_time: string | null }): Winner["verdict"] => {
+    const cpa = g.purchases > 0 ? g.spend / g.purchases : null;
+    if (!blended || cpa === null) return g.spend >= 1500 ? "loser" : "middle";
+    if (cpa <= blended * 0.95 && g.purchases >= 10) return "winner";
+    if (isRecent(g.created_time, anchorDays) && g.purchases >= EARLY_MIN_PURCHASES && g.spend <= EARLY_MAX_SPEND && cpa <= blended * 0.9) return "early";
+    if (cpa >= blended * 1.2 && g.spend >= 1500) return "loser";
     return "middle";
   };
-  // The ads that sold: newest launch first, so the current winners lead the list.
-  const picked = rows
-    .filter((r) => r.purchases >= MIN_PURCHASES)
+  // The creatives that sold, newest launch first, so the current winners lead the list: the proven ones, plus the new ones that look like winners on little spend.
+  const picked = [...groups.values()]
+    .map((g) => ({ ...g, verdict: verdict(g) }))
+    .filter((g) => g.purchases >= MIN_PURCHASES || g.verdict === "early")
     .sort((a, b) => (b.created_time ?? "").localeCompare(a.created_time ?? "") || b.purchases - a.purchases)
     .slice(0, MAX_WINNERS);
-  const { data: analysisRows } = picked.length ? await db.from("ad_creative_analyses").select("ad_id, thumbnail_url, analysis").in("ad_id", picked.map((r) => r.ad_id)) : { data: [] };
+  const allIds = picked.flatMap((g) => g.ad_ids);
+  const { data: analysisRows } = allIds.length ? await db.from("ad_creative_analyses").select("ad_id, thumbnail_url, analysis").in("ad_id", allIds) : { data: [] };
   const analyses = new Map(((analysisRows ?? []) as AnalysisRow[]).map((a) => [a.ad_id, a]));
-  const previous = new Map((cached?.winners ?? []).map((w) => [w.ad_id, w]));
+  const previous = new Map<string, Winner>();
+  for (const w of cached?.winners ?? []) for (const id of w.ad_ids ?? [w.ad_id]) previous.set(id, w);
   const token = await fbToken(db);
   let lookups = 0;
   const winners: Winner[] = [];
-  for (const r of picked) {
-    const a = analyses.get(r.ad_id);
+  for (const g of picked) {
+    // Any ad of the group may have been deconstructed; the lead ad is the one transcribed from here on.
+    const a = g.ad_ids.map((id) => analyses.get(id)).find((x) => x?.analysis?.transcript) ?? analyses.get(g.lead.ad_id);
     const transcript = cleanTranscript(a?.analysis?.transcript ?? "").slice(0, 8000);
-    let thumbnail = a?.thumbnail_url ?? previous.get(r.ad_id)?.thumbnail_url ?? null;
+    const prev = g.ad_ids.map((id) => previous.get(id)).find((x) => x?.thumbnail_url);
+    let thumbnail = a?.thumbnail_url ?? g.ad_ids.map((id) => analyses.get(id)?.thumbnail_url).find(Boolean) ?? prev?.thumbnail_url ?? null;
     if (!thumbnail && token && lookups < MAX_THUMB_LOOKUPS) {
       lookups += 1;
-      thumbnail = await fetchThumbnail(r.ad_id, token);
+      thumbnail = await fetchThumbnail(g.lead.ad_id, token);
     }
     winners.push({
-      ad_id: r.ad_id,
-      account_id: r.account_id,
-      ad: r.ad,
-      created_time: r.created_time,
-      purchases: r.purchases,
-      spend: Math.round(r.spend),
-      cpa: r.purchases > 0 ? Math.round(r.spend / r.purchases) : null,
-      verdict: verdict(r.purchases, r.spend),
+      ad_id: g.lead.ad_id,
+      ad_ids: g.ad_ids,
+      account_id: g.lead.account_id,
+      ad: g.ad,
+      created_time: g.created_time,
+      purchases: g.purchases,
+      spend: Math.round(g.spend),
+      cpa: g.purchases > 0 ? Math.round(g.spend / g.purchases) : null,
+      verdict: g.verdict,
       thumbnail_url: thumbnail,
       transcript,
       hook: hookOf(transcript),

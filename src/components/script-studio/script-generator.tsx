@@ -340,7 +340,7 @@ export function ScriptGenerator() {
               <div className="mt-2 rounded-lg bg-gray-950 border border-gray-800">
                 <div className="flex items-center gap-2 px-3 py-2 text-[11px] text-gray-500 border-b border-gray-900">
                   <span className="flex-1">
-                    Our {store} ads that sold, newest first{winners ? ` · ${winners.winners.length}` : ""}
+                    Our {store} creatives that sold, newest first, scaled copies counted in{winners ? ` · ${winners.winners.length}` : ""}
                   </span>
                   {winBusy === "refresh" ? (
                     <span className="inline-flex items-center gap-1 text-purple-300">
@@ -367,8 +367,13 @@ export function ScriptGenerator() {
                         <div className="min-w-0">
                           <p className="text-gray-200 truncate">
                             <span className="font-mono text-[11px]">{w.ad}</span>
-                            {fresh && <span className="ml-1.5 rounded-full bg-purple-900 text-purple-200 text-[9px] font-extrabold px-1.5 py-px tracking-wide">NEW</span>}
+                            {w.verdict === "early" ? (
+                              <span className="ml-1.5 rounded-full bg-green-900 text-green-200 text-[9px] font-extrabold px-1.5 py-px tracking-wide">EARLY WINNER</span>
+                            ) : fresh ? (
+                              <span className="ml-1.5 rounded-full bg-purple-900 text-purple-200 text-[9px] font-extrabold px-1.5 py-px tracking-wide">NEW</span>
+                            ) : null}
                             {w.verdict === "loser" && <span className="ml-1.5 text-[9px] text-red-400 font-semibold">high CPA</span>}
+                            {(w.ad_ids?.length ?? 1) > 1 && <span className="ml-1.5 text-[9px] text-gray-500">+ {w.ad_ids!.length - 1} scaled {w.ad_ids!.length - 1 === 1 ? "copy" : "copies"}</span>}
                           </p>
                           <p className="text-gray-500 truncate">
                             {launched(w.created_time)}

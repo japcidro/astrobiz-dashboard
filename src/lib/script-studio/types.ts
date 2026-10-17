@@ -98,16 +98,24 @@ export interface RunView extends RunRow {
   scripts: ScriptRow[];
 }
 
-/** One of our ads that sold, from the cached ad metrics; its transcript (when deconstructed) can be the next reference. */
+/**
+ * One of our creatives that sold, from the cached ad metrics: the test ad and
+ * its scaled "- Copy" ads summed as one. Its transcript (when deconstructed)
+ * can be the next reference. "early": launched inside the anchor window with
+ * little spend and a strong cost per purchase, a signal rather than proof.
+ */
 export interface Winner {
+  /** The ad with the most spend in the group; the one transcribed. */
   ad_id: string;
+  /** Every ad id in the group (the original and its scaled copies). */
+  ad_ids?: string[];
   account_id: string | null;
   ad: string;
   created_time: string | null;
   purchases: number;
   spend: number;
   cpa: number | null;
-  verdict: "winner" | "middle" | "loser";
+  verdict: "winner" | "early" | "middle" | "loser";
   thumbnail_url: string | null;
   /** The spoken words with timestamps and [ON-SCREEN] markers, or "" until the ad is deconstructed. */
   transcript: string;

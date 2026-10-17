@@ -31,7 +31,7 @@ const DNA_SCHEMA = { type: "object", additionalProperties: false, required: ["dn
 
 const DNA_SYSTEM = `You write the Winning DNA brief for one brand's video ads: what has actually sold, read from the brand's own ads with their real purchase numbers. A scriptwriter will read it before adapting a competitor's script for this brand, to fill what that script cannot give us, and to make the next scripts win the way the current winners win. Be concrete and quote real lines from the transcripts; never invent a line, a number or a claim.
 
-The ads come in two groups. WINNING NOW: launched inside the anchor window; they carry the weight, and the first section is about them. EARLIER: older winners and losers; background, kept only for what still holds.
+The ads come in two groups. WINNING NOW: launched inside the anchor window; they carry the weight, and the first section is about them. EARLIER: older winners and losers; background, kept only for what still holds. An ad marked EARLY is new, has little spend and a strong cost per purchase: read it as a signal of where the winning is going, and say that its numbers are early. A creative's purchases and spend include its scaled copies.
 
 Write plain text with exactly these headed sections, about 600 words in all:
 WHAT IS WINNING NOW: for each current winner, its name, purchases and cost per purchase; the format (a skit, a talking head, an expert, an update, a voice-over…), who is on screen, the hook move; then, across them: why they win, and how the script is built beat by beat with the actual lines (quote them); the lines and devices to reuse in the next scripts.
@@ -87,7 +87,7 @@ export async function buildDna(db: SupabaseClient, store: string, builtBy: strin
   const spend = metrics.reduce((s, r) => s + r.spend, 0);
   const buys = metrics.reduce((s, r) => s + r.purchases, 0);
   const user = [
-    `Brand: ${store}. Anchor window: the last ${anchorDays} days. Across the ${metrics.length} ads that sold: ₱${spend} spend, ${buys} purchases. Winner = at most 95% of the brand's blended cost per purchase with 10+ purchases; loser = 120% or more with ₱1,500+ spend.`,
+    `Brand: ${store}. Anchor window: the last ${anchorDays} days. Across the ${metrics.length} ads that sold: ₱${spend} spend, ${buys} purchases. Winner = at most 95% of the brand's blended cost per purchase with 10+ purchases; early = launched in the window, 2+ purchases on at most ₱6,000 spend at 90% of blended or better; loser = 120% or more with ₱1,500+ spend.`,
     `WINNING NOW (${now.length} ads launched in the last ${anchorDays} days, most purchases first):\n\n${now.length ? now.sort((a, b) => b.purchases - a.purchases).map(block).join("\n\n") : "(none launched in the window)"}`,
     `EARLIER (${earlier.length} deconstructed ads, background):\n\n${earlier.sort((a, b) => b.purchases - a.purchases).map((w, i) => block(w, now.length + i)).join("\n\n")}`,
     "Write the Winning DNA brief. Answer with JSON only.",
