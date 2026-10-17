@@ -87,7 +87,7 @@ export async function buildDna(db: SupabaseClient, store: string, builtBy: strin
   const spend = metrics.reduce((s, r) => s + r.spend, 0);
   const buys = metrics.reduce((s, r) => s + r.purchases, 0);
   const user = [
-    `Brand: ${store}. Anchor window: the last ${anchorDays} days. Across the ${metrics.length} ads that sold: ₱${spend} spend, ${buys} purchases. Winner = at most 95% of the brand's blended cost per purchase with 10+ purchases; early = launched in the window, 2+ purchases on at most ₱6,000 spend at 90% of blended or better; loser = 120% or more with ₱1,500+ spend.`,
+    `Brand: ${store}. Anchor window: the last ${anchorDays} days. Across the ${metrics.length} ads that sold: ₱${spend} spend, ${buys} purchases. Winner = at most 95% of the brand's blended cost per purchase with 10+ purchases; early = launched in the window at 90% of blended or better, however little it has spent; loser = 120% or more with ₱1,500+ spend.`,
     `WINNING NOW (${now.length} ads launched in the last ${anchorDays} days, most purchases first):\n\n${now.length ? now.sort((a, b) => b.purchases - a.purchases).map(block).join("\n\n") : "(none launched in the window)"}`,
     `EARLIER (${earlier.length} deconstructed ads, background):\n\n${earlier.sort((a, b) => b.purchases - a.purchases).map((w, i) => block(w, now.length + i)).join("\n\n")}`,
     "Write the Winning DNA brief. Answer with JSON only.",

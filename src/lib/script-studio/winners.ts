@@ -14,12 +14,9 @@ import { DEFAULT_ANCHOR_DAYS, isRecent } from "./types";
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
 const STALE_MS = 24 * 60 * 60 * 1000;
-const MAX_WINNERS = 30;
-/** A creative that sold this much is listed whatever its age. */
-const MIN_PURCHASES = 5;
-/** A creative launched inside the anchor window is listed from this many purchases, when its cost per purchase is strong. */
-const EARLY_MIN_PURCHASES = 2;
-const EARLY_MAX_SPEND = 6000;
+const MAX_WINNERS = 80;
+/** Every creative that sold is listed, whatever it spent. */
+const MIN_PURCHASES = 1;
 /** The scaled copies of an ad: "DHT-072226LIN2 - Copy", "… - Copy 2". */
 const COPY_SUFFIX = /\s*-\s*copy(\s*\d+)?\s*$/i;
 export const baseName = (ad: string) => ad.replace(COPY_SUFFIX, "").trim();
@@ -110,14 +107,15 @@ export async function refreshWinners(db: SupabaseClient, store: string, force = 
     const cpa = g.purchases > 0 ? g.spend / g.purchases : null;
     if (!blended || cpa === null) return g.spend >= 1500 ? "loser" : "middle";
     if (cpa <= blended * 0.95 && g.purchases >= 10) return "winner";
-    if (isRecent(g.created_time, anchorDays) && g.purchases >= EARLY_MIN_PURCHASES && g.spend <= EARLY_MAX_SPEND && cpa <= blended * 0.9) return "early";
+    // New and cheap per purchase, on however little spend: a signal, listed and tagged from the first sale.
+    if (isRecent(g.created_time, anchorDays) && cpa <= blended * 0.9) return "early";
     if (cpa >= blended * 1.2 && g.spend >= 1500) return "loser";
     return "middle";
   };
-  // The creatives that sold, newest launch first, so the current winners lead the list: the proven ones, plus the new ones that look like winners on little spend.
+  // Every creative that sold, newest launch first, so the current winners lead the list: the proven ones and the new ones on little spend alike.
   const picked = [...groups.values()]
     .map((g) => ({ ...g, verdict: verdict(g) }))
-    .filter((g) => g.purchases >= MIN_PURCHASES || g.verdict === "early")
+    .filter((g) => g.purchases >= MIN_PURCHASES)
     .sort((a, b) => (b.created_time ?? "").localeCompare(a.created_time ?? "") || b.purchases - a.purchases)
     .slice(0, MAX_WINNERS);
   const allIds = picked.flatMap((g) => g.ad_ids);
