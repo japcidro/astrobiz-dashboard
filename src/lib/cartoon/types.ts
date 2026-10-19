@@ -42,6 +42,10 @@ export interface CartoonHookRow {
   character_preview_path: string | null;
   character_error: string | null;
   character_credits: number | null;
+  /** Science B-roll: stills wait until the marketer approves the style anchor; each redraw is a different take. */
+  anchor_approved: boolean;
+  anchor_redos: number;
+  anchor_note: string;
   final_status: StepStatus | null;
   final_path: string | null;
   final_seconds: number | null;

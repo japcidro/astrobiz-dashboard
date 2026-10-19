@@ -97,9 +97,22 @@ export const STYLE_LOOK =
 
 const FRAME = "Vertical 9:16, full-bleed, the tissue block fills the frame edge to edge with the subject centred and nothing important cropped at the sides. No text, no labels, no captions, no numbers, no logos, no watermark, no product bottles unless the scene asks for one.";
 
-/** The style anchor: the first beat's scene, drawn alone; every later still is drawn with it as the reference image. */
-export function anchorPrompt(scene: string): string {
-  return `${STYLE_LOOK} ${scene.trim()} ${FRAME}`;
+/**
+ * A redraw of the anchor is a different take, not a re-roll: the marketer's
+ * note when there is one, else the next of these, in turn. Each keeps the
+ * palette and the cross-section but changes the render and the staging.
+ */
+export const ANCHOR_VARIATIONS = [
+  "A more high-tech take: a cinematic 3D medical animation frame, shallow depth of field, soft volumetric light from above, the tissue block floating on the sky-blue background with a faint clean grid under it, fine glowing particles in the air, crisp micro-detail on every surface.",
+  "A closer, more dramatic take: the camera much nearer the subject, which fills most of the frame, with a gentle rim light along its edge, the layers rendered with visible texture and translucency, the background a deeper gradient of the same sky blue.",
+  "A cleaner, flatter take: wider framing showing more of the surrounding layers, matte surfaces with soft ambient occlusion, every structure outlined by a thin lighter edge the way a printed anatomy plate is, still rendered in 3D.",
+  "A glassy premium take: the tissue block rendered like a polished museum model, glossy highlights, a thin reflective base plane, the subject lit like a product shot, the sky-blue background brighter at the top.",
+];
+
+/** The style anchor: the first beat's scene, drawn alone; every later still is drawn with it as the reference image. The take steers a redraw. */
+export function anchorPrompt(scene: string, take?: string): string {
+  const steer = take?.trim() ? `${take.trim()} ` : "";
+  return `${STYLE_LOOK} ${scene.trim()} ${steer}${FRAME}`;
 }
 
 export function stillPrompt(scene: string, move: Move): string {

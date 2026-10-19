@@ -1,6 +1,6 @@
 import { requireBoardUser } from "@/lib/marketing-board/auth";
 import { isUuid } from "@/lib/remake/views";
-import { loadProject, redoStep, redoStill } from "@/lib/science-broll/views";
+import { loadProject, redoAnchor, redoStep, redoStill } from "@/lib/science-broll/views";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +8,7 @@ type Ctx = { params: Promise<{ id: string }> };
 
 /**
  * POST — { what: "still", beat_id, note? } redraws a beat's still with the note in the prompt (the check and the clip follow);
- * { what: "clip", beat_id } animates the same still again; { what: "character" } redraws the style anchor and every still;
+ * { what: "clip", beat_id } animates the same still again; { what: "character", note? } redraws the style anchor as a different take (every still waits for the new OK);
  * { what: "join" } joins the current clips again.
  */
 export async function POST(request: Request, ctx: Ctx) {
@@ -23,7 +23,9 @@ export async function POST(request: Request, ctx: Ctx) {
   if (b.what === "still") {
     if (!beatId) return Response.json({ error: "Which beat?" }, { status: 400 });
     problem = await redoStill(auth.db, id, beatId, typeof b.note === "string" ? b.note : "");
-  } else if (b.what === "clip" || b.what === "character" || b.what === "join") {
+  } else if (b.what === "character") {
+    problem = await redoAnchor(auth.db, id, typeof b.note === "string" ? b.note : "");
+  } else if (b.what === "clip" || b.what === "join") {
     problem = await redoStep(auth.db, id, b.what, beatId);
   } else {
     return Response.json({ error: "Unknown step" }, { status: 400 });

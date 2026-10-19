@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CartoonBeatRow, CartoonHookRow, CartoonHookSummary, CartoonHookView, CartoonResolution } from "@/lib/cartoon/types";
 import { deleteHook, loadHook, loadHooks, redo } from "@/lib/cartoon/views";
-import { MAX_VARIANTS, anchorPrompt, checkPrompt, moveById, motionPrompt, stillPrompt } from "./engines";
+import { ANCHOR_VARIATIONS, MAX_VARIANTS, anchorPrompt, checkPrompt, moveById, motionPrompt, stillPrompt } from "./engines";
 import { planBroll } from "./planner";
 
 /**
@@ -100,6 +100,9 @@ export async function planAndStart(db: SupabaseClient, projectId: string): Promi
       title: `${plan.title}${n}`,
       character_desc: `Style anchor: ${first.scene}`,
       character_prompt: anchorPrompt(first.scene),
+      anchor_approved: false,
+      anchor_redos: 0,
+      anchor_note: "",
       character_status: null,
       character_path: null,
       character_preview_path: null,
@@ -142,5 +145,48 @@ export async function redoStill(db: SupabaseClient, projectId: string, beatId: s
   return null;
 }
 
-/** Animate the same still again, redraw the anchor and everything, or join again. */
-export const redoStep = (db: SupabaseClient, projectId: string, what: "clip" | "character" | "join", beatId: string | null) => redo(db, projectId, what, beatId);
+/** The marketer's OK on the anchor: the worker starts drawing the stills from it. */
+export async function approveAnchor(db: SupabaseClient, projectId: string): Promise<string | null> {
+  const { data } = await db.from("cartoon_hooks").select("character_status").eq("id", projectId).eq("kind", "science").maybeSingle();
+  if (!data) return "Not found";
+  if (data.character_status !== "done") return "The anchor is not drawn yet";
+  const { error } = await db.from("cartoon_hooks").update({ anchor_approved: true, status: "working", error: null }).eq("id", projectId);
+  return error ? error.message : null;
+}
+
+/**
+ * Draw the anchor again as a different take: the marketer's note when given,
+ * else the next of the skill's variations. Every still is reset too and waits
+ * for the new OK.
+ */
+export async function redoAnchor(db: SupabaseClient, projectId: string, note: string): Promise<string | null> {
+  const [{ data: row }, { data: first }] = await Promise.all([
+    db.from("cartoon_hooks").select("anchor_redos").eq("id", projectId).eq("kind", "science").maybeSingle(),
+    db.from("cartoon_beats").select("scene").eq("hook_id", projectId).order("idx").limit(1).maybeSingle(),
+  ]);
+  if (!row || !first) return "Not found";
+  const redos = (Number(row.anchor_redos) || 0) + 1;
+  const fix = note.trim().slice(0, 400);
+  const take = fix ? `A different take from the last one, as the marketer asks: ${fix}.` : `${ANCHOR_VARIATIONS[(redos - 1) % ANCHOR_VARIATIONS.length]} Clearly different from a plain textbook plate.`;
+  const { error } = await db
+    .from("cartoon_hooks")
+    .update({
+      character_prompt: anchorPrompt(first.scene as string, take),
+      anchor_note: fix,
+      anchor_redos: redos,
+      anchor_approved: false,
+      character_status: null,
+      character_error: null,
+      status: "working",
+      final_status: null,
+      final_error: null,
+      error: null,
+    })
+    .eq("id", projectId);
+  if (error) return error.message;
+  await db.from("cartoon_beats").update({ still_status: null, still_error: null, check_status: null, check_ok: null, check_notes: null, check_error: null, still_redos: 0, clip_status: null, clip_error: null }).eq("hook_id", projectId);
+  return null;
+}
+
+/** Animate the same still again, or join again. */
+export const redoStep = (db: SupabaseClient, projectId: string, what: "clip" | "join", beatId: string | null) => redo(db, projectId, what, beatId);

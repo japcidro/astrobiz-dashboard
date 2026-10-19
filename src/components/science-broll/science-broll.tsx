@@ -30,6 +30,7 @@ export function ScienceBroll({ id }: { id: string }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [zoom, setZoom] = useState<{ video?: string; image?: string } | null>(null);
   const [noteFor, setNoteFor] = useState<{ id: string; note: string } | null>(null);
+  const [anchorNote, setAnchorNote] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -66,8 +67,11 @@ export function ScienceBroll({ id }: { id: string }) {
     act(`${what}:${beatId ?? ""}`, async () => {
       const next = await api<CartoonHookView>(`/api/owner/science-broll/${id}/redo`, { method: "POST", body: JSON.stringify({ what, beat_id: beatId, note }) });
       setNoteFor(null);
+      setAnchorNote("");
       return next;
     });
+
+  const approveAnchor = () => act("approve", () => api<CartoonHookView>(`/api/owner/science-broll/${id}`, { method: "POST", body: JSON.stringify({ action: "approve_anchor" }) }));
 
   const anotherTake = () =>
     act("take", async () => {
@@ -83,6 +87,9 @@ export function ScienceBroll({ id }: { id: string }) {
   const st = PROJECT_STATUS[project.status];
   const joining = project.final_status === "queued" || project.final_status === "running";
   const checked = project.beats.filter((b) => b.check_status === "done").length;
+  const anchorDrawn = project.character_status === "done" && !!project.character_url;
+  const anchorBusy = project.character_status === "queued" || project.character_status === "running";
+  const waitingOk = project.status === "working" && !project.anchor_approved;
 
   return (
     <div className="max-w-7xl space-y-5">
@@ -126,6 +133,15 @@ export function ScienceBroll({ id }: { id: string }) {
       {project.status === "planning" && (
         <Panel className="flex items-center gap-3 text-sm text-gray-300">
           <Loader2 size={16} className="animate-spin text-purple-300" /> Claude is splitting the text into shots and picking a move for each. About half a minute.
+        </Panel>
+      )}
+      {waitingOk && anchorDrawn && (
+        <Panel className="flex items-center gap-3 flex-wrap text-sm border-amber-500/40">
+          <ShieldCheck size={16} className="text-amber-300" />
+          <span className="text-amber-100">The style anchor is drawn. Approve it and the stills are drawn from it; or redraw it as a different take first.</span>
+          <Button primary onClick={() => void approveAnchor()} busy={busy === "approve"} disabled={busy !== null}>
+            <Check size={12} /> Approve the anchor
+          </Button>
         </Panel>
       )}
       {project.status === "failed" && (
@@ -172,9 +188,12 @@ export function ScienceBroll({ id }: { id: string }) {
             </Panel>
 
             <Panel className="space-y-2">
-              <Label>Style anchor</Label>
+              <Label>
+                Style anchor{project.anchor_approved ? " · approved" : anchorDrawn ? " · needs your OK" : ""}
+                {project.anchor_redos > 0 ? ` · take ${project.anchor_redos + 1}` : ""}
+              </Label>
               <div className="flex gap-3">
-                <button type="button" onClick={() => project.character_url && setZoom({ image: project.character_url })} className="shrink-0 w-20 aspect-[9/16] rounded-lg overflow-hidden bg-black cursor-zoom-in">
+                <button type="button" onClick={() => project.character_url && setZoom({ image: project.character_url })} className="shrink-0 w-28 aspect-[9/16] rounded-lg overflow-hidden bg-black cursor-zoom-in">
                   {project.character_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={project.character_url} alt="" className="w-full h-full object-cover" />
@@ -183,13 +202,30 @@ export function ScienceBroll({ id }: { id: string }) {
                   )}
                 </button>
                 <div className="min-w-0 space-y-1.5">
-                  <p className="text-[11px] text-gray-400 line-clamp-6">Every still is drawn with this image as its reference, so the whole set shares one palette and render.</p>
+                  <p className="text-[11px] text-gray-400 line-clamp-6">Every still is drawn with this image as its reference, so the whole set shares one palette and render. Nothing is drawn until you approve it.</p>
+                  {project.anchor_note && <p className="text-[10px] text-gray-500 line-clamp-3">Last note: {project.anchor_note}</p>}
                   {project.character_error && <p className="text-[10px] text-red-300 line-clamp-3">{project.character_error}</p>}
                 </div>
               </div>
-              <ConfirmButton question="Redraw the anchor and every still with it?" label="Redraw" onConfirm={() => void redo("character")} className="text-[11px] text-purple-300 hover:text-white inline-flex items-center gap-1 cursor-pointer">
-                <RefreshCw size={11} /> Redraw the anchor
-              </ConfirmButton>
+              {!project.anchor_approved && anchorDrawn && (
+                <Button primary onClick={() => void approveAnchor()} busy={busy === "approve"} disabled={busy !== null} className="w-full justify-center">
+                  <Check size={12} /> Approve the anchor
+                </Button>
+              )}
+              <div className="space-y-1.5">
+                <input value={anchorNote} onChange={(e) => setAnchorNote(e.target.value)} placeholder="Redraw note (optional): more high-tech, closer on the follicle, glassy…" className={field} disabled={anchorBusy} />
+                <Button
+                  ghost={!anchorDrawn || project.anchor_approved}
+                  onClick={() => void redo("character", undefined, anchorNote)}
+                  busy={busy === "character:"}
+                  disabled={busy !== null || anchorBusy}
+                  className="w-full justify-center !text-[11px]"
+                  title={project.anchor_approved ? "Every still is redrawn from the new anchor after your OK" : "A different take each time"}
+                >
+                  <RefreshCw size={11} /> {anchorNote.trim() ? "Redraw with this note" : "Redraw as a different take"}
+                </Button>
+                <p className="text-[10px] text-gray-600">Without a note, each redraw tries a different look: high-tech animation frame, closer and dramatic, clean plate, glassy premium.</p>
+              </div>
             </Panel>
 
             <Panel>
@@ -209,6 +245,7 @@ export function ScienceBroll({ id }: { id: string }) {
                   key={b.id}
                   beat={b}
                   busy={busy}
+                  anchorApproved={project.anchor_approved}
                   note={noteFor?.id === b.id ? noteFor.note : null}
                   onNote={(note) => setNoteFor(note === null ? null : { id: b.id, note })}
                   onZoom={setZoom}
@@ -226,6 +263,7 @@ export function ScienceBroll({ id }: { id: string }) {
 function BeatCard({
   beat: b,
   busy,
+  anchorApproved,
   note,
   onNote,
   onZoom,
@@ -233,6 +271,7 @@ function BeatCard({
 }: {
   beat: CartoonBeatView;
   busy: string | null;
+  anchorApproved: boolean;
   /** The redo note being typed for this beat, or null when the box is closed. */
   note: string | null;
   onNote: (note: string | null) => void;
@@ -261,7 +300,7 @@ function BeatCard({
         {(stillBusy || checking || waitingCheck || clipBusy || (!b.still_preview_url && !b.still_status)) && (
           <div className="absolute inset-x-0 bottom-0 bg-black/70 text-[10px] text-gray-200 px-2 py-1 flex items-center gap-1.5 pointer-events-none">
             <Loader2 size={10} className="animate-spin" />
-            {stillBusy ? (b.still_redos > 0 ? "Redrawing after the check…" : "Drawing the still…") : checking || waitingCheck ? "Claude is checking the still…" : clipBusy ? (b.clip_status === "running" ? "Animating, ~2 min…" : "Clip queued…") : "Waiting for the style anchor"}
+            {stillBusy ? (b.still_redos > 0 ? "Redrawing after the check…" : "Drawing the still…") : checking || waitingCheck ? "Claude is checking the still…" : clipBusy ? (b.clip_status === "running" ? "Animating, ~2 min…" : "Clip queued…") : anchorApproved ? "Waiting for the style anchor" : "Waiting for your OK on the anchor"}
           </div>
         )}
         <span className="absolute top-1.5 left-1.5 text-[10px] font-semibold bg-black/60 text-white px-1.5 py-0.5 rounded">

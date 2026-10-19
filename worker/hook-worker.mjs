@@ -677,8 +677,10 @@ async function cartoonAdvance(hookId) {
   const characterReady = !hook.character_prompt || (hook.character_status === "done" && hook.character_path);
   // Science B-roll (kind "science"): Claude checks every still before it is animated; a failed check redraws it once.
   const science = hook.kind === "science";
+  // Science: nothing is drawn from the anchor until the marketer has approved it.
+  const anchorGate = science && !hook.anchor_approved;
   for (const b of beats) {
-    if (b.still_status === null && (!b.uses_character || characterReady)) {
+    if (b.still_status === null && (!b.uses_character || characterReady) && !anchorGate) {
       await queueCartoonStep("cartoon_beats", b.id, "still", "cartoon_still", CARTOON_IMAGE, {
         hook_id: hook.id,
         beat_id: b.id,

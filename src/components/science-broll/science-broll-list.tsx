@@ -196,7 +196,11 @@ function ProjectCard({ project: h, onDelete }: { project: CartoonHookSummary; on
       : h.status === "working"
         ? h.final_status === "running" || h.final_status === "queued"
           ? "Joining the clips…"
-          : `Stills ${h.stills_done}/${h.beats_total} · clips ${h.clips_done}/${h.beats_total}`
+          : !h.anchor_approved
+            ? h.character_status === "done"
+              ? "Needs your OK on the style anchor"
+              : "Drawing the style anchor…"
+            : `Stills ${h.stills_done}/${h.beats_total} · clips ${h.clips_done}/${h.beats_total}`
         : h.status === "failed"
           ? h.error ?? "Failed"
           : `${h.beats_total} clips · ${h.final_seconds ?? "?"} s`;
