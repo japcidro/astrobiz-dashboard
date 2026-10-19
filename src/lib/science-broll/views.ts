@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CartoonBeatRow, CartoonHookRow, CartoonHookSummary, CartoonHookView, CartoonResolution } from "@/lib/cartoon/types";
 import { deleteHook, loadHook, loadHooks, redo } from "@/lib/cartoon/views";
-import { ANCHOR_VARIATIONS, MAX_VARIANTS, anchorPrompt, checkPrompt, moveById, motionPrompt, stillPrompt } from "./engines";
+import { ANCHOR_VARIATIONS, MAX_VARIANTS, anchorCheckPrompt, anchorPrompt, checkPrompt, moveById, motionPrompt, stillPrompt } from "./engines";
 import { planBroll } from "./planner";
 
 /**
@@ -93,13 +93,18 @@ export async function planAndStart(db: SupabaseClient, projectId: string): Promi
     return error.message;
   }
   const n = project.variant > 1 ? ` · take ${project.variant}` : "";
-  const first = plan.beats[0];
   await db
     .from("cartoon_hooks")
     .update({
       title: `${plan.title}${n}`,
-      character_desc: `Style anchor: ${first.scene}`,
-      character_prompt: anchorPrompt(first.scene),
+      character_desc: plan.anchor_scene,
+      character_prompt: anchorPrompt(plan.anchor_scene),
+      anchor_check_prompt: anchorCheckPrompt(plan.anchor_scene),
+      anchor_check_status: null,
+      anchor_check_ok: null,
+      anchor_check_notes: null,
+      anchor_check_error: null,
+      anchor_auto_redos: 0,
       anchor_approved: false,
       anchor_redos: 0,
       anchor_note: "",
@@ -160,18 +165,22 @@ export async function approveAnchor(db: SupabaseClient, projectId: string): Prom
  * for the new OK.
  */
 export async function redoAnchor(db: SupabaseClient, projectId: string, note: string): Promise<string | null> {
-  const [{ data: row }, { data: first }] = await Promise.all([
-    db.from("cartoon_hooks").select("anchor_redos").eq("id", projectId).eq("kind", "science").maybeSingle(),
-    db.from("cartoon_beats").select("scene").eq("hook_id", projectId).order("idx").limit(1).maybeSingle(),
-  ]);
-  if (!row || !first) return "Not found";
+  const { data: row } = await db.from("cartoon_hooks").select("anchor_redos, character_desc").eq("id", projectId).eq("kind", "science").maybeSingle();
+  if (!row) return "Not found";
+  const scene = String(row.character_desc ?? "").replace(/^Style anchor: /, "");
   const redos = (Number(row.anchor_redos) || 0) + 1;
   const fix = note.trim().slice(0, 400);
   const take = fix ? `A different take from the last one, as the marketer asks: ${fix}.` : `${ANCHOR_VARIATIONS[(redos - 1) % ANCHOR_VARIATIONS.length]} Clearly different from a plain textbook plate.`;
   const { error } = await db
     .from("cartoon_hooks")
     .update({
-      character_prompt: anchorPrompt(first.scene as string, take),
+      character_prompt: anchorPrompt(scene, take),
+      anchor_check_prompt: anchorCheckPrompt(scene),
+      anchor_check_status: null,
+      anchor_check_ok: null,
+      anchor_check_notes: null,
+      anchor_check_error: null,
+      anchor_auto_redos: 0,
       anchor_note: fix,
       anchor_redos: redos,
       anchor_approved: false,

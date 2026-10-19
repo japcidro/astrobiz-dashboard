@@ -46,6 +46,13 @@ export interface CartoonHookRow {
   anchor_approved: boolean;
   anchor_redos: number;
   anchor_note: string;
+  /** Claude's coherence check on the anchor before the marketer sees it; a fail redraws it once (anchor_auto_redos). */
+  anchor_check_prompt: string;
+  anchor_check_status: StepStatus | null;
+  anchor_check_ok: boolean | null;
+  anchor_check_notes: string | null;
+  anchor_check_error: string | null;
+  anchor_auto_redos: number;
   final_status: StepStatus | null;
   final_path: string | null;
   final_seconds: number | null;

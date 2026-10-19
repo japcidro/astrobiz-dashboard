@@ -20,15 +20,18 @@ export interface PlannedBeat {
 
 export interface Plan {
   title: string;
+  /** The subject at rest, for the style anchor: no arrows, highlights or particles. */
+  anchor_scene: string;
   beats: PlannedBeat[];
 }
 
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["title", "beats"],
+  required: ["title", "anchor_scene", "beats"],
   properties: {
     title: { type: "string", description: "3 to 6 words naming this set, in English" },
+    anchor_scene: { type: "string", description: "The set's main subject at rest, for the style anchor: the tissue, the cut, the subject and the structures around it, nothing happening, no highlight, no arrows, no particles" },
     beats: {
       type: "array",
       items: {
@@ -65,6 +68,7 @@ Rules:
 - Keep consecutive beats on the same subject at the same framing when the text stays on one thing, so a problem beat and its calm beat read as one scene changing. Change the subject only when the text does.
 - "scene" describes only the picture: the tissue, the cut, the subject and its state, what is highlighted and in which colour, where any particles, drops, arrows or a patch or capsule sit. English. No text on screen, no labels, no brand names, no faces, no gore.
 - "motion" is one or two sentences in the move's grammar: particles along arrows, a glow growing or fading, a strand thinning or thickening, drops sliding, a slow push-in or a hold. Simple and physical so an image-to-video model can do it.
+- "anchor_scene" is the set's main subject at rest, drawn once as the style anchor every still is matched to: the tissue block, the cut, the one subject and only the structures that belong around it, each complete and attached (a vessel runs through the deeper layer and branches toward the subject, never a loose tube). Nothing happening: no arrows, particles, drops, glows or highlights, no product.
 - The marketer's notes win over these rules.`;
 
 async function apiKey(db: SupabaseClient): Promise<string | null> {
@@ -83,7 +87,7 @@ function clean(plan: Plan): Plan {
       scene: b.scene.trim().slice(0, 1200),
       motion: String(b.motion ?? "").trim().slice(0, 600),
     }));
-  return { title: String(plan.title ?? "").trim().slice(0, 80) || "Science b-roll", beats };
+  return { title: String(plan.title ?? "").trim().slice(0, 80) || "Science b-roll", anchor_scene: String(plan.anchor_scene ?? "").trim().slice(0, 1200) || beats[0]?.scene || "", beats };
 }
 
 export async function planBroll(db: SupabaseClient, input: { text: string; direction: string; variant: number }): Promise<Plan | { error: string }> {

@@ -677,7 +677,17 @@ async function cartoonAdvance(hookId) {
   const characterReady = !hook.character_prompt || (hook.character_status === "done" && hook.character_path);
   // Science B-roll (kind "science"): Claude checks every still before it is animated; a failed check redraws it once.
   const science = hook.kind === "science";
-  // Science: nothing is drawn from the anchor until the marketer has approved it.
+  // Science: the anchor is checked for coherence first (a fail redraws it once), then nothing is drawn from it until the marketer has approved it.
+  if (science && hook.character_status === "done" && hook.character_path && hook.anchor_check_status === null) {
+    await queueCartoonStep("cartoon_hooks", hook.id, "anchor_check", "science_check", "claude", {
+      hook_id: hook.id,
+      anchor: true,
+      still_path: hook.character_preview_path || hook.character_path,
+      prompt: hook.anchor_check_prompt,
+      still_prompt: hook.character_prompt,
+      redos: hook.anchor_auto_redos,
+    });
+  }
   const anchorGate = science && !hook.anchor_approved;
   for (const b of beats) {
     if (b.still_status === null && (!b.uses_character || characterReady) && !anchorGate) {
@@ -875,7 +885,8 @@ async function scienceCheck(job, dir) {
   const ext = extensionOf(p.still_path) || "jpg";
   const file = join(dir, `still.${ext}`);
   await storageDownload(p.still_path, file, BOARD_BUCKET);
-  await updateCartoonBeat(p.beat_id, { check_status: "running" });
+  if (p.anchor) await updateCartoonHook(p.hook_id, { anchor_check_status: "running" });
+  else await updateCartoonBeat(p.beat_id, { check_status: "running" });
   const key = await anthropicKey();
   if (!key) throw new Error("No Anthropic API key in Settings");
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
@@ -903,6 +914,23 @@ async function scienceCheck(job, dir) {
   const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
   const out = JSON.parse(text);
   const fix = String(out.fix ?? "").slice(0, 300);
+  if (p.anchor) {
+    // The style anchor: a fail redraws it once with the fix; the marketer only sees a checked anchor.
+    if (!out.ok && Number(p.redos ?? 0) < SCIENCE_REDRAWS) {
+      await updateCartoonHook(p.hook_id, {
+        character_status: null,
+        character_error: null,
+        anchor_check_status: null,
+        anchor_check_ok: false,
+        anchor_check_notes: `Redrawn once: ${fix}`,
+        anchor_auto_redos: Number(p.redos ?? 0) + 1,
+        character_prompt: `${String(p.still_prompt || "")} Fix from the reviewer: ${fix}`,
+      });
+      return "anchor failed the check, redrawing";
+    }
+    await updateCartoonHook(p.hook_id, { anchor_check_status: "done", anchor_check_ok: !!out.ok, anchor_check_notes: out.ok ? "Checked" : `Kept with a flag: ${fix}` });
+    return out.ok ? "anchor passed" : "anchor failed, kept";
+  }
   if (!out.ok && Number(p.redos ?? 0) < SCIENCE_REDRAWS) {
     await updateCartoonBeat(p.beat_id, {
       still_status: null,
@@ -1228,7 +1256,10 @@ const REMAKE_FAIL = {
   cartoon_voice: (p, m) => updateCartoonBeat(p.beat_id, { voice_status: "failed", voice_error: m }),
   cartoon_join: (p, m) => updateCartoonHook(p.hook_id, { final_status: "failed", final_error: m }),
   // A check that could not run never blocks the clip: the still is kept and flagged.
-  science_check: (p, m) => updateCartoonBeat(p.beat_id, { check_status: "done", check_ok: null, check_notes: `Not checked: ${String(m).slice(0, 200)}`, check_error: m }),
+  science_check: (p, m) =>
+    p.anchor
+      ? updateCartoonHook(p.hook_id, { anchor_check_status: "done", anchor_check_ok: null, anchor_check_notes: `Not checked: ${String(m).slice(0, 200)}`, anchor_check_error: m })
+      : updateCartoonBeat(p.beat_id, { check_status: "done", check_ok: null, check_notes: `Not checked: ${String(m).slice(0, 200)}`, check_error: m }),
   hookgen_still: (p, m) => updateHookgenBeat(p.beat_id, { still_status: "failed", still_error: m }),
   hookgen_clip: (p, m) => updateHookgenBeat(p.beat_id, { clip_status: "failed", clip_error: m }),
   // A check that could not run does not hold the hook back: the join treats it as settled.

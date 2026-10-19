@@ -93,7 +93,7 @@ export const moveById = (id: string | null | undefined): Move => MOVES.find((m) 
 
 /** The style bible: every still, anchor included, starts from this. */
 export const STYLE_LOOK =
-  "Textbook medical illustration rendered in soft 3D: a clean anatomical cross-section, glossy but soft surfaces, even studio light, no harsh shadows. Fixed palette: peach-pink skin and tissue layers, cream-yellow fat cells, deep red vessels, a clear light sky-blue background behind the tissue block. Highlights carry meaning and nothing else is tinted: red for a problem, green for calm, blue for an ingredient, warm gold for a comeback, thin white arrows for movement. Plausible anatomy drawn simply enough to read in three seconds, never gory, no needles, no procedures, no faces.";
+  "Textbook medical illustration rendered in soft 3D: a clean anatomical cross-section, glossy but soft surfaces, even studio light, no harsh shadows. Fixed palette: peach-pink skin and tissue layers, cream-yellow fat cells, deep red vessels, a clear light sky-blue background behind the tissue block. Highlights carry meaning and nothing else is tinted: red for a problem, green for calm, blue for an ingredient, warm gold for a comeback, thin white arrows for movement. Plausible anatomy drawn simply enough to read in three seconds: every structure is complete and attached where it belongs (a vessel runs through the deeper layers and branches up to the subject, a gland sits beside the follicle, fat cells fill their own layer); nothing floats, nothing is cut off mid-air, no stray tubes or fragments, no duplicate subjects. Never gory, no needles, no procedures, no faces.";
 
 const FRAME = "Vertical 9:16, full-bleed, the tissue block fills the frame edge to edge with the subject centred and nothing important cropped at the sides. No text, no labels, no captions, no numbers, no logos, no watermark, no product bottles unless the scene asks for one.";
 
@@ -109,10 +109,26 @@ export const ANCHOR_VARIATIONS = [
   "A glassy premium take: the tissue block rendered like a polished museum model, glossy highlights, a thin reflective base plane, the subject lit like a product shot, the sky-blue background brighter at the top.",
 ];
 
-/** The style anchor: the first beat's scene, drawn alone; every later still is drawn with it as the reference image. The take steers a redraw. */
+/** The anchor shows the subject at rest: it sets the look, the beats add what happens. */
+const AT_REST = "The subject at rest with nothing happening: no arrows, no particles, no drops, no glow, no red, green, blue or gold highlight anywhere, no product. Few elements, each one readable: the layers, the one subject, the structures around it, all complete and attached.";
+
+/** The style anchor: the set's subject at rest, drawn alone; every later still is drawn with it as the reference image. The take steers a redraw. */
 export function anchorPrompt(scene: string, take?: string): string {
   const steer = take?.trim() ? `${take.trim()} ` : "";
-  return `${STYLE_LOOK} ${scene.trim()} ${steer}${FRAME}`;
+  return `${STYLE_LOOK} ${scene.trim()} ${AT_REST} ${steer}${FRAME}`;
+}
+
+/** What Claude checks the anchor against before the marketer sees it: coherent anatomy, nothing happening, the style. */
+export function anchorCheckPrompt(scene: string): string {
+  return [
+    "You review the style anchor of a science b-roll set: the one still every other still will be drawn from. Pass it only when all of this holds:",
+    "1. It is a textbook medical illustration cross-section in soft 3D: peach tissue layers, cream fat, red vessels, a light sky-blue background. Not a photo, not a dark glowing render, not a cartoon.",
+    `2. It shows this subject at rest, readable at a glance: ${scene.trim()}`,
+    "3. The anatomy is coherent: every structure is complete and attached where it belongs; no vessel, tube or fragment floats in the air, starts from nowhere or ends mid-air; no duplicated subject; the layers read top to bottom.",
+    "4. Nothing is happening: no arrows, particles, drops, glows or coloured highlights; no product.",
+    "5. No text, label, caption, number, logo or watermark anywhere; the subject centred and whole; no faces, no gore.",
+    'Answer with JSON only: {"ok": boolean, "fix": string}. "fix" is one sentence for the image model on what to change when ok is false (name the floating or incoherent part first), or "" when ok is true.',
+  ].join("\n");
 }
 
 export function stillPrompt(scene: string, move: Move): string {

@@ -87,8 +87,10 @@ export function ScienceBroll({ id }: { id: string }) {
   const st = PROJECT_STATUS[project.status];
   const joining = project.final_status === "queued" || project.final_status === "running";
   const checked = project.beats.filter((b) => b.check_status === "done").length;
-  const anchorDrawn = project.character_status === "done" && !!project.character_url;
-  const anchorBusy = project.character_status === "queued" || project.character_status === "running";
+  const anchorChecked = project.anchor_check_status === "done";
+  const anchorDrawn = project.character_status === "done" && !!project.character_url && anchorChecked;
+  const anchorBusy = project.character_status === "queued" || project.character_status === "running" || (project.character_status === "done" && !anchorChecked);
+  const anchorStep = project.character_status === "queued" || project.character_status === "running" ? (project.anchor_auto_redos > 0 ? "Redrawing the anchor after the check…" : "Drawing the anchor…") : project.character_status === "done" && !anchorChecked ? "Claude is checking the anchor…" : null;
   const waitingOk = project.status === "working" && !project.anchor_approved;
 
   return (
@@ -189,20 +191,27 @@ export function ScienceBroll({ id }: { id: string }) {
 
             <Panel className="space-y-2">
               <Label>
-                Style anchor{project.anchor_approved ? " · approved" : anchorDrawn ? " · needs your OK" : ""}
+                Style anchor{project.anchor_approved ? " · approved" : anchorDrawn ? " · needs your OK" : anchorStep ? " · " + anchorStep.replace("…", "") : ""}
                 {project.anchor_redos > 0 ? ` · take ${project.anchor_redos + 1}` : ""}
               </Label>
               <div className="flex gap-3">
                 <button type="button" onClick={() => project.character_url && setZoom({ image: project.character_url })} className="shrink-0 w-28 aspect-[9/16] rounded-lg overflow-hidden bg-black cursor-zoom-in">
                   {project.character_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={project.character_url} alt="" className="w-full h-full object-cover" />
+                    <img src={project.character_url} alt="" className={`w-full h-full object-cover ${anchorBusy ? "opacity-40" : ""}`} />
                   ) : (
                     <span className="w-full h-full flex items-center justify-center">{project.character_status === "failed" ? <AlertTriangle size={14} className="text-red-300" /> : <Loader2 size={14} className="animate-spin text-purple-300" />}</span>
                   )}
                 </button>
                 <div className="min-w-0 space-y-1.5">
-                  <p className="text-[11px] text-gray-400 line-clamp-6">Every still is drawn with this image as its reference, so the whole set shares one palette and render. Nothing is drawn until you approve it.</p>
+                  <p className="text-[11px] text-gray-400 line-clamp-6">The subject at rest, nothing happening: it sets the look every still is matched to. Claude checks it for coherent anatomy before you see it. Nothing is drawn until you approve it.</p>
+                  {anchorStep && (
+                    <p className="text-[11px] text-purple-300 inline-flex items-center gap-1">
+                      <Loader2 size={10} className="animate-spin" /> {anchorStep}
+                    </p>
+                  )}
+                  {project.anchor_check_status === "done" && project.anchor_check_ok === false && project.anchor_check_notes && <p className="text-[10px] text-amber-300 line-clamp-3">{project.anchor_check_notes}</p>}
+                  {project.anchor_check_status === "done" && project.anchor_check_ok && project.anchor_auto_redos > 0 && <p className="text-[10px] text-gray-500">Redrawn once by the check</p>}
                   {project.anchor_note && <p className="text-[10px] text-gray-500 line-clamp-3">Last note: {project.anchor_note}</p>}
                   {project.character_error && <p className="text-[10px] text-red-300 line-clamp-3">{project.character_error}</p>}
                 </div>
