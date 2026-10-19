@@ -1516,7 +1516,7 @@ async function boardFetch(job) {
 
 // ─── One job ───
 async function processJob(job) {
-  if (job.kind.startsWith("remake_") || job.kind.startsWith("cartoon_") || job.kind.startsWith("hookgen_") || job.kind === "talking_head" || job.kind === "image_gen") return processRemakeJob(job);
+  if (job.kind.startsWith("remake_") || job.kind.startsWith("cartoon_") || job.kind.startsWith("hookgen_") || job.kind === "science_check" || job.kind === "talking_head" || job.kind === "image_gen") return processRemakeJob(job);
   if (job.kind === "board_fetch") {
     log(`job ${job.id} board_fetch start`);
     try {
