@@ -675,6 +675,8 @@ async function cartoonAdvance(hookId) {
     await queueCartoonStep("cartoon_hooks", hook.id, "character", "cartoon_character", CARTOON_IMAGE, { hook_id: hook.id, prompt: hook.character_prompt });
   }
   const characterReady = !hook.character_prompt || (hook.character_status === "done" && hook.character_path);
+  // Science B-roll (kind "science"): Claude checks every still before it is animated; a failed check redraws it once.
+  const science = hook.kind === "science";
   for (const b of beats) {
     if (b.still_status === null && (!b.uses_character || characterReady)) {
       await queueCartoonStep("cartoon_beats", b.id, "still", "cartoon_still", CARTOON_IMAGE, {
@@ -684,7 +686,17 @@ async function cartoonAdvance(hookId) {
         character_path: b.uses_character && hook.character_prompt ? hook.character_path : null,
       });
     }
-    if (b.still_status === "done" && b.still_path && b.clip_status === null) {
+    if (science && b.still_status === "done" && b.still_path && b.check_status === null) {
+      await queueCartoonStep("cartoon_beats", b.id, "check", "science_check", "claude", {
+        hook_id: hook.id,
+        beat_id: b.id,
+        still_path: b.still_preview_path || b.still_path,
+        prompt: b.check_prompt,
+        still_prompt: b.still_prompt,
+        redos: b.still_redos,
+      });
+    }
+    if (b.still_status === "done" && b.still_path && b.clip_status === null && (!science || b.check_status === "done")) {
       await queueCartoonStep("cartoon_beats", b.id, "clip", "cartoon_clip", CARTOON_CLIP, {
         hook_id: hook.id,
         beat_id: b.id,
@@ -839,7 +851,73 @@ async function cartoonJoin(job, dir) {
   return `${beats.length} beats, ${total.toFixed(1)} s`;
 }
 
-const CARTOON_RUN = { cartoon_character: cartoonCharacter, cartoon_still: cartoonStill, cartoon_clip: cartoonClip, cartoon_voice: cartoonVoice, cartoon_join: cartoonJoin };
+const SCIENCE_REDRAWS = 1;
+const SCIENCE_CHECK_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["ok", "fix"],
+  properties: {
+    ok: { type: "boolean" },
+    fix: { type: "string", description: "One sentence for the image model on what to change when ok is false; empty when ok" },
+  },
+};
+
+/**
+ * Science B-roll: is the still a clean textbook cross-section of the planned
+ * subject, in the set's style, with no stray text? The check prompt is
+ * written by the app (src/lib/science-broll/engines.ts). A fail redraws the
+ * still once with the fix in its prompt; after that it is kept and flagged.
+ */
+async function scienceCheck(job, dir) {
+  const p = job.params;
+  const ext = extensionOf(p.still_path) || "jpg";
+  const file = join(dir, `still.${ext}`);
+  await storageDownload(p.still_path, file, BOARD_BUCKET);
+  await updateCartoonBeat(p.beat_id, { check_status: "running" });
+  const key = await anthropicKey();
+  if (!key) throw new Error("No Anthropic API key in Settings");
+  const { default: Anthropic } = await import("@anthropic-ai/sdk");
+  const client = new Anthropic({ apiKey: key });
+  await updateJob(job.id, { cli_command: "claude science still check" });
+  const media = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg";
+  const response = await client.beta.messages.create({
+    model: "claude-opus-5-5",
+    max_tokens: 2000,
+    betas: ["server-side-fallback-2026-07-01"],
+    fallbacks: "default",
+    output_config: { effort: "low", format: { type: "json_schema", schema: SCIENCE_CHECK_SCHEMA } },
+    system: String(p.prompt || "You review a science illustration still. Answer with JSON only."),
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: media, data: (await readFile(file)).toString("base64") } },
+          { type: "text", text: "The still to review. Answer with JSON only." },
+        ],
+      },
+    ],
+  });
+  if (response.stop_reason === "refusal") throw new Error("Claude declined to check this still");
+  const text = response.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
+  const out = JSON.parse(text);
+  const fix = String(out.fix ?? "").slice(0, 300);
+  if (!out.ok && Number(p.redos ?? 0) < SCIENCE_REDRAWS) {
+    await updateCartoonBeat(p.beat_id, {
+      still_status: null,
+      still_error: null,
+      check_status: null,
+      check_ok: false,
+      check_notes: `Redrawn once: ${fix}`,
+      still_redos: Number(p.redos ?? 0) + 1,
+      still_prompt: `${String(p.still_prompt || "")} Fix from the reviewer: ${fix}`,
+    });
+    return "failed the check, redrawing";
+  }
+  await updateCartoonBeat(p.beat_id, { check_status: "done", check_ok: !!out.ok, check_notes: out.ok ? "Checked" : `Kept with a flag: ${fix}` });
+  return out.ok ? "passed" : "failed, kept";
+}
+
+const CARTOON_RUN = { cartoon_character: cartoonCharacter, cartoon_still: cartoonStill, cartoon_clip: cartoonClip, cartoon_voice: cartoonVoice, cartoon_join: cartoonJoin, science_check: scienceCheck };
 
 // ─── Hook Generator ───
 // The app plans a hook (Claude writes each beat's prompts) and records the
@@ -1147,6 +1225,8 @@ const REMAKE_FAIL = {
   cartoon_clip: (p, m) => updateCartoonBeat(p.beat_id, { clip_status: "failed", clip_error: m }),
   cartoon_voice: (p, m) => updateCartoonBeat(p.beat_id, { voice_status: "failed", voice_error: m }),
   cartoon_join: (p, m) => updateCartoonHook(p.hook_id, { final_status: "failed", final_error: m }),
+  // A check that could not run never blocks the clip: the still is kept and flagged.
+  science_check: (p, m) => updateCartoonBeat(p.beat_id, { check_status: "done", check_ok: null, check_notes: `Not checked: ${String(m).slice(0, 200)}`, check_error: m }),
   hookgen_still: (p, m) => updateHookgenBeat(p.beat_id, { still_status: "failed", still_error: m }),
   hookgen_clip: (p, m) => updateHookgenBeat(p.beat_id, { clip_status: "failed", clip_error: m }),
   // A check that could not run does not hold the hook back: the join treats it as settled.
@@ -1188,7 +1268,7 @@ async function processRemakeJob(job) {
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
     // A finished cartoon step usually unlocks the next one; queue it now rather than at the next sweep.
-    if (job.kind.startsWith("cartoon_") && job.params?.hook_id) await cartoonAdvance(job.params.hook_id).catch(() => {});
+    if ((job.kind.startsWith("cartoon_") || job.kind === "science_check") && job.params?.hook_id) await cartoonAdvance(job.params.hook_id).catch(() => {});
     if (job.kind.startsWith("hookgen_") && job.params?.hook_id) await hookgenAdvance(job.params.hook_id).catch(() => {});
   }
 }

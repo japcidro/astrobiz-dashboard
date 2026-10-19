@@ -3,7 +3,7 @@ import { BOARD_BUCKET, signBoardPaths } from "@/lib/marketing-board/storage";
 import { MAX_VARIANTS, characterPrompt, motionPrompt, stillPrompt } from "./engines";
 import { voiceElevenLabsBeats } from "./elevenlabs";
 import { planHook } from "./planner";
-import type { BeatStyle, CartoonBeatRow, CartoonBeatView, CartoonHookRow, CartoonHookSummary, CartoonHookView, CartoonResolution, CartoonStyle, VoiceProvider } from "./types";
+import type { BeatStyle, CartoonBeatRow, CartoonBeatView, CartoonHookRow, CartoonHookSummary, CartoonHookView, CartoonResolution, CartoonStyle, HookKind, VoiceProvider } from "./types";
 
 /**
  * The app plans a hook (Claude) and resets steps for redos. The Mac worker
@@ -29,8 +29,8 @@ function summarize(h: CartoonHookRow, beats: CartoonBeatRow[], signed: Map<strin
   };
 }
 
-export async function loadHooks(db: SupabaseClient): Promise<CartoonHookSummary[]> {
-  const { data } = await db.from("cartoon_hooks").select("*").order("created_at", { ascending: false }).limit(100);
+export async function loadHooks(db: SupabaseClient, kind: HookKind = "cartoon"): Promise<CartoonHookSummary[]> {
+  const { data } = await db.from("cartoon_hooks").select("*").eq("kind", kind).order("created_at", { ascending: false }).limit(100);
   const hooks = (data ?? []) as CartoonHookRow[];
   if (hooks.length === 0) return [];
   const { data: beatRows } = await db
@@ -126,7 +126,7 @@ export async function planAndStart(db: SupabaseClient, hookId: string): Promise<
   if (!data) return "Not found";
   const hook = data as CartoonHookRow;
   await db.from("cartoon_hooks").update({ status: "planning", error: null }).eq("id", hookId);
-  const plan = await planHook(db, { script: hook.script, style: hook.style, direction: hook.direction, variant: hook.variant });
+  const plan = await planHook(db, { script: hook.script, style: hook.style as CartoonStyle, direction: hook.direction, variant: hook.variant });
   if ("error" in plan) {
     await db.from("cartoon_hooks").update({ status: "failed", error: plan.error }).eq("id", hookId);
     return plan.error;
@@ -144,8 +144,8 @@ export async function planAndStart(db: SupabaseClient, hookId: string): Promise<
       uses_character: b.uses_character,
       scene: b.scene,
       motion: b.motion,
-      still_prompt: stillPrompt(b.style, b.scene, b.uses_character),
-      motion_prompt: motionPrompt(b.style, b.motion),
+      still_prompt: stillPrompt(b.style as Exclude<BeatStyle, "science">, b.scene, b.uses_character),
+      motion_prompt: motionPrompt(b.style as Exclude<BeatStyle, "science">, b.motion),
     }))
   );
   if (error) {
@@ -158,7 +158,7 @@ export async function planAndStart(db: SupabaseClient, hookId: string): Promise<
     .update({
       title: `${plan.title}${n}`,
       character_desc: plan.character.needed ? plan.character.description : "",
-      character_prompt: plan.character.needed ? characterPrompt(plan.character.style, plan.character.description) : null,
+      character_prompt: plan.character.needed ? characterPrompt(plan.character.style as Exclude<BeatStyle, "science">, plan.character.description) : null,
       character_status: null,
       character_path: null,
       character_preview_path: null,
@@ -199,8 +199,8 @@ export async function updateBeat(
       motion: b.motion,
       style: b.style,
       uses_character: b.uses_character,
-      still_prompt: stillPrompt(b.style, b.scene, b.uses_character),
-      motion_prompt: motionPrompt(b.style, b.motion),
+      still_prompt: stillPrompt(b.style as Exclude<BeatStyle, "science">, b.scene, b.uses_character),
+      motion_prompt: motionPrompt(b.style as Exclude<BeatStyle, "science">, b.motion),
     })
     .eq("id", beatId);
   return error ? error.message : null;
@@ -226,7 +226,8 @@ export async function redo(db: SupabaseClient, hookId: string, what: Redo, beatI
     await db.from("cartoon_hooks").update({ character_status: null, character_error: null }).eq("id", hookId);
   } else if (what === "still" || what === "clip" || what === "voice") {
     if (!beatId) return "Which beat?";
-    const patch = what === "still" ? { ...reset("still"), ...reset("clip") } : reset(what);
+    // A new image needs a new check (Science B-roll) and a new clip.
+  const patch = what === "still" ? { ...reset("still"), ...reset("clip"), check_status: null, check_ok: null, check_notes: null, check_error: null, still_redos: 0 } : reset(what);
     const { error } = await db.from("cartoon_beats").update(patch).eq("id", beatId).eq("hook_id", hookId);
     if (error) return error.message;
   } else if (what !== "join") {

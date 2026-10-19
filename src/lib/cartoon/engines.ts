@@ -32,10 +32,10 @@ export const STYLES: Array<{ id: CartoonStyle; name: string; blurb: string }> = 
   { id: "mixed", name: "Mixed", blurb: "Claude picks per beat, like the reference ads" },
 ];
 
-export const styleName = (s: CartoonStyle) => STYLES.find((x) => x.id === s)?.name ?? s;
+export const styleName = (s: string) => (s === "science" ? "Science illustration" : STYLES.find((x) => x.id === s)?.name ?? s);
 
 /** The look every image of that style starts from. */
-export const STYLE_LOOK: Record<BeatStyle, string> = {
+export const STYLE_LOOK: Record<Exclude<BeatStyle, "science">, string> = {
   pixar3d: "3D animated movie style, soft cinematic lighting, expressive stylized characters, rich detailed set.",
   flat2d: "Full-bleed flat 2D cartoon illustration, thick black outlines, simple flat colors, webcomic style, simple round-head characters.",
   medical: "Glowing medical 3D visualization on a dark blue background, translucent glass-like anatomy, glowing orange and blue energy, cinematic.",
@@ -44,16 +44,16 @@ export const STYLE_LOOK: Record<BeatStyle, string> = {
 const FRAME = "Vertical 9:16, full-bleed, fills the whole frame edge to edge, no border. No text, no captions, no letters, no logos, no watermark.";
 
 /** The character image every beat with the main character is drawn from. */
-export function characterPrompt(style: BeatStyle, description: string): string {
+export function characterPrompt(style: Exclude<BeatStyle, "science">, description: string): string {
   return `${STYLE_LOOK[style]} Character design of ${description.trim()}. One character only, full body from head to feet, standing, facing the camera, neutral expression, plain soft light background. ${FRAME}`;
 }
 
-export function stillPrompt(style: BeatStyle, scene: string, withCharacter: boolean): string {
+export function stillPrompt(style: Exclude<BeatStyle, "science">, scene: string, withCharacter: boolean): string {
   const keep = withCharacter ? " The main character is the exact same person as in the reference image: same face, hair, body, outfit and art style." : "";
   return `${STYLE_LOOK[style]} ${scene.trim()}${keep} ${FRAME}`;
 }
 
-export function motionPrompt(style: BeatStyle, motion: string): string {
+export function motionPrompt(style: Exclude<BeatStyle, "science">, motion: string): string {
   const keep = style === "flat2d" ? "Keep the exact flat 2D cartoon style with thick black outlines." : style === "medical" ? "Keep the exact glowing medical visualization style." : "Keep the exact 3D animated style and character.";
   return `${motion.trim()} ${keep} No text, no captions.`;
 }

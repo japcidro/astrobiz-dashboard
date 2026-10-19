@@ -1,5 +1,8 @@
 export type CartoonStyle = "pixar3d" | "flat2d" | "medical" | "mixed";
-export type BeatStyle = Exclude<CartoonStyle, "mixed">;
+/** A beat's look; "science" belongs to the Science B-roll Generator, which shares these tables. */
+export type BeatStyle = Exclude<CartoonStyle, "mixed"> | "science";
+/** Which tool a row belongs to: Cartoon Hooks or the Science B-roll Generator. */
+export type HookKind = "cartoon" | "science";
 export type CartoonResolution = "480p" | "720p";
 export type StepStatus = "queued" | "running" | "done" | "failed";
 export type HookStatus = "planning" | "working" | "done" | "failed";
@@ -17,11 +20,12 @@ export interface CartoonVoice {
 
 export interface CartoonHookRow {
   id: string;
+  kind: HookKind;
   batch_id: string;
   variant: number;
   title: string;
   script: string;
-  style: CartoonStyle;
+  style: CartoonStyle | "science";
   direction: string;
   resolution: CartoonResolution;
   voice_on: boolean;
@@ -73,6 +77,14 @@ export interface CartoonBeatRow {
   voice_seconds: number | null;
   voice_error: string | null;
   voice_credits: number | null;
+  /** Science B-roll only: the move, the still check and its automatic redraws. */
+  move: string | null;
+  check_prompt: string;
+  check_status: StepStatus | null;
+  check_ok: boolean | null;
+  check_notes: string | null;
+  check_error: string | null;
+  still_redos: number;
   created_at: string;
   updated_at: string;
 }
