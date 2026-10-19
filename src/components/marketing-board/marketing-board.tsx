@@ -46,6 +46,8 @@ export function MarketingBoard() {
   const [showAllDone, setShowAllDone] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<BoardStatus | null>(null);
+  /** Where a dragged card would land inside a column: the slot index among the shown cards. */
+  const [dropSlot, setDropSlot] = useState<{ status: BoardStatus; index: number } | null>(null);
   const [worker, setWorker] = useState<WorkerStatus | null>(null);
   const router = useRouter();
   const pathname = usePathname();
@@ -197,12 +199,18 @@ export function MarketingBoard() {
     }
   };
 
-  const move = async (id: string, status: BoardStatus) => {
+  /** Drop a card in a column, at a position between its neighbours when one was picked (todo and in progress keep a hand-set order). */
+  const move = async (id: string, status: BoardStatus, position?: number) => {
     const current = view?.items.find((i) => i.id === id);
-    if (!current || current.status === status) return;
-    replaceItem({ ...current, status, done_at: status === "done" ? new Date().toISOString() : null });
+    if (!current) return;
+    if (current.status === status && position === undefined) return;
+    const patchBody: Record<string, unknown> = {};
+    if (current.status !== status) patchBody.status = status;
+    if (position !== undefined && position !== current.position) patchBody.position = position;
+    if (Object.keys(patchBody).length === 0) return;
+    replaceItem({ ...current, status, position: position ?? current.position, done_at: status === "done" ? (current.done_at ?? new Date().toISOString()) : null });
     try {
-      const r = await api<{ item: BoardItem }>(`/api/owner/marketing-board/items/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
+      const r = await api<{ item: BoardItem }>(`/api/owner/marketing-board/items/${id}`, { method: "PATCH", body: JSON.stringify(patchBody) });
       replaceItem(r.item);
     } catch (e) {
       replaceItem(current);
@@ -237,6 +245,8 @@ export function MarketingBoard() {
   const columns = useMemo(() => {
     const by: Record<BoardStatus, BoardItem[]> = { todo: [], in_progress: [], done: [] };
     for (const i of filtered) by[i.status].push(i);
+    by.todo.sort((a, b) => a.position - b.position);
+    by.in_progress.sort((a, b) => a.position - b.position);
     by.done.sort((a, b) => (b.done_at ?? b.updated_at).localeCompare(a.done_at ?? a.updated_at));
     return by;
   }, [filtered]);
@@ -400,6 +410,7 @@ export function MarketingBoard() {
             const list = columns[status];
             const shown = status === "done" && !showAllDone ? list.slice(0, DONE_PREVIEW) : list;
             const over = dropTarget === status && dragId !== null;
+            const slotted = status !== "done" && dropSlot?.status === status ? dropSlot.index : null;
             return (
               <section
                 key={status}
@@ -411,13 +422,27 @@ export function MarketingBoard() {
                 onDrop={(e) => {
                   e.preventDefault();
                   const id = e.dataTransfer.getData("text/plain") || dragId;
+                  const slot = slotted;
                   setDropTarget(null);
+                  setDropSlot(null);
                   setDragId(null);
                   // Files dropped from the desktop are picked up by the page-wide drop.
-                  if (id) void move(id, status);
+                  if (!id) return;
+                  if (slot === null) {
+                    void move(id, status);
+                    return;
+                  }
+                  // Between the two neighbours of the slot, the dragged card left out: the midpoint, or one step past the edge.
+                  const others = list.filter((i) => i.id !== id);
+                  const before = others[slot - 1];
+                  const after = others[slot];
+                  const position = before && after ? (before.position + after.position) / 2 : before ? before.position + 1 : after ? after.position - 1 : undefined;
+                  void move(id, status, position);
                 }}
-                onDragLeave={() => {
+                onDragLeave={(e) => {
+                  if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
                   if (dropTarget === status) setDropTarget(null);
+                  if (dropSlot?.status === status) setDropSlot(null);
                 }}
                 className={`rounded-xl border p-2.5 min-h-[160px] transition-colors ${over ? "border-purple-500 bg-purple-500/5" : "border-gray-800 bg-gray-900/40"}`}
               >
@@ -426,14 +451,22 @@ export function MarketingBoard() {
                   <span className="text-xs text-gray-600">{list.length}</span>
                 </header>
                 <div className="space-y-2">
-                  {shown.map((item) => (
-                    <BoardCard
+                  {shown.map((item, idx) => (
+                    <div
                       key={item.id}
-                      item={item}
-                      selected={item.id === selectedId}
-                      onSelect={() => setSelectedId(item.id)}
-                      onDragStart={() => setDragId(item.id)}
-                    />
+                      onDragOver={(e) => {
+                        if (status === "done" || !dragId) return;
+                        // Top half of a card: the slot above it; bottom half: the slot below.
+                        const r = e.currentTarget.getBoundingClientRect();
+                        const index = e.clientY < r.top + r.height / 2 ? idx : idx + 1;
+                        if (dropSlot?.status !== status || dropSlot.index !== index) setDropSlot({ status, index });
+                      }}
+                      className="relative"
+                    >
+                      {slotted === idx && dragId !== item.id && <div className="absolute -top-1.5 left-1 right-1 h-0.5 rounded bg-purple-400" />}
+                      <BoardCard item={item} selected={item.id === selectedId} onSelect={() => setSelectedId(item.id)} onDragStart={() => setDragId(item.id)} />
+                      {slotted === shown.length && idx === shown.length - 1 && dragId !== item.id && <div className="absolute -bottom-1.5 left-1 right-1 h-0.5 rounded bg-purple-400" />}
+                    </div>
                   ))}
                   {shown.length === 0 && (
                     <p className="text-xs text-gray-600 text-center py-6">

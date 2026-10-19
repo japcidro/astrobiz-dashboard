@@ -117,6 +117,7 @@ export async function loadBoard(db: SupabaseClient): Promise<BoardView> {
       .from("marketing_board_items")
       .select("*")
       .or(`status.neq.done,done_at.gt."${cutoff}"`)
+      .order("position", { ascending: true })
       .order("created_at", { ascending: false })
       .limit(MAX_ITEMS),
     loadNames(db),

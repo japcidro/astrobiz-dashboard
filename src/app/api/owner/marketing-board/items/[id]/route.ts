@@ -19,7 +19,7 @@ export async function GET(_request: Request, ctx: Ctx) {
   return Response.json({ item });
 }
 
-/** PATCH — title, status, store, assignee, due date. */
+/** PATCH — title, status, store, assignee, due date, position (the hand-set order inside a column). */
 export async function PATCH(request: Request, ctx: Ctx) {
   const auth = await requireBoardUser();
   if (auth.error) return auth.error;
@@ -42,6 +42,7 @@ export async function PATCH(request: Request, ctx: Ctx) {
     else if (typeof b.due_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(b.due_date)) patch.due_date = b.due_date;
     else return Response.json({ error: "Bad date" }, { status: 400 });
   }
+  if (typeof b.position === "number" && Number.isFinite(b.position)) patch.position = b.position;
   if (typeof b.status === "string") {
     if (!BOARD_STATUSES.includes(b.status as BoardStatus)) return Response.json({ error: "Unknown status" }, { status: 400 });
     patch.status = b.status;

@@ -59,6 +59,8 @@ export interface ItemRow {
   assignee_id: string | null;
   due_date: string | null;
   done_at: string | null;
+  /** Hand-set order inside a column: smaller is higher. New cards get a negative epoch, so newest is on top. */
+  position: number;
   created_by: string | null;
   created_at: string;
   updated_at: string;
