@@ -52,6 +52,8 @@ export function CallRecorder({ entryId, entryStatus, initialVoiceSeconds }: Prop
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [meterBlind, setMeterBlind] = useState(false);
   const [blockReason, setBlockReason] = useState<BlockReason>("denied");
+  /** How many audio inputs Chrome can see; null until checked. */
+  const [micCount, setMicCount] = useState<number | null>(null);
 
   const wantRef = useRef(false);
   const entryIdRef = useRef(entryId);
@@ -192,6 +194,12 @@ export function CallRecorder({ entryId, entryStatus, initialVoiceSeconds }: Prop
         }
         setBlockReason(reason);
         setPhase("blocked");
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          setMicCount(devices.filter((d) => d.kind === "audioinput").length);
+        } catch {
+          setMicCount(null);
+        }
         postEvent("blocked", name || "getUserMedia failed");
         return;
       }
@@ -347,6 +355,24 @@ export function CallRecorder({ entryId, entryStatus, initialVoiceSeconds }: Prop
           </li>
           <li>Bumalik dito at i-click ang <strong>Try the microphone again</strong>. Dapat lumabas ang pulang REC.</li>
         </ol>
+      )}
+
+      {phase === "blocked" && blockReason === "nodevice" && (
+        <div className="text-xs text-gray-300 space-y-2 bg-gray-900/60 border border-amber-800/40 rounded-lg p-3">
+          <p className="text-gray-400">
+            Chrome sees <strong className="text-white">{micCount === null ? "no" : micCount}</strong> microphone{micCount === 1 ? "" : "s"}. Dalawang posibleng dahilan:
+          </p>
+          <ol className="list-decimal pl-5 space-y-1.5">
+            <li>
+              <strong>Naka-OFF ang microphone sa Windows.</strong> Settings → <strong>Privacy &amp; security</strong> → <strong>Microphone</strong>. I-ON ang{" "}
+              <strong>Microphone access</strong> at <strong>Let apps access your microphone</strong>. Tapos i-refresh ang page na ito.
+            </li>
+            <li>
+              <strong>Walang mic ang computer.</strong> Kung desktop PC: hindi gagana ang earphone ng cellphone; kailangan ng USB headset o splitter. Kung laptop: may
+              built-in mic yan, kaya number 1 ang problema. Check: right-click ang speaker icon sa baba-kanan → <strong>Sound settings</strong> → <strong>Input</strong>.
+            </li>
+          </ol>
+        </div>
       )}
 
       {(phase === "lost" || phase === "blocked") && (
