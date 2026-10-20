@@ -4,6 +4,11 @@ import { redirect } from "next/navigation";
 import { RunningTimer } from "@/components/timer/running-timer";
 import { ManualEntryForm } from "@/components/timer/manual-entry-form";
 import { TimeHistory } from "@/components/timer/time-history";
+import { ConsentForm } from "@/components/call-coach/consent-form";
+import { CallRecorder } from "@/components/call-coach/call-recorder";
+import { activeConsent, isRecordedRole, voiceSecondsOn } from "@/lib/call-coach/server";
+import { createServiceClient } from "@/lib/supabase/service";
+import { phDate } from "@/lib/call-coach/shared";
 
 export default async function TimeTrackerPage() {
   const employee = await getEmployee();
@@ -53,6 +58,18 @@ export default async function TimeTrackerPage() {
   const weekHours = Math.floor(weekTotal / 3600);
   const weekMinutes = Math.floor((weekTotal % 3600) / 60);
 
+  // Call Coach: VA (and admin) shifts are recorded from the PC mic. The
+  // timer stays locked behind the consent until it is signed once.
+  const recorded = isRecordedRole(employee.role);
+  let consented = false;
+  let voiceToday = 0;
+  if (recorded) {
+    const service = createServiceClient();
+    const consent = await activeConsent(service, employee.id);
+    consented = !!consent;
+    if (consent) voiceToday = await voiceSecondsOn(service, employee.id, phDate());
+  }
+
   return (
     <div>
       <div className="mb-8">
@@ -78,7 +95,20 @@ export default async function TimeTrackerPage() {
 
       {/* Timer + Manual Entry */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <RunningTimer activeEntry={activeEntry} />
+        {recorded && !consented ? (
+          <ConsentForm fullName={employee.full_name} />
+        ) : (
+          <div className="space-y-4">
+            <RunningTimer activeEntry={activeEntry} />
+            {recorded && (
+              <CallRecorder
+                entryId={activeEntry?.id ?? null}
+                entryStatus={activeEntry ? (activeEntry.status as "running" | "paused") : null}
+                initialVoiceSeconds={voiceToday}
+              />
+            )}
+          </div>
+        )}
         <ManualEntryForm />
       </div>
 

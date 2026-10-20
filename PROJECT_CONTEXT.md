@@ -50,6 +50,9 @@ Team members are pre-registered by admin in Settings (email + role). On first Go
 | `brand_reference_files` | Per-store uploaded reference files w/ extracted text | `creative-generator-v2-migration.sql` |
 | `ai_generations` | Saved AI chat threads | `ai-tables-migration.sql` |
 | `ad_creative_analyses` | Deconstructor output per ad: transcript, hook, classification, scenes (Gemini Flash) | (see crons) |
+| `call_coach_consents` | Recording consent signed once per employee (exact wording, IP, UA) | `call-coach-migration.sql` |
+| `call_coach_segments` | Call Coach: one voiced minute of shift audio in the private `call-coach` bucket | `call-coach-migration.sql` |
+| `call_coach_mic_events` | Call Coach: recorder started/paused/lost/stopped/silent, so gaps are explainable | `call-coach-migration.sql` |
 
 ## Pages & Routes
 
@@ -64,7 +67,8 @@ Team members are pre-registered by admin in Settings (email + role). On first Go
 ### Time & Attendance
 | Route | Description |
 |-------|-------------|
-| `/time-tracker` | Running timer + manual entry + history (all roles) |
+| `/time-tracker` | Running timer + manual entry + history (all roles). VA and admin shifts are recorded from the PC mic (Call Coach): consent gate on first use, voice-activated 60s segments uploaded to `/api/call-coach/segments`, Break pauses, Clock Out stops |
+| `/owner/call-coach` | Call Coach (owner/admin only): per-VA per-day saved speech, timeline with a player per minute; Phase 2 adds Gemini transcripts + Claude scores; audio auto-deleted after 60 days by `/api/cron/call-coach-retention` |
 | `/admin/attendance` | Admin view of all employees' time entries |
 
 ### P&L (Admin Only)

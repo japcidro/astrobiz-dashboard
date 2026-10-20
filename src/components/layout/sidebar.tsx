@@ -47,6 +47,7 @@ import {
   Megaphone,
   Mic,
   Film,
+  Headphones,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -451,6 +452,14 @@ const ownerNavEntries: NavEntry[] = [
     href: "/owner/marketing-board",
     icon: <Kanban size={20} />,
     roles: ownerRoles,
+  },
+  {
+    // VA shift recordings. Owner only: the team must not hear each other.
+    label: "Call Coach",
+    href: "/owner/call-coach",
+    icon: <Headphones size={20} />,
+    roles: ownerRoles,
+    ownerOnly: true,
   },
 ];
 
