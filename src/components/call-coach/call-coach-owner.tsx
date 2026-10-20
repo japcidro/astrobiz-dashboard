@@ -14,6 +14,8 @@ import {
   Play,
   RefreshCw,
   Sparkles,
+  TrendingDown,
+  TrendingUp,
 } from "lucide-react";
 import { api } from "@/components/hook-studio/ui";
 import {
@@ -24,6 +26,7 @@ import {
   scoreTone,
   type CallRow,
   type DayResponse,
+  type DigestRow,
   type MicEventKind,
   type OverviewEmployee,
   type OverviewResponse,
@@ -251,6 +254,8 @@ export function CallCoachOwner() {
           pending={picked.employee.reviews[picked.date]?.pending ?? 0}
         />
       )}
+
+      {picked && <DigestPanel employee={picked.employee} onOpenDay={(date) => pick(picked.employee, date)} />}
 
       <RubricEditor />
     </div>
@@ -760,6 +765,154 @@ function RubricEditor() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The Monday digests for one VA: week score with trend, wins, what to coach,
+ * and the clips to replay together (a click opens that day's scorecard).
+ */
+function DigestPanel({ employee, onOpenDay }: { employee: OverviewEmployee; onOpenDay: (date: string) => void }) {
+  const [digests, setDigests] = useState<DigestRow[] | null>(null);
+  const [building, setBuilding] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const load = useCallback(
+    () =>
+      api<{ digests: DigestRow[] }>(`/api/call-coach/digests?employee_id=${employee.id}`)
+        .then((r) => setDigests(r.digests))
+        .catch((e: unknown) => setMsg(e instanceof Error ? e.message : "Could not load digests")),
+    [employee.id],
+  );
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const build = () => {
+    setBuilding(true);
+    setMsg(null);
+    api<{ status: string; reason?: string }>("/api/call-coach/digests", { method: "POST", body: JSON.stringify({ employee_id: employee.id }) })
+      .then((r) => {
+        if (r.status === "skipped") setMsg(r.reason ?? "Nothing to digest yet");
+      })
+      .catch((e: unknown) => setMsg(e instanceof Error ? e.message : "Digest failed"))
+      .finally(() => {
+        setBuilding(false);
+        void load();
+      });
+  };
+
+  const weekLabel = (d: DigestRow) =>
+    `${new Date(`${d.week_start}T00:00:00+08:00`).toLocaleDateString("en-PH", { month: "short", day: "numeric", timeZone: "Asia/Manila" })} to ${new Date(`${d.week_end}T00:00:00+08:00`).toLocaleDateString("en-PH", { month: "short", day: "numeric", timeZone: "Asia/Manila" })}`;
+
+  return (
+    <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5 space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-base font-semibold text-white">Monday digests · {employee.full_name.split(" ")[0]}</h3>
+          <p className="text-xs text-gray-500 mt-0.5">Written by Claude Opus every Monday 7 AM from the week&apos;s reviews. The VA sees only their own note on My Calls.</p>
+        </div>
+        <button
+          type="button"
+          onClick={build}
+          disabled={building}
+          className="inline-flex items-center gap-2 text-sm text-gray-300 hover:text-white border border-gray-700 hover:border-gray-500 rounded-lg px-3 py-2 disabled:opacity-50 cursor-pointer"
+          title="Write (or rewrite) the digest for the week that just ended"
+        >
+          {building ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+          {building ? "Writing…" : "Write last week's digest"}
+        </button>
+      </div>
+      {msg && <p className="text-xs text-amber-300">{msg}</p>}
+      {digests === null && (
+        <p className="text-sm text-gray-500">
+          <Loader2 size={14} className="inline animate-spin mr-2" /> Loading…
+        </p>
+      )}
+      {digests && digests.length === 0 && <p className="text-sm text-gray-500">No digest yet. The first one lands the Monday after a reviewed week.</p>}
+      {digests?.map((d) => (
+        <div key={d.id} className="bg-gray-900/50 border border-gray-700/60 rounded-lg p-4 space-y-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-sm font-semibold text-white">{weekLabel(d)}</span>
+            {d.status === "done" ? (
+              <>
+                <span className={`font-mono text-lg font-bold ${scoreClass(d.score)}`}>{d.score === null ? "–" : d.score.toFixed(1)}</span>
+                {d.score !== null && d.prev_score !== null && (
+                  <span className="inline-flex items-center gap-1 text-xs text-gray-400">
+                    {d.score > d.prev_score ? <TrendingUp size={14} className="text-green-400" /> : d.score < d.prev_score ? <TrendingDown size={14} className="text-red-400" /> : null}
+                    last week {d.prev_score.toFixed(1)}
+                  </span>
+                )}
+                <span className="text-xs text-gray-500">
+                  {d.days_reviewed} days · {d.calls_count} calls · {d.confirmed_count} confirmed · upsell {d.upsell_attempted}/{d.reached_count}
+                </span>
+              </>
+            ) : (
+              <span className="text-xs text-amber-300">{d.status === "failed" ? `failed: ${d.error ?? "unknown"}` : d.status}</span>
+            )}
+          </div>
+          {d.status === "done" && (
+            <div className="grid lg:grid-cols-2 gap-4">
+              <div className="space-y-3">
+                <p className="text-sm text-gray-300 leading-relaxed">{d.summary}</p>
+                {d.wins.length > 0 && (
+                  <ul className="space-y-1">
+                    {d.wins.map((w, i) => (
+                      <li key={i} className="text-sm text-green-200 flex gap-2">
+                        <span>✓</span>
+                        <span>{w}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div className="space-y-3">
+                {d.coaching.length > 0 && (
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold mb-1">Coach this week</p>
+                    <ul className="space-y-1.5">
+                      {d.coaching.map((c, i) => (
+                        <li key={i} className="text-sm text-gray-200 flex gap-2">
+                          <span className="text-purple-400 mt-0.5">▸</span>
+                          <span>{c}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {d.training_clips.length > 0 && (
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold mb-1">Replay together</p>
+                    <ul className="space-y-1.5">
+                      {d.training_clips.map((clip, i) => (
+                        <li key={i} className="text-sm text-gray-300 flex items-start gap-2">
+                          <button
+                            type="button"
+                            onClick={() => onOpenDay(clip.date)}
+                            className="font-mono text-xs text-blue-300 hover:text-white border border-blue-900/60 hover:border-blue-500 rounded px-1.5 py-0.5 cursor-pointer whitespace-nowrap"
+                            title="Open that day's scorecard, then click the moment to play it"
+                          >
+                            {new Date(`${clip.date}T00:00:00+08:00`).toLocaleDateString("en-PH", { month: "short", day: "numeric", timeZone: "Asia/Manila" })} {clip.at.slice(0, 5)}
+                          </button>
+                          <span>{clip.note}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {d.va_message && (
+                  <details>
+                    <summary className="text-xs text-gray-500 hover:text-gray-300 cursor-pointer">What the VA reads</summary>
+                    <p className="text-sm text-gray-400 mt-2 leading-relaxed whitespace-pre-line">{d.va_message}</p>
+                  </details>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

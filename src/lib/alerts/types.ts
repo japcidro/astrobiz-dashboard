@@ -14,7 +14,12 @@ export type AlertType =
   | "ad_account_payment_failed"
   | "waybill_sender_mismatch"
   | "task_assigned"
-  | "task_completed";
+  | "task_completed"
+  | "call_coach_no_upsell"
+  | "call_coach_score_drop"
+  | "call_coach_rts_risk"
+  | "call_coach_not_recorded"
+  | "call_coach_digest";
 
 export type AlertResourceType =
   | "product"
@@ -25,7 +30,8 @@ export type AlertResourceType =
   | "ad_account"
   | "autopilot_run"
   | "system"
-  | "task";
+  | "task"
+  | "employee";
 
 export interface AdminAlert {
   id: string;
@@ -73,6 +79,11 @@ export const ALERT_TYPE_LABELS: Record<AlertType, string> = {
   waybill_sender_mismatch: "Wrong sender on waybill",
   task_assigned: "Task assigned",
   task_completed: "Task completed",
+  call_coach_no_upsell: "No upsell all day",
+  call_coach_score_drop: "Call score dropped",
+  call_coach_rts_risk: "RTS-risk calls",
+  call_coach_not_recorded: "Shift not recorded",
+  call_coach_digest: "Weekly coaching digest",
 };
 
 export const SEVERITY_ORDER: Record<AlertSeverity, number> = {

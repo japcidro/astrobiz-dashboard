@@ -226,3 +226,54 @@ export const scoreTone = (score: number | null | undefined): "good" | "mid" | "b
   if (score >= 3) return "mid";
   return "bad";
 };
+
+// ─── Phase 3: the Monday digest, alerts, the VA's own view ───
+
+export const DIGEST_MODEL = "claude-opus-5-5";
+
+export interface TrainingClip {
+  date: string;
+  at: string;
+  note: string;
+}
+
+export interface DigestRow {
+  id: string;
+  employee_id: string;
+  week_start: string;
+  week_end: string;
+  status: "queued" | "running" | "done" | "failed";
+  model: string | null;
+  days_reviewed: number;
+  calls_count: number;
+  reached_count: number;
+  confirmed_count: number;
+  upsell_attempted: number;
+  upsell_converted: number;
+  score: number | null;
+  prev_score: number | null;
+  scores: Partial<Record<RubricKey, number | null>>;
+  summary: string | null;
+  wins: string[];
+  coaching: string[];
+  training_clips: TrainingClip[];
+  va_message: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  error: string | null;
+  updated_at: string;
+}
+
+/** The Monday of the Manila week that holds this YYYY-MM-DD. */
+export function phWeekStart(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  const dow = (d.getUTCDay() + 6) % 7; // Monday = 0
+  d.setUTCDate(d.getUTCDate() - dow);
+  return d.toISOString().slice(0, 10);
+}
+
+export function addDays(date: string, days: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}

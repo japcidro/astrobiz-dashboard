@@ -12,6 +12,9 @@ import {
   ClipboardList,
   ClipboardCheck,
   CreditCard,
+  PhoneOff,
+  Headphones,
+  MicOff,
 } from "lucide-react";
 import type { AlertType, AlertSeverity } from "@/lib/alerts/types";
 
@@ -30,6 +33,11 @@ const ICON_BY_TYPE: Record<AlertType, React.ReactNode> = {
   waybill_sender_mismatch: <Tag size={16} />,
   task_assigned: <ClipboardList size={16} />,
   task_completed: <ClipboardCheck size={16} />,
+  call_coach_no_upsell: <PhoneOff size={16} />,
+  call_coach_score_drop: <TrendingDown size={16} />,
+  call_coach_rts_risk: <Truck size={16} />,
+  call_coach_not_recorded: <MicOff size={16} />,
+  call_coach_digest: <Headphones size={16} />,
 };
 
 const BG_BY_SEVERITY: Record<AlertSeverity, string> = {

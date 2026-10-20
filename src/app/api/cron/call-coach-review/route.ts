@@ -1,6 +1,7 @@
 import { createServiceClient } from "@/lib/supabase/service";
 import { runTranscriptionBatch } from "@/lib/call-coach/transcribe";
 import { employeesNeedingReview, reviewDay } from "@/lib/call-coach/review";
+import { notifyEmployeeOfReview, raiseNotRecordedAlerts, raiseReviewAlerts } from "@/lib/call-coach/alerts";
 import { phDate } from "@/lib/call-coach/shared";
 
 export const dynamic = "force-dynamic";
@@ -23,13 +24,21 @@ export async function GET(request: Request) {
 
   const today = phDate();
   const yesterday = phDate(new Date(Date.now() - 24 * 60 * 60 * 1000));
-  const results: Array<{ employee_id: string; date: string; status: string; reason?: string }> = [];
+  const results: Array<{ employee_id: string; date: string; status: string; reason?: string; alerts?: string[] }> = [];
   for (const date of [yesterday, today]) {
     for (const employeeId of await employeesNeedingReview(db, date)) {
-      if (Date.now() - started > 270_000) break;
+      if (Date.now() - started > 250_000) break;
       const r = await reviewDay(db, employeeId, date);
-      results.push({ employee_id: employeeId, date, status: r.status, reason: r.reason });
+      let alerts: string[] = [];
+      if (r.status === "done" && r.review) {
+        const { data: emp } = await db.from("employees").select("full_name").eq("id", employeeId).maybeSingle();
+        alerts = await raiseReviewAlerts(db, r.review, (emp?.full_name as string | undefined) ?? "VA");
+        await notifyEmployeeOfReview(db, r.review);
+      }
+      results.push({ employee_id: employeeId, date, status: r.status, reason: r.reason, alerts });
     }
   }
-  return Response.json({ ok: true, transcription, reviews: results, ms: Date.now() - started });
+  // VAs who clocked in today but sent no audio.
+  const notRecorded = await raiseNotRecordedAlerts(db, today);
+  return Response.json({ ok: true, transcription, reviews: results, not_recorded: notRecorded, ms: Date.now() - started });
 }

@@ -114,6 +114,13 @@ const navEntries: NavEntry[] = [
         roles: ["admin", "va", "fulfillment", "marketing"],
       },
       {
+        // Call Coach: the VA's own scores and coaching notes. No audio here.
+        label: "My Calls",
+        href: "/va/my-calls",
+        icon: <Headphones size={18} />,
+        roles: ["admin", "va"],
+      },
+      {
         label: "Attendance",
         href: "/admin/attendance",
         icon: <Users size={18} />,

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import pg from "pg";
 import { transcribeAudio } from "../transcribe";
 import { askReview, buildTimeline, phClock } from "../review";
+import { askDigest } from "../digest";
 import { DEFAULT_RUBRIC } from "../shared";
 
 /**
@@ -76,6 +77,32 @@ describe.skipIf(!live)("call coach live pipeline", () => {
         expect(call.start).toMatch(/^\d{1,2}:\d{2}:\d{2}$/);
         expect(timeline).toContain(`[${call.start.padStart(8, "0")}]`);
       }
+    },
+    240_000,
+  );
+
+  it(
+    "writes a Monday digest with Opus from a week of reviews",
+    async () => {
+      const dir = process.env.CALL_COACH_AUDIO_DIR!;
+      const keys = await keysFromDb();
+      const review = JSON.parse(readFileSync(`${dir}/review.json`, "utf8")) as { output: { calls: Array<{ start: string; outcome: string; summary: string; flags: string[]; moments: Array<{ at: string; tag: string; note: string; quote: string | null }> }>; day_summary: string; coaching: string[] } };
+      // One real reviewed day repeated as a small week, with the second day a little better.
+      const days = ["2026-10-13", "2026-10-14", "2026-10-15"];
+      const dayBlocks = days.map((d, i) => {
+        const score = [3.2, 3.5, 3.9][i];
+        const flagged = review.output.calls.map((c) => `  - ${c.start.padStart(8, "0")} ${c.outcome} [${c.flags.join(", ")}] ${c.summary}`);
+        return `## ${d}  score ${score}  calls 2 (reached 2, confirmed 1, upsell offered 1, taken 1)\nrubric: greeting 4, confirmation 3.5, upsell 5, objection 2, tone 3.5, closing 2.5\nsummary: ${review.output.day_summary}\ncoaching that day: ${review.output.coaching.join(" | ")}\nflagged calls:\n${flagged.join("\n")}`;
+      });
+      const moments = days.flatMap((d) => review.output.calls.flatMap((c) => c.moments.map((m) => `- ${d} ${m.at.padStart(8, "0")} [${m.tag}] (${c.outcome}) ${m.note}${m.quote ? ` "${m.quote}"` : ""}`)));
+      const user = `VA: Anna Santos (first name Anna)\nWeek: 2026-10-13 to 2026-10-19 (Manila). Days reviewed: 3.\nWeek score: 3.5. Previous week: 3.1.\n\nDAILY REVIEWS\n${dayBlocks.join("\n\n")}\n\nMOMENTS YOU MAY PICK TRAINING CLIPS FROM\n${moments.join("\n")}`;
+      const asked = await askDigest(keys.anthropic, user);
+      if ("error" in asked) throw new Error(asked.error);
+      writeFileSync(`${dir}/digest.json`, JSON.stringify(asked, null, 2));
+      console.log(`--- digest (${asked.usage.input_tokens} in / ${asked.usage.output_tokens} out)\n${JSON.stringify(asked.output, null, 2)}`);
+      expect(asked.output.coaching.length).toBeGreaterThanOrEqual(2);
+      expect(asked.output.va_message.length).toBeGreaterThan(80);
+      for (const clip of asked.output.training_clips) expect(days).toContain(clip.date);
     },
     240_000,
   );

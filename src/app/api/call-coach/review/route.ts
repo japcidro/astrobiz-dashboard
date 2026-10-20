@@ -1,6 +1,7 @@
 import { requireCoach } from "@/lib/call-coach/server";
 import { runTranscriptionBatch } from "@/lib/call-coach/transcribe";
 import { reviewDay } from "@/lib/call-coach/review";
+import { notifyEmployeeOfReview, raiseReviewAlerts } from "@/lib/call-coach/alerts";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -29,5 +30,11 @@ export async function POST(request: Request) {
 
   const result = await reviewDay(auth.db, employeeId, date, { force: true });
   if (result.status === "failed") return Response.json({ error: result.reason, transcription }, { status: 500 });
-  return Response.json({ ...result, transcription });
+  let alerts: string[] = [];
+  if (result.status === "done" && result.review) {
+    const { data: emp } = await auth.db.from("employees").select("full_name").eq("id", employeeId).maybeSingle();
+    alerts = await raiseReviewAlerts(auth.db, result.review, (emp?.full_name as string | undefined) ?? "VA");
+    await notifyEmployeeOfReview(auth.db, result.review);
+  }
+  return Response.json({ ...result, transcription, alerts });
 }

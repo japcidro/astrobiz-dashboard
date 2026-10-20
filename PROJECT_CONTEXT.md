@@ -56,6 +56,7 @@ Team members are pre-registered by admin in Settings (email + role). On first Go
 | `call_coach_transcripts` | Call Coach: Gemini transcript per segment (turns with speaker + offset, rendered text) | `call-coach-phase2-migration.sql` |
 | `call_coach_reviews` | Call Coach: Claude's review per employee per day (score, rubric averages, counts, summary, coaching) | `call-coach-phase2-migration.sql` |
 | `call_coach_calls` | Call Coach: each call Claude found in a day (outcome, scores, flags, moments with timestamps) | `call-coach-phase2-migration.sql` |
+| `call_coach_digests` | Call Coach: Opus's Monday digest per VA per week (trend, wins, coaching, training clips, VA note) | `call-coach-phase3-migration.sql` |
 
 ## Pages & Routes
 
@@ -71,7 +72,8 @@ Team members are pre-registered by admin in Settings (email + role). On first Go
 | Route | Description |
 |-------|-------------|
 | `/time-tracker` | Running timer + manual entry + history (all roles). VA and admin shifts are recorded from the PC mic (Call Coach): consent gate on first use, voice-activated 60s segments uploaded to `/api/call-coach/segments`, Break pauses, Clock Out stops |
-| `/owner/call-coach` | Call Coach (owner/admin only): per-VA per-day scorecard. `/api/cron/call-coach-transcribe` (every 30 min) sends each stored minute to Gemini 2.5 Flash; `/api/cron/call-coach-review` (11:30 PM PH) has Claude Sonnet 5.5 split the day into calls and score them on a 6-item rubric (editable via `/api/call-coach/rubric`, stored in `app_settings.call_coach_rubric`). "Review now" = `POST /api/call-coach/review`. Moments click-to-play seek the saved minute. Audio auto-deleted after 60 days by `/api/cron/call-coach-retention`; transcripts and scores stay |
+| `/owner/call-coach` | Call Coach (owner/admin only): per-VA per-day scorecard. `/api/cron/call-coach-transcribe` (every 30 min) sends each stored minute to Gemini 2.5 Flash; `/api/cron/call-coach-review` (11:30 PM PH) has Claude Sonnet 5.5 split the day into calls and score them on a 6-item rubric (editable via `/api/call-coach/rubric`, stored in `app_settings.call_coach_rubric`). "Review now" = `POST /api/call-coach/review`. Moments click-to-play seek the saved minute. `/api/cron/call-coach-digest` (Mon 7 AM PH) has Claude Opus 5.5 write a weekly digest per VA (`call_coach_digests`, also "Write last week's digest" = `POST /api/call-coach/digests`). After each review, alerts land in admin_alerts (`call_coach_no_upsell`, `call_coach_score_drop`, `call_coach_rts_risk`, `call_coach_not_recorded`, `call_coach_digest`) and the VA gets an employee_notification. Audio auto-deleted after 60 days by `/api/cron/call-coach-retention`; transcripts and scores stay |
+| `/va/my-calls` | My Calls (va + admin): the VA's own day scores, rubric, coaching notes, per-call summaries and this week's digest note. No audio, no transcripts |
 | `/admin/attendance` | Admin view of all employees' time entries |
 
 ### P&L (Admin Only)

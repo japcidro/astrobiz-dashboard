@@ -15,3 +15,14 @@ describe("formatMinutes", () => {
     expect(formatMinutes(3 * 3600 + 7 * 60)).toBe("3h 07m");
   });
 });
+
+describe("phWeekStart", () => {
+  it("returns the Monday of the week, Monday through Sunday", async () => {
+    const { phWeekStart, addDays } = await import("../shared");
+    expect(phWeekStart("2026-10-20")).toBe("2026-10-19"); // a Tuesday
+    expect(phWeekStart("2026-10-19")).toBe("2026-10-19"); // Monday stays
+    expect(phWeekStart("2026-10-25")).toBe("2026-10-19"); // Sunday belongs to the week before
+    expect(addDays("2026-10-19", 6)).toBe("2026-10-25");
+    expect(addDays("2026-11-01", -1)).toBe("2026-10-31");
+  });
+});
