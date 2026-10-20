@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CartoonBeatRow, CartoonHookRow, CartoonHookSummary, CartoonHookView, CartoonResolution } from "@/lib/cartoon/types";
 import { deleteHook, loadHook, loadHooks, redo } from "@/lib/cartoon/views";
-import { ANCHOR_VARIATIONS, MAX_VARIANTS, anchorCheckPrompt, anchorPrompt, checkPrompt, moveById, motionPrompt, stillPrompt } from "./engines";
+import { DEFAULT_LOOK, MAX_VARIANTS, anchorCheckPrompt, anchorPrompt, checkPrompt, lookById, moveById, motionPrompt, scaleById, stillPrompt, type LookId } from "./engines";
 import { planBroll } from "./planner";
 
 /**
@@ -19,6 +19,7 @@ export interface CreateProjects {
   text: string;
   direction: string;
   brand: string;
+  look: LookId;
   resolution: CartoonResolution;
   variants: number;
   batch_id: string | null;
@@ -45,6 +46,7 @@ export async function createProjects(db: SupabaseClient, input: CreateProjects):
     title: "Planning…",
     script: text,
     style: "science",
+    look: input.look || DEFAULT_LOOK,
     direction,
     resolution: input.resolution,
     voice_on: false,
@@ -62,7 +64,8 @@ export async function planAndStart(db: SupabaseClient, projectId: string): Promi
   if (!data) return "Not found";
   const project = data as CartoonHookRow;
   await db.from("cartoon_hooks").update({ status: "planning", error: null }).eq("id", projectId);
-  const plan = await planBroll(db, { text: project.script, direction: project.direction, variant: project.variant });
+  const look = lookById(project.look);
+  const plan = await planBroll(db, { text: project.script, direction: project.direction, variant: project.variant, look });
   if ("error" in plan) {
     await db.from("cartoon_hooks").update({ status: "failed", error: plan.error }).eq("id", projectId);
     return plan.error;
@@ -72,6 +75,7 @@ export async function planAndStart(db: SupabaseClient, projectId: string): Promi
   const { error } = await db.from("cartoon_beats").insert(
     plan.beats.map((b, idx) => {
       const move = moveById(b.move);
+      const scale = scaleById(b.scale);
       return {
         hook_id: projectId,
         idx,
@@ -82,9 +86,10 @@ export async function planAndStart(db: SupabaseClient, projectId: string): Promi
         scene: b.scene,
         motion: b.motion,
         move: move.id,
-        still_prompt: stillPrompt(b.scene, move),
-        motion_prompt: motionPrompt(b.motion, move),
-        check_prompt: checkPrompt(b.scene, move),
+        scale: scale.id,
+        still_prompt: stillPrompt(b.scene, move, scale, look),
+        motion_prompt: motionPrompt(b.motion, move, look),
+        check_prompt: checkPrompt(b.scene, move, scale, look),
       };
     })
   );
@@ -98,8 +103,8 @@ export async function planAndStart(db: SupabaseClient, projectId: string): Promi
     .update({
       title: `${plan.title}${n}`,
       character_desc: plan.anchor_scene,
-      character_prompt: anchorPrompt(plan.anchor_scene),
-      anchor_check_prompt: anchorCheckPrompt(plan.anchor_scene),
+      character_prompt: anchorPrompt(plan.anchor_scene, look),
+      anchor_check_prompt: anchorCheckPrompt(plan.anchor_scene, look),
       anchor_check_status: null,
       anchor_check_ok: null,
       anchor_check_notes: null,
@@ -124,16 +129,21 @@ export async function planAndStart(db: SupabaseClient, projectId: string): Promi
 
 /** Draw a beat's still again, with the marketer's note in the prompt; the check and the clip follow on their own. */
 export async function redoStill(db: SupabaseClient, projectId: string, beatId: string, note: string): Promise<string | null> {
-  const { data } = await db.from("cartoon_beats").select("*").eq("id", beatId).eq("hook_id", projectId).maybeSingle();
+  const [{ data }, { data: hookRow }] = await Promise.all([
+    db.from("cartoon_beats").select("*").eq("id", beatId).eq("hook_id", projectId).maybeSingle(),
+    db.from("cartoon_hooks").select("look").eq("id", projectId).maybeSingle(),
+  ]);
   if (!data) return "Not found";
   const b = data as CartoonBeatRow;
   const move = moveById(b.move);
+  const scale = scaleById(b.scale);
+  const look = lookById(hookRow?.look as string | undefined);
   const fix = note.trim().slice(0, 400);
   const { error } = await db
     .from("cartoon_beats")
     .update({
-      still_prompt: fix ? `${stillPrompt(b.scene, move)} The marketer asks for this change: ${fix}.` : stillPrompt(b.scene, move),
-      check_prompt: fix ? `${checkPrompt(b.scene, move)}\nThe marketer also asked for: ${fix}. Fail the still when that is missing.` : checkPrompt(b.scene, move),
+      still_prompt: fix ? `${stillPrompt(b.scene, move, scale, look)} The marketer asks for this change: ${fix}.` : stillPrompt(b.scene, move, scale, look),
+      check_prompt: fix ? `${checkPrompt(b.scene, move, scale, look)}\nThe marketer also asked for: ${fix}. Fail the still when that is missing.` : checkPrompt(b.scene, move, scale, look),
       still_status: null,
       still_error: null,
       check_status: null,
@@ -165,17 +175,18 @@ export async function approveAnchor(db: SupabaseClient, projectId: string): Prom
  * for the new OK.
  */
 export async function redoAnchor(db: SupabaseClient, projectId: string, note: string): Promise<string | null> {
-  const { data: row } = await db.from("cartoon_hooks").select("anchor_redos, character_desc").eq("id", projectId).eq("kind", "science").maybeSingle();
+  const { data: row } = await db.from("cartoon_hooks").select("anchor_redos, character_desc, look").eq("id", projectId).eq("kind", "science").maybeSingle();
   if (!row) return "Not found";
+  const look = lookById(row.look as string | undefined);
   const scene = String(row.character_desc ?? "").replace(/^Style anchor: /, "");
   const redos = (Number(row.anchor_redos) || 0) + 1;
   const fix = note.trim().slice(0, 400);
-  const take = fix ? `A different take from the last one, as the marketer asks: ${fix}.` : `${ANCHOR_VARIATIONS[(redos - 1) % ANCHOR_VARIATIONS.length]} Clearly different from a plain textbook plate.`;
+  const take = fix ? `A different take from the last one, as the marketer asks: ${fix}.` : `${look.variations[(redos - 1) % look.variations.length]} Clearly different from the last take.`;
   const { error } = await db
     .from("cartoon_hooks")
     .update({
-      character_prompt: anchorPrompt(scene, take),
-      anchor_check_prompt: anchorCheckPrompt(scene),
+      character_prompt: anchorPrompt(scene, look, take),
+      anchor_check_prompt: anchorCheckPrompt(scene, look),
       anchor_check_status: null,
       anchor_check_ok: null,
       anchor_check_notes: null,

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { WorkerStatus } from "@/lib/hook-studio/types";
 import type { CartoonHookSummary, CartoonResolution } from "@/lib/cartoon/types";
-import { MAX_VARIANTS, MOVES, roughEstimate } from "@/lib/science-broll/engines";
+import { LOOKS, MAX_VARIANTS, SCALES, roughEstimate, type LookId } from "@/lib/science-broll/engines";
 import { Button, Chip, ConfirmButton, Label, Panel, Pill, api, credits, timeAgo } from "@/components/hook-studio/ui";
 import { ClipVideo } from "@/components/remake/clip-video";
 
@@ -23,6 +23,7 @@ interface Form {
   text: string;
   direction: string;
   brand: string;
+  look: LookId;
   resolution: CartoonResolution;
   variants: number;
 }
@@ -38,7 +39,7 @@ export function ScienceBrollList() {
   const [worker, setWorker] = useState<WorkerStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [form, setForm] = useState<Form>({ text: "", direction: "", brand: "", resolution: "480p", variants: 1 });
+  const [form, setForm] = useState<Form>({ text: "", direction: "", brand: "", look: "cinematic", resolution: "480p", variants: 1 });
 
   const refresh = useCallback(async () => {
     try {
@@ -67,7 +68,7 @@ export function ScienceBrollList() {
     try {
       const r = await api<{ projects: CartoonHookSummary[] }>("/api/owner/science-broll", {
         method: "POST",
-        body: JSON.stringify({ text: form.text, direction: form.direction, brand: form.brand, resolution: form.resolution, variants: form.variants }),
+        body: JSON.stringify({ text: form.text, direction: form.direction, brand: form.brand, look: form.look, resolution: form.resolution, variants: form.variants }),
       });
       setProjects(r.projects);
     } catch (e) {
@@ -116,12 +117,25 @@ export function ScienceBrollList() {
               value={form.text}
               onChange={(e) => setForm({ ...form, text: e.target.value })}
               rows={7}
-              placeholder={"Pills lose up to 70% of their potency in your stomach acid and liver before your blood ever sees them.\nThe patch goes through your skin instead, straight into the bloodstream, a steady release for 8 to 12 hours."}
+              placeholder={"A patch can send medicine into your blood. But your skin is a powerful barrier.\nThe patch releases tiny molecules that travel through the skin, between the cells, into your capillaries, and with your blood through the whole body: a slow, steady delivery for 8 to 12 hours."}
               className={`${field} resize-y`}
             />
             <input value={form.direction} onChange={(e) => setForm({ ...form, direction: e.target.value })} placeholder='Notes for Claude (optional): "show the patch on a forearm", "no capsules on screen", "gut wall only"' className={field} />
           </div>
           <div className="space-y-3">
+            <div>
+              <p className="text-[11px] text-gray-400 mb-1.5">Look</p>
+              <div className="flex flex-wrap gap-1.5">
+                {LOOKS.map((l) => (
+                  <span key={l.id} title={l.blurb}>
+                    <Chip on={form.look === l.id} onClick={() => setForm({ ...form, look: l.id })}>
+                      {l.name}
+                    </Chip>
+                  </span>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-600 mt-1">{LOOKS.find((l) => l.id === form.look)?.blurb}</p>
+            </div>
             <div>
               <p className="text-[11px] text-gray-400 mb-1.5">Brand · optional, for the product form</p>
               <div className="flex flex-wrap gap-1.5">
@@ -154,7 +168,7 @@ export function ScienceBrollList() {
               </div>
               <span className="text-[11px] text-gray-600">Each take is a different visual idea for the same text</span>
             </div>
-            <p className="text-[11px] text-gray-600">Moves the skill knows: {MOVES.map((m) => m.name).join(" · ")}.</p>
+            <p className="text-[11px] text-gray-600">A set moves through the body as the text goes on: {SCALES.map((s) => s.name.toLowerCase()).join(" · ")}.</p>
           </div>
         </div>
         <div className="flex items-center gap-3 flex-wrap pt-1">

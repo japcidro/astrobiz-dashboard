@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import type { CartoonBeatView, CartoonHookView, StepStatus } from "@/lib/cartoon/types";
-import { moveById } from "@/lib/science-broll/engines";
+import { lookById, moveById, scaleById } from "@/lib/science-broll/engines";
 import { Button, ConfirmButton, Label, Panel, Pill, api, credits, timeAgo } from "@/components/hook-studio/ui";
 import { ClipVideo, Lightbox } from "@/components/remake/clip-video";
 import { PROJECT_STATUS } from "./science-broll-list";
@@ -106,7 +106,7 @@ export function ScienceBroll({ id }: { id: string }) {
           </h1>
           <Pill tone={st.tone}>{st.label}</Pill>
           <span className="text-xs text-gray-500">
-            {project.resolution} · {timeAgo(project.created_at)} · spent {credits(project.credits)}
+            {lookById(project.look).name} · {project.resolution} · {timeAgo(project.created_at)} · spent {credits(project.credits)}
           </span>
           <span className="flex-1" />
           <Button onClick={() => void anotherTake()} busy={busy === "take"} disabled={busy !== null || project.status === "planning"} title="Same text and settings, a different visual idea">
@@ -288,6 +288,7 @@ function BeatCard({
   onRedo: (what: "still" | "clip", note?: string) => void;
 }) {
   const move = moveById(b.move);
+  const scale = scaleById(b.scale);
   const stillBusy = b.still_status === "queued" || b.still_status === "running";
   const checking = b.check_status === "queued" || b.check_status === "running";
   const clipBusy = b.clip_status === "queued" || b.clip_status === "running";
@@ -313,7 +314,7 @@ function BeatCard({
           </div>
         )}
         <span className="absolute top-1.5 left-1.5 text-[10px] font-semibold bg-black/60 text-white px-1.5 py-0.5 rounded">
-          {b.idx + 1} · {Number(b.seconds).toFixed(0)}s · {move.name}
+          {b.idx + 1} · {Number(b.seconds).toFixed(0)}s · {scale.name} · {move.name}
         </span>
       </div>
       {b.line && <p className="text-[12px] text-white leading-snug">“{b.line}”</p>}

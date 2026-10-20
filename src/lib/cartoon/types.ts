@@ -53,6 +53,8 @@ export interface CartoonHookRow {
   anchor_check_notes: string | null;
   anchor_check_error: string | null;
   anchor_auto_redos: number;
+  /** Science B-roll: the look of the set (cinematic 3D or textbook plate). */
+  look: string | null;
   final_status: StepStatus | null;
   final_path: string | null;
   final_seconds: number | null;
@@ -90,6 +92,8 @@ export interface CartoonBeatRow {
   voice_credits: number | null;
   /** Science B-roll only: the move, the still check and its automatic redraws. */
   move: string | null;
+  /** Science B-roll: where the camera is (surface, section, cellular, vessel, body). */
+  scale: string | null;
   check_prompt: string;
   check_status: StepStatus | null;
   check_ok: boolean | null;

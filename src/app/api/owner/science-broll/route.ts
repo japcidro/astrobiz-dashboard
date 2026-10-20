@@ -2,6 +2,7 @@ import { after } from "next/server";
 import { requireBoardUser } from "@/lib/marketing-board/auth";
 import { isUuid } from "@/lib/remake/views";
 import type { CartoonResolution } from "@/lib/cartoon/types";
+import { LOOKS, type LookId } from "@/lib/science-broll/engines";
 import { createProjects, loadProjects, planAndStart } from "@/lib/science-broll/views";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +16,7 @@ export async function GET() {
   return Response.json({ projects: await loadProjects(auth.db) });
 }
 
-/** POST — { text, direction?, brand?, resolution?, variants?, batch_id? }: rows saved in "planning" and returned at once; Claude plans them in the background and the Mac worker takes over. */
+/** POST — { text, direction?, brand?, look?, resolution?, variants?, batch_id? }: rows saved in "planning" and returned at once; Claude plans them in the background and the Mac worker takes over. */
 export async function POST(request: Request) {
   const auth = await requireBoardUser();
   if (auth.error) return auth.error;
@@ -26,6 +27,7 @@ export async function POST(request: Request) {
     text: str(b.text),
     direction: str(b.direction),
     brand: str(b.brand),
+    look: LOOKS.some((l) => l.id === b.look) ? (b.look as LookId) : "cinematic",
     resolution: (b.resolution === "720p" ? "720p" : "480p") as CartoonResolution,
     variants: typeof b.variants === "number" ? b.variants : 1,
     batch_id: isUuid(b.batch_id) ? b.batch_id : null,
