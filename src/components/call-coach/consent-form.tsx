@@ -18,8 +18,26 @@ export function ConsentForm({ fullName }: { fullName: string }) {
 
   const ready = name.trim().length >= 2;
 
-  const sign = () => {
+  const [micNote, setMicNote] = useState<string | null>(null);
+
+  // Ask for the microphone inside the click, so Chrome shows its prompt right
+  // here, tied to the VA's own action, instead of later when the timer starts.
+  const sign = async () => {
     setError(null);
+    setMicNote(null);
+    if (navigator.mediaDevices?.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        for (const t of stream.getTracks()) t.stop();
+      } catch (e) {
+        const name = e instanceof Error ? e.name : "";
+        setMicNote(
+          name === "NotFoundError"
+            ? "Walang nakitang microphone sa computer na ito. Pwede pa ring i-save ang consent; i-plug ang headset o mic bago mag-Start Work."
+            : "Na-block ang microphone. Okay lang, na-save pa rin ang consent. Sa Time Tracker, i-click ang lock icon sa address bar, i-Allow ang Microphone, tapos Try again.",
+        );
+      }
+    }
     startTransition(async () => {
       const res = await fetch("/api/call-coach/consent", {
         method: "POST",
@@ -63,6 +81,10 @@ export function ConsentForm({ fullName }: { fullName: string }) {
       <p className="text-xs text-gray-500 mt-1.5">
         Signed as {fullName} on {new Date().toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric", timeZone: "Asia/Manila" })}.
       </p>
+      <p className="text-xs text-amber-200/80 mt-3">
+        Pagka-click ng button, magtatanong si Chrome: &quot;astrobiz.live wants to use your microphone&quot;. I-click ang <strong>Allow</strong>. Isang beses lang ito.
+      </p>
+      {micNote && <p className="text-xs text-amber-300 mt-2">{micNote}</p>}
 
       {error && (
         <div className="mt-4 p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-sm">{error}</div>
@@ -70,7 +92,7 @@ export function ConsentForm({ fullName }: { fullName: string }) {
 
       <button
         type="button"
-        onClick={sign}
+        onClick={() => void sign()}
         disabled={!ready || pending}
         className="mt-5 inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white font-medium py-2.5 px-5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
       >

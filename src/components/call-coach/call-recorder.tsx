@@ -17,6 +17,8 @@ import { MIN_VOICE_SECONDS, SEGMENT_SECONDS, formatMinutes, type MicEventKind } 
  */
 
 type Phase = "off" | "starting" | "recording" | "lost" | "blocked" | "unsupported";
+/** Why the mic could not start: Chrome blocked it, Chrome has not asked yet, or there is no mic. */
+type BlockReason = "denied" | "prompt" | "nodevice" | "busy";
 
 interface Props {
   entryId: string | null;
@@ -49,6 +51,7 @@ export function CallRecorder({ entryId, entryStatus, initialVoiceSeconds }: Prop
   const [uploading, setUploading] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [meterBlind, setMeterBlind] = useState(false);
+  const [blockReason, setBlockReason] = useState<BlockReason>("denied");
 
   const wantRef = useRef(false);
   const entryIdRef = useRef(entryId);
@@ -176,8 +179,20 @@ export function CallRecorder({ entryId, entryStatus, initialVoiceSeconds }: Prop
           video: false,
         });
       } catch (e) {
+        const name = e instanceof Error ? e.name : "";
+        let reason: BlockReason = name === "NotFoundError" || name === "OverconstrainedError" ? "nodevice" : name === "NotReadableError" ? "busy" : "denied";
+        if (reason === "denied") {
+          // Dismissed prompt vs. a real block: the Permissions API knows.
+          try {
+            const status = await navigator.permissions?.query({ name: "microphone" as PermissionName });
+            if (status?.state === "prompt") reason = "prompt";
+          } catch {
+            /* Permissions API unavailable; treat as denied */
+          }
+        }
+        setBlockReason(reason);
         setPhase("blocked");
-        postEvent("blocked", e instanceof Error ? e.name : "getUserMedia failed");
+        postEvent("blocked", name || "getUserMedia failed");
         return;
       }
       if (!wantRef.current) {
@@ -310,13 +325,29 @@ export function CallRecorder({ entryId, entryStatus, initialVoiceSeconds }: Prop
           {phase === "starting" && "Asking the browser for your microphone…"}
           {phase === "off" && entryStatus === "paused" && "Paused with your break. Resume Work turns it back on."}
           {phase === "lost" && "Your microphone disconnected or the laptop slept. Your timer is still running."}
-          {phase === "blocked" && "Click the lock icon in the address bar, allow Microphone, then try again."}
+          {phase === "blocked" && blockReason === "denied" && "Na-block ang microphone sa Chrome. Sundin ang steps sa baba."}
+          {phase === "blocked" && blockReason === "prompt" && "Hindi pa na-Allow ang microphone. I-click ang button sa baba, tapos Allow."}
+          {phase === "blocked" && blockReason === "nodevice" && "Walang nakitang microphone. I-plug ang headset o mic, tapos i-click ang button sa baba."}
+          {phase === "blocked" && blockReason === "busy" && "May ibang app na gumagamit ng microphone (Zoom, Meet, Viber?). Isara muna yun, tapos i-click ang button sa baba."}
           {phase === "unsupported" && "This browser cannot record. Use Chrome or Edge on the laptop."}
         </div>
         <span className="text-xs text-gray-400 font-mono whitespace-nowrap">{formatMinutes(voiceToday)} saved today</span>
       </div>
 
       {phase === "recording" && <LevelMeter level={level} blind={meterBlind} />}
+
+      {phase === "blocked" && blockReason === "denied" && (
+        <ol className="text-xs text-gray-300 space-y-1.5 bg-gray-900/60 border border-amber-800/40 rounded-lg p-3 list-decimal pl-7">
+          <li>
+            Sa taas ng Chrome, sa <strong>kaliwa ng address</strong> (astrobiz.live), i-click ang maliit na icon: <span className="font-mono">🔒</span> o{" "}
+            <span className="font-mono">ⓘ</span> o <span className="font-mono">⚙</span>.
+          </li>
+          <li>
+            Hanapin ang <strong>Microphone</strong> at i-switch sa <strong>Allow</strong>. Kung wala, i-click ang <strong>Site settings</strong>, tapos hanapin doon.
+          </li>
+          <li>Bumalik dito at i-click ang <strong>Try the microphone again</strong>. Dapat lumabas ang pulang REC.</li>
+        </ol>
+      )}
 
       {(phase === "lost" || phase === "blocked") && (
         <button
@@ -325,7 +356,7 @@ export function CallRecorder({ entryId, entryStatus, initialVoiceSeconds }: Prop
           className="inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium py-2 px-4 rounded-lg transition-colors cursor-pointer"
         >
           <RefreshCw size={16} />
-          {phase === "lost" ? "Resume recording" : "Try the microphone again"}
+          {phase === "lost" ? "Resume recording" : blockReason === "prompt" ? "Allow the microphone" : "Try the microphone again"}
         </button>
       )}
 
