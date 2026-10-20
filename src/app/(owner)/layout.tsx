@@ -3,6 +3,8 @@ import { getEmployee } from "@/lib/supabase/get-employee";
 import { createClient } from "@/lib/supabase/server";
 import { canOpenDevDashboard, isOwnerEmail } from "@/lib/owner";
 import { Sidebar } from "@/components/layout/sidebar";
+import { ThemeSync } from "@/components/theme/theme-sync";
+import { asTheme } from "@/lib/theme";
 
 export const dynamic = "force-dynamic";
 
@@ -24,11 +26,15 @@ export default async function OwnerLayout({
   // A 404, not a redirect: nobody else should learn this space exists.
   if (!canOpenDevDashboard(user.email, employee.role)) notFound();
 
+  const theme = asTheme(employee.theme);
+
   return (
-    <div className="flex h-dvh bg-gray-900">
+    <div className="flex h-dvh bg-canvas">
+      <ThemeSync theme={theme} />
       <Sidebar
         employeeName={employee.full_name}
         employeeRole={employee.role}
+        theme={theme}
         devAccess
         isOwner={isOwnerEmail(user.email)}
         space="owner"

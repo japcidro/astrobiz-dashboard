@@ -132,7 +132,7 @@ export function ScalingCampaignsManager({ storeNames }: Props) {
 
   return (
     <div className="max-w-3xl">
-      <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-6">
+      <div className="bg-panel border border-line rounded-panel shadow-card p-6">
         <div className="flex items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-orange-600/20 rounded-lg">
@@ -195,7 +195,7 @@ export function ScalingCampaignsManager({ storeNames }: Props) {
               return (
                 <div
                   key={store}
-                  className="bg-gray-900/60 border border-gray-700/50 rounded-lg p-3"
+                  className="bg-gray-900/60 border border-line rounded-lg p-3"
                 >
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm font-semibold text-white w-32 flex-shrink-0">
@@ -223,7 +223,7 @@ export function ScalingCampaignsManager({ storeNames }: Props) {
                     <button
                       onClick={() => handleSave(store)}
                       disabled={!isDirty || isSaving}
-                      className="flex items-center gap-1.5 bg-orange-600 hover:bg-orange-500 text-white text-sm px-3 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                      className="flex items-center gap-1.5 bg-orange-600 hover:bg-orange-500 text-warn-ink text-sm px-3 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                     >
                       {isSaving ? (
                         <Loader2 size={14} className="animate-spin" />

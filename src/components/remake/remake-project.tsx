@@ -389,8 +389,8 @@ export function RemakeProject({ id }: { id: string }) {
                 {duration > 0 && range && (
                   <div className="absolute inset-y-0 bg-purple-400/25 border-x-2 border-purple-300 pointer-events-none" style={{ left: `${(range[0] / duration) * 100}%`, width: `${((range[1] - range[0]) / duration) * 100}%` }}>
                     {/* Times sit just outside the range, or just inside it at either end of the strip. */}
-                    <span className={`absolute bottom-0.5 text-[10px] font-bold tabular-nums bg-purple-600 text-white px-1 rounded whitespace-nowrap ${range[0] / duration < 0.06 ? "left-0.5" : "right-full mr-0.5"}`}>{range[0].toFixed(1)}s</span>
-                    <span className={`absolute bottom-0.5 text-[10px] font-bold tabular-nums bg-purple-600 text-white px-1 rounded whitespace-nowrap ${range[1] / duration > 0.94 ? "right-0.5" : "left-full ml-0.5"}`}>{range[1].toFixed(1)}s</span>
+                    <span className={`absolute bottom-0.5 text-[10px] font-bold tabular-nums bg-purple-600 text-accent-ink px-1 rounded whitespace-nowrap ${range[0] / duration < 0.06 ? "left-0.5" : "right-full mr-0.5"}`}>{range[0].toFixed(1)}s</span>
+                    <span className={`absolute bottom-0.5 text-[10px] font-bold tabular-nums bg-purple-600 text-accent-ink px-1 rounded whitespace-nowrap ${range[1] / duration > 0.94 ? "right-0.5" : "left-full ml-0.5"}`}>{range[1].toFixed(1)}s</span>
                   </div>
                 )}
                 {duration > 0 && hover !== null && (

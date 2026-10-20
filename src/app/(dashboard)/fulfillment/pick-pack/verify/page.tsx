@@ -367,10 +367,10 @@ export default function VerifyPage() {
           </div>
 
           {/* Items table */}
-          <div className="overflow-x-auto rounded-xl border border-gray-700/50 mb-4">
+          <div className="overflow-x-auto rounded-xl border border-line mb-4">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-gray-800/50">
+                <tr className="bg-panel">
                   <th className="text-gray-400 text-xs uppercase font-medium px-4 py-3 text-left w-10">
                     Status
                   </th>
@@ -451,7 +451,7 @@ export default function VerifyPage() {
                 setSelectedSender(orderDetails?.store_name ?? "");
                 setPhase("confirm_sender");
               }}
-              className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-xl transition-colors cursor-pointer"
+              className="w-full bg-emerald-600 hover:bg-emerald-500 text-good-ink font-semibold py-3 rounded-xl transition-colors cursor-pointer"
             >
               Next — Verify Sender →
             </button>
@@ -501,7 +501,7 @@ export default function VerifyPage() {
                         ? expected
                           ? "bg-emerald-600/20 border-emerald-500 text-emerald-200"
                           : "bg-yellow-600/20 border-yellow-500 text-yellow-200"
-                        : "bg-gray-800/50 border-gray-700 text-gray-300 hover:bg-gray-700/50"
+                        : "bg-panel border-gray-700 text-gray-300 hover:bg-gray-700/50"
                     }`}
                   >
                     <div className="flex items-center justify-between">
@@ -548,7 +548,7 @@ export default function VerifyPage() {
             <button
               onClick={handleVerifyComplete}
               disabled={!selectedSender || fulfilling}
-              className="flex-[2] bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
+              className="flex-[2] bg-emerald-600 hover:bg-emerald-500 text-good-ink font-semibold py-3 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
             >
               {fulfilling ? "Saving..." : "Confirm Packed ✓"}
             </button>

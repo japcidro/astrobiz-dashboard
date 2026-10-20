@@ -344,7 +344,7 @@ export default function JtDashboardPage() {
       <div className="mb-6">
         <button
           onClick={() => setShowUploader((v) => !v)}
-          className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-3 py-2 rounded-lg transition-colors cursor-pointer mb-3"
+          className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-good-ink text-sm px-3 py-2 rounded-lg transition-colors cursor-pointer mb-3"
         >
           <Upload size={14} />
           {showUploader ? "Hide J&T Upload" : "Upload J&T Data"}
@@ -435,7 +435,7 @@ export default function JtDashboardPage() {
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 mb-6">
         {/* Total Parcels */}
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-4">
           <div className="flex items-center gap-2 mb-2">
             <Package size={16} className="text-blue-400" />
             <span className="text-xs text-gray-400 font-medium">Total Parcels</span>
@@ -446,7 +446,7 @@ export default function JtDashboardPage() {
         </div>
 
         {/* Delivered */}
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-4">
           <div className="flex items-center gap-2 mb-2">
             <CheckCircle size={16} className="text-green-400" />
             <span className="text-xs text-gray-400 font-medium">Delivered</span>
@@ -458,7 +458,7 @@ export default function JtDashboardPage() {
         </div>
 
         {/* In Transit */}
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-4">
           <div className="flex items-center gap-2 mb-2">
             <Truck size={16} className="text-blue-400" />
             <span className="text-xs text-gray-400 font-medium">In Transit</span>
@@ -469,7 +469,7 @@ export default function JtDashboardPage() {
         </div>
 
         {/* For Return */}
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-4">
           <div className="flex items-center gap-2 mb-2">
             <RotateCcw size={16} className="text-orange-400" />
             <span className="text-xs text-gray-400 font-medium">For Return</span>
@@ -480,7 +480,7 @@ export default function JtDashboardPage() {
         </div>
 
         {/* Returned */}
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-4">
           <div className="flex items-center gap-2 mb-2">
             <XCircle size={16} className="text-red-400" />
             <span className="text-xs text-gray-400 font-medium">Returned</span>
@@ -491,7 +491,7 @@ export default function JtDashboardPage() {
         </div>
 
         {/* Returned (Aged) */}
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-4">
           <div className="flex items-center gap-2 mb-2">
             <AlertTriangle size={16} className="text-yellow-400" />
             <span className="text-xs text-gray-400 font-medium">Returned (Aged)</span>
@@ -502,7 +502,7 @@ export default function JtDashboardPage() {
         </div>
 
         {/* COD Collected */}
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-4">
           <div className="flex items-center gap-2 mb-2">
             <DollarSign size={16} className="text-green-400" />
             <span className="text-xs text-gray-400 font-medium">COD Collected</span>
@@ -522,14 +522,14 @@ export default function JtDashboardPage() {
 
       {/* Store Breakdown Table */}
       {!loading && storeBreakdown.length > 0 && (
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl overflow-hidden mb-6">
-          <div className="px-4 py-3 border-b border-gray-700/50">
+        <div className="bg-panel border border-line rounded-panel shadow-card overflow-hidden mb-6">
+          <div className="px-4 py-3 border-b border-line">
             <h2 className="text-sm font-semibold text-white">Store Breakdown</h2>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-700/50 text-gray-400 text-xs">
+                <tr className="border-b border-line text-gray-400 text-xs">
                   <th className="text-left px-4 py-2.5 font-medium">Store</th>
                   <th className="text-right px-4 py-2.5 font-medium">Total</th>
                   <th className="text-right px-4 py-2.5 font-medium">Delivered</th>
@@ -584,8 +584,8 @@ export default function JtDashboardPage() {
 
       {/* RTS by Province Analytics */}
       {!loading && rtsByProvince.length > 0 && (
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl overflow-hidden mb-6">
-          <div className="px-4 py-3 border-b border-gray-700/50">
+        <div className="bg-panel border border-line rounded-panel shadow-card overflow-hidden mb-6">
+          <div className="px-4 py-3 border-b border-line">
             <h2 className="text-sm font-semibold text-white">
               RTS by Province{" "}
               <span className="text-gray-400 font-normal">— {rtsByProvince.length} areas with returns</span>
@@ -637,8 +637,8 @@ export default function JtDashboardPage() {
 
       {/* RTS Table */}
       {!loading && rtsDeliveries.length > 0 && (
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl overflow-hidden mb-6">
-          <div className="px-4 py-3 border-b border-gray-700/50">
+        <div className="bg-panel border border-line rounded-panel shadow-card overflow-hidden mb-6">
+          <div className="px-4 py-3 border-b border-line">
             <h2 className="text-sm font-semibold text-white">
               RTS (Return to Sender){" "}
               <span className="text-gray-400 font-normal">— {rtsDeliveries.length} parcels</span>
@@ -647,7 +647,7 @@ export default function JtDashboardPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-700/50 text-gray-400 text-xs">
+                <tr className="border-b border-line text-gray-400 text-xs">
                   <th className="text-left px-4 py-2.5 font-medium">Waybill</th>
                   <th className="text-left px-4 py-2.5 font-medium">Store</th>
                   <th className="text-left px-4 py-2.5 font-medium">Receiver</th>

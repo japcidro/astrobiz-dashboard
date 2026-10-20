@@ -53,8 +53,8 @@ export function AlertsFeed({ limit = 6 }: Props) {
       <div className="bg-gray-900/30 border border-gray-800 rounded-xl p-6 animate-pulse">
         <div className="h-5 w-40 bg-gray-800 rounded mb-4" />
         <div className="space-y-2">
-          <div className="h-16 bg-gray-800/50 rounded" />
-          <div className="h-16 bg-gray-800/50 rounded" />
+          <div className="h-16 bg-panel rounded" />
+          <div className="h-16 bg-panel rounded" />
         </div>
       </div>
     );

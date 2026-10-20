@@ -55,6 +55,8 @@ import type { UserRole } from "@/lib/types";
 import { NotificationBell } from "@/components/alerts/notification-bell";
 import { EmployeeNotificationBell } from "@/components/attendance/employee-notification-bell";
 import { OPS_HOME, OWNER_HOME } from "@/lib/owner";
+import { AppearancePicker } from "@/components/theme/appearance-picker";
+import type { Theme } from "@/lib/theme";
 
 interface NavItem {
   label: string;
@@ -465,16 +467,18 @@ const ownerNavEntries: NavEntry[] = [
 
 export type SidebarSpace = "ops" | "owner";
 
-const roleColors: Record<UserRole, string> = {
-  admin: "bg-purple-600",
-  va: "bg-blue-600",
-  fulfillment: "bg-green-600",
-  marketing: "bg-orange-600",
+const roleLabels: Record<UserRole, string> = {
+  admin: "Admin",
+  va: "VA",
+  fulfillment: "Fulfillment",
+  marketing: "Marketing",
 };
 
 interface SidebarProps {
   employeeName: string;
   employeeRole: UserRole;
+  /** The employee's saved theme, for the Appearance picker. */
+  theme: Theme;
   /** Shows the Development Dashboard switch. Decided on the server (owner email or team role). */
   devAccess?: boolean;
   /** The owner by email: sees owner-only entries too. */
@@ -485,6 +489,7 @@ interface SidebarProps {
 export function Sidebar({
   employeeName,
   employeeRole,
+  theme,
   devAccess = false,
   isOwner = false,
   space = "ops",
@@ -534,12 +539,17 @@ export function Sidebar({
     window.location.href = "/login";
   };
 
+  const itemBase =
+    "flex items-center gap-3 rounded-control px-3 py-2 text-sm transition-colors";
+  const itemOn = "bg-nav-on text-nav-on-fg font-medium";
+  const itemOff = "text-muted hover:bg-raised hover:text-fg";
+
   const sidebarContent = (
-    <div className="flex flex-col h-full">
-      {/* Logo */}
-      <div className="shrink-0 p-6 border-b border-gray-800">
+    <div className="flex h-full flex-col">
+      {/* Brand */}
+      <div className="shrink-0 px-5 pb-4 pt-5">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-bold text-white">Astrobiz</h1>
+          <span className="font-display text-base text-fg">Astrobiz</span>
           {devAccess && (
             <button
               type="button"
@@ -548,25 +558,27 @@ export function Sidebar({
               aria-label="Development dashboard"
               title={inOwnerSpace ? "Back to Operations" : "Open Development Dashboard"}
               onClick={switchSpace}
-              className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-400 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950 ${
-                inOwnerSpace ? "bg-purple-600" : "bg-gray-700 hover:bg-gray-600"
+              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-pill border transition-colors ${
+                inOwnerSpace
+                  ? "border-accent bg-accent"
+                  : "border-line-strong bg-raised hover:border-dim"
               }`}
             >
               <span
-                className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${
-                  inOwnerSpace ? "translate-x-[18px]" : "translate-x-0.5"
+                className={`inline-block h-3.5 w-3.5 rounded-full transition-transform ${
+                  inOwnerSpace ? "translate-x-[18px] bg-accent-ink" : "translate-x-[3px] bg-muted"
                 }`}
               />
             </button>
           )}
         </div>
-        <p className="text-xs text-gray-500 mt-1">
-          {inOwnerSpace ? "Development Dashboard" : "Operations Dashboard"}
+        <p className="mt-0.5 text-xs text-muted">
+          {inOwnerSpace ? "Development" : "Operations"}
         </p>
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-1">
+      <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain px-3 pb-3">
         {filteredEntries.map((entry) => {
           if (isGroup(entry)) {
             const active = isGroupActive(entry);
@@ -575,20 +587,19 @@ export function Sidebar({
               <div key={entry.label}>
                 <button
                   onClick={() => toggleGroup(entry.label)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors cursor-pointer ${
-                    active
-                      ? "text-white bg-white/5"
-                      : "text-gray-400 hover:text-white hover:bg-white/5"
+                  aria-expanded={expanded}
+                  className={`w-full cursor-pointer ${itemBase} ${
+                    active && !expanded ? "text-fg" : "text-muted hover:bg-raised hover:text-fg"
                   }`}
                 >
-                  {entry.icon}
+                  <span className={active ? "text-accent" : ""}>{entry.icon}</span>
                   {entry.label}
-                  <span className="ml-auto">
+                  <span className="ml-auto text-dim">
                     {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                   </span>
                 </button>
                 {expanded && (
-                  <div className="ml-4 mt-1 space-y-0.5">
+                  <div className="ml-3 mt-0.5 space-y-0.5 border-l border-line pl-2">
                     {entry.children
                       .filter(visible)
                       .map((child) => {
@@ -602,22 +613,19 @@ export function Sidebar({
                         return (
                           <div key={child.href}>
                             {child.section && (
-                              <p className="text-[10px] uppercase tracking-wider text-gray-600 font-medium px-3 pt-3 pb-1">
+                              <p className="text-label px-3 pb-1 pt-3 text-dim">
                                 {child.section}
                               </p>
                             )}
-                          <Link
-                            href={child.href}
-                            onClick={() => setMobileOpen(false)}
-                            className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                              childActive
-                                ? "bg-white/10 text-white font-medium"
-                                : "text-gray-500 hover:text-white hover:bg-white/5"
-                            }`}
-                          >
-                            {child.icon}
-                            {child.label}
-                          </Link>
+                            <Link
+                              href={child.href}
+                              onClick={() => setMobileOpen(false)}
+                              aria-current={childActive ? "page" : undefined}
+                              className={`${itemBase} ${childActive ? itemOn : itemOff}`}
+                            >
+                              <span className={childActive ? "text-accent" : ""}>{child.icon}</span>
+                              {child.label}
+                            </Link>
                           </div>
                         );
                       })}
@@ -632,11 +640,11 @@ export function Sidebar({
             return (
               <div
                 key={item.href}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-gray-600 cursor-not-allowed"
+                className={`${itemBase} cursor-not-allowed text-dim`}
               >
                 {item.icon}
                 {item.label}
-                <span className="ml-auto text-[10px] bg-gray-800 text-gray-500 px-1.5 py-0.5 rounded">
+                <span className="ml-auto rounded-pill border border-line px-1.5 py-0.5 font-num text-[10px] text-dim">
                   Soon
                 </span>
               </div>
@@ -649,32 +657,25 @@ export function Sidebar({
               key={item.href}
               href={item.href}
               onClick={() => setMobileOpen(false)}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${
-                isActive
-                  ? "bg-white/10 text-white"
-                  : "text-gray-400 hover:text-white hover:bg-white/5"
-              }`}
+              aria-current={isActive ? "page" : undefined}
+              className={`${itemBase} ${isActive ? itemOn : itemOff}`}
             >
-              {item.icon}
+              <span className={isActive ? "text-accent" : ""}>{item.icon}</span>
               {item.label}
             </Link>
           );
         })}
       </nav>
 
-      {/* User info */}
-      <div className="shrink-0 p-4 border-t border-gray-800">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-white text-sm font-medium">
+      {/* User */}
+      <div className="shrink-0 border-t border-line p-3">
+        <div className="mb-1 flex items-center gap-3 px-1 py-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent-soft font-display text-sm text-accent">
             {employeeName.charAt(0).toUpperCase()}
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm text-white truncate">{employeeName}</p>
-            <span
-              className={`inline-block px-2 py-0.5 rounded text-[10px] font-medium text-white uppercase ${roleColors[employeeRole]}`}
-            >
-              {employeeRole}
-            </span>
+          <div className="min-w-0 flex-1 leading-tight">
+            <p className="truncate text-sm text-fg">{employeeName}</p>
+            <p className="text-xs text-muted">{roleLabels[employeeRole]}</p>
           </div>
           {employeeRole === "admin" ? (
             <NotificationBell employeeRole={employeeRole} />
@@ -682,12 +683,13 @@ export function Sidebar({
             <EmployeeNotificationBell />
           )}
         </div>
+        <AppearancePicker current={theme} />
         <button
           onClick={handleLogout}
-          className="flex items-center gap-2 text-gray-400 hover:text-white text-sm w-full px-3 py-2 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+          className="flex w-full cursor-pointer items-center gap-2 rounded-control px-3 py-2 text-sm text-muted transition-colors hover:bg-raised hover:text-fg"
         >
           <LogOut size={16} />
-          Sign Out
+          Sign out
         </button>
       </div>
     </div>
@@ -698,7 +700,8 @@ export function Sidebar({
       {/* Mobile toggle */}
       <button
         onClick={() => setMobileOpen(true)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-gray-900 rounded-lg text-white cursor-pointer"
+        aria-label="Open menu"
+        className="fixed left-4 top-4 z-50 cursor-pointer rounded-control border border-line bg-panel p-2 text-fg lg:hidden"
       >
         <Menu size={20} />
       </button>
@@ -706,21 +709,22 @@ export function Sidebar({
       {/* Mobile overlay */}
       {mobileOpen && (
         <div
-          className="lg:hidden fixed inset-0 bg-black/50 z-40"
+          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
           onClick={() => setMobileOpen(false)}
         />
       )}
 
       {/* Sidebar */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-50 w-64 bg-gray-950 border-r border-gray-800 transform transition-transform lg:transform-none ${
+        className={`fixed inset-y-0 left-0 z-50 w-64 transform border-r border-line bg-sidebar transition-transform lg:static lg:transform-none ${
           mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         }`}
       >
         {/* Mobile close */}
         <button
           onClick={() => setMobileOpen(false)}
-          className="lg:hidden absolute top-4 right-4 text-gray-400 hover:text-white cursor-pointer"
+          aria-label="Close menu"
+          className="absolute right-4 top-4 cursor-pointer text-muted hover:text-fg lg:hidden"
         >
           <X size={20} />
         </button>

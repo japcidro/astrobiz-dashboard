@@ -351,7 +351,7 @@ export function PromoteToScalingModal({
         {/* Body */}
         <div className="p-5 space-y-4">
           {/* Ad preview */}
-          <div className="flex items-center gap-3 p-2 bg-gray-800/40 border border-gray-700/50 rounded-lg">
+          <div className="flex items-center gap-3 p-2 bg-gray-800/40 border border-line rounded-lg">
             {subject.thumbnail_url ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -387,7 +387,7 @@ export function PromoteToScalingModal({
                 Loading configured stores…
               </div>
             ) : availableStores.length === 0 ? (
-              <div className="text-xs text-gray-400 p-2 bg-gray-800/60 border border-gray-700/50 rounded-lg">
+              <div className="text-xs text-gray-400 p-2 bg-gray-800/60 border border-line rounded-lg">
                 {sourceAccountId ? (
                   <>
                     No scaling campaign is mapped for this ad account yet —
@@ -697,7 +697,7 @@ export function PromoteToScalingModal({
           <button
             onClick={handleSubmit}
             disabled={!canSubmit}
-            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-orange-600 hover:bg-orange-500 text-white rounded-lg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-orange-600 hover:bg-orange-500 text-warn-ink rounded-lg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {submitting ? (
               <Loader2 size={14} className="animate-spin" />

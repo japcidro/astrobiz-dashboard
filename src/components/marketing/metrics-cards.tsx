@@ -76,7 +76,7 @@ export function MetricsCards({ insights, loading }: MetricsCardsProps) {
       {metrics.map((m) => (
         <div
           key={m.label}
-          className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4"
+          className="bg-panel border border-line rounded-panel shadow-card p-4"
         >
           <div className="flex items-center gap-2 mb-2">
             <div className={`p-1.5 ${m.bg} rounded-lg`}>{m.icon}</div>

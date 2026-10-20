@@ -97,7 +97,7 @@ export function VoicePicker({ value, agentName, storeName, onChange }: Props) {
 
   if (loading) {
     return (
-      <div className="bg-gray-900/50 border border-gray-700/50 rounded-lg p-4 flex items-center gap-2 text-sm text-gray-400">
+      <div className="bg-gray-900/50 border border-line rounded-lg p-4 flex items-center gap-2 text-sm text-gray-400">
         <Loader2 size={14} className="animate-spin" />
         Loading voices from ElevenLabs...
       </div>
@@ -134,7 +134,7 @@ export function VoicePicker({ value, agentName, storeName, onChange }: Props) {
         </button>
       </div>
 
-      <div className="max-h-72 overflow-y-auto bg-gray-900/40 border border-gray-700/50 rounded-lg divide-y divide-gray-800">
+      <div className="max-h-72 overflow-y-auto bg-gray-900/40 border border-line rounded-lg divide-y divide-gray-800">
         {voices.length === 0 && (
           <div className="p-4 text-sm text-gray-500 text-center">
             No voices found in your ElevenLabs account.
@@ -147,7 +147,7 @@ export function VoicePicker({ value, agentName, storeName, onChange }: Props) {
           return (
             <div
               key={voice.voice_id}
-              className={`flex items-center gap-3 p-3 hover:bg-gray-800/50 transition-colors ${
+              className={`flex items-center gap-3 p-3 hover:bg-panel transition-colors ${
                 isSelected ? "bg-emerald-900/20" : ""
               }`}
             >

@@ -22,7 +22,7 @@ const OUTCOME_STYLES: Record<
   delivered: {
     label: "Delivered",
     badge: "bg-green-900/30 text-green-400",
-    card: "border-gray-700/50 bg-gray-800/40",
+    card: "border-line bg-gray-800/40",
   },
   returned: {
     label: "Returned to sender — not counted",
@@ -108,7 +108,7 @@ function Section({
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="bg-gray-800/60 border border-gray-700/50 rounded-lg p-3">
+    <div className="bg-gray-800/60 border border-line rounded-lg p-3">
       <p className="text-xs text-gray-500">{label}</p>
       <p className="text-sm font-bold text-white mt-0.5">{value}</p>
     </div>

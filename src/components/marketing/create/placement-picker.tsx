@@ -115,7 +115,7 @@ export function PlacementPicker({
 
       {/* Manual placements */}
       {!automatic && (
-        <div className="space-y-4 bg-gray-800/50 rounded-xl p-4 border border-gray-700/50">
+        <div className="space-y-4 bg-panel rounded-xl p-4 border border-line">
           {Object.entries(PLACEMENTS).map(([platform, config]) => {
             const isEnabled = platforms.includes(platform);
             return (

@@ -239,7 +239,7 @@ export function TestCallTab({
         </div>
       )}
 
-      <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-6">
+      <div className="bg-panel border border-line rounded-panel shadow-card p-6">
         <h3 className="text-white font-medium mb-1">Test Call</h3>
         <p className="text-sm text-gray-500 mb-4">
           Tatawagin ka ng AI gamit ang real order data from your Shopify store
@@ -343,7 +343,7 @@ export function TestCallTab({
                 (!!attempt && !isTerminal) ||
                 !normalizedPhone
               }
-              className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="w-full bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 text-good-ink text-sm px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {initiating ? (
                 <Loader2 size={16} className="animate-spin" />
@@ -368,7 +368,7 @@ export function TestCallTab({
 
       {/* Live status / Result */}
       {attempt && (
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-6">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-6">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-white font-medium">
               Call Status

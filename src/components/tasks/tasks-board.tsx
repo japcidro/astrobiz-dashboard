@@ -259,7 +259,7 @@ export function TasksBoard({ currentEmployeeId, currentRole }: Props) {
       </div>
 
       {/* Quick add */}
-      <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-3 flex flex-wrap items-center gap-2">
+      <div className="bg-panel border border-line rounded-panel shadow-card p-3 flex flex-wrap items-center gap-2">
         <input
           value={quickTitle}
           onChange={(e) => setQuickTitle(e.target.value)}
@@ -305,7 +305,7 @@ export function TasksBoard({ currentEmployeeId, currentRole }: Props) {
         <button
           onClick={handleCreate}
           disabled={!quickTitle.trim() || creating}
-          className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-good-ink text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Plus size={14} />
           Add
@@ -482,7 +482,7 @@ function TaskRow({
 
   return (
     <div
-      className={`group bg-gray-800/40 hover:bg-gray-800/70 border border-gray-700/50 rounded-lg px-3 py-2 flex items-center gap-3 transition-colors ${
+      className={`group bg-gray-800/40 hover:bg-gray-800/70 border border-line rounded-lg px-3 py-2 flex items-center gap-3 transition-colors ${
         isDone || task.status === "cancelled" ? "opacity-60" : ""
       }`}
     >
@@ -792,7 +792,7 @@ function TaskDetailModal({
             <button
               onClick={save}
               disabled={!dirty}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2 rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              className="bg-emerald-600 hover:bg-emerald-500 text-good-ink text-sm font-medium px-4 py-2 rounded-lg cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Save
             </button>

@@ -208,17 +208,17 @@ export default function BarcodesPage() {
             <button
               onClick={handleGenerate}
               disabled={selected.size === 0 || generating}
-              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-good-ink text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
             >
               <Tag size={14} />
               {generating ? "Generating..." : "Generate Labels"}
             </button>
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-gray-700/50 print:hidden">
+          <div className="overflow-x-auto rounded-xl border border-line print:hidden">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-gray-800/50">
+                <tr className="bg-panel">
                   <th className="px-4 py-3 text-left w-10">
                     <input
                       type="checkbox"
@@ -341,7 +341,7 @@ export default function BarcodesPage() {
                   printWindow.focus();
                   setTimeout(() => { printWindow.print(); }, 500);
                 }}
-                className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-3 py-2 rounded-lg transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-good-ink text-sm px-3 py-2 rounded-lg transition-colors cursor-pointer"
               >
                 <Printer size={14} />
                 Print

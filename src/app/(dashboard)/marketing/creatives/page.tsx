@@ -1065,7 +1065,7 @@ function WinnersPoolToolbar({
             ? "Generate the structured Log document for Claude Project"
             : "Tag at least one ad to enable"
         }
-        className="bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2 cursor-pointer"
+        className="bg-amber-600 hover:bg-amber-500 disabled:opacity-40 disabled:cursor-not-allowed text-warn-ink text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2 cursor-pointer"
       >
         <Sparkles size={14} />
         Generate Log

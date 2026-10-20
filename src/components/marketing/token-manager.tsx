@@ -115,7 +115,7 @@ export function TokenManager({
   return (
     <div className="max-w-3xl space-y-6">
       {/* Token Form */}
-      <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-6">
+      <div className="bg-panel border border-line rounded-panel shadow-card p-6">
         <div className="flex items-center gap-3 mb-6">
           <div className="p-2 bg-blue-600/20 rounded-lg">
             <Key size={20} className="text-blue-400" />
@@ -188,7 +188,7 @@ export function TokenManager({
             <button
               type="submit"
               disabled={isPending}
-              className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-medium py-2.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+              className="flex-1 bg-blue-600 hover:bg-blue-500 text-info-ink font-medium py-2.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
             >
               {isPending ? "Saving..." : "Save Token"}
             </button>
@@ -197,7 +197,7 @@ export function TokenManager({
       </div>
 
       {/* Detected Accounts */}
-      <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-6">
+      <div className="bg-panel border border-line rounded-panel shadow-card p-6">
         <div className="flex items-center justify-between mb-1">
           <h2 className="text-lg font-semibold text-white">
             Ad Accounts ({displayAccounts.length})
@@ -206,7 +206,7 @@ export function TokenManager({
             <button
               onClick={handleSaveSelection}
               disabled={savingSelection}
-              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+              className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-info-ink text-sm px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
             >
               {savingSelection ? (
                 <RefreshCw size={14} className="animate-spin" />
@@ -287,7 +287,7 @@ export function TokenManager({
       </div>
 
       {/* Instructions */}
-      <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-6">
+      <div className="bg-panel border border-line rounded-panel shadow-card p-6">
         <h3 className="text-sm font-medium text-white mb-3">
           How to get a token with all ad accounts:
         </h3>

@@ -42,10 +42,10 @@ const TONE_BADGE: Record<StatusTone, string> = {
 };
 
 const TONE_CARD: Record<StatusTone, string> = {
-  ok: "border-gray-700/50",
+  ok: "border-line",
   warn: "border-orange-700/60",
   bad: "border-red-700/70 shadow-[0_0_0_1px_rgba(239,68,68,0.25)]",
-  muted: "border-gray-700/50 opacity-80",
+  muted: "border-line opacity-80",
 };
 
 function StatusBadge({ account }: { account: BillingAccount }) {
@@ -190,7 +190,7 @@ function ThresholdEditor({
   );
 
   return (
-    <div className="rounded-lg border border-gray-700/50 bg-gray-900/30 p-3">
+    <div className="rounded-lg border border-line bg-gray-900/30 p-3">
       <p className="text-[10px] uppercase tracking-wider text-gray-500 font-medium mb-2 flex items-center gap-1">
         <BellRing size={11} /> Billing limit &amp; email warning
       </p>
@@ -200,7 +200,7 @@ function ThresholdEditor({
         <button
           onClick={save}
           disabled={saving || !dirty}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-40 disabled:hover:bg-emerald-700 mb-[18px]"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium bg-emerald-700 hover:bg-emerald-600 text-good-ink disabled:opacity-40 disabled:hover:bg-emerald-700 mb-[18px]"
         >
           {saving ? (
             <Loader2 size={13} className="animate-spin" />
@@ -227,7 +227,7 @@ function AccountCard({
 
   return (
     <div
-      className={`bg-gray-800/50 border rounded-xl p-5 flex flex-col gap-4 ${TONE_CARD[status.tone]}`}
+      className={`bg-panel border rounded-xl p-5 flex flex-col gap-4 ${TONE_CARD[status.tone]}`}
     >
       {/* Name + status */}
       <div className="flex items-start justify-between gap-3">
@@ -533,7 +533,7 @@ export default function AdsBillingPage() {
                       href={a.links.pay}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-600 hover:bg-red-500 text-white text-xs font-semibold"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-red-600 hover:bg-red-500 text-bad-ink text-xs font-semibold"
                     >
                       <CreditCard size={12} /> Pay now <ExternalLink size={11} />
                     </a>
@@ -590,7 +590,7 @@ export default function AdsBillingPage() {
                       href={a.links.pay}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-orange-600 hover:bg-orange-500 text-white text-xs font-semibold"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-orange-600 hover:bg-orange-500 text-warn-ink text-xs font-semibold"
                     >
                       <CreditCard size={12} /> Pay early <ExternalLink size={11} />
                     </a>
@@ -635,7 +635,7 @@ export default function AdsBillingPage() {
         ].map((m) => (
           <div
             key={m.label}
-            className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4"
+            className="bg-panel border border-line rounded-panel shadow-card p-4"
           >
             <span className="text-xs text-gray-400">{m.label}</span>
             {loading ? (

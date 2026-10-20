@@ -472,7 +472,7 @@ function AdCard({
       className={`group text-left rounded-xl overflow-hidden transition-colors cursor-pointer ${
         ad.reviewed_at
           ? "bg-green-500/10 border-2 border-green-500/70 ring-1 ring-green-500/40"
-          : "bg-gray-800/50 border border-gray-700/50 hover:border-gray-500"
+          : "bg-panel border border-line hover:border-gray-500"
       }`}
     >
       {/* Thumbnail */}

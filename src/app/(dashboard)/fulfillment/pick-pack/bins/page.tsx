@@ -171,7 +171,7 @@ export default function BinsPage() {
 
         <button
           onClick={() => setShowAdd(!showAdd)}
-          className="ml-auto flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+          className="ml-auto flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-info-ink text-sm font-medium px-4 py-2 rounded-lg transition-colors"
         >
           <Plus size={16} />
           Add Bin Location
@@ -180,7 +180,7 @@ export default function BinsPage() {
 
       {/* Add Form */}
       {showAdd && (
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4 mb-6">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-4 mb-6">
           <h3 className="text-sm font-medium text-gray-300 mb-3">
             New Bin Location
           </h3>
@@ -221,7 +221,7 @@ export default function BinsPage() {
               <button
                 onClick={handleAdd}
                 disabled={saving}
-                className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-medium px-3 py-2 rounded-lg transition-colors"
+                className="flex-1 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-good-ink text-sm font-medium px-3 py-2 rounded-lg transition-colors"
               >
                 {saving ? "Saving..." : "Save"}
               </button>
@@ -240,11 +240,11 @@ export default function BinsPage() {
       )}
 
       {/* Table */}
-      <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl overflow-hidden">
+      <div className="bg-panel border border-line rounded-panel shadow-card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm text-left">
             <thead>
-              <tr className="border-b border-gray-700/50">
+              <tr className="border-b border-line">
                 <th className="px-4 py-3 text-xs font-medium text-gray-400 uppercase">
                   SKU
                 </th>
@@ -425,7 +425,7 @@ export default function BinsPage() {
           </table>
         </div>
         {!loading && (
-          <div className="px-4 py-3 border-t border-gray-700/50 text-xs text-gray-500">
+          <div className="px-4 py-3 border-t border-line text-xs text-gray-500">
             {filtered.length} location{filtered.length !== 1 ? "s" : ""}
           </div>
         )}

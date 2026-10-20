@@ -272,7 +272,7 @@ export function OrderDetailPanel({ order, isAdmin, onClose }: Props) {
           {(order.note || order.tags) && (
             <Section icon={<MessageSquare size={16} />} title="Notes & Tags">
               {order.note && (
-                <p className="text-sm text-gray-300 bg-gray-800/50 rounded-lg p-3 mb-2">
+                <p className="text-sm text-gray-300 bg-panel rounded-lg p-3 mb-2">
                   {order.note}
                 </p>
               )}

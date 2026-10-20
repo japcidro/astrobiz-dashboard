@@ -71,7 +71,7 @@ export function EmployeeNotificationBell() {
       >
         <Bell size={18} />
         {unreadTotal > 0 && (
-          <span className="absolute top-1 right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-blue-500 text-white text-[10px] font-bold flex items-center justify-center">
+          <span className="absolute top-1 right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-blue-500 text-info-ink text-[10px] font-bold flex items-center justify-center">
             {unreadTotal > 99 ? "99+" : unreadTotal}
           </span>
         )}

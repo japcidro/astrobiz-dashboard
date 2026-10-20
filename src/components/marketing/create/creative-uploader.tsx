@@ -172,7 +172,7 @@ export function CreativeUploader({
 
       {/* Upload area or preview */}
       {hasFile ? (
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-4">
           <div className="flex items-center gap-3">
             {previewUrl && type === "image" ? (
               <img

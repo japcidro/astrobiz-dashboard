@@ -419,13 +419,13 @@ export function AdRowsTable({
                 }`}
               >
                 {/* # */}
-                <td className="px-2 py-1.5 bg-gray-800/50 text-gray-500 text-center">
+                <td className="px-2 py-1.5 bg-panel text-gray-500 text-center">
                   {idx + 1}
                 </td>
 
                 {/* Adset Name */}
                 {showAdsetName && (
-                  <td className="px-2 py-1.5 bg-gray-800/50">
+                  <td className="px-2 py-1.5 bg-panel">
                     {sharesAdset ? (
                       <span
                         className="flex items-center gap-1.5 pl-2 text-xs text-gray-500"
@@ -452,7 +452,7 @@ export function AdRowsTable({
 
                 {/* Existing ad set — one per ad set group, on its first row */}
                 {pickExisting && (
-                  <td className="px-2 py-1.5 bg-gray-800/50 align-top">
+                  <td className="px-2 py-1.5 bg-panel align-top">
                     {sharesAdset ? (
                       <span
                         className="flex items-center gap-1.5 pl-2 py-1 text-xs text-gray-500"
@@ -519,7 +519,7 @@ export function AdRowsTable({
 
                 {/* Budget — one per ad set, on its first row */}
                 {budget && (
-                  <td className="px-2 py-1.5 bg-gray-800/50">
+                  <td className="px-2 py-1.5 bg-panel">
                     {!sharesAdset && (
                       <div className="flex items-center gap-1">
                         <span className="text-xs text-gray-500">₱</span>
@@ -549,7 +549,7 @@ export function AdRowsTable({
                 )}
 
                 {/* Ad Name */}
-                <td className="px-2 py-1.5 bg-gray-800/50">
+                <td className="px-2 py-1.5 bg-panel">
                   <div className="space-y-1">
                     <div className="flex items-center justify-end">
                       <PresetPicker
@@ -578,7 +578,7 @@ export function AdRowsTable({
                 </td>
 
                 {/* Creative */}
-                <td className="px-2 py-1.5 bg-gray-800/50">
+                <td className="px-2 py-1.5 bg-panel">
                   <input
                     ref={(el) => {
                       rowInputRefs.current[row.id] = el;
@@ -638,7 +638,7 @@ export function AdRowsTable({
                 </td>
 
                 {/* Primary Text */}
-                <td className="px-2 py-1.5 bg-gray-800/50">
+                <td className="px-2 py-1.5 bg-panel">
                   <div className="space-y-1">
                     <div className="flex items-center justify-end">
                       <PresetPicker
@@ -665,7 +665,7 @@ export function AdRowsTable({
                 </td>
 
                 {/* Headline */}
-                <td className="px-2 py-1.5 bg-gray-800/50">
+                <td className="px-2 py-1.5 bg-panel">
                   <div className="space-y-1">
                     <div className="flex items-center justify-end">
                       <PresetPicker
@@ -694,7 +694,7 @@ export function AdRowsTable({
                 </td>
 
                 {/* Description */}
-                <td className="px-2 py-1.5 bg-gray-800/50">
+                <td className="px-2 py-1.5 bg-panel">
                   <div className="space-y-1">
                     <div className="flex items-center justify-end">
                       <PresetPicker
@@ -721,7 +721,7 @@ export function AdRowsTable({
                 </td>
 
                 {/* Actions */}
-                <td className="px-2 py-1.5 bg-gray-800/50 text-center">
+                <td className="px-2 py-1.5 bg-panel text-center">
                   <div className="flex items-center justify-center gap-1">
                     <button
                       type="button"

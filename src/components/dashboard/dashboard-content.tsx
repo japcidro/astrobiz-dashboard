@@ -5,6 +5,7 @@ import { AdminDashboard } from "./admin-dashboard";
 import { VADashboard } from "./va-dashboard";
 import { MarketingDashboard } from "./marketing-dashboard";
 import { FulfillmentDashboard } from "./fulfillment-dashboard";
+import { PageHeader } from "@/components/ui/page-header";
 
 interface Props {
   role: UserRole;
@@ -34,16 +35,14 @@ export function DashboardContent({
 
   return (
     <div>
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-white">
-          {getGreeting()}, {firstName}!
-        </h1>
-        <p className="text-gray-400 mt-1">
-          {role === "admin"
-            ? "Here\u2019s your business overview."
-            : "Here\u2019s your overview for today."}
-        </p>
-      </div>
+      <PageHeader
+        title={`${getGreeting()}, ${firstName}`}
+        subtitle={
+          role === "admin"
+            ? "The business today, at a glance."
+            : "Your day, at a glance."
+        }
+      />
 
       {role === "admin" && (
         <AdminDashboard

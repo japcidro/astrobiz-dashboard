@@ -265,7 +265,7 @@ export function DisapprovalReasonModal({ adId, adName, accountId, onClose }: Pro
           )}
 
           {empty && (
-            <div className="p-4 bg-gray-800/50 border border-gray-700 rounded-lg text-sm text-gray-300">
+            <div className="p-4 bg-panel border border-gray-700 rounded-lg text-sm text-gray-300">
               <p className="font-medium text-white mb-1">
                 FB returned no structured reason.
               </p>
@@ -353,7 +353,7 @@ export function DisapprovalReasonModal({ adId, adName, accountId, onClose }: Pro
               which specific lines triggered the rejection + how to
               rewrite them compliantly. */}
           {data && !loading && !error && (
-            <div className="mt-2 pt-3 border-t border-gray-700/50 space-y-2">
+            <div className="mt-2 pt-3 border-t border-line space-y-2">
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold flex items-center gap-2">
                   Specific Reasons (AI Inference)
@@ -385,7 +385,7 @@ export function DisapprovalReasonModal({ adId, adName, accountId, onClose }: Pro
                   <button
                     onClick={() => runAiAnalysis(false)}
                     disabled={aiLoading}
-                    className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer"
+                    className="bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-accent-ink text-xs font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer"
                     title="Run Claude Sonnet 4.6 against the captured transcript + Meta's policy categories. Takes 10–25s."
                   >
                     <Sparkles size={12} />
@@ -405,7 +405,7 @@ export function DisapprovalReasonModal({ adId, adName, accountId, onClose }: Pro
               )}
 
               {aiNoTranscript && !transcribing && (
-                <div className="p-3 bg-gray-800/50 border border-gray-700 rounded-lg text-xs text-gray-300">
+                <div className="p-3 bg-panel border border-gray-700 rounded-lg text-xs text-gray-300">
                   <p className="font-medium text-white mb-1">
                     No transcript captured for this ad yet.
                   </p>
@@ -417,7 +417,7 @@ export function DisapprovalReasonModal({ adId, adName, accountId, onClose }: Pro
                   <button
                     onClick={transcribeAndAnalyze}
                     disabled={transcribing}
-                    className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-wait text-white text-xs font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer"
+                    className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-wait text-good-ink text-xs font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer"
                     title="Transcribe with Gemini, then auto-run the AI rejection analysis"
                   >
                     <Wand2 size={12} />

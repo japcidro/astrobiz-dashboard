@@ -160,7 +160,7 @@ export function StepCampaign({ data, onUpdate }: StepCampaignProps) {
 
       {/* Budget (shown when CBO is on) */}
       {data.campaign_budget_optimization && (
-        <div className="mb-6 bg-gray-800/50 rounded-xl p-4 border border-gray-700/50 max-w-lg">
+        <div className="mb-6 bg-panel rounded-xl p-4 border border-line max-w-lg">
           <div className="flex gap-3 mb-3">
             <button
               onClick={() =>

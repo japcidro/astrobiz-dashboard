@@ -4,8 +4,10 @@ import { createClient } from "@/lib/supabase/server";
 import { alertUnauthorizedAccess } from "@/lib/alerts/unauthorized-access";
 import { Sidebar } from "@/components/layout/sidebar";
 import { BackgroundRefresh } from "@/components/layout/background-refresh";
+import { ThemeSync } from "@/components/theme/theme-sync";
 import { ClockStatusBanner } from "@/components/attendance/clock-status-banner";
 import { canOpenDevDashboard, isOwnerEmail } from "@/lib/owner";
+import { asTheme } from "@/lib/theme";
 
 export default async function DashboardLayout({
   children,
@@ -30,15 +32,13 @@ export default async function DashboardLayout({
   if (!employee) {
     await alertUnauthorizedAccess(user.id, user.email ?? undefined);
     return (
-      <div className="flex h-screen bg-gray-900 items-center justify-center">
-        <div className="text-center max-w-md p-8">
-          <h1 className="text-2xl font-bold text-white mb-4">
-            Account Not Set Up
-          </h1>
-          <p className="text-gray-400 mb-2">
-            You&apos;re signed in as <span className="text-white">{user.email}</span>, but your employee profile wasn&apos;t created yet.
+      <div className="flex h-screen items-center justify-center bg-canvas">
+        <div className="max-w-md p-8 text-center">
+          <h1 className="mb-4 text-2xl text-fg">Account not set up</h1>
+          <p className="mb-2 text-muted">
+            You&apos;re signed in as <span className="text-fg">{user.email}</span>, but your employee profile wasn&apos;t created yet.
           </p>
-          <p className="text-gray-500 text-sm mb-6">
+          <p className="mb-6 text-sm text-dim">
             Ask your admin to add you, or check the Supabase logs for trigger errors.
           </p>
           <form
@@ -51,9 +51,9 @@ export default async function DashboardLayout({
           >
             <button
               type="submit"
-              className="bg-white text-gray-900 font-medium py-2 px-6 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
+              className="cursor-pointer rounded-control border border-line-strong bg-raised px-6 py-2 font-medium text-fg transition-colors hover:bg-panel"
             >
-              Sign Out
+              Sign out
             </button>
           </form>
         </div>
@@ -61,11 +61,15 @@ export default async function DashboardLayout({
     );
   }
 
+  const theme = asTheme(employee.theme);
+
   return (
-    <div className="flex h-dvh bg-gray-900">
+    <div className="flex h-dvh bg-canvas">
+      <ThemeSync theme={theme} />
       <Sidebar
         employeeName={employee.full_name}
         employeeRole={employee.role}
+        theme={theme}
         devAccess={canOpenDevDashboard(user.email, employee.role)}
         isOwner={isOwnerEmail(user.email)}
       />

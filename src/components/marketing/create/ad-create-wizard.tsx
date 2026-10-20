@@ -506,7 +506,7 @@ export function AdCreateWizard() {
       </div>
 
       {/* Step content */}
-      <div className="bg-gray-800/30 border border-gray-700/50 rounded-xl p-6">
+      <div className="bg-gray-800/30 border border-line rounded-xl p-6">
         {stepContent()}
 
         <WizardNav

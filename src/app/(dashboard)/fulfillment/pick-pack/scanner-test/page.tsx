@@ -75,14 +75,14 @@ export default function ScannerTestPage() {
         />
         <button
           onClick={handleSubmit}
-          className="mt-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-4 py-2 rounded-lg cursor-pointer"
+          className="mt-2 bg-emerald-600 hover:bg-emerald-500 text-good-ink text-sm px-4 py-2 rounded-lg cursor-pointer"
         >
           Submit now
         </button>
       </div>
 
       {liveKeys.length > 0 && (
-        <div className="mb-4 p-3 bg-gray-800/50 border border-gray-700 rounded-xl">
+        <div className="mb-4 p-3 bg-panel border border-gray-700 rounded-xl">
           <p className="text-xs text-gray-400 mb-2">Live keystrokes (last 30):</p>
           <div className="font-mono text-sm text-yellow-300 break-all">
             {liveKeys.map((k, i) => (
@@ -110,7 +110,7 @@ export default function ScannerTestPage() {
       </div>
 
       {logs.length === 0 ? (
-        <div className="text-center py-12 text-gray-500 border border-gray-700/50 rounded-xl">
+        <div className="text-center py-12 text-gray-500 border border-line rounded-xl">
           <p>No scans yet. Scan a QR/barcode to see output.</p>
         </div>
       ) : (
@@ -118,7 +118,7 @@ export default function ScannerTestPage() {
           {logs.map((log, i) => (
             <div
               key={i}
-              className="p-4 bg-gray-900/50 border border-gray-700/50 rounded-xl"
+              className="p-4 bg-gray-900/50 border border-line rounded-xl"
             >
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs text-gray-500">{log.at}</span>

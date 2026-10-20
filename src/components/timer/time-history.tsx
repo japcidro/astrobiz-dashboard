@@ -29,7 +29,7 @@ export function TimeHistory({ entries }: TimeHistoryProps) {
   );
 
   return (
-    <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-6">
+    <div className="bg-panel border border-line rounded-panel shadow-card p-6">
       <h2 className="text-lg font-semibold text-white mb-4">Recent History</h2>
 
       {sortedDates.length === 0 ? (

@@ -94,7 +94,7 @@ export function RepeatBuyersTable({
 }: Props) {
   if (buyers.length === 0) {
     return (
-      <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-12 text-center">
+      <div className="bg-panel border border-line rounded-panel shadow-card p-12 text-center">
         <p className="text-gray-400">No repeat buyers in this window.</p>
         <p className="text-gray-600 text-sm mt-1">
           Try a longer window or lower the minimum order count.
@@ -104,10 +104,10 @@ export function RepeatBuyersTable({
   }
 
   return (
-    <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl overflow-hidden">
+    <div className="bg-panel border border-line rounded-panel shadow-card overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-gray-800/80 border-b border-gray-700/50">
+          <thead className="bg-gray-800/80 border-b border-line">
             <tr>
               <th className="px-4 py-3 text-left text-xs font-medium text-gray-400">
                 Stores

@@ -202,7 +202,7 @@ export default function AuditPage() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 bg-gray-800/50 border border-gray-700/50 rounded-lg p-1 w-fit">
+      <div className="flex gap-1 mb-6 bg-panel border border-line rounded-lg p-1 w-fit">
         <button
           onClick={() => setTab("adjustments")}
           className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
@@ -255,11 +255,11 @@ export default function AuditPage() {
             </div>
           </div>
 
-          <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl overflow-hidden">
+          <div className="bg-panel border border-line rounded-panel shadow-card overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm text-left">
                 <thead>
-                  <tr className="border-b border-gray-700/50">
+                  <tr className="border-b border-line">
                     <th className="px-4 py-3 text-xs font-medium text-gray-400 uppercase">
                       Date
                     </th>
@@ -367,7 +367,7 @@ export default function AuditPage() {
               </table>
             </div>
             {!loadingAdj && (
-              <div className="px-4 py-3 border-t border-gray-700/50 text-xs text-gray-500">
+              <div className="px-4 py-3 border-t border-line text-xs text-gray-500">
                 {filteredAdj.length} adjustment
                 {filteredAdj.length !== 1 ? "s" : ""}
               </div>
@@ -415,11 +415,11 @@ export default function AuditPage() {
             </div>
           )}
 
-          <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl overflow-hidden">
+          <div className="bg-panel border border-line rounded-panel shadow-card overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm text-left">
                 <thead>
-                  <tr className="border-b border-gray-700/50">
+                  <tr className="border-b border-line">
                     <th className="px-4 py-3 text-xs font-medium text-gray-400 uppercase">
                       Date
                     </th>
@@ -567,7 +567,7 @@ export default function AuditPage() {
               </table>
             </div>
             {!loadingVer && (
-              <div className="px-4 py-3 border-t border-gray-700/50 text-xs text-gray-500">
+              <div className="px-4 py-3 border-t border-line text-xs text-gray-500">
                 {filteredVer.length} verification
                 {filteredVer.length !== 1 ? "s" : ""}
               </div>

@@ -285,7 +285,7 @@ export function PresetPicker({ kind, storeId, currentValue, onApply }: Props) {
                     type="button"
                     onClick={handleSave}
                     disabled={saving || !newLabel.trim()}
-                    className="flex-1 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-[11px] px-2 py-1 cursor-pointer"
+                    className="flex-1 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-good-ink text-[11px] px-2 py-1 cursor-pointer"
                   >
                     {saving ? "Saving..." : "Save"}
                   </button>

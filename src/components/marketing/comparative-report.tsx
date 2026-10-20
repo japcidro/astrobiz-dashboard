@@ -75,7 +75,7 @@ const TIER_META: Record<
   },
   dead: {
     label: "Dead",
-    color: "text-gray-400 bg-gray-800/50 border-gray-700/40",
+    color: "text-gray-400 bg-panel border-gray-700/40",
     icon: CircleSlash,
   },
 };
@@ -349,7 +349,7 @@ export function ComparativeReportView({
             return (
               <div
                 key={i}
-                className="bg-gray-900/60 border border-gray-700/50 rounded-xl p-4"
+                className="bg-gray-900/60 border border-line rounded-xl p-4"
               >
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div className="min-w-0">
@@ -373,7 +373,7 @@ export function ComparativeReportView({
                       storeName,
                       concept: c,
                     })}
-                    className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors flex-shrink-0"
+                    className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-info-ink text-xs font-medium px-3 py-1.5 rounded-lg transition-colors flex-shrink-0"
                   >
                     <ArrowUpRight size={12} />
                     Generate full script

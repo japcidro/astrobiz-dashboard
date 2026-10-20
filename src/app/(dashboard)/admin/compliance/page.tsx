@@ -643,7 +643,7 @@ function SummaryCard({
   small?: boolean;
 }) {
   return (
-    <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
+    <div className="bg-panel border border-line rounded-panel shadow-card p-4">
       <p className="text-xs text-gray-500 uppercase tracking-wide">{label}</p>
       {loading ? (
         <div className="h-6 mt-1.5 w-20 bg-gray-700 rounded animate-pulse" />

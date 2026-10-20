@@ -230,7 +230,7 @@ export function StepModeSelect({
 
       {/* Existing campaign/adset selection */}
       {mode !== "new" && (
-        <div className="space-y-4 bg-gray-800/50 rounded-xl p-4 border border-gray-700/50">
+        <div className="space-y-4 bg-panel rounded-xl p-4 border border-line">
           <div>
             <label className="block text-sm text-gray-400 mb-1.5">
               Select Campaign

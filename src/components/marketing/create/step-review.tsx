@@ -158,7 +158,7 @@ export function StepReview({
           Your ad has been created and is <strong>ACTIVE</strong>. It will start
           running on the scheduled date.
         </p>
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4 max-w-sm mx-auto mb-6 text-left">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-4 max-w-sm mx-auto mb-6 text-left">
           <div className="space-y-2 text-sm">
             <div className="flex justify-between">
               <span className="text-gray-400">Campaign</span>
@@ -242,7 +242,7 @@ export function StepReview({
       )}
 
       {mode !== "new" && (
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-4">
           <h3 className="text-sm font-medium text-white mb-2">Campaign</h3>
           <p className="text-sm text-gray-400">
             Using existing campaign{" "}
@@ -310,7 +310,7 @@ export function StepReview({
       )}
 
       {mode === "existing_adset" && (
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-4">
           <h3 className="text-sm font-medium text-white mb-2">Ad Set</h3>
           <p className="text-sm text-gray-400">
             Using existing ad set{" "}
@@ -401,7 +401,7 @@ function SummaryCard({
   children: React.ReactNode;
 }) {
   return (
-    <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
+    <div className="bg-panel border border-line rounded-panel shadow-card p-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-sm font-medium text-white">{title}</h3>
         <button

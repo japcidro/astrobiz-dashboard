@@ -115,10 +115,10 @@ export function ProfitDailyTable({ rows, totals, sortKey, sortDir, onSort }: Pro
   }
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-gray-700/50">
+    <div className="overflow-x-auto rounded-xl border border-line">
       <table className="w-full text-sm">
         <thead>
-          <tr className="bg-gray-800/50">
+          <tr className="bg-panel">
             {COLUMNS.map((col) => (
               <th
                 key={col.key}

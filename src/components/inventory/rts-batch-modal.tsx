@@ -721,7 +721,7 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
           {/* STEP: waybill_scan ─────────────────────────────────────── */}
           {step === "waybill_scan" && (
             <div className="space-y-4">
-              <div className="p-4 bg-gray-800/30 border border-gray-700/50 rounded-xl">
+              <div className="p-4 bg-gray-800/30 border border-line rounded-xl">
                 <p className="text-sm text-gray-300 mb-3">
                   Scan the J&amp;T waybill barcode on the parcel.
                 </p>
@@ -786,7 +786,7 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
                 </button>
                 <button
                   onClick={handleEnterManual}
-                  className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-lg cursor-pointer"
+                  className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-good-ink font-semibold py-3 rounded-lg cursor-pointer"
                 >
                   <Pencil size={16} /> Enter manually
                 </button>
@@ -828,7 +828,7 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
           {/* STEP: confirm_prefill ─────────────────────────────────── */}
           {step === "confirm_prefill" && resolved && (
             <div className="space-y-4">
-              <div className="p-4 bg-gray-800/40 border border-gray-700/50 rounded-xl space-y-2">
+              <div className="p-4 bg-gray-800/40 border border-line rounded-xl space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs uppercase text-gray-500">Store</span>
                   <span className="text-sm font-semibold text-white">
@@ -915,7 +915,7 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
                 <button
                   onClick={handleConfirmPrefill}
                   disabled={creating}
-                  className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-lg disabled:opacity-50 cursor-pointer"
+                  className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-good-ink font-semibold py-3 rounded-lg disabled:opacity-50 cursor-pointer"
                 >
                   {creating ? (
                     <Loader2 className="animate-spin" size={16} />
@@ -1002,7 +1002,7 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
                     <button
                       onClick={handleManualOpenBatch}
                       disabled={creating || !manualBatchRef.trim() || !manualStoreId}
-                      className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-lg disabled:opacity-50 cursor-pointer"
+                      className="flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-good-ink font-semibold py-3 rounded-lg disabled:opacity-50 cursor-pointer"
                     >
                       {creating ? (
                         <Loader2 className="animate-spin" size={16} />
@@ -1023,7 +1023,7 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
               {/* Scoreboard */}
               {!batch.isManual ? (
                 <div className="grid grid-cols-3 gap-2">
-                  <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-3 text-center">
+                  <div className="bg-panel border border-line rounded-panel shadow-card p-3 text-center">
                     <p className="text-xs uppercase text-gray-500">Received</p>
                     <p className="text-2xl font-bold text-emerald-400">
                       {totals.received}
@@ -1032,13 +1032,13 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
                       </span>
                     </p>
                   </div>
-                  <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-3 text-center">
+                  <div className="bg-panel border border-line rounded-panel shadow-card p-3 text-center">
                     <p className="text-xs uppercase text-gray-500">Damaged</p>
                     <p className="text-2xl font-bold text-amber-400">
                       {totals.damaged}
                     </p>
                   </div>
-                  <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-3 text-center">
+                  <div className="bg-panel border border-line rounded-panel shadow-card p-3 text-center">
                     <p className="text-xs uppercase text-gray-500">Missing</p>
                     <p className="text-2xl font-bold text-red-400">
                       {totals.missing}
@@ -1046,7 +1046,7 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
                   </div>
                 </div>
               ) : (
-                <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-3">
+                <div className="bg-panel border border-line rounded-panel shadow-card p-3">
                   <p className="text-xs uppercase text-gray-500">Scanned</p>
                   <p className="text-2xl font-bold text-white">
                     {sessionLog.length}{" "}
@@ -1122,7 +1122,7 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
                               </span>
                               <button
                                 onClick={() => adjustDamaged(it.id, 1)}
-                                className="w-7 h-7 rounded bg-amber-700 hover:bg-amber-600 text-white cursor-pointer"
+                                className="w-7 h-7 rounded bg-amber-700 hover:bg-amber-600 text-warn-ink cursor-pointer"
                               >
                                 +
                               </button>
@@ -1233,7 +1233,7 @@ export function RtsBatchModal({ open, onClose, onCompleted }: Props) {
 
               <button
                 onClick={handleFinish}
-                className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-lg transition-colors cursor-pointer"
+                className="w-full bg-emerald-600 hover:bg-emerald-500 text-good-ink font-semibold py-3 rounded-lg transition-colors cursor-pointer"
               >
                 Done
               </button>

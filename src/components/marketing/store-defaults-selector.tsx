@@ -63,7 +63,7 @@ export function StoreDefaultsSelector({
   };
 
   return (
-    <div className="bg-gray-800/30 border border-gray-700/50 rounded-xl p-4">
+    <div className="bg-gray-800/30 border border-line rounded-xl p-4">
       <div className="flex items-center gap-2 mb-3">
         <StoreIcon size={16} className="text-gray-400" />
         <h3 className="text-sm font-semibold text-white">Store</h3>
@@ -103,7 +103,7 @@ export function StoreDefaultsSelector({
                 ? "No defaults saved yet for this store"
                 : "Fill Page, pixel, URL, CTA, targeting and ad copy from saved defaults"
           }
-          className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-600/80 hover:bg-blue-600 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-white font-medium transition-colors cursor-pointer"
+          className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-600/80 hover:bg-blue-600 disabled:bg-gray-700 disabled:text-gray-500 disabled:cursor-not-allowed text-info-ink font-medium transition-colors cursor-pointer"
         >
           <Wand2 size={13} />
           Apply store defaults

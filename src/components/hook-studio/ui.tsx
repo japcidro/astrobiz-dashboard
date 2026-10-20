@@ -5,7 +5,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 export function Panel({ children, className = "" }: { children: ReactNode; className?: string }) {
   return (
-    <div className={`bg-gray-800/50 border border-gray-700 rounded-xl p-4 ${className}`}>{children}</div>
+    <div className={`bg-panel border border-gray-700 rounded-xl p-4 ${className}`}>{children}</div>
   );
 }
 
@@ -120,7 +120,7 @@ export function ConfirmButton({
           setArmed(false);
           await onConfirm();
         }}
-        className="px-2 py-0.5 rounded bg-red-600 hover:bg-red-500 text-white cursor-pointer"
+        className="px-2 py-0.5 rounded bg-red-600 hover:bg-red-500 text-bad-ink cursor-pointer"
       >
         Yes
       </button>

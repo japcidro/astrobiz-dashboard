@@ -45,7 +45,7 @@ export function LeadsTab({
         </div>
       )}
 
-      <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-12 text-center">
+      <div className="bg-panel border border-line rounded-panel shadow-card p-12 text-center">
         <Inbox size={32} className="mx-auto text-gray-600 mb-3" />
         <p className="text-gray-400 mb-1">Leads view coming next</p>
         <p className="text-sm text-gray-500">

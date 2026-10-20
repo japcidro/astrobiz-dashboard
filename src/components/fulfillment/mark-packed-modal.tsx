@@ -101,7 +101,7 @@ export function MarkPackedModal({
           {/* Preview list */}
           <div>
             <p className="text-xs text-gray-400 mb-1.5">Orders to clear:</p>
-            <div className="max-h-32 overflow-y-auto bg-gray-800/50 border border-gray-700/50 rounded-lg p-2 text-xs font-mono text-gray-300 space-y-0.5">
+            <div className="max-h-32 overflow-y-auto bg-panel border border-line rounded-lg p-2 text-xs font-mono text-gray-300 space-y-0.5">
               {orders.slice(0, 30).map((o) => (
                 <div key={o.id}>
                   {o.name} — {o.store_name} — {o.customer_name}
@@ -184,7 +184,7 @@ export function MarkPackedModal({
           <button
             onClick={handleConfirm}
             disabled={!canSubmit}
-            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-red-600 hover:bg-red-500 text-white rounded-lg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-red-600 hover:bg-red-500 text-bad-ink rounded-lg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {submitting && <Loader2 size={14} className="animate-spin" />}
             {submitting ? "Clearing…" : `Confirm Clear (${orders.length})`}

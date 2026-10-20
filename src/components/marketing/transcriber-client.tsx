@@ -699,7 +699,7 @@ export function TranscriberClient() {
           {running ? (
             <button
               onClick={cancel}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium px-4 py-2 rounded-lg cursor-pointer transition-colors"
+              className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-bad-ink font-medium px-4 py-2 rounded-lg cursor-pointer transition-colors"
             >
               <X size={16} /> Stop
             </button>
@@ -707,7 +707,7 @@ export function TranscriberClient() {
             <button
               onClick={start}
               disabled={!pendingCount}
-              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-800 disabled:text-gray-500 disabled:cursor-not-allowed text-white font-medium px-4 py-2 rounded-lg cursor-pointer transition-colors"
+              className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-800 disabled:text-gray-500 disabled:cursor-not-allowed text-good-ink font-medium px-4 py-2 rounded-lg cursor-pointer transition-colors"
             >
               <Play size={16} />
               Transcribe {pendingCount || ""}

@@ -27,7 +27,7 @@ export function WizardNav({
   const isLast = currentStep === totalSteps - 1;
 
   return (
-    <div className="flex items-center justify-between border-t border-gray-700/50 pt-4 mt-6">
+    <div className="flex items-center justify-between border-t border-line pt-4 mt-6">
       <div>
         {!isFirst && (
           <button

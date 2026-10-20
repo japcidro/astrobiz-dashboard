@@ -187,7 +187,7 @@ export default function StockPage() {
       )}
 
       {/* Tab bar */}
-      <div className="flex gap-1 mb-6 bg-gray-800/50 rounded-xl p-1 overflow-x-auto">
+      <div className="flex gap-1 mb-6 bg-panel rounded-xl p-1 overflow-x-auto">
         {TABS.map((tab) => (
           <button
             key={tab.key}
@@ -355,10 +355,10 @@ function StockOverviewTab({
 
       {/* Table */}
       {!loading && filtered.length > 0 && (
-        <div className="overflow-x-auto rounded-xl border border-gray-700/50">
+        <div className="overflow-x-auto rounded-xl border border-line">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-gray-800/50">
+              <tr className="bg-panel">
                 <th className="text-gray-400 text-xs uppercase font-medium px-4 py-3 text-left whitespace-nowrap">
                   SKU
                 </th>
@@ -559,7 +559,7 @@ function StockInTab({
 
       {/* Scanned product card */}
       {scannedProduct && (
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-5 mb-4">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-5 mb-4">
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-white font-semibold text-lg">
@@ -599,7 +599,7 @@ function StockInTab({
             <button
               onClick={handleStockInSubmit}
               disabled={submitting}
-              className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+              className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-good-ink font-semibold py-2 px-4 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
             >
               {submitting ? "Adding..." : `Add +${quantity}`}
             </button>
@@ -821,7 +821,7 @@ function AdjustTab({
                   <button
                     key={`${r.store_id}-${r.sku}-${r.variant_id}`}
                     onClick={() => selectFromSearch(r)}
-                    className="w-full text-left px-4 py-3 hover:bg-gray-700 transition-colors border-b border-gray-700/50 last:border-0 cursor-pointer"
+                    className="w-full text-left px-4 py-3 hover:bg-gray-700 transition-colors border-b border-line last:border-0 cursor-pointer"
                   >
                     <span className="text-white font-mono text-sm">
                       {r.sku}
@@ -843,7 +843,7 @@ function AdjustTab({
 
       {/* Selected product */}
       {selectedProduct && (
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-5 mb-4">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-5 mb-4">
           <div className="flex items-start justify-between mb-4">
             <div>
               <p className="text-white font-semibold text-lg">
@@ -942,7 +942,7 @@ function AdjustTab({
             <button
               onClick={handleAdjustSubmit}
               disabled={submitting || !reason}
-              className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+              className="flex-1 bg-blue-600 hover:bg-blue-500 text-info-ink font-semibold py-2.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
             >
               {submitting
                 ? "Adjusting..."
@@ -1185,7 +1185,7 @@ function CycleCountTab({
   if (!started) {
     return (
       <div>
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-5 mb-4">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-5 mb-4">
           <h3 className="text-white font-semibold mb-4">
             Start a Cycle Count
           </h3>
@@ -1228,7 +1228,7 @@ function CycleCountTab({
           <button
             onClick={startCount}
             disabled={zoneInventory.length === 0}
-            className="bg-blue-600 hover:bg-blue-500 text-white font-semibold py-2.5 px-6 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+            className="bg-blue-600 hover:bg-blue-500 text-info-ink font-semibold py-2.5 px-6 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
           >
             Start Counting ({zoneInventory.length} items)
           </button>
@@ -1278,10 +1278,10 @@ function CycleCountTab({
       </div>
 
       {/* Count table */}
-      <div className="overflow-x-auto rounded-xl border border-gray-700/50 mb-4">
+      <div className="overflow-x-auto rounded-xl border border-line mb-4">
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-gray-800/50">
+            <tr className="bg-panel">
               <th className="text-gray-400 text-xs uppercase font-medium px-4 py-3 text-left whitespace-nowrap">
                 SKU
               </th>
@@ -1377,7 +1377,7 @@ function CycleCountTab({
         <button
           onClick={applyCorrections}
           disabled={applying}
-          className="w-full bg-yellow-600 hover:bg-yellow-500 text-white font-semibold py-3 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
+          className="w-full bg-yellow-600 hover:bg-yellow-500 text-warn-ink font-semibold py-3 rounded-xl transition-colors disabled:opacity-50 cursor-pointer"
         >
           {applying
             ? "Applying corrections..."

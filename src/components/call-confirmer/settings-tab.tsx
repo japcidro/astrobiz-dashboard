@@ -169,7 +169,7 @@ export function SettingsTab({
           <button
             onClick={handleSave}
             disabled={saving || !dirty}
-            className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm px-4 py-1.5 rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed flex items-center gap-2"
+            className="bg-emerald-600 hover:bg-emerald-500 disabled:bg-gray-700 disabled:text-gray-500 text-good-ink text-sm px-4 py-1.5 rounded-lg transition-colors cursor-pointer disabled:cursor-not-allowed flex items-center gap-2"
           >
             {saving ? (
               <Loader2 size={14} className="animate-spin" />
@@ -386,7 +386,7 @@ const inputCls =
 
 function Card({ title, children }: { title?: string; children: React.ReactNode }) {
   return (
-    <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-6">
+    <div className="bg-panel border border-line rounded-panel shadow-card p-6">
       {title && <h3 className="text-white font-medium mb-4">{title}</h3>}
       {children}
     </div>

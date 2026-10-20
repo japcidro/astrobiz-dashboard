@@ -32,7 +32,7 @@ export function FbAccessCheck() {
   };
 
   return (
-    <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-5">
+    <div className="bg-panel border border-line rounded-panel shadow-card p-5">
       <div className="flex items-start justify-between gap-3 mb-1">
         <div>
           <h3 className="text-white font-medium flex items-center gap-2">
@@ -150,7 +150,7 @@ export function FbAccessCheck() {
                 {report.pages.map((p) => (
                   <div
                     key={p.id}
-                    className="flex items-start justify-between gap-3 p-2.5 rounded-lg bg-gray-800/60 border border-gray-700/50"
+                    className="flex items-start justify-between gap-3 p-2.5 rounded-lg bg-gray-800/60 border border-line"
                   >
                     <div className="min-w-0">
                       <p className="text-sm text-white">{p.name}</p>

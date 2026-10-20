@@ -383,9 +383,9 @@ export function ChatPanel({ datePreset }: { datePreset: DatePreset }) {
   }
 
   return (
-    <div className="bg-gray-900/50 border border-gray-700/50 rounded-xl overflow-hidden flex flex-col h-[65vh] min-h-[500px]">
+    <div className="bg-gray-900/50 border border-line rounded-xl overflow-hidden flex flex-col h-[65vh] min-h-[500px]">
       {/* Toolbar */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-700/50 bg-gray-800/30">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-line bg-gray-800/30">
         <div className="text-xs text-gray-400">
           {sessionId ? "Continuing previous chat" : "New chat"}
         </div>
@@ -559,7 +559,7 @@ export function ChatPanel({ datePreset }: { datePreset: DatePreset }) {
       </div>
 
       {/* Input */}
-      <div className="border-t border-gray-700/50 p-3">
+      <div className="border-t border-line p-3">
         <p className="text-[10px] text-gray-500 mb-1.5">
           Default scope: <span className="text-gray-300">{DATE_PRESET_LABELS[datePreset]}</span>{" "}
           · override anytime in your message (e.g. "last 30 days").
@@ -592,7 +592,7 @@ export function ChatPanel({ datePreset }: { datePreset: DatePreset }) {
           <button
             type="submit"
             disabled={streaming || !input.trim()}
-            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-good-ink text-sm font-medium px-4 py-2.5 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
           >
             {streaming ? (
               <Loader2 size={14} className="animate-spin" />
@@ -809,7 +809,7 @@ function ToolCallChips({
                   />
                 </button>
                 {isExpanded && (
-                  <div className="mt-1 ml-4 p-2 bg-gray-900/60 border border-gray-700/50 rounded text-[11px] text-gray-300 font-mono">
+                  <div className="mt-1 ml-4 p-2 bg-gray-900/60 border border-line rounded text-[11px] text-gray-300 font-mono">
                     <div className="text-gray-500 mb-0.5">Input:</div>
                     <pre className="whitespace-pre-wrap break-all">
                       {Object.keys(c.input).length > 0

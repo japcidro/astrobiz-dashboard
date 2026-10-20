@@ -160,7 +160,7 @@ export default function InventoryPage() {
           {(role === "admin" || role === "fulfillment") && (
             <button
               onClick={() => setRtsOpen(true)}
-              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-3 py-2 rounded-lg transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-good-ink text-sm px-3 py-2 rounded-lg transition-colors cursor-pointer"
             >
               <PackagePlus size={14} />
               RTS Return

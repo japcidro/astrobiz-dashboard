@@ -390,7 +390,7 @@ export function AutopilotModal({
             ) : (
               <div className="space-y-5">
                 {/* Master switch */}
-                <div className="flex items-center justify-between p-4 bg-gray-800/60 border border-gray-700/50 rounded-xl">
+                <div className="flex items-center justify-between p-4 bg-gray-800/60 border border-line rounded-xl">
                   <div>
                     <p className="text-sm text-white font-medium">
                       Autopilot master switch
@@ -408,7 +408,7 @@ export function AutopilotModal({
                 </div>
 
                 {/* Kill rules */}
-                <div className="p-4 bg-gray-800/40 border border-gray-700/50 rounded-xl space-y-4">
+                <div className="p-4 bg-gray-800/40 border border-line rounded-xl space-y-4">
                   <div className="flex items-center gap-2">
                     <AlertTriangle size={14} className="text-red-400" />
                     <p className="text-sm text-white font-medium">
@@ -438,7 +438,7 @@ export function AutopilotModal({
                 </div>
 
                 {/* Auto-resume toggle */}
-                <div className="flex items-center justify-between p-4 bg-gray-800/40 border border-gray-700/50 rounded-xl">
+                <div className="flex items-center justify-between p-4 bg-gray-800/40 border border-line rounded-xl">
                   <div className="pr-3">
                     <p className="text-sm text-white font-medium flex items-center gap-2">
                       <TrendingUp size={14} className="text-green-400" />
@@ -469,7 +469,7 @@ export function AutopilotModal({
                   <button
                     onClick={saveConfig}
                     disabled={savingConfig}
-                    className="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white rounded-lg disabled:opacity-50 flex items-center gap-2 cursor-pointer"
+                    className="px-4 py-2 text-sm font-medium bg-blue-600 hover:bg-blue-500 text-info-ink rounded-lg disabled:opacity-50 flex items-center gap-2 cursor-pointer"
                   >
                     {savingConfig && (
                       <Loader2 size={14} className="animate-spin" />
@@ -536,7 +536,7 @@ export function AutopilotModal({
                 </div>
               ) : (
                 <div className="border border-gray-800 rounded-lg divide-y divide-gray-800 overflow-hidden">
-                  <div className="hidden sm:grid grid-cols-[1fr_60px_96px] bg-gray-800/50 text-gray-400 text-xs font-medium px-3 py-2">
+                  <div className="hidden sm:grid grid-cols-[1fr_60px_96px] bg-panel text-gray-400 text-xs font-medium px-3 py-2">
                     <div className="text-left">Campaign</div>
                     <div className="text-right">Ads</div>
                     <div className="text-right">Autopilot</div>

@@ -86,7 +86,7 @@ export function AiKeyManager({
 
   return (
     <div className="max-w-3xl">
-      <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-6">
+      <div className="bg-panel border border-line rounded-panel shadow-card p-6">
         <div className="flex items-center gap-3 mb-4">
           <div className={`p-2 ${c.iconBg} rounded-lg`}>
             <Sparkles size={20} className={c.iconText} />

@@ -77,7 +77,7 @@ export default function JtLinkPage() {
         <button
           onClick={() => run(true)}
           disabled={loading !== null}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-info-ink rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {loading === "dry" ? (
             <Loader2 className="w-4 h-4 animate-spin" />
@@ -148,7 +148,7 @@ export default function JtLinkPage() {
         <button
           onClick={() => run(false)}
           disabled={loading !== null || !dryResult}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-good-ink rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {loading === "real" ? (
             <Loader2 className="w-4 h-4 animate-spin" />

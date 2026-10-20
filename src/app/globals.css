@@ -1,37 +1,621 @@
 @import "tailwindcss";
 
+/*
+  The visual system. Five themes, one token set.
+
+  Every page is styled through the tokens below (bg-panel, text-muted,
+  rounded-panel, font-display, ...). The theme on <html data-theme="..."> picks
+  the values; the default is Night shift. Pages never know which theme is on.
+
+  Tailwind's own grey, purple and semantic scales are remapped onto the same
+  tokens further down, so the pages that still say bg-gray-800 or
+  text-purple-300 follow the theme too, until they are rewritten.
+
+  Themes (see src/lib/theme.ts for the list the picker shows):
+    night    Night shift     green-tinted near-black, sage accent, mono numbers
+    ledger   Daylight ledger light paper, teal ink, squarer corners
+    control  Mission control navy, amber, dense and square, uppercase labels
+    studio   Soft studio     light, cobalt, airy, big radii, soft shadows
+    forest   Deep forest     mid-tone green, apricot, serif display
+*/
+
 :root {
-  --background: #111827;
-  --foreground: #f9fafb;
+  color-scheme: dark;
+
+  /* surfaces */
+  --t-canvas: #0b1110;
+  --t-sidebar: #0e1513;
+  --t-panel: #121a18;
+  --t-raised: #19231f;
+  --t-line: #22302b;
+  --t-line-strong: #2e3d37;
+
+  /* text */
+  --t-fg: #e8eeeb;
+  --t-muted: #8a9a93;
+  --t-dim: #5c6b64;
+
+  /* the one accent: primary action, active state, good */
+  --t-accent: #3fc9a4;
+  --t-accent-hover: #5ad4b3;
+  --t-accent-ink: #07211a;
+  --t-accent-soft: #143229;
+
+  /* meaning colors, never decoration */
+  --t-good: #3fc9a4;
+  --t-good-ink: #07211a;
+  --t-good-soft: #143229;
+  --t-warn: #f0b35b;
+  --t-warn-ink: #2a1a04;
+  --t-warn-soft: #2e2414;
+  --t-bad: #f07a70;
+  --t-bad-ink: #2b0d0a;
+  --t-bad-soft: #331b19;
+  --t-info: #6fb3ff;
+  --t-info-ink: #061a33;
+  --t-info-soft: #15243a;
+
+  /* navigation */
+  --t-nav-on: #19231f;
+  --t-nav-on-fg: #e8eeeb;
+
+  /* type */
+  --t-font-display: var(--font-manrope), "Avenir Next", "Segoe UI", sans-serif;
+  --t-font-body: var(--font-plex-sans), "Helvetica Neue", Arial, sans-serif;
+  --t-font-mono: var(--font-plex-mono), "SFMono-Regular", Menlo, monospace;
+  --t-font-num: var(--t-font-mono);
+  --t-display-weight: 800;
+  --t-display-tracking: -0.01em;
+  --t-display-transform: none;
+  --t-num-weight: 500;
+
+  /* small labels: section headers in the sidebar, table headers, tile labels */
+  --t-label-font: var(--t-font-body);
+  --t-label-size: 0.78rem;
+  --t-label-transform: none;
+  --t-label-tracking: 0;
+
+  /* shape */
+  --t-radius-panel: 10px;
+  --t-radius-control: 7px;
+  --t-radius-pill: 999px;
+  --t-shadow-card: 0 0 #0000;
+  --t-shadow-float: 0 24px 48px -24px rgb(0 0 0 / 0.6);
+
+  /* density */
+  --t-row-pad: 0.5625rem;
+  --t-gap: 0.625rem;
 }
 
+[data-theme="ledger"] {
+  color-scheme: light;
+  --t-canvas: #f4f5f2;
+  --t-sidebar: #eceeea;
+  --t-panel: #ffffff;
+  --t-raised: #f0f2ef;
+  --t-line: #d8ddd6;
+  --t-line-strong: #c3cac1;
+  --t-fg: #161a18;
+  --t-muted: #5f6b66;
+  --t-dim: #98a29d;
+  --t-accent: #0e7c66;
+  --t-accent-hover: #0b6a57;
+  --t-accent-ink: #ffffff;
+  --t-accent-soft: #ddf0ea;
+  --t-good: #0e7c66;
+  --t-good-ink: #ffffff;
+  --t-good-soft: #ddf0ea;
+  --t-warn: #b9741a;
+  --t-warn-ink: #ffffff;
+  --t-warn-soft: #fbefd9;
+  --t-bad: #be4238;
+  --t-bad-ink: #ffffff;
+  --t-bad-soft: #f9e1de;
+  --t-info: #2c66c9;
+  --t-info-ink: #ffffff;
+  --t-info-soft: #e1eafb;
+  --t-nav-on: #ffffff;
+  --t-nav-on-fg: #161a18;
+  --t-font-display: var(--font-archivo), "Helvetica Neue", Arial, sans-serif;
+  --t-font-body: var(--font-source-sans), "Helvetica Neue", Arial, sans-serif;
+  --t-font-mono: var(--font-jetbrains-mono), Menlo, monospace;
+  --t-font-num: var(--t-font-mono);
+  --t-display-weight: 700;
+  --t-display-tracking: -0.015em;
+  --t-radius-panel: 6px;
+  --t-radius-control: 4px;
+  --t-radius-pill: 4px;
+  --t-shadow-float: 0 24px 48px -24px rgb(20 30 25 / 0.35);
+  --t-row-pad: 0.5rem;
+}
+
+[data-theme="control"] {
+  color-scheme: dark;
+  --t-canvas: #0a0e14;
+  --t-sidebar: #0a0e14;
+  --t-panel: #10161f;
+  --t-raised: #161e2a;
+  --t-line: #1f2937;
+  --t-line-strong: #2c3847;
+  --t-fg: #e6edf3;
+  --t-muted: #8b98a8;
+  --t-dim: #4f5b6b;
+  --t-accent: #f5a524;
+  --t-accent-hover: #ffb73f;
+  --t-accent-ink: #1a1200;
+  --t-accent-soft: #2a2008;
+  --t-good: #3ddc97;
+  --t-good-ink: #04200f;
+  --t-good-soft: #0f2a1d;
+  --t-warn: #e2c565;
+  --t-warn-ink: #241c03;
+  --t-warn-soft: #2a2410;
+  --t-bad: #ff5c5c;
+  --t-bad-ink: #2b0606;
+  --t-bad-soft: #331414;
+  --t-info: #58a6ff;
+  --t-info-ink: #04162e;
+  --t-info-soft: #0f2340;
+  --t-nav-on: #161e2a;
+  --t-nav-on-fg: #f5a524;
+  --t-font-display: var(--font-barlow-condensed), "Arial Narrow", sans-serif;
+  --t-font-body: var(--font-barlow), "Helvetica Neue", Arial, sans-serif;
+  --t-font-mono: var(--font-jetbrains-mono), Menlo, monospace;
+  --t-font-num: var(--t-font-mono);
+  --t-display-weight: 600;
+  --t-display-tracking: 0.02em;
+  --t-display-transform: uppercase;
+  --t-num-weight: 600;
+  --t-label-font: var(--t-font-mono);
+  --t-label-size: 0.66rem;
+  --t-label-transform: uppercase;
+  --t-label-tracking: 0.08em;
+  --t-radius-panel: 3px;
+  --t-radius-control: 2px;
+  --t-radius-pill: 2px;
+  --t-row-pad: 0.375rem;
+  --t-gap: 0.375rem;
+}
+
+[data-theme="studio"] {
+  color-scheme: light;
+  --t-canvas: #f1f3f8;
+  --t-sidebar: #ffffff;
+  --t-panel: #ffffff;
+  --t-raised: #f6f7fb;
+  --t-line: #e4e8f0;
+  --t-line-strong: #cfd5e1;
+  --t-fg: #1a2033;
+  --t-muted: #5f6b85;
+  --t-dim: #a0a9bc;
+  --t-accent: #2f5bea;
+  --t-accent-hover: #244ccc;
+  --t-accent-ink: #ffffff;
+  --t-accent-soft: #e8eeff;
+  --t-good: #1f9d6b;
+  --t-good-ink: #ffffff;
+  --t-good-soft: #e1f5ec;
+  --t-warn: #d9822b;
+  --t-warn-ink: #ffffff;
+  --t-warn-soft: #fdeedd;
+  --t-bad: #d64545;
+  --t-bad-ink: #ffffff;
+  --t-bad-soft: #fbe3e3;
+  --t-info: #5b8def;
+  --t-info-ink: #ffffff;
+  --t-info-soft: #e6eefc;
+  --t-nav-on: #e8eeff;
+  --t-nav-on-fg: #2f5bea;
+  --t-font-display: var(--font-sora), "Helvetica Neue", Arial, sans-serif;
+  --t-font-body: var(--font-dm-sans), "Helvetica Neue", Arial, sans-serif;
+  --t-font-mono: var(--font-dm-mono), Menlo, monospace;
+  --t-font-num: var(--t-font-display);
+  --t-display-weight: 600;
+  --t-display-tracking: -0.02em;
+  --t-num-weight: 600;
+  --t-radius-panel: 16px;
+  --t-radius-control: 10px;
+  --t-shadow-card: 0 1px 2px rgb(20 30 60 / 0.05), 0 10px 28px -16px rgb(20 30 60 / 0.14);
+  --t-shadow-float: 0 24px 48px -24px rgb(20 30 60 / 0.35);
+  --t-row-pad: 0.625rem;
+  --t-gap: 0.875rem;
+}
+
+[data-theme="forest"] {
+  color-scheme: dark;
+  --t-canvas: #1c3733;
+  --t-sidebar: #173029;
+  --t-panel: #234440;
+  --t-raised: #2b4f49;
+  --t-line: #335650;
+  --t-line-strong: #44685f;
+  --t-fg: #f2efe6;
+  --t-muted: #a9bdb6;
+  --t-dim: #7a948c;
+  --t-accent: #ffb174;
+  --t-accent-hover: #ffc08e;
+  --t-accent-ink: #2a1708;
+  --t-accent-soft: #3f4a3a;
+  --t-good: #9be3b3;
+  --t-good-ink: #0d2a18;
+  --t-good-soft: #2d5a43;
+  --t-warn: #ffd66b;
+  --t-warn-ink: #2a2004;
+  --t-warn-soft: #4a4a2c;
+  --t-bad: #ff7b7b;
+  --t-bad-ink: #2e0a0a;
+  --t-bad-soft: #5a3535;
+  --t-info: #9ed2ff;
+  --t-info-ink: #072033;
+  --t-info-soft: #2f4f5c;
+  --t-nav-on: #2b4f49;
+  --t-nav-on-fg: #f2efe6;
+  --t-font-display: var(--font-fraunces), Georgia, serif;
+  --t-font-body: var(--font-nunito-sans), "Helvetica Neue", Arial, sans-serif;
+  --t-font-mono: var(--font-fira-mono), Menlo, monospace;
+  --t-font-num: var(--t-font-display);
+  --t-display-weight: 700;
+  --t-num-weight: 500;
+  --t-radius-panel: 12px;
+  --t-radius-control: 8px;
+  --t-row-pad: 0.5625rem;
+  --t-gap: 0.75rem;
+}
+
+/*
+  Tailwind tokens. `inline` makes utilities carry the var() itself, so a
+  class resolves against whichever theme is on <html>.
+*/
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* the system's own names: use these in new code */
+  --color-canvas: var(--t-canvas);
+  --color-sidebar: var(--t-sidebar);
+  --color-panel: var(--t-panel);
+  --color-raised: var(--t-raised);
+  --color-line: var(--t-line);
+  --color-line-strong: var(--t-line-strong);
+  --color-fg: var(--t-fg);
+  --color-muted: var(--t-muted);
+  --color-dim: var(--t-dim);
+  --color-accent: var(--t-accent);
+  --color-accent-hover: var(--t-accent-hover);
+  --color-accent-ink: var(--t-accent-ink);
+  --color-accent-soft: var(--t-accent-soft);
+  --color-good: var(--t-good);
+  --color-good-ink: var(--t-good-ink);
+  --color-good-soft: var(--t-good-soft);
+  --color-warn: var(--t-warn);
+  --color-warn-ink: var(--t-warn-ink);
+  --color-warn-soft: var(--t-warn-soft);
+  --color-bad: var(--t-bad);
+  --color-bad-ink: var(--t-bad-ink);
+  --color-bad-soft: var(--t-bad-soft);
+  --color-info: var(--t-info);
+  --color-info-ink: var(--t-info-ink);
+  --color-info-soft: var(--t-info-soft);
+  --color-nav-on: var(--t-nav-on);
+  --color-nav-on-fg: var(--t-nav-on-fg);
+
+  --font-display: var(--t-font-display);
+  --font-sans: var(--t-font-body);
+  --font-mono: var(--t-font-mono);
+  --font-num: var(--t-font-num);
+
+  --radius-panel: var(--t-radius-panel);
+  --radius-control: var(--t-radius-control);
+  --radius-pill: var(--t-radius-pill);
+  --shadow-card: var(--t-shadow-card);
+  --shadow-float: var(--t-shadow-float);
+
+  /*
+    Legacy scales, remapped. The pages written before the system say
+    bg-gray-800, text-white, bg-purple-600, text-green-400 and so on; here
+    each of those lands on a token, so they follow the theme until rewritten.
+    New code never uses these names.
+  */
+  --color-white: var(--t-fg);
+  --color-gray-50: var(--t-fg);
+  --color-gray-100: var(--t-fg);
+  --color-gray-200: var(--t-fg);
+  --color-gray-300: var(--t-fg);
+  --color-gray-400: var(--t-muted);
+  --color-gray-500: var(--t-muted);
+  --color-gray-600: var(--t-dim);
+  --color-gray-700: var(--t-line-strong);
+  --color-gray-800: var(--t-panel);
+  --color-gray-900: var(--t-canvas);
+  --color-gray-950: var(--t-sidebar);
+  --color-slate-50: var(--t-fg);
+  --color-slate-100: var(--t-fg);
+  --color-slate-200: var(--t-fg);
+  --color-slate-300: var(--t-fg);
+  --color-slate-400: var(--t-muted);
+  --color-slate-500: var(--t-muted);
+  --color-slate-600: var(--t-dim);
+  --color-slate-700: var(--t-line-strong);
+  --color-slate-800: var(--t-panel);
+  --color-slate-900: var(--t-canvas);
+  --color-slate-950: var(--t-sidebar);
+  --color-zinc-50: var(--t-fg);
+  --color-zinc-100: var(--t-fg);
+  --color-zinc-200: var(--t-fg);
+  --color-zinc-300: var(--t-fg);
+  --color-zinc-400: var(--t-muted);
+  --color-zinc-500: var(--t-muted);
+  --color-zinc-600: var(--t-dim);
+  --color-zinc-700: var(--t-line-strong);
+  --color-zinc-800: var(--t-panel);
+  --color-zinc-900: var(--t-canvas);
+  --color-zinc-950: var(--t-sidebar);
+  --color-neutral-50: var(--t-fg);
+  --color-neutral-100: var(--t-fg);
+  --color-neutral-200: var(--t-fg);
+  --color-neutral-300: var(--t-fg);
+  --color-neutral-400: var(--t-muted);
+  --color-neutral-500: var(--t-muted);
+  --color-neutral-600: var(--t-dim);
+  --color-neutral-700: var(--t-line-strong);
+  --color-neutral-800: var(--t-panel);
+  --color-neutral-900: var(--t-canvas);
+  --color-neutral-950: var(--t-sidebar);
+
+  --color-purple-50: var(--t-accent-soft);
+  --color-purple-100: var(--t-accent-soft);
+  --color-purple-200: var(--t-accent);
+  --color-purple-300: var(--t-accent);
+  --color-purple-400: var(--t-accent);
+  --color-purple-500: var(--t-accent-hover);
+  --color-purple-600: var(--t-accent);
+  --color-purple-700: var(--t-accent);
+  --color-purple-800: var(--t-accent-soft);
+  --color-purple-900: var(--t-accent-soft);
+  --color-purple-950: var(--t-accent-soft);
+  --color-violet-50: var(--t-accent-soft);
+  --color-violet-100: var(--t-accent-soft);
+  --color-violet-200: var(--t-accent);
+  --color-violet-300: var(--t-accent);
+  --color-violet-400: var(--t-accent);
+  --color-violet-500: var(--t-accent-hover);
+  --color-violet-600: var(--t-accent);
+  --color-violet-700: var(--t-accent);
+  --color-violet-800: var(--t-accent-soft);
+  --color-violet-900: var(--t-accent-soft);
+  --color-violet-950: var(--t-accent-soft);
+  --color-indigo-50: var(--t-accent-soft);
+  --color-indigo-100: var(--t-accent-soft);
+  --color-indigo-200: var(--t-accent);
+  --color-indigo-300: var(--t-accent);
+  --color-indigo-400: var(--t-accent);
+  --color-indigo-500: var(--t-accent-hover);
+  --color-indigo-600: var(--t-accent);
+  --color-indigo-700: var(--t-accent);
+  --color-indigo-800: var(--t-accent-soft);
+  --color-indigo-900: var(--t-accent-soft);
+  --color-indigo-950: var(--t-accent-soft);
+  --color-pink-50: var(--t-accent-soft);
+  --color-pink-100: var(--t-accent-soft);
+  --color-pink-200: var(--t-accent);
+  --color-pink-300: var(--t-accent);
+  --color-pink-400: var(--t-accent);
+  --color-pink-500: var(--t-accent-hover);
+  --color-pink-600: var(--t-accent);
+  --color-pink-700: var(--t-accent);
+  --color-pink-800: var(--t-accent-soft);
+  --color-pink-900: var(--t-accent-soft);
+  --color-pink-950: var(--t-accent-soft);
+
+  --color-green-50: var(--t-good-soft);
+  --color-green-100: var(--t-good-soft);
+  --color-green-200: var(--t-good);
+  --color-green-300: var(--t-good);
+  --color-green-400: var(--t-good);
+  --color-green-500: var(--t-good);
+  --color-green-600: var(--t-good);
+  --color-green-700: var(--t-good);
+  --color-green-800: var(--t-good-soft);
+  --color-green-900: var(--t-good-soft);
+  --color-green-950: var(--t-good-soft);
+  --color-emerald-50: var(--t-good-soft);
+  --color-emerald-100: var(--t-good-soft);
+  --color-emerald-200: var(--t-good);
+  --color-emerald-300: var(--t-good);
+  --color-emerald-400: var(--t-good);
+  --color-emerald-500: var(--t-good);
+  --color-emerald-600: var(--t-good);
+  --color-emerald-700: var(--t-good);
+  --color-emerald-800: var(--t-good-soft);
+  --color-emerald-900: var(--t-good-soft);
+  --color-emerald-950: var(--t-good-soft);
+  --color-teal-50: var(--t-good-soft);
+  --color-teal-100: var(--t-good-soft);
+  --color-teal-200: var(--t-good);
+  --color-teal-300: var(--t-good);
+  --color-teal-400: var(--t-good);
+  --color-teal-500: var(--t-good);
+  --color-teal-600: var(--t-good);
+  --color-teal-700: var(--t-good);
+  --color-teal-800: var(--t-good-soft);
+  --color-teal-900: var(--t-good-soft);
+  --color-teal-950: var(--t-good-soft);
+
+  --color-yellow-50: var(--t-warn-soft);
+  --color-yellow-100: var(--t-warn-soft);
+  --color-yellow-200: var(--t-warn);
+  --color-yellow-300: var(--t-warn);
+  --color-yellow-400: var(--t-warn);
+  --color-yellow-500: var(--t-warn);
+  --color-yellow-600: var(--t-warn);
+  --color-yellow-700: var(--t-warn);
+  --color-yellow-800: var(--t-warn-soft);
+  --color-yellow-900: var(--t-warn-soft);
+  --color-yellow-950: var(--t-warn-soft);
+  --color-amber-50: var(--t-warn-soft);
+  --color-amber-100: var(--t-warn-soft);
+  --color-amber-200: var(--t-warn);
+  --color-amber-300: var(--t-warn);
+  --color-amber-400: var(--t-warn);
+  --color-amber-500: var(--t-warn);
+  --color-amber-600: var(--t-warn);
+  --color-amber-700: var(--t-warn);
+  --color-amber-800: var(--t-warn-soft);
+  --color-amber-900: var(--t-warn-soft);
+  --color-amber-950: var(--t-warn-soft);
+  --color-orange-50: var(--t-warn-soft);
+  --color-orange-100: var(--t-warn-soft);
+  --color-orange-200: var(--t-warn);
+  --color-orange-300: var(--t-warn);
+  --color-orange-400: var(--t-warn);
+  --color-orange-500: var(--t-warn);
+  --color-orange-600: var(--t-warn);
+  --color-orange-700: var(--t-warn);
+  --color-orange-800: var(--t-warn-soft);
+  --color-orange-900: var(--t-warn-soft);
+  --color-orange-950: var(--t-warn-soft);
+
+  --color-red-50: var(--t-bad-soft);
+  --color-red-100: var(--t-bad-soft);
+  --color-red-200: var(--t-bad);
+  --color-red-300: var(--t-bad);
+  --color-red-400: var(--t-bad);
+  --color-red-500: var(--t-bad);
+  --color-red-600: var(--t-bad);
+  --color-red-700: var(--t-bad);
+  --color-red-800: var(--t-bad-soft);
+  --color-red-900: var(--t-bad-soft);
+  --color-red-950: var(--t-bad-soft);
+  --color-rose-50: var(--t-bad-soft);
+  --color-rose-100: var(--t-bad-soft);
+  --color-rose-200: var(--t-bad);
+  --color-rose-300: var(--t-bad);
+  --color-rose-400: var(--t-bad);
+  --color-rose-500: var(--t-bad);
+  --color-rose-600: var(--t-bad);
+  --color-rose-700: var(--t-bad);
+  --color-rose-800: var(--t-bad-soft);
+  --color-rose-900: var(--t-bad-soft);
+  --color-rose-950: var(--t-bad-soft);
+
+  --color-blue-50: var(--t-info-soft);
+  --color-blue-100: var(--t-info-soft);
+  --color-blue-200: var(--t-info);
+  --color-blue-300: var(--t-info);
+  --color-blue-400: var(--t-info);
+  --color-blue-500: var(--t-info);
+  --color-blue-600: var(--t-info);
+  --color-blue-700: var(--t-info);
+  --color-blue-800: var(--t-info-soft);
+  --color-blue-900: var(--t-info-soft);
+  --color-blue-950: var(--t-info-soft);
+  --color-sky-50: var(--t-info-soft);
+  --color-sky-100: var(--t-info-soft);
+  --color-sky-200: var(--t-info);
+  --color-sky-300: var(--t-info);
+  --color-sky-400: var(--t-info);
+  --color-sky-500: var(--t-info);
+  --color-sky-600: var(--t-info);
+  --color-sky-700: var(--t-info);
+  --color-sky-800: var(--t-info-soft);
+  --color-sky-900: var(--t-info-soft);
+  --color-sky-950: var(--t-info-soft);
+  --color-cyan-50: var(--t-info-soft);
+  --color-cyan-100: var(--t-info-soft);
+  --color-cyan-200: var(--t-info);
+  --color-cyan-300: var(--t-info);
+  --color-cyan-400: var(--t-info);
+  --color-cyan-500: var(--t-info);
+  --color-cyan-600: var(--t-info);
+  --color-cyan-700: var(--t-info);
+  --color-cyan-800: var(--t-info-soft);
+  --color-cyan-900: var(--t-info-soft);
+  --color-cyan-950: var(--t-info-soft);
+
+  /* rounded-xl was the card radius, rounded-lg/md the control radius */
+  --radius-xl: var(--t-radius-panel);
+  --radius-2xl: var(--t-radius-panel);
+  --radius-lg: var(--t-radius-control);
+  --radius-md: var(--t-radius-control);
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+@layer base {
+  html {
+    background: var(--t-canvas);
+  }
+  body {
+    background: var(--t-canvas);
+    color: var(--t-fg);
+    font-family: var(--t-font-body);
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 {
+    font-family: var(--t-font-display);
+    font-weight: var(--t-display-weight);
+    letter-spacing: var(--t-display-tracking);
+    text-transform: var(--t-display-transform);
+    text-wrap: balance;
+  }
+  input, select, textarea, button {
+    font-family: inherit;
+  }
+  ::selection {
+    background: var(--t-accent);
+    color: var(--t-accent-ink);
+  }
+  :focus-visible {
+    outline: 2px solid var(--t-accent);
+    outline-offset: 2px;
+  }
 }
 
-/* Custom scrollbar for dark theme */
+@utility font-display {
+  font-family: var(--t-font-display);
+  font-weight: var(--t-display-weight);
+  letter-spacing: var(--t-display-tracking);
+  text-transform: var(--t-display-transform);
+}
+
+/* numbers: timestamps, money, counts, IDs */
+@utility font-num {
+  font-family: var(--t-font-num);
+  font-weight: var(--t-num-weight);
+  font-variant-numeric: tabular-nums;
+}
+
+/* small labels above data: tile labels, table headers, sidebar sections */
+@utility text-label {
+  font-family: var(--t-label-font);
+  font-size: var(--t-label-size);
+  text-transform: var(--t-label-transform);
+  letter-spacing: var(--t-label-tracking);
+}
+
+@utility py-row {
+  padding-block: var(--t-row-pad);
+}
+
+@utility gap-sys {
+  gap: var(--t-gap);
+}
+
+/* scrollbars follow the surface */
 ::-webkit-scrollbar {
   width: 8px;
+  height: 8px;
 }
-
 ::-webkit-scrollbar-track {
-  background: #1f2937;
+  background: transparent;
 }
-
 ::-webkit-scrollbar-thumb {
-  background: #374151;
+  background: var(--t-line-strong);
   border-radius: 4px;
 }
-
 ::-webkit-scrollbar-thumb:hover {
-  background: #4b5563;
+  background: var(--t-dim);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

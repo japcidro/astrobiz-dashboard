@@ -8,6 +8,8 @@ export interface Employee {
   full_name: string;
   role: UserRole;
   is_active: boolean;
+  /** Dashboard theme, one of src/lib/theme.ts THEMES. */
+  theme: string;
   created_at: string;
   updated_at: string;
 }

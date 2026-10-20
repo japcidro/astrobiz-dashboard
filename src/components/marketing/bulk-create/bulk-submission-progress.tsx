@@ -380,7 +380,7 @@ export function BulkSubmissionProgress({
               {errorCount > 0 && (
                 <button
                   onClick={handleRetryFailed}
-                  className="px-4 py-2 text-sm bg-yellow-600 hover:bg-yellow-500 text-white rounded-lg"
+                  className="px-4 py-2 text-sm bg-yellow-600 hover:bg-yellow-500 text-warn-ink rounded-lg"
                 >
                   Retry Failed
                 </button>

@@ -118,17 +118,17 @@ export function ClockStatusBanner() {
   if (status.state === "running") {
     const displaySeconds = (status.running_seconds ?? 0) + tick;
     return (
-      <div className="flex items-center justify-between gap-3 px-4 py-2 bg-green-500/10 border-b border-green-500/20">
+      <div className="flex items-center justify-between gap-3 border-b border-line bg-sidebar px-4 py-2">
         <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-          <CheckCircle size={14} className="text-green-400" />
-          <span className="text-sm text-green-300 font-medium">
-            Clocked in · {fmtDuration(displaySeconds)}
+          <span className="h-2 w-2 animate-pulse rounded-full bg-good" />
+          <CheckCircle size={14} className="text-good" />
+          <span className="text-sm text-fg">
+            Clocked in · <span className="font-num">{fmtDuration(displaySeconds)}</span>
           </span>
         </div>
         <Link
           href="/time-tracker"
-          className="text-xs text-green-300/80 hover:text-green-200 flex items-center gap-1"
+          className="flex items-center gap-1 text-xs text-muted hover:text-fg"
         >
           Open tracker <ArrowRight size={12} />
         </Link>
@@ -138,16 +138,16 @@ export function ClockStatusBanner() {
 
   if (status.state === "paused") {
     return (
-      <div className="flex items-center justify-between gap-3 px-4 py-2 bg-yellow-500/10 border-b border-yellow-500/20">
+      <div className="flex items-center justify-between gap-3 border-b border-warn/40 bg-warn-soft px-4 py-2">
         <div className="flex items-center gap-2">
-          <PauseCircle size={14} className="text-yellow-400" />
-          <span className="text-sm text-yellow-300 font-medium">
-            On break · {fmtDuration(status.running_seconds ?? 0)}
+          <PauseCircle size={14} className="text-warn" />
+          <span className="text-sm text-fg">
+            On break · <span className="font-num">{fmtDuration(status.running_seconds ?? 0)}</span>
           </span>
         </div>
         <Link
           href="/time-tracker"
-          className="text-xs text-yellow-300/80 hover:text-yellow-200 flex items-center gap-1"
+          className="flex items-center gap-1 text-xs text-warn hover:text-fg"
         >
           Resume <ArrowRight size={12} />
         </Link>
@@ -158,10 +158,10 @@ export function ClockStatusBanner() {
   // not clocked in
   if (shiftActive) {
     return (
-      <div className="flex items-center justify-between gap-3 px-4 py-2 bg-red-500/10 border-b border-red-500/30">
+      <div className="flex items-center justify-between gap-3 border-b border-bad/50 bg-bad-soft px-4 py-2">
         <div className="flex items-center gap-2">
-          <AlertCircle size={14} className="text-red-400" />
-          <span className="text-sm text-red-300 font-medium">
+          <AlertCircle size={14} className="text-bad" />
+          <span className="text-sm text-fg">
             Not clocked in
             {status.shift_start &&
               ` · shift started ${status.shift_start.slice(0, 5)}`}
@@ -169,7 +169,7 @@ export function ClockStatusBanner() {
         </div>
         <Link
           href="/time-tracker"
-          className="text-xs font-semibold text-white bg-red-500 hover:bg-red-400 px-3 py-1 rounded-md flex items-center gap-1"
+          className="flex items-center gap-1 rounded-control bg-accent px-3 py-1 font-display text-xs text-accent-ink hover:bg-accent-hover"
         >
           Clock in now <ArrowRight size={12} />
         </Link>

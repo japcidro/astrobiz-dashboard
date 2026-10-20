@@ -96,7 +96,7 @@ export default function DraftsPage() {
           {drafts.map((draft) => (
             <div
               key={draft.id}
-              className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4 flex items-center justify-between"
+              className="bg-panel border border-line rounded-panel shadow-card p-4 flex items-center justify-between"
             >
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">

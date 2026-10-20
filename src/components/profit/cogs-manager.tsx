@@ -336,7 +336,7 @@ export function CogsManager({ initialItems }: Props) {
 
   return (
     <div className="max-w-5xl space-y-6">
-      <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-6">
+      <div className="bg-panel border border-line rounded-panel shadow-card p-6">
         {/* Header */}
         <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
           <div className="flex items-center gap-3">
@@ -369,7 +369,7 @@ export function CogsManager({ initialItems }: Props) {
             <button
               onClick={handleScanShopify}
               disabled={scanning}
-              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-good-ink text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
             >
               {scanning ? (
                 <RefreshCw size={14} className="animate-spin" />
@@ -555,7 +555,7 @@ export function CogsManager({ initialItems }: Props) {
             <button
               onClick={handleAddRow}
               disabled={saving || !newSku.trim()}
-              className="flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-3 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+              className="flex items-center justify-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-good-ink text-sm px-3 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
             >
               {saving ? (
                 <RefreshCw size={14} className="animate-spin" />

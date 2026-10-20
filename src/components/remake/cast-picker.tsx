@@ -277,7 +277,7 @@ export function CastPicker({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={p.url} alt="" className="w-full h-full object-cover pointer-events-none" loading="lazy" draggable={false} />
             {on && (
-              <span className="absolute top-1.5 right-1.5 bg-purple-600 text-white rounded-full p-1">
+              <span className="absolute top-1.5 right-1.5 bg-purple-600 text-accent-ink rounded-full p-1">
                 <Check size={12} />
               </span>
             )}

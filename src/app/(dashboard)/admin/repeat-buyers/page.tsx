@@ -478,7 +478,7 @@ function ParcelCoverageNote({
       className={`mb-4 p-3 rounded-xl border text-sm flex items-start gap-3 ${
         stale
           ? "bg-yellow-900/20 border-yellow-700/50 text-yellow-300"
-          : "bg-gray-800/50 border-gray-700/50 text-gray-400"
+          : "bg-panel border-line text-gray-400"
       }`}
     >
       <AlertTriangle

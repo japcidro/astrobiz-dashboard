@@ -254,7 +254,7 @@ export function FulfillmentDashboard({
             accentBorder={
               unfulfilledOrders.filter((o) => o.age_days >= 3).length > 0
                 ? "border-red-500/30"
-                : "border-gray-700/50"
+                : "border-line"
             }
             loading={fulfillmentLoading}
           />
@@ -264,7 +264,7 @@ export function FulfillmentDashboard({
       {/* Needs Attention */}
       <div className="mb-8">
         <h2 className="text-lg font-semibold text-white mb-4">Needs Attention</h2>
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-2">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-2">
           <ActionItem
             label="Out of stock products"
             count={summary?.out_of_stock_count ?? 0}

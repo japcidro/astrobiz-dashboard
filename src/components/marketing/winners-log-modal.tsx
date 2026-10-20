@@ -289,7 +289,7 @@ export function WinnersLogModal({ storeFilter, onClose }: Props) {
               </button>
               <button
                 onClick={handleDownload}
-                className="text-xs bg-amber-600 hover:bg-amber-500 text-white font-medium px-3 py-2 rounded-lg flex items-center gap-1.5 cursor-pointer"
+                className="text-xs bg-amber-600 hover:bg-amber-500 text-warn-ink font-medium px-3 py-2 rounded-lg flex items-center gap-1.5 cursor-pointer"
               >
                 <Download size={12} />
                 Download .md

@@ -97,8 +97,8 @@ export function RepeatBuyersSummaryCards({ summary, loading }: Props) {
       {metrics.map((m) => (
         <div
           key={m.label}
-          className={`bg-gray-800/50 border rounded-xl p-4 ${
-            m.accent || "border-gray-700/50"
+          className={`bg-panel border rounded-xl p-4 ${
+            m.accent || "border-line"
           }`}
         >
           <div className="flex items-center gap-2 mb-2">

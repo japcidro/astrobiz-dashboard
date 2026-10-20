@@ -610,7 +610,7 @@ export function PromoteBulkToScalingModal({
                 Loading configured stores…
               </div>
             ) : availableStores.length === 0 ? (
-              <div className="text-xs text-gray-400 p-2 bg-gray-800/60 border border-gray-700/50 rounded-lg">
+              <div className="text-xs text-gray-400 p-2 bg-gray-800/60 border border-line rounded-lg">
                 {sourceAccountId ? (
                   <>
                     No scaling campaign is mapped for this ad account yet —
@@ -754,7 +754,7 @@ export function PromoteBulkToScalingModal({
           )}
 
           {/* Quick-apply + subjects */}
-          <div className="bg-gray-800/40 border border-gray-700/50 rounded-lg overflow-hidden">
+          <div className="bg-gray-800/40 border border-line rounded-lg overflow-hidden">
             {destinationReady && !submitting && !done && (
               <div className="flex items-center flex-wrap gap-2 px-2 py-1.5 border-b border-gray-700/40 bg-gray-900/30 text-[11px] text-gray-400">
                 <span className="text-gray-500">Put every ad:</span>
@@ -964,7 +964,7 @@ export function PromoteBulkToScalingModal({
 
           {/* Result tally */}
           {done && (
-            <div className="p-2.5 bg-gray-800/60 border border-gray-700/50 rounded-lg text-xs text-gray-300">
+            <div className="p-2.5 bg-gray-800/60 border border-line rounded-lg text-xs text-gray-300">
               <div className="flex items-center gap-3">
                 <span className="inline-flex items-center gap-1 text-emerald-400">
                   <CheckCircle2 size={12} />
@@ -1037,7 +1037,7 @@ export function PromoteBulkToScalingModal({
             <button
               onClick={handleSubmit}
               disabled={!canSubmit}
-              className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-orange-600 hover:bg-orange-500 text-white rounded-lg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-orange-600 hover:bg-orange-500 text-warn-ink rounded-lg cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {submitting ? (
                 <Loader2 size={14} className="animate-spin" />

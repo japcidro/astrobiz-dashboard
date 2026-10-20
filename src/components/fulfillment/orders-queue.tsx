@@ -151,17 +151,17 @@ export function OrdersQueue({
           <button
             onClick={() => onGeneratePickList(Array.from(selected))}
             disabled={selected.size === 0}
-            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-good-ink text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
           >
             Generate Pick List
           </button>
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-gray-700/50">
+      <div className="overflow-x-auto rounded-xl border border-line">
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-gray-800/50">
+            <tr className="bg-panel">
               <th className="px-4 py-3 text-left w-10">
                 <input type="checkbox" checked={allSelected} onChange={toggleAll}
                   className="rounded border-gray-600 bg-gray-800 text-emerald-500 focus:ring-emerald-500 cursor-pointer" />

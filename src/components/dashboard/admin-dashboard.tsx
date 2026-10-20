@@ -230,7 +230,7 @@ export function AdminDashboard({
             accentBorder={
               outOfStock > 0
                 ? "border-red-500/30"
-                : "border-gray-700/50"
+                : "border-line"
             }
             loading={loading}
           />
@@ -242,7 +242,7 @@ export function AdminDashboard({
         <h2 className="text-lg font-semibold text-white mb-4">
           Needs Attention
         </h2>
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-2">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-2">
           <ActionItem
             label="Orders unfulfilled 3+ days"
             count={agingTotal}

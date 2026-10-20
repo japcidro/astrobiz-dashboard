@@ -1156,7 +1156,7 @@ export default function AdsPage() {
     else if (s.includes("ACCOUNT"))
       style = "text-orange-400 bg-orange-900/50";
     else if (s.includes("ARCHIVED"))
-      style = "text-gray-500 bg-gray-800/50";
+      style = "text-gray-500 bg-panel";
     return (
       <span
         className={`text-[10px] font-medium px-1.5 py-0.5 rounded uppercase whitespace-nowrap ${style}`}
@@ -1634,7 +1634,7 @@ export default function AdsPage() {
 
       {/* Summary Bar */}
       {!loading && (
-        <div className="bg-gray-800/70 border border-gray-700/50 rounded-xl p-4 mb-4 flex flex-wrap gap-6 text-sm">
+        <div className="bg-gray-800/70 border border-line rounded-xl p-4 mb-4 flex flex-wrap gap-6 text-sm">
           <span className="text-gray-400">
             Total: <strong className="text-white">{totals.count} ads</strong>
           </span>
@@ -1760,7 +1760,7 @@ export default function AdsPage() {
               <button
                 onClick={handleSaveBudget}
                 disabled={budgetSaving}
-                className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-sm py-2 rounded-lg disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
+                className="flex-1 bg-blue-600 hover:bg-blue-500 text-info-ink text-sm py-2 rounded-lg disabled:opacity-50 cursor-pointer flex items-center justify-center gap-1.5"
               >
                 {budgetSaving && <Loader2 size={14} className="animate-spin" />}
                 Save
@@ -1771,11 +1771,11 @@ export default function AdsPage() {
       )}
 
       {/* Table */}
-      <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl overflow-hidden">
+      <div className="bg-panel border border-line rounded-panel shadow-card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-700/50">
+              <tr className="border-b border-line">
                 {/* Bulk-select column (adset drill only) */}
                 {drillLevel === "adset" && (
                   <th className="px-2 py-3 w-8 text-center">
@@ -2345,7 +2345,7 @@ export default function AdsPage() {
           <button
             onClick={() => setBulkPromoteOpen(true)}
             disabled={bulkSubjects.length === 0}
-            className="flex items-center gap-1.5 bg-orange-600 hover:bg-orange-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium px-3 py-1.5 rounded-lg cursor-pointer"
+            className="flex items-center gap-1.5 bg-orange-600 hover:bg-orange-500 disabled:opacity-40 disabled:cursor-not-allowed text-warn-ink text-xs font-medium px-3 py-1.5 rounded-lg cursor-pointer"
           >
             <TrendingUp size={13} />
             Promote {bulkSubjects.length} →&nbsp;Scaling
@@ -2354,7 +2354,7 @@ export default function AdsPage() {
       )}
 
       {promoteToast && (
-        <div className="fixed bottom-6 right-6 z-50 bg-orange-700/90 border border-orange-500 text-white text-sm px-4 py-2.5 rounded-lg shadow-lg max-w-sm">
+        <div className="fixed bottom-6 right-6 z-50 bg-orange-700/90 border border-orange-500 text-warn-ink text-sm px-4 py-2.5 rounded-lg shadow-lg max-w-sm">
           {promoteToast}
         </div>
       )}

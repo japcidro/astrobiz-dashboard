@@ -126,7 +126,7 @@ export function VADashboard({
             accentBorder={
               agingTotal > 0
                 ? "border-red-500/30"
-                : "border-gray-700/50"
+                : "border-line"
             }
             loading={loading}
           />
@@ -157,7 +157,7 @@ export function VADashboard({
               <Link
                 key={store.store_name}
                 href={`/va/orders?store=${encodeURIComponent(store.store_name)}`}
-                className="bg-gray-800/50 hover:bg-gray-800 border border-gray-700/50 rounded-lg p-4 transition-colors"
+                className="bg-panel hover:bg-gray-800 border border-line rounded-lg p-4 transition-colors"
               >
                 <div className="flex items-center gap-2 mb-2">
                   <Store size={14} className="text-gray-400" />
@@ -202,7 +202,7 @@ export function VADashboard({
         <h2 className="text-lg font-semibold text-white mb-4">
           Needs Attention
         </h2>
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-2">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-2">
           <ActionItem
             label="Unfulfilled orders"
             count={summary?.unfulfilled_count ?? 0}

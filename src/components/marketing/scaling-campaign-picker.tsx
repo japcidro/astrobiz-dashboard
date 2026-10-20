@@ -160,7 +160,7 @@ export function ScalingCampaignPicker({
       </div>
 
       {choice.kind === "new" && (
-        <div className="space-y-3 p-3 bg-gray-800/40 border border-gray-700/50 rounded-lg">
+        <div className="space-y-3 p-3 bg-gray-800/40 border border-line rounded-lg">
           <div>
             <label className="block text-xs text-gray-400 mb-1.5">
               New campaign name

@@ -163,7 +163,7 @@ export function ProductDetailPanel({ product, isAdmin, onClose }: Props) {
               {product.variants.map((v) => (
                 <div
                   key={v.id}
-                  className="bg-gray-800/50 border border-gray-700/50 rounded-lg p-3 space-y-2"
+                  className="bg-panel border border-line rounded-lg p-3 space-y-2"
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium text-white">

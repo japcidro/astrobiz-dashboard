@@ -351,7 +351,7 @@ export function QuickActionsModal({
               <div className="border border-gray-800 rounded-lg overflow-hidden">
                 <div className="max-h-64 overflow-y-auto">
                   <table className="w-full text-xs">
-                    <thead className="bg-gray-800/50 sticky top-0">
+                    <thead className="bg-panel sticky top-0">
                       <tr className="text-gray-400">
                         <th className="text-left px-3 py-2">Ad</th>
                         <th className="text-right px-3 py-2">Days</th>
@@ -472,7 +472,7 @@ export function QuickActionsModal({
               <div className="border border-gray-800 rounded-lg overflow-hidden">
                 <div className="max-h-64 overflow-y-auto">
                   <table className="w-full text-xs">
-                    <thead className="bg-gray-800/50 sticky top-0">
+                    <thead className="bg-panel sticky top-0">
                       <tr className="text-gray-400">
                         <th className="text-left px-3 py-2">Ad Set</th>
                         <th className="text-right px-3 py-2">Days</th>
@@ -544,7 +544,7 @@ export function QuickActionsModal({
           )}
 
           {results && results.length > 0 && (
-            <div className="mt-4 p-3 rounded-lg bg-gray-800/50 text-sm">
+            <div className="mt-4 p-3 rounded-lg bg-panel text-sm">
               <span className="text-green-400">{okCount} succeeded</span>
               {failCount > 0 && (
                 <>
@@ -569,7 +569,7 @@ export function QuickActionsModal({
             <button
               onClick={executeKill}
               disabled={executing || bleeders.length === 0}
-              className="px-4 py-2 text-sm font-medium bg-red-600 hover:bg-red-500 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer"
+              className="px-4 py-2 text-sm font-medium bg-red-600 hover:bg-red-500 text-bad-ink rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer"
             >
               {executing ? (
                 <Loader2 size={14} className="animate-spin" />
@@ -584,7 +584,7 @@ export function QuickActionsModal({
             <button
               onClick={executeBoost}
               disabled={executing || winners.length === 0}
-              className="px-4 py-2 text-sm font-medium bg-green-600 hover:bg-green-500 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer"
+              className="px-4 py-2 text-sm font-medium bg-green-600 hover:bg-green-500 text-good-ink rounded-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer"
             >
               {executing ? (
                 <Loader2 size={14} className="animate-spin" />

@@ -72,7 +72,7 @@ export function RunningTimer({ activeEntry }: RunningTimerProps) {
   const hasSession = isRunning || isPaused;
 
   return (
-    <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-6">
+    <div className="bg-panel border border-line rounded-panel shadow-card p-6">
       <h2 className="text-lg font-semibold text-white mb-6">Timer</h2>
 
       {/* Timer Display */}
@@ -111,7 +111,7 @@ export function RunningTimer({ activeEntry }: RunningTimerProps) {
           <button
             onClick={() => handleAction(startTimer)}
             disabled={isPending}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white font-medium py-3 px-6 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+            className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-good-ink font-medium py-3 px-6 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
           >
             <Play size={20} />
             Start Work
@@ -125,7 +125,7 @@ export function RunningTimer({ activeEntry }: RunningTimerProps) {
                 handleAction(() => pauseTimer(activeEntry!.id))
               }
               disabled={isPending}
-              className="flex items-center gap-2 bg-yellow-600 hover:bg-yellow-500 text-white font-medium py-3 px-6 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+              className="flex items-center gap-2 bg-yellow-600 hover:bg-yellow-500 text-warn-ink font-medium py-3 px-6 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
             >
               <Pause size={20} />
               Take Break
@@ -135,7 +135,7 @@ export function RunningTimer({ activeEntry }: RunningTimerProps) {
                 handleAction(() => stopTimer(activeEntry!.id))
               }
               disabled={isPending}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium py-3 px-6 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+              className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-bad-ink font-medium py-3 px-6 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
             >
               <Square size={20} />
               Clock Out
@@ -150,7 +150,7 @@ export function RunningTimer({ activeEntry }: RunningTimerProps) {
                 handleAction(() => resumeTimer(activeEntry!.id))
               }
               disabled={isPending}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white font-medium py-3 px-6 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-good-ink font-medium py-3 px-6 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
             >
               <Play size={20} />
               Resume Work
@@ -160,7 +160,7 @@ export function RunningTimer({ activeEntry }: RunningTimerProps) {
                 handleAction(() => stopTimer(activeEntry!.id))
               }
               disabled={isPending}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-white font-medium py-3 px-6 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+              className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-bad-ink font-medium py-3 px-6 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
             >
               <Square size={20} />
               Clock Out

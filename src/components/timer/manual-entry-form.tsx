@@ -28,7 +28,7 @@ export function ManualEntryForm() {
   const today = new Date().toISOString().split("T")[0];
 
   return (
-    <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-6">
+    <div className="bg-panel border border-line rounded-panel shadow-card p-6">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-white">Manual Entry</h2>
         <button
@@ -116,7 +116,7 @@ export function ManualEntryForm() {
           <button
             type="submit"
             disabled={isPending}
-            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-medium py-2.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+            className="w-full bg-blue-600 hover:bg-blue-500 text-info-ink font-medium py-2.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
           >
             {isPending ? "Adding..." : "Add Manual Entry"}
           </button>

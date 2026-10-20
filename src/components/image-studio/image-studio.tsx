@@ -378,9 +378,9 @@ export function ImageStudio() {
                         )}
                         {score !== null && <span className="absolute top-1.5 left-1.5 rounded-full bg-black/70 text-white text-[11px] font-bold px-2 py-0.5">{score.toFixed(1)}</span>}
                         {bestId === x.id && <span className="absolute top-1.5 right-1.5 rounded-full bg-green-500 text-green-950 text-[10px] font-extrabold px-2 py-0.5">BEST</span>}
-                        {x.brand_check?.product_ok === false && <span className="absolute top-1.5 right-1.5 rounded-full bg-red-600 text-white text-[10px] font-extrabold px-2 py-0.5">WRONG PRODUCT</span>}
+                        {x.brand_check?.product_ok === false && <span className="absolute top-1.5 right-1.5 rounded-full bg-red-600 text-bad-ink text-[10px] font-extrabold px-2 py-0.5">WRONG PRODUCT</span>}
                         {x.kept && (
-                          <span className="absolute bottom-1.5 left-1.5 bg-green-600 text-white rounded-full p-1">
+                          <span className="absolute bottom-1.5 left-1.5 bg-green-600 text-good-ink rounded-full p-1">
                             <Check size={10} />
                           </span>
                         )}

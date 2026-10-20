@@ -291,7 +291,7 @@ export function IlpDeconstructionModal({
           )}
 
           {noTranscript && !transcribing && (
-            <div className="p-4 bg-gray-800/50 border border-gray-700 rounded-lg text-sm text-gray-300">
+            <div className="p-4 bg-panel border border-gray-700 rounded-lg text-sm text-gray-300">
               <p className="font-medium text-white mb-2">
                 No transcript captured for this ad yet.
               </p>
@@ -303,7 +303,7 @@ export function IlpDeconstructionModal({
                 <button
                   onClick={transcribeNow}
                   disabled={transcribing}
-                  className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-wait text-white text-xs font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer"
+                  className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-wait text-good-ink text-xs font-medium px-3 py-1.5 rounded-lg flex items-center gap-1.5 cursor-pointer"
                   title="Force Gemini to transcribe this ad now, then run the 8-zone analysis. Takes 30–90 seconds."
                 >
                   <Wand2 size={12} />

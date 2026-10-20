@@ -201,7 +201,7 @@ export function MarketingDashboard({
           Today&apos;s Ad Performance
         </h2>
         {error && !loading ? (
-          <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-6 text-center">
+          <div className="bg-panel border border-line rounded-panel shadow-card p-6 text-center">
             <p className="text-gray-400 text-sm">
               Ad data unavailable. Please check your Facebook token configuration.
             </p>

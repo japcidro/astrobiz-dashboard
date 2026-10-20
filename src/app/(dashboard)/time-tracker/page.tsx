@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { RunningTimer } from "@/components/timer/running-timer";
 import { ManualEntryForm } from "@/components/timer/manual-entry-form";
 import { TimeHistory } from "@/components/timer/time-history";
+import { PageHeader } from "@/components/ui/page-header";
 import { ConsentForm } from "@/components/call-coach/consent-form";
 import { CallRecorder } from "@/components/call-coach/call-recorder";
 import { activeConsent, isRecordedRole, voiceSecondsOn } from "@/lib/call-coach/server";
@@ -72,26 +73,15 @@ export default async function TimeTrackerPage() {
 
   return (
     <div>
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-white">Time Tracker</h1>
-        <p className="text-gray-400 mt-1">Track your work hours</p>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-2 gap-4 mb-6">
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
-          <p className="text-sm text-gray-400">Today</p>
-          <p className="text-xl font-bold text-white mt-1">
-            {todayHours}h {todayMinutes}m
-          </p>
-        </div>
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-4">
-          <p className="text-sm text-gray-400">This Week</p>
-          <p className="text-xl font-bold text-white mt-1">
-            {weekHours}h {weekMinutes}m
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        title="Time tracker"
+        subtitle={
+          <>
+            Today <span className="font-num text-fg">{todayHours}h {todayMinutes}m</span>
+            {" · "}This week <span className="font-num text-fg">{weekHours}h {weekMinutes}m</span>
+          </>
+        }
+      />
 
       {/* Timer + Manual Entry */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">

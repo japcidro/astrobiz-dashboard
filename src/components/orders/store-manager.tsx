@@ -194,7 +194,7 @@ export function StoreManager({ stores: initialStores }: Props) {
 
   return (
     <div className="max-w-3xl space-y-6">
-      <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-6">
+      <div className="bg-panel border border-line rounded-panel shadow-card p-6">
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-emerald-600/20 rounded-lg">
@@ -216,7 +216,7 @@ export function StoreManager({ stores: initialStores }: Props) {
                 setForm(emptyForm);
                 setError(null);
               }}
-              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-good-ink text-sm px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
             >
               <Plus size={14} />
               Add Store
@@ -288,7 +288,7 @@ export function StoreManager({ stores: initialStores }: Props) {
                         {!store.api_token && (
                           <button
                             onClick={() => handleReconnect(store.id)}
-                            className="flex items-center gap-1 px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-xs rounded transition-colors cursor-pointer"
+                            className="flex items-center gap-1 px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-good-ink text-xs rounded transition-colors cursor-pointer"
                             title="Connect to Shopify"
                           >
                             <ExternalLink size={12} />
@@ -488,7 +488,7 @@ export function StoreManager({ stores: initialStores }: Props) {
                 type="button"
                 onClick={editingId ? handleUpdate : handleAdd}
                 disabled={isPending || !form.name || !form.store_url || !canSubmit}
-                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium py-2.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
+                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-good-ink font-medium py-2.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2"
               >
                 {isPending ? (
                   <>

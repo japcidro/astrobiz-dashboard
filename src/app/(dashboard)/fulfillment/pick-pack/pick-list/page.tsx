@@ -179,10 +179,10 @@ export default function PickListPage() {
 
       {/* Pick list table */}
       {!loading && sortedItems.length > 0 && (
-        <div className="overflow-x-auto rounded-xl border border-gray-700/50">
+        <div className="overflow-x-auto rounded-xl border border-line">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-gray-800/50">
+              <tr className="bg-panel">
                 <th className="text-gray-400 text-xs uppercase font-medium px-4 py-3 text-left whitespace-nowrap">
                   Bin
                 </th>

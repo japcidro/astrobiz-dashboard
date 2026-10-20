@@ -187,16 +187,16 @@ export function StepAdset({
       <div>
         <label className="block text-sm text-gray-400 mb-2">Budget</label>
         {campaignBudget ? (
-          <p className="max-w-lg rounded-xl border border-gray-700/50 bg-gray-800/50 p-4 text-sm text-gray-400">
+          <p className="max-w-lg rounded-xl border border-line bg-panel p-4 text-sm text-gray-400">
             Set on the campaign (CBO) — Facebook spreads it across the ad
             sets, so they don&apos;t get a budget of their own.
           </p>
         ) : budgetNote ? (
-          <p className="max-w-lg rounded-xl border border-gray-700/50 bg-gray-800/50 p-4 text-sm text-gray-400">
+          <p className="max-w-lg rounded-xl border border-line bg-panel p-4 text-sm text-gray-400">
             {budgetNote}
           </p>
         ) : (
-        <div className="bg-gray-800/50 rounded-xl p-4 border border-gray-700/50 max-w-lg">
+        <div className="bg-panel rounded-xl p-4 border border-line max-w-lg">
           <div className="flex gap-3 mb-3">
             <button
               onClick={() =>

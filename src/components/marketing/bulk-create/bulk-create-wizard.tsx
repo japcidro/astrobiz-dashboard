@@ -114,7 +114,7 @@ function Section({
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="bg-gray-800/30 border border-gray-700/50 rounded-xl">
+    <div className="bg-gray-800/30 border border-line rounded-xl">
       <button
         onClick={() => setOpen(!open)}
         className="w-full flex items-center justify-between px-6 py-4 cursor-pointer"
@@ -656,7 +656,7 @@ export function BulkCreateWizard() {
 
           {/* New Campaign form or Existing Campaign dropdown */}
           {mode === "new" ? (
-            <div className="bg-gray-800/50 rounded-xl p-4 border border-gray-700/50">
+            <div className="bg-panel rounded-xl p-4 border border-line">
               <StepCampaign
                 data={campaign}
                 onUpdate={(updates) =>
@@ -665,7 +665,7 @@ export function BulkCreateWizard() {
               />
             </div>
           ) : (
-            <div className="bg-gray-800/50 rounded-xl p-4 border border-gray-700/50">
+            <div className="bg-panel rounded-xl p-4 border border-line">
               <label className="block text-sm text-gray-400 mb-1.5">
                 Select Campaign
               </label>
@@ -702,7 +702,7 @@ export function BulkCreateWizard() {
 
         {/* ─── Section B: Adset Template ─── */}
         {usingExistingAdset ? (
-          <div className="bg-gray-800/30 border border-gray-700/50 rounded-xl px-6 py-4">
+          <div className="bg-gray-800/30 border border-line rounded-xl px-6 py-4">
             <h2 className="text-white font-semibold">B. Adset Template</h2>
             <p className="text-gray-500 text-xs mt-1">
               Not needed — the ads are going into ad sets that already
@@ -803,7 +803,7 @@ export function BulkCreateWizard() {
           </div>
 
           {/* Default Copy (fill all rows) */}
-          <div className="mb-4 bg-gray-700/20 border border-gray-700/50 rounded-lg p-4">
+          <div className="mb-4 bg-gray-700/20 border border-line rounded-lg p-4">
             <div className="flex items-center justify-between mb-3">
               <p className="text-sm text-gray-400">Default ad copy (optional — fills all empty rows)</p>
               <button
@@ -880,7 +880,7 @@ export function BulkCreateWizard() {
         </Section>
 
         {/* ─── Section D: Submit ─── */}
-        <div className="bg-gray-800/30 border border-gray-700/50 rounded-xl p-6 mt-6">
+        <div className="bg-gray-800/30 border border-line rounded-xl p-6 mt-6">
           <div className="flex items-center gap-4">
             <button
               disabled={!canSubmit}

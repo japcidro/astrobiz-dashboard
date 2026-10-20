@@ -95,7 +95,7 @@ export default async function AttendancePage() {
 
       {/* Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-5">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-5">
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2 bg-blue-600/20 rounded-lg">
               <User size={20} className="text-blue-400" />
@@ -107,7 +107,7 @@ export default async function AttendancePage() {
           </p>
         </div>
 
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-5">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-5">
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2 bg-green-600/20 rounded-lg">
               <CheckCircle size={20} className="text-green-400" />
@@ -117,7 +117,7 @@ export default async function AttendancePage() {
           <p className="text-2xl font-bold text-white">{totalActiveNow}</p>
         </div>
 
-        <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-5">
+        <div className="bg-panel border border-line rounded-panel shadow-card p-5">
           <div className="flex items-center gap-3 mb-3">
             <div className="p-2 bg-red-600/20 rounded-lg">
               <XCircle size={20} className="text-red-400" />
@@ -131,11 +131,11 @@ export default async function AttendancePage() {
       </div>
 
       {/* Employee Table */}
-      <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl overflow-hidden">
+      <div className="bg-panel border border-line rounded-panel shadow-card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
-              <tr className="border-b border-gray-700/50">
+              <tr className="border-b border-line">
                 <th className="text-left text-sm font-medium text-gray-400 px-6 py-4">
                   Employee
                 </th>

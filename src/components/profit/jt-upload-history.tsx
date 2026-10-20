@@ -68,7 +68,7 @@ export function JtUploadHistory({ refreshKey = 0 }: JtUploadHistoryProps) {
   const visible = showAll ? history : history.slice(0, HISTORY_PREVIEW_ROWS);
 
   return (
-    <div className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-5 mb-6">
+    <div className="bg-panel border border-line rounded-panel shadow-card p-5 mb-6">
       <div className="flex items-center gap-2 mb-3">
         <History size={16} className="text-gray-400" />
         <h3 className="text-base font-semibold text-white">Upload History</h3>
@@ -133,7 +133,7 @@ export function JtUploadHistory({ refreshKey = 0 }: JtUploadHistoryProps) {
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
               <thead>
-                <tr className="text-left text-xs text-gray-500 border-b border-gray-700/50">
+                <tr className="text-left text-xs text-gray-500 border-b border-line">
                   <th className="font-medium px-2 py-2 whitespace-nowrap">
                     Uploaded (PHT)
                   </th>
