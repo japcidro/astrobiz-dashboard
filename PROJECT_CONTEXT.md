@@ -53,6 +53,9 @@ Team members are pre-registered by admin in Settings (email + role). On first Go
 | `call_coach_consents` | Recording consent signed once per employee (exact wording, IP, UA) | `call-coach-migration.sql` |
 | `call_coach_segments` | Call Coach: one voiced minute of shift audio in the private `call-coach` bucket | `call-coach-migration.sql` |
 | `call_coach_mic_events` | Call Coach: recorder started/paused/lost/stopped/silent, so gaps are explainable | `call-coach-migration.sql` |
+| `call_coach_transcripts` | Call Coach: Gemini transcript per segment (turns with speaker + offset, rendered text) | `call-coach-phase2-migration.sql` |
+| `call_coach_reviews` | Call Coach: Claude's review per employee per day (score, rubric averages, counts, summary, coaching) | `call-coach-phase2-migration.sql` |
+| `call_coach_calls` | Call Coach: each call Claude found in a day (outcome, scores, flags, moments with timestamps) | `call-coach-phase2-migration.sql` |
 
 ## Pages & Routes
 
@@ -68,7 +71,7 @@ Team members are pre-registered by admin in Settings (email + role). On first Go
 | Route | Description |
 |-------|-------------|
 | `/time-tracker` | Running timer + manual entry + history (all roles). VA and admin shifts are recorded from the PC mic (Call Coach): consent gate on first use, voice-activated 60s segments uploaded to `/api/call-coach/segments`, Break pauses, Clock Out stops |
-| `/owner/call-coach` | Call Coach (owner/admin only): per-VA per-day saved speech, timeline with a player per minute; Phase 2 adds Gemini transcripts + Claude scores; audio auto-deleted after 60 days by `/api/cron/call-coach-retention` |
+| `/owner/call-coach` | Call Coach (owner/admin only): per-VA per-day scorecard. `/api/cron/call-coach-transcribe` (every 30 min) sends each stored minute to Gemini 2.5 Flash; `/api/cron/call-coach-review` (11:30 PM PH) has Claude Sonnet 5.5 split the day into calls and score them on a 6-item rubric (editable via `/api/call-coach/rubric`, stored in `app_settings.call_coach_rubric`). "Review now" = `POST /api/call-coach/review`. Moments click-to-play seek the saved minute. Audio auto-deleted after 60 days by `/api/cron/call-coach-retention`; transcripts and scores stay |
 | `/admin/attendance` | Admin view of all employees' time entries |
 
 ### P&L (Admin Only)

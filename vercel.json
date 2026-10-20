@@ -71,6 +71,14 @@
     {
       "path": "/api/cron/call-coach-retention",
       "schedule": "30 3 * * *"
+    },
+    {
+      "path": "/api/cron/call-coach-transcribe",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/call-coach-review",
+      "schedule": "30 15 * * *"
     }
   ]
 }

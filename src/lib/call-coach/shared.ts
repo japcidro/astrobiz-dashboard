@@ -53,6 +53,8 @@ export interface SegmentRow {
   bytes: number;
   mime: string;
   status: "stored" | "transcribed" | "scored" | "failed";
+  transcribe_attempts: number;
+  transcribe_error: string | null;
 }
 
 export interface MicEventRow {
@@ -76,6 +78,7 @@ export interface OverviewEmployee {
   role: string;
   consented_at: string | null;
   days: Record<string, DayTotals>;
+  reviews: Record<string, DayReviewSummary>;
 }
 
 export interface OverviewResponse {
@@ -84,8 +87,10 @@ export interface OverviewResponse {
 }
 
 export interface DayResponse {
-  segments: Array<SegmentRow & { url: string | null }>;
+  segments: Array<SegmentRow & { url: string | null; transcript: TranscriptRow | null }>;
   events: MicEventRow[];
+  review: ReviewRow | null;
+  calls: CallRow[];
 }
 
 /** A moment's calendar date in the Philippines (UTC+8), as YYYY-MM-DD. */
@@ -102,3 +107,122 @@ export const formatMinutes = (seconds: number) => {
 
 export const formatClock = (iso: string) =>
   new Date(iso).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit", timeZone: "Asia/Manila" });
+
+// ─── Phase 2: transcripts and scores ───
+
+export const TRANSCRIBE_MODEL = "gemini-2.5-flash";
+export const REVIEW_MODEL = "claude-sonnet-5-5";
+
+/** app_settings key for an owner-edited rubric; DEFAULT_RUBRIC when unset. */
+export const RUBRIC_SETTING_KEY = "call_coach_rubric";
+
+export const RUBRIC_ITEMS = [
+  { key: "greeting", label: "Greeting & intro" },
+  { key: "confirmation", label: "Order confirmation" },
+  { key: "upsell", label: "Upsell attempt" },
+  { key: "objection", label: "Objection handling" },
+  { key: "tone", label: "Tone & courtesy" },
+  { key: "closing", label: "Closing & delivery reminder" },
+] as const;
+
+export type RubricKey = (typeof RUBRIC_ITEMS)[number]["key"];
+
+export const DEFAULT_RUBRIC = `Score each call 1 to 5 on these six items. Leave an item null when the call never reached that stage (a no-answer has no closing).
+
+1. Greeting & intro (greeting): Names the store, names the customer, says why they are calling, all within the first 10 seconds. 5 = all three, warm. 3 = two of three. 1 = jumps straight into the order with no intro.
+   Good: "Hi ma'am Joy, si Ana po ito from I Love Patches, tumatawag po ako about sa order niyo."
+
+2. Order confirmation (confirmation): Repeats the items, quantity, COD total, full address and a landmark, and catches mismatches. 5 = everything repeated and confirmed. 3 = items and total only. 1 = asks "confirm po?" without reading anything back.
+   Good: "2 boxes po, 1,180 COD, Brgy. San Isidro, malapit sa chapel, tama po?"
+
+3. Upsell attempt (upsell): Offers a bundle or add-on tied to a benefit. 5 = offered, tied to a benefit, handled the answer well. 3 = offered flatly ("gusto niyo pa po?"). 1 = no attempt on a reachable, willing customer. Null when the customer cancelled before an offer made sense.
+
+4. Objection handling (objection): "Pag-iisipan ko pa", "mahal", "cancel na lang", "hindi ako ang umorder", wrong address. 5 = acknowledged, reassured, gave a reason to decide today, kept the order or set a real callback. 3 = acknowledged but gave up at the first no. 1 = argued, or ended the call with nothing settled. Null when the customer raised nothing.
+
+5. Tone & courtesy (tone): Patience, po/opo, not talking over, not rushed. 5 = warm and unhurried throughout. 3 = fine but mechanical. 1 = curt, rushed or irritated.
+
+6. Closing & delivery reminder (closing): States the delivery window, asks them to keep the phone on, reminds them to prepare the COD amount and accept the parcel. 5 = all of it. 3 = delivery window only. 1 = "sige po, bye" with nothing set.
+
+Flags to raise when you see them: rts_risk (customer stayed unsure or unreachable after a hesitation), no_upsell (reachable happy customer, no offer), rushed (noticeably shorter or curt late in the shift), wrong_info (VA stated a price, item or policy that contradicts the order), great_call (worth using as a training clip).`;
+
+export interface TranscriptTurn {
+  /** Seconds into the segment. */
+  t: number;
+  speaker: "va" | "customer" | "other";
+  text: string;
+}
+
+export interface TranscriptRow {
+  id: string;
+  segment_id: string;
+  language: string | null;
+  text: string;
+  turns: TranscriptTurn[];
+  tokens: number | null;
+}
+
+export type CallOutcome = "confirmed" | "cancelled" | "callback" | "no_answer" | "wrong_number" | "not_sales" | "unclear";
+
+export interface CallMoment {
+  at: string;
+  tag: string;
+  note: string;
+  quote: string | null;
+}
+
+export interface CallRow {
+  id: string;
+  position: number;
+  started_at: string;
+  ended_at: string;
+  outcome: CallOutcome;
+  customer_audible: boolean;
+  scores: Partial<Record<RubricKey, number | null>>;
+  overall: number | null;
+  summary: string;
+  upsell_attempted: boolean;
+  upsell_converted: boolean;
+  flags: string[];
+  moments: CallMoment[];
+}
+
+export interface ReviewRow {
+  id: string;
+  employee_id: string;
+  date: string;
+  status: "queued" | "running" | "done" | "failed";
+  model: string | null;
+  segments_count: number;
+  voice_seconds: number;
+  reviewed_through: string | null;
+  calls_count: number;
+  reached_count: number;
+  confirmed_count: number;
+  upsell_attempted: number;
+  upsell_converted: number;
+  score: number | null;
+  scores: Partial<Record<RubricKey, number | null>>;
+  summary: string | null;
+  coaching: string[];
+  non_call_notes: string | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  error: string | null;
+  updated_at: string;
+}
+
+/** What the overview shows in a day cell once a review exists. */
+export interface DayReviewSummary {
+  score: number | null;
+  calls: number;
+  status: ReviewRow["status"];
+  /** Segments still waiting for a transcript. */
+  pending: number;
+}
+
+export const scoreTone = (score: number | null | undefined): "good" | "mid" | "bad" | "none" => {
+  if (score === null || score === undefined) return "none";
+  if (score >= 4) return "good";
+  if (score >= 3) return "mid";
+  return "bad";
+};
