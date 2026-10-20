@@ -1,53 +1,45 @@
 "use client";
 
-import { useState, useEffect, useTransition } from "react";
-import { Play, Pause, Square, Coffee } from "lucide-react";
+import { useState, useSyncExternalStore, useTransition } from "react";
 import { startTimer, pauseTimer, resumeTimer, stopTimer } from "@/lib/time-actions";
 import type { TimeEntry, TimePause } from "@/lib/types";
+import { Panel } from "@/components/ui/panel";
+import { Pill } from "@/components/ui/pill";
+import { Button } from "@/components/ui/button";
+import { Note } from "@/components/ui/note";
 
 interface RunningTimerProps {
   activeEntry: (TimeEntry & { time_pauses: TimePause[] }) | null;
 }
 
+/** A clock that ticks once a second; 0 on the server, so the first paint is 00:00:00. */
+function subscribeToClock(onTick: () => void) {
+  const id = setInterval(onTick, 1000);
+  return () => clearInterval(id);
+}
+const readClock = () => Math.floor(Date.now() / 1000) * 1000;
+const readServerClock = () => 0;
+
+/** Seconds on the clock at `now`, with every break taken out. */
+function elapsedSeconds(
+  entry: NonNullable<RunningTimerProps["activeEntry"]>,
+  now: number
+): number {
+  if (now === 0) return 0;
+  let elapsed = now - new Date(entry.started_at).getTime();
+  for (const pause of entry.time_pauses || []) {
+    const pauseStart = new Date(pause.paused_at).getTime();
+    const pauseEnd = pause.resumed_at ? new Date(pause.resumed_at).getTime() : now;
+    elapsed -= pauseEnd - pauseStart;
+  }
+  return Math.max(0, Math.floor(elapsed / 1000));
+}
+
 export function RunningTimer({ activeEntry }: RunningTimerProps) {
-  const [seconds, setSeconds] = useState(0);
+  const now = useSyncExternalStore(subscribeToClock, readClock, readServerClock);
+  const seconds = activeEntry ? elapsedSeconds(activeEntry, now) : 0;
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-
-  // Calculate initial seconds from active entry
-  useEffect(() => {
-    if (!activeEntry) {
-      setSeconds(0);
-      return;
-    }
-
-    const calculateElapsed = () => {
-      const startedAt = new Date(activeEntry.started_at).getTime();
-      const now = Date.now();
-      let elapsed = now - startedAt;
-
-      // Subtract pause durations
-      for (const pause of activeEntry.time_pauses || []) {
-        const pauseStart = new Date(pause.paused_at).getTime();
-        const pauseEnd = pause.resumed_at
-          ? new Date(pause.resumed_at).getTime()
-          : now;
-        elapsed -= pauseEnd - pauseStart;
-      }
-
-      return Math.max(0, Math.floor(elapsed / 1000));
-    };
-
-    setSeconds(calculateElapsed());
-
-    // Only tick if running
-    if (activeEntry.status === "running") {
-      const interval = setInterval(() => {
-        setSeconds(calculateElapsed());
-      }, 1000);
-      return () => clearInterval(interval);
-    }
-  }, [activeEntry]);
 
   const formatTime = (totalSeconds: number) => {
     const h = Math.floor(totalSeconds / 3600);
@@ -55,6 +47,9 @@ export function RunningTimer({ activeEntry }: RunningTimerProps) {
     const s = totalSeconds % 60;
     return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   };
+
+  const formatClock = (iso: string) =>
+    new Date(iso).toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" });
 
   const handleAction = (action: () => Promise<void>) => {
     setError(null);
@@ -72,102 +67,83 @@ export function RunningTimer({ activeEntry }: RunningTimerProps) {
   const hasSession = isRunning || isPaused;
 
   return (
-    <div className="bg-panel border border-line rounded-panel shadow-card p-6">
-      <h2 className="text-lg font-semibold text-white mb-6">Timer</h2>
-
-      {/* Timer Display */}
-      <div className="text-center mb-8">
-        <div className="text-6xl font-mono font-bold text-white tracking-wider">
-          {formatTime(seconds)}
-        </div>
-        <div className="mt-2">
-          {isRunning && (
-            <span className="inline-flex items-center gap-1.5 text-green-400 text-sm">
-              <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-              Running
-            </span>
-          )}
-          {isPaused && (
-            <span className="inline-flex items-center gap-1.5 text-yellow-400 text-sm">
-              <Coffee size={14} />
-              Paused (on break)
-            </span>
-          )}
-          {!hasSession && (
-            <span className="text-gray-500 text-sm">Ready to start</span>
-          )}
-        </div>
-      </div>
+    <Panel
+      title="Today's session"
+      actions={
+        isRunning ? (
+          <Pill tone="good">Running</Pill>
+        ) : isPaused ? (
+          <Pill tone="warn">On break</Pill>
+        ) : (
+          <Pill>Not started</Pill>
+        )
+      }
+    >
+      {/* The timer is the one big thing on the page. */}
+      <p
+        className={`font-num text-5xl leading-none tracking-tight sm:text-6xl ${
+          isPaused ? "text-muted" : "text-fg"
+        }`}
+        aria-live="off"
+      >
+        {formatTime(seconds)}
+      </p>
+      <p className="mt-2 text-xs text-muted">
+        {hasSession && activeEntry
+          ? `Started ${formatClock(activeEntry.started_at)}`
+          : "Start when your shift begins. Breaks pause the clock."}
+      </p>
 
       {error && (
-        <div className="mb-4 p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-sm text-center">
+        <Note tone="bad" className="mt-4">
           {error}
-        </div>
+        </Note>
       )}
 
-      {/* Controls */}
-      <div className="flex items-center justify-center gap-3">
+      <div className="mt-5 flex flex-wrap items-center gap-2">
         {!hasSession && (
-          <button
-            onClick={() => handleAction(startTimer)}
-            disabled={isPending}
-            className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-good-ink font-medium py-3 px-6 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
-          >
-            <Play size={20} />
-            Start Work
-          </button>
+          <Button onClick={() => handleAction(startTimer)} disabled={isPending} size="lg">
+            {isPending ? "Starting…" : "Start work"}
+          </Button>
         )}
 
         {isRunning && (
           <>
-            <button
-              onClick={() =>
-                handleAction(() => pauseTimer(activeEntry!.id))
-              }
+            <Button
+              variant="secondary"
+              onClick={() => handleAction(() => pauseTimer(activeEntry!.id))}
               disabled={isPending}
-              className="flex items-center gap-2 bg-yellow-600 hover:bg-yellow-500 text-warn-ink font-medium py-3 px-6 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
             >
-              <Pause size={20} />
-              Take Break
-            </button>
-            <button
-              onClick={() =>
-                handleAction(() => stopTimer(activeEntry!.id))
-              }
+              Break
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => handleAction(() => stopTimer(activeEntry!.id))}
               disabled={isPending}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-bad-ink font-medium py-3 px-6 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
             >
-              <Square size={20} />
-              Clock Out
-            </button>
+              Clock out
+            </Button>
           </>
         )}
 
         {isPaused && (
           <>
-            <button
-              onClick={() =>
-                handleAction(() => resumeTimer(activeEntry!.id))
-              }
+            <Button
+              onClick={() => handleAction(() => resumeTimer(activeEntry!.id))}
               disabled={isPending}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-500 text-good-ink font-medium py-3 px-6 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
             >
-              <Play size={20} />
-              Resume Work
-            </button>
-            <button
-              onClick={() =>
-                handleAction(() => stopTimer(activeEntry!.id))
-              }
+              Resume work
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => handleAction(() => stopTimer(activeEntry!.id))}
               disabled={isPending}
-              className="flex items-center gap-2 bg-red-600 hover:bg-red-500 text-bad-ink font-medium py-3 px-6 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
             >
-              <Square size={20} />
-              Clock Out
-            </button>
+              Clock out
+            </Button>
           </>
         )}
       </div>
-    </div>
+    </Panel>
   );
 }

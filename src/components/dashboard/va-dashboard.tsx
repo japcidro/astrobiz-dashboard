@@ -2,17 +2,18 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Tile } from "@/components/ui/tile";
+import { LinkButton } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
-  Package,
-  AlertTriangle,
-  Clock,
-  CheckCircle,
-  Timer,
-  ClipboardList,
-  Store,
-} from "lucide-react";
-import { StatCard } from "./stat-card";
-import { ActionItem } from "./action-item";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { NeedsYou } from "./needs-you";
 
 interface Props {
   employeeName: string;
@@ -36,11 +37,7 @@ interface StoreBreakdown {
   fulfilled: number;
 }
 
-export function VADashboard({
-  employeeName: _employeeName,
-  hoursToday,
-  hasActiveSession,
-}: Props) {
+export function VADashboard({ hasActiveSession }: Props) {
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<OrdersSummary | null>(null);
   const [stores, setStores] = useState<StoreBreakdown[]>([]);
@@ -67,178 +64,123 @@ export function VADashboard({
 
   const agingTotal =
     (summary?.aging_warning_count ?? 0) + (summary?.aging_danger_count ?? 0);
+  const total = summary?.total_orders ?? 0;
+  const fulfilled = summary?.fulfilled_count ?? 0;
+  const unfulfilled = summary?.unfulfilled_count ?? 0;
 
   return (
-    <div>
-      {/* Personal */}
-      <div className="mb-8">
-        <div className="grid grid-cols-2 gap-4 max-w-md">
-          <StatCard
-            label="Hours Today"
-            value={hoursToday}
-            icon={<Clock size={16} />}
-            iconBg="bg-blue-500/20 text-blue-400"
-            accentBorder="border-blue-500/30"
-            loading={false}
-          />
-          <StatCard
-            label="Status"
-            value={hasActiveSession ? "Clocked In" : "Not Clocked In"}
-            icon={<CheckCircle size={16} />}
-            iconBg="bg-green-500/20 text-green-400"
-            accentBorder="border-green-500/30"
-            loading={false}
-          />
-        </div>
-      </div>
-
-      {/* Today's Orders */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold text-white mb-4">
-          Today&apos;s Orders
-        </h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard
-            label="Total Orders"
-            value={String(summary?.total_orders ?? 0)}
-            icon={<Package size={16} />}
-            iconBg="bg-blue-500/20 text-blue-400"
-            accentBorder="border-blue-500/30"
-            loading={loading}
-          />
-          <StatCard
+    <div className="space-y-8">
+      <section>
+        <h2 className="mb-3 text-base text-fg">Today&apos;s orders</h2>
+        <div className="grid grid-cols-2 gap-sys md:grid-cols-4">
+          <Tile label="Orders today" value={String(total)} loading={loading} />
+          <Tile
             label="Unfulfilled"
-            value={String(summary?.unfulfilled_count ?? 0)}
-            icon={<AlertTriangle size={16} />}
-            iconBg="bg-yellow-500/20 text-yellow-400"
-            accentBorder="border-yellow-500/30"
+            value={String(unfulfilled)}
+            delta={
+              total > 0 ? `${Math.round((unfulfilled / total) * 100)}% of today` : undefined
+            }
             loading={loading}
           />
-          <StatCard
-            label="Aging (3+ days)"
+          <Tile
+            label="Aging 3+ days"
             value={String(agingTotal)}
-            icon={<Clock size={16} />}
-            iconBg={
-              agingTotal > 0
-                ? "bg-red-500/20 text-red-400"
-                : "bg-gray-500/20 text-gray-400"
-            }
-            accentBorder={
-              agingTotal > 0
-                ? "border-red-500/30"
-                : "border-line"
-            }
+            delta={agingTotal > 0 ? "call these first" : undefined}
+            tone="bad"
+            hot={agingTotal > 0}
             loading={loading}
           />
-          <StatCard
+          <Tile
             label="Fulfilled"
-            value={String(summary?.fulfilled_count ?? 0)}
-            icon={<CheckCircle size={16} />}
-            iconBg="bg-green-500/20 text-green-400"
-            accentBorder="border-green-500/30"
+            value={String(fulfilled)}
+            delta={
+              total > 0 ? `${Math.round((fulfilled / total) * 100)}% of today` : undefined
+            }
+            tone="good"
             loading={loading}
           />
         </div>
-      </div>
+      </section>
 
-      {/* Store Breakdown */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold text-white mb-4">By Store</h2>
+      <section>
+        <h2 className="mb-3 text-base text-fg">By store</h2>
         {storesLoading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="h-20 bg-gray-800/30 rounded-lg animate-pulse" />
-            <div className="h-20 bg-gray-800/30 rounded-lg animate-pulse" />
+          <div className="space-y-2">
+            <div className="h-9 animate-pulse rounded-control bg-raised" />
+            <div className="h-9 animate-pulse rounded-control bg-raised" />
           </div>
         ) : stores.length === 0 ? (
-          <p className="text-sm text-gray-500">No orders today.</p>
+          <EmptyState title="No orders today">
+            Orders show up here, store by store, as they come in.
+          </EmptyState>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {stores.map((store) => (
-              <Link
-                key={store.store_name}
-                href={`/va/orders?store=${encodeURIComponent(store.store_name)}`}
-                className="bg-panel hover:bg-gray-800 border border-line rounded-lg p-4 transition-colors"
-              >
-                <div className="flex items-center gap-2 mb-2">
-                  <Store size={14} className="text-gray-400" />
-                  <span className="text-sm font-medium text-white truncate">
-                    {store.store_name}
-                  </span>
-                </div>
-                <div className="grid grid-cols-3 gap-2 text-center">
-                  <div>
-                    <p className="text-xs text-gray-500">Total</p>
-                    <p className="text-lg font-semibold text-white">{store.total}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Unfulfilled</p>
-                    <p
-                      className={`text-lg font-semibold ${
-                        store.unfulfilled > 0 ? "text-yellow-400" : "text-gray-600"
-                      }`}
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableHeader>Store</TableHeader>
+                <TableHeader num>Total</TableHeader>
+                <TableHeader num>Unfulfilled</TableHeader>
+                <TableHeader num>Aging</TableHeader>
+                <TableHeader num>Fulfilled</TableHeader>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {stores.map((store) => (
+                <TableRow key={store.store_name}>
+                  <TableCell>
+                    <Link
+                      href={`/va/orders?store=${encodeURIComponent(store.store_name)}`}
+                      className="text-fg hover:text-accent"
                     >
-                      {store.unfulfilled}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Aging</p>
-                    <p
-                      className={`text-lg font-semibold ${
-                        store.aging > 0 ? "text-red-400" : "text-gray-600"
-                      }`}
-                    >
-                      {store.aging}
-                    </p>
-                  </div>
-                </div>
-              </Link>
-            ))}
-          </div>
+                      {store.store_name}
+                    </Link>
+                  </TableCell>
+                  <TableCell num>{store.total}</TableCell>
+                  <TableCell num className={store.unfulfilled > 0 ? "text-warn" : "text-dim"}>
+                    {store.unfulfilled}
+                  </TableCell>
+                  <TableCell num className={store.aging > 0 ? "text-bad" : "text-dim"}>
+                    {store.aging}
+                  </TableCell>
+                  <TableCell num className="text-muted">
+                    {store.fulfilled}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         )}
-      </div>
+      </section>
 
-      {/* Needs Attention */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold text-white mb-4">
-          Needs Attention
-        </h2>
-        <div className="bg-panel border border-line rounded-panel shadow-card p-2">
-          <ActionItem
-            label="Unfulfilled orders"
-            count={summary?.unfulfilled_count ?? 0}
-            href="/va/orders"
-            severity="warning"
-            icon={<AlertTriangle size={16} />}
-          />
-          <ActionItem
-            label="Orders aging 3+ days"
-            count={agingTotal}
-            href="/va/orders"
-            severity="danger"
-            icon={<Clock size={16} />}
-          />
-        </div>
-      </div>
+      <NeedsYou
+        loading={loading}
+        items={[
+          {
+            label: "Orders aging 3+ days",
+            count: agingTotal,
+            href: "/va/orders",
+            severity: "danger",
+          },
+          {
+            label: "Unfulfilled orders",
+            count: unfulfilled,
+            href: "/va/orders",
+            severity: "warning",
+          },
+          {
+            label: "You are not clocked in",
+            count: hasActiveSession ? 0 : 1,
+            href: "/time-tracker",
+            severity: "info",
+          },
+        ]}
+      />
 
-      {/* Quick Links */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold text-white mb-4">Quick Links</h2>
-        <div className="grid grid-cols-2 gap-4">
-          <Link
-            href="/time-tracker"
-            className="flex items-center gap-3 p-4 bg-gray-700/30 rounded-lg hover:bg-gray-700/50 transition-colors"
-          >
-            <Timer size={20} className="text-blue-400" />
-            <span className="text-sm text-gray-300">Time Tracker</span>
-          </Link>
-          <Link
-            href="/va/orders"
-            className="flex items-center gap-3 p-4 bg-gray-700/30 rounded-lg hover:bg-gray-700/50 transition-colors"
-          >
-            <ClipboardList size={20} className="text-yellow-400" />
-            <span className="text-sm text-gray-300">Orders &amp; Parcels</span>
-          </Link>
-        </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <LinkButton href="/va/orders">Open orders &amp; parcels</LinkButton>
+        <LinkButton href="/time-tracker" variant="ghost">
+          Time tracker
+        </LinkButton>
       </div>
     </div>
   );

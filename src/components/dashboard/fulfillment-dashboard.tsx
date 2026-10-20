@@ -1,23 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
+import { Tile } from "@/components/ui/tile";
+import { LinkButton } from "@/components/ui/button";
 import {
-  Package,
-  AlertTriangle,
-  XCircle,
-  Archive,
-  Clock,
-  CheckCircle,
-  Timer,
-  Boxes,
-  ClipboardList,
-  TrendingDown,
-  ScanLine,
-  ArrowRight,
-} from "lucide-react";
-import { StatCard } from "./stat-card";
-import { ActionItem } from "./action-item";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { NeedsYou } from "./needs-you";
 
 interface Props {
   employeeName: string;
@@ -51,11 +45,7 @@ interface TodayData {
   }>;
 }
 
-export function FulfillmentDashboard({
-  employeeName: _employeeName,
-  hoursToday,
-  hasActiveSession,
-}: Props) {
+export function FulfillmentDashboard({ hasActiveSession }: Props) {
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState<InventorySummary | null>(null);
   const [fulfillmentLoading, setFulfillmentLoading] = useState(true);
@@ -88,240 +78,136 @@ export function FulfillmentDashboard({
       .catch(() => {});
   }, []);
 
+  const aging = unfulfilledOrders.filter((o) => o.age_days >= 3).length;
+  const outOfStock = summary?.out_of_stock_count ?? 0;
+  const lowStock = summary?.low_stock_count ?? 0;
+  const lowRunway = today?.low_runway_skus ?? [];
+
   return (
-    <div>
-      {/* Personal */}
-      <div className="mb-8">
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 max-w-2xl">
-          <StatCard
-            label="Hours Today"
-            value={hoursToday}
-            icon={<Clock size={16} />}
-            iconBg="bg-blue-500/20 text-blue-400"
-            accentBorder="border-blue-500/30"
-            loading={false}
-          />
-          <StatCard
-            label="Status"
-            value={hasActiveSession ? "Clocked In" : "Not Clocked In"}
-            icon={<CheckCircle size={16} />}
-            iconBg="bg-green-500/20 text-green-400"
-            accentBorder="border-green-500/30"
-            loading={false}
-          />
-          <StatCard
-            label="My Verified Today"
-            value={String(today?.my_verified_today ?? 0)}
-            subtitle={
-              today?.team_verified_today
-                ? `Team: ${today.team_verified_today}`
-                : undefined
-            }
-            icon={<ScanLine size={16} />}
-            iconBg="bg-purple-500/20 text-purple-400"
-            accentBorder="border-purple-500/30"
+    <div className="space-y-8">
+      <section>
+        <h2 className="mb-3 text-base text-fg">Today</h2>
+        <div className="grid grid-cols-2 gap-sys md:grid-cols-3 lg:grid-cols-6">
+          <Tile
+            label="Pack queue"
+            value={String(today?.pack_queue ?? 0)}
+            delta="ready to verify"
             loading={!today}
           />
+          <Tile
+            label="Verified by me"
+            value={String(today?.my_verified_today ?? 0)}
+            delta={today ? `team ${today.team_verified_today}` : undefined}
+            loading={!today}
+          />
+          <Tile
+            label="Unfulfilled"
+            value={String(unfulfilledOrders.length)}
+            loading={fulfillmentLoading}
+          />
+          <Tile
+            label="Aging 3+ days"
+            value={String(aging)}
+            delta={aging > 0 ? "pack these first" : undefined}
+            tone="bad"
+            hot={aging > 0}
+            loading={fulfillmentLoading}
+          />
+          <Tile
+            label="Out of stock"
+            value={String(outOfStock)}
+            delta={summary ? `of ${summary.total_products} products` : undefined}
+            tone="bad"
+            hot={outOfStock > 0}
+            loading={loading}
+          />
+          <Tile
+            label="Low stock"
+            value={String(lowStock)}
+            delta={summary ? `${summary.total_units} units in all` : undefined}
+            tone={lowStock > 0 ? "warn" : "neutral"}
+            loading={loading}
+          />
         </div>
-      </div>
+      </section>
 
-      {/* Pack Queue CTA */}
-      <div className="mb-8">
-        <Link
-          href="/fulfillment/pick-pack/verify"
-          className="block bg-gradient-to-r from-orange-500/20 to-orange-600/10 border border-orange-500/30 rounded-xl p-5 hover:from-orange-500/30 hover:to-orange-600/20 transition-colors"
-        >
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-lg bg-orange-500/20 text-orange-400 flex items-center justify-center flex-shrink-0">
-              <Package size={24} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-orange-300 uppercase tracking-wider mb-1">
-                Pack Queue
-              </p>
-              <p className="text-2xl font-bold text-white">
-                {today?.pack_queue ?? 0}{" "}
-                <span className="text-sm font-normal text-gray-400">
-                  orders ready to verify
-                </span>
-              </p>
-            </div>
-            <div className="flex items-center gap-2 text-orange-300 font-medium text-sm">
-              Start verifying
-              <ArrowRight size={16} />
-            </div>
-          </div>
-        </Link>
-      </div>
-
-      {/* Low Runway SKUs */}
-      {today?.low_runway_skus && today.low_runway_skus.length > 0 && (
-        <div className="mb-8">
-          <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-            <TrendingDown size={18} className="text-red-400" />
-            SKUs Running Out Soon
-          </h2>
-          <div className="bg-gray-900/40 border border-gray-800 rounded-xl divide-y divide-gray-800">
-            {today.low_runway_skus.map((sku) => (
-              <div
-                key={`${sku.store_name}-${sku.sku}`}
-                className="flex items-center gap-3 px-4 py-3"
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-white truncate">
-                    {sku.product_title}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {sku.store_name} • {sku.velocity_per_day.toFixed(1)}/day velocity
-                  </p>
-                </div>
-                <div className="text-right">
-                  <p
-                    className={`text-sm font-semibold ${
-                      sku.runway_days < 3 ? "text-red-400" : "text-yellow-400"
-                    }`}
-                  >
-                    {sku.runway_days}d left
-                  </p>
-                  <p className="text-xs text-gray-600">{sku.stock} in stock</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+      {lowRunway.length > 0 && (
+        <section>
+          <h2 className="mb-3 text-base text-fg">Running out soon</h2>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableHeader>Product</TableHeader>
+                <TableHeader>Store</TableHeader>
+                <TableHeader num>Per day</TableHeader>
+                <TableHeader num>In stock</TableHeader>
+                <TableHeader num>Days left</TableHeader>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {lowRunway.map((sku) => (
+                <TableRow key={`${sku.store_name}-${sku.sku}`}>
+                  <TableCell className="max-w-xs">
+                    <p className="truncate">{sku.product_title}</p>
+                    {sku.sku && <p className="truncate font-mono text-xs text-muted">{sku.sku}</p>}
+                  </TableCell>
+                  <TableCell className="text-muted">{sku.store_name}</TableCell>
+                  <TableCell num>{sku.velocity_per_day.toFixed(1)}</TableCell>
+                  <TableCell num>{sku.stock}</TableCell>
+                  <TableCell num className={sku.runway_days < 3 ? "text-bad" : "text-warn"}>
+                    {sku.runway_days}d
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </section>
       )}
 
-      {/* Inventory Health */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold text-white mb-4">Inventory Health</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <StatCard
-            label="Out of Stock"
-            value={String(summary?.out_of_stock_count ?? 0)}
-            icon={<XCircle size={16} />}
-            iconBg="bg-red-500/20 text-red-400"
-            accentBorder="border-red-500/30"
-            loading={loading}
-          />
-          <StatCard
-            label="Low Stock"
-            value={String(summary?.low_stock_count ?? 0)}
-            icon={<AlertTriangle size={16} />}
-            iconBg="bg-yellow-500/20 text-yellow-400"
-            accentBorder="border-yellow-500/30"
-            loading={loading}
-          />
-          <StatCard
-            label="Total Units"
-            value={String(summary?.total_units ?? 0)}
-            icon={<Archive size={16} />}
-            iconBg="bg-green-500/20 text-green-400"
-            accentBorder="border-green-500/30"
-            loading={loading}
-          />
-          <StatCard
-            label="Total Products"
-            value={String(summary?.total_products ?? 0)}
-            icon={<Package size={16} />}
-            iconBg="bg-blue-500/20 text-blue-400"
-            accentBorder="border-blue-500/30"
-            loading={loading}
-          />
-        </div>
-      </div>
+      <NeedsYou
+        loading={loading || fulfillmentLoading}
+        items={[
+          {
+            label: "Orders aging 3+ days",
+            count: aging,
+            href: "/fulfillment/pick-pack",
+            severity: "danger",
+          },
+          {
+            label: "Out of stock products",
+            count: outOfStock,
+            href: "/fulfillment/inventory",
+            severity: "danger",
+          },
+          {
+            label: "Unfulfilled orders waiting",
+            count: unfulfilledOrders.length,
+            href: "/fulfillment/pick-pack",
+            severity: "warning",
+          },
+          {
+            label: "Low stock products (under 10)",
+            count: lowStock,
+            href: "/fulfillment/inventory",
+            severity: "warning",
+          },
+          {
+            label: "You are not clocked in",
+            count: hasActiveSession ? 0 : 1,
+            href: "/time-tracker",
+            severity: "info",
+          },
+        ]}
+      />
 
-      {/* Fulfillment Queue */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold text-white mb-4">Fulfillment Queue</h2>
-        <div className="grid grid-cols-2 gap-4">
-          <StatCard
-            label="Unfulfilled Orders"
-            value={String(unfulfilledOrders.length)}
-            icon={<Package size={16} />}
-            iconBg="bg-orange-500/20 text-orange-400"
-            accentBorder="border-orange-500/30"
-            loading={fulfillmentLoading}
-          />
-          <StatCard
-            label="Aging (3+ days)"
-            value={String(unfulfilledOrders.filter((o) => o.age_days >= 3).length)}
-            icon={<AlertTriangle size={16} />}
-            iconBg={
-              unfulfilledOrders.filter((o) => o.age_days >= 3).length > 0
-                ? "bg-red-500/20 text-red-400"
-                : "bg-gray-500/20 text-gray-400"
-            }
-            accentBorder={
-              unfulfilledOrders.filter((o) => o.age_days >= 3).length > 0
-                ? "border-red-500/30"
-                : "border-line"
-            }
-            loading={fulfillmentLoading}
-          />
-        </div>
-      </div>
-
-      {/* Needs Attention */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold text-white mb-4">Needs Attention</h2>
-        <div className="bg-panel border border-line rounded-panel shadow-card p-2">
-          <ActionItem
-            label="Out of stock products"
-            count={summary?.out_of_stock_count ?? 0}
-            href="/fulfillment/inventory"
-            severity="danger"
-            icon={<XCircle size={16} />}
-          />
-          <ActionItem
-            label="Low stock products (<10)"
-            count={summary?.low_stock_count ?? 0}
-            href="/fulfillment/inventory"
-            severity="warning"
-            icon={<AlertTriangle size={16} />}
-          />
-          <ActionItem
-            label="Unfulfilled orders waiting"
-            count={unfulfilledOrders.length}
-            href="/fulfillment/pick-pack"
-            severity="warning"
-            icon={<Package size={16} />}
-          />
-          <ActionItem
-            label="Orders aging 3+ days"
-            count={unfulfilledOrders.filter((o) => o.age_days >= 3).length}
-            href="/fulfillment/pick-pack"
-            severity="danger"
-            icon={<Clock size={16} />}
-          />
-        </div>
-      </div>
-
-      {/* Quick Links */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold text-white mb-4">Quick Links</h2>
-        <div className="grid grid-cols-2 gap-4">
-          <Link
-            href="/time-tracker"
-            className="flex items-center gap-3 p-4 bg-gray-700/30 rounded-lg hover:bg-gray-700/50 transition-colors"
-          >
-            <Timer size={20} className="text-blue-400" />
-            <span className="text-sm text-gray-300">Time Tracker</span>
-          </Link>
-          <Link
-            href="/fulfillment/inventory"
-            className="flex items-center gap-3 p-4 bg-gray-700/30 rounded-lg hover:bg-gray-700/50 transition-colors"
-          >
-            <Boxes size={20} className="text-green-400" />
-            <span className="text-sm text-gray-300">Inventory</span>
-          </Link>
-          <Link
-            href="/fulfillment/pick-pack"
-            className="flex items-center gap-3 p-4 bg-gray-700/30 rounded-lg hover:bg-gray-700/50 transition-colors"
-          >
-            <ClipboardList size={20} className="text-orange-400" />
-            <span className="text-sm text-gray-300">Pick &amp; Pack</span>
-          </Link>
-        </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <LinkButton href="/fulfillment/pick-pack/verify">Start verifying</LinkButton>
+        <LinkButton href="/fulfillment/pick-pack" variant="secondary">
+          Pick &amp; pack
+        </LinkButton>
+        <LinkButton href="/fulfillment/inventory" variant="ghost">
+          Inventory
+        </LinkButton>
       </div>
     </div>
   );

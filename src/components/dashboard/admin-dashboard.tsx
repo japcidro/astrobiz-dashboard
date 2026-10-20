@@ -2,17 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { cachedFetch, formatLastRefreshed } from "@/lib/client-cache";
-import {
-  Package,
-  TrendingUp,
-  AlertTriangle,
-  Users,
-  Clock,
-  XCircle,
-  Target,
-} from "lucide-react";
-import { StatCard } from "./stat-card";
-import { ActionItem } from "./action-item";
+import { Tile } from "@/components/ui/tile";
+import { NeedsYou } from "./needs-you";
 import { AlertsFeed } from "@/components/alerts/alerts-feed";
 
 interface Props {
@@ -52,11 +43,7 @@ function formatHours(seconds: number): string {
   return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
 }
 
-export function AdminDashboard({
-  employeeName,
-  teamTotalHours,
-  teamNotClockedIn,
-}: Props) {
+export function AdminDashboard({ teamTotalHours, teamNotClockedIn }: Props) {
   const [loading, setLoading] = useState(true);
   const [todayOrders, setTodayOrders] = useState<OrdersSummary | null>(null);
   const [monthOrders, setMonthOrders] = useState<OrdersSummary | null>(null);
@@ -108,171 +95,140 @@ export function AdminDashboard({
     (todayOrders?.aging_warning_count ?? 0) +
     (todayOrders?.aging_danger_count ?? 0);
 
-  const unfulfilledSubtitle =
-    agingTotal > 0 ? `(${agingTotal} aging)` : undefined;
-
   const outOfStock = inventory?.out_of_stock_count ?? 0;
+  const lowStock = inventory?.low_stock_count ?? 0;
+  const monthRoas = monthAds?.roas ?? 0;
 
   return (
-    <div>
-      {/* Last refreshed indicator */}
-      {lastRefreshed && (
-        <p className="text-xs text-gray-600 mb-4">
-          Last refreshed: {lastRefreshed}
-        </p>
-      )}
+    <div className="space-y-8">
+      {/* Decision cockpit: the action feed at the top */}
+      <AlertsFeed limit={5} />
 
-      {/* Decision Cockpit — action feed at the top */}
-      <div className="mb-8">
-        <AlertsFeed limit={5} />
-      </div>
-
-      {/* Today's Highlights */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold text-white mb-4">
-          Today&apos;s Highlights
-        </h2>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-          <StatCard
-            label="Today's Revenue"
+      <section>
+        <div className="mb-3 flex items-baseline justify-between gap-3">
+          <h2 className="text-base text-fg">Today</h2>
+          {lastRefreshed && (
+            <p className="text-xs text-dim">Refreshed {lastRefreshed}</p>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-sys md:grid-cols-3 lg:grid-cols-5">
+          <Tile
+            label="Revenue today"
             value={formatCurrency(todayOrders?.total_revenue ?? 0)}
-            icon={<span className="text-sm font-bold">₱</span>}
-            iconBg="bg-green-500/20 text-green-400"
-            accentBorder="border-green-500/30"
             loading={loading}
           />
-          <StatCard
-            label="Today's Orders"
+          <Tile
+            label="Orders today"
             value={String(todayOrders?.total_orders ?? 0)}
-            icon={<Package size={16} />}
-            iconBg="bg-blue-500/20 text-blue-400"
-            accentBorder="border-blue-500/30"
+            delta={
+              todayOrders ? `${todayOrders.fulfilled_count} fulfilled` : undefined
+            }
             loading={loading}
           />
-          <StatCard
-            label="Today's Ad Spend"
+          <Tile
+            label="Ad spend today"
             value={formatCurrency(todayAds?.spend ?? 0)}
-            icon={<TrendingUp size={16} />}
-            iconBg="bg-orange-500/20 text-orange-400"
-            accentBorder="border-orange-500/30"
+            delta={todayAds ? `ROAS ${todayAds.roas.toFixed(2)}x` : undefined}
+            tone={todayAds && todayAds.spend > 0 && todayAds.roas < 1 ? "bad" : "neutral"}
             loading={loading}
           />
-          <StatCard
+          <Tile
             label="Unfulfilled"
             value={String(todayOrders?.unfulfilled_count ?? 0)}
-            subtitle={unfulfilledSubtitle}
-            subtitleColor={agingTotal > 0 ? "text-red-400" : undefined}
-            icon={<AlertTriangle size={16} />}
-            iconBg="bg-yellow-500/20 text-yellow-400"
-            accentBorder={
-              agingTotal > 0
-                ? "border-red-500/30"
-                : "border-yellow-500/30"
+            delta={agingTotal > 0 ? `${agingTotal} aging 3+ days` : undefined}
+            tone="bad"
+            hot={agingTotal > 0}
+            loading={loading}
+          />
+          <Tile
+            label="Team hours"
+            value={formatHours(teamTotalHours)}
+            delta={
+              teamNotClockedIn > 0
+                ? `${teamNotClockedIn} not clocked in`
+                : "everyone clocked in"
+            }
+            tone={teamNotClockedIn > 0 ? "warn" : "good"}
+          />
+        </div>
+      </section>
+
+      <section>
+        <h2 className="mb-3 text-base text-fg">This month</h2>
+        <div className="grid grid-cols-2 gap-sys md:grid-cols-3 lg:grid-cols-5">
+          <Tile
+            label="Revenue"
+            value={formatCurrency(monthOrders?.total_revenue ?? 0)}
+            loading={loading}
+          />
+          <Tile
+            label="Orders"
+            value={String(monthOrders?.total_orders ?? 0)}
+            delta={
+              monthOrders ? `${monthOrders.fulfilled_count} fulfilled` : undefined
             }
             loading={loading}
           />
-          <StatCard
-            label="Team Hours"
-            value={formatHours(teamTotalHours)}
-            icon={<Users size={16} />}
-            iconBg="bg-purple-500/20 text-purple-400"
-            accentBorder="border-purple-500/30"
-            loading={loading}
-          />
-        </div>
-      </div>
-
-      {/* This Month */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold text-white mb-4">This Month</h2>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
-          <StatCard
-            label="Month Revenue"
-            value={formatCurrency(monthOrders?.total_revenue ?? 0)}
-            icon={<span className="text-sm font-bold">₱</span>}
-            iconBg="bg-green-500/20 text-green-400"
-            accentBorder="border-green-500/30"
-            loading={loading}
-          />
-          <StatCard
-            label="Month Orders"
-            value={String(monthOrders?.total_orders ?? 0)}
-            icon={<Package size={16} />}
-            iconBg="bg-blue-500/20 text-blue-400"
-            accentBorder="border-blue-500/30"
-            loading={loading}
-          />
-          <StatCard
-            label="Month Ad Spend"
+          <Tile
+            label="Ad spend"
             value={formatCurrency(monthAds?.spend ?? 0)}
-            icon={<TrendingUp size={16} />}
-            iconBg="bg-orange-500/20 text-orange-400"
-            accentBorder="border-orange-500/30"
+            delta={monthAds ? `${monthAds.purchases} purchases` : undefined}
             loading={loading}
           />
-          <StatCard
+          <Tile
             label="ROAS"
-            value={`${(monthAds?.roas ?? 0).toFixed(2)}x`}
-            icon={<Target size={16} />}
-            iconBg="bg-cyan-500/20 text-cyan-400"
-            accentBorder="border-cyan-500/30"
+            value={`${monthRoas.toFixed(2)}x`}
+            delta={monthAds ? `CPA ${formatCurrency(monthAds.cpa)}` : undefined}
+            tone={monthAds && monthAds.spend > 0 && monthRoas < 1 ? "bad" : "neutral"}
             loading={loading}
           />
-          <StatCard
+          <Tile
             label="Inventory"
             value={String(inventory?.total_units ?? 0)}
-            subtitle={
-              outOfStock > 0 ? `${outOfStock} out of stock` : undefined
-            }
-            subtitleColor={outOfStock > 0 ? "text-red-400" : undefined}
-            icon={<Package size={16} />}
-            iconBg="bg-gray-500/20 text-gray-400"
-            accentBorder={
+            unit="units"
+            delta={
               outOfStock > 0
-                ? "border-red-500/30"
-                : "border-line"
+                ? `${outOfStock} out of stock`
+                : inventory
+                  ? `${inventory.total_products} products`
+                  : undefined
             }
+            tone={outOfStock > 0 ? "bad" : "neutral"}
+            hot={outOfStock > 0}
             loading={loading}
           />
         </div>
-      </div>
+      </section>
 
-      {/* Needs Attention */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold text-white mb-4">
-          Needs Attention
-        </h2>
-        <div className="bg-panel border border-line rounded-panel shadow-card p-2">
-          <ActionItem
-            label="Orders unfulfilled 3+ days"
-            count={agingTotal}
-            href="/va/orders"
-            severity="danger"
-            icon={<AlertTriangle size={16} />}
-          />
-          <ActionItem
-            label="Out of stock products"
-            count={inventory?.out_of_stock_count ?? 0}
-            href="/fulfillment/inventory"
-            severity="danger"
-            icon={<XCircle size={16} />}
-          />
-          <ActionItem
-            label="Low stock products"
-            count={inventory?.low_stock_count ?? 0}
-            href="/fulfillment/inventory"
-            severity="warning"
-            icon={<AlertTriangle size={16} />}
-          />
-          <ActionItem
-            label="Team not clocked in"
-            count={teamNotClockedIn}
-            href="/admin/attendance"
-            severity="info"
-            icon={<Users size={16} />}
-          />
-        </div>
-      </div>
+      <NeedsYou
+        loading={loading}
+        items={[
+          {
+            label: "Orders unfulfilled 3+ days",
+            count: agingTotal,
+            href: "/va/orders",
+            severity: "danger",
+          },
+          {
+            label: "Out of stock products",
+            count: outOfStock,
+            href: "/fulfillment/inventory",
+            severity: "danger",
+          },
+          {
+            label: "Low stock products",
+            count: lowStock,
+            href: "/fulfillment/inventory",
+            severity: "warning",
+          },
+          {
+            label: "Team not clocked in",
+            count: teamNotClockedIn,
+            href: "/admin/attendance",
+            severity: "info",
+          },
+        ]}
+      />
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { VADashboard } from "./va-dashboard";
 import { MarketingDashboard } from "./marketing-dashboard";
 import { FulfillmentDashboard } from "./fulfillment-dashboard";
 import { PageHeader } from "@/components/ui/page-header";
+import { Pill } from "@/components/ui/pill";
 
 interface Props {
   role: UserRole;
@@ -23,6 +24,14 @@ function getGreeting(): string {
   return "Good evening";
 }
 
+function todayLabel(): string {
+  return new Date().toLocaleDateString("en-PH", {
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+  });
+}
+
 export function DashboardContent({
   role,
   employeeName,
@@ -38,9 +47,30 @@ export function DashboardContent({
       <PageHeader
         title={`${getGreeting()}, ${firstName}`}
         subtitle={
-          role === "admin"
-            ? "The business today, at a glance."
-            : "Your day, at a glance."
+          <>
+            {todayLabel()}
+            {" · "}
+            <span className="font-num text-fg">{hoursToday}</span> on the clock
+            {role === "admin" && (
+              <>
+                {" · "}
+                {teamNotClockedIn > 0 ? (
+                  <>
+                    <span className="font-num text-fg">{teamNotClockedIn}</span> not clocked in
+                  </>
+                ) : (
+                  "everyone clocked in"
+                )}
+              </>
+            )}
+          </>
+        }
+        actions={
+          hasActiveSession ? (
+            <Pill tone="good">Clocked in</Pill>
+          ) : (
+            <Pill>Not clocked in</Pill>
+          )
         }
       />
 

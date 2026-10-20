@@ -1,8 +1,12 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Plus } from "lucide-react";
 import { addManualEntry } from "@/lib/time-actions";
+import { Panel } from "@/components/ui/panel";
+import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Note } from "@/components/ui/note";
 
 export function ManualEntryForm() {
   const [isOpen, setIsOpen] = useState(false);
@@ -28,100 +32,80 @@ export function ManualEntryForm() {
   const today = new Date().toISOString().split("T")[0];
 
   return (
-    <div className="bg-panel border border-line rounded-panel shadow-card p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-white">Manual Entry</h2>
-        <button
-          onClick={() => setIsOpen(!isOpen)}
-          className="flex items-center gap-1.5 text-sm text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
-        >
-          <Plus size={16} />
-          {isOpen ? "Cancel" : "Add Entry"}
-        </button>
-      </div>
-
-      <p className="text-sm text-gray-400 mb-4">
-        Forgot to start the timer? Add your hours manually here.
+    <Panel
+      title="Manual entry"
+      actions={
+        <Button variant="ghost" size="sm" onClick={() => setIsOpen(!isOpen)}>
+          {isOpen ? "Cancel" : "Add entry"}
+        </Button>
+      }
+    >
+      <p className="text-sm text-muted">
+        Forgot to start the timer? Add the hours here and they count toward today.
       </p>
 
       {success && (
-        <div className="mb-4 p-3 bg-green-900/30 border border-green-700/50 rounded-lg text-green-300 text-sm">
-          Entry added successfully!
-        </div>
+        <p className="mt-3 text-sm text-good" role="status">
+          Entry added.
+        </p>
       )}
 
       {isOpen && (
-        <form action={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm text-gray-300 mb-1.5">Date</label>
-            <input
+        <form action={handleSubmit} className="mt-4 space-y-4">
+          <Field label="Date" htmlFor="manual-date">
+            <Input
+              id="manual-date"
               type="date"
               name="date"
               defaultValue={today}
               max={today}
               required
-              className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
-          </div>
+          </Field>
 
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm text-gray-300 mb-1.5">
-                Hours
-              </label>
-              <input
+            <Field label="Hours" htmlFor="manual-hours">
+              <Input
+                id="manual-hours"
                 type="number"
                 name="hours"
                 min="0"
                 max="24"
                 defaultValue="0"
                 required
-                className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="font-num"
               />
-            </div>
-            <div>
-              <label className="block text-sm text-gray-300 mb-1.5">
-                Minutes
-              </label>
-              <input
+            </Field>
+            <Field label="Minutes" htmlFor="manual-minutes">
+              <Input
+                id="manual-minutes"
                 type="number"
                 name="minutes"
                 min="0"
                 max="59"
                 defaultValue="0"
                 required
-                className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="font-num"
               />
-            </div>
+            </Field>
           </div>
 
-          <div>
-            <label className="block text-sm text-gray-300 mb-1.5">
-              Notes (optional)
-            </label>
-            <input
+          <Field label="Notes (optional)" htmlFor="manual-notes">
+            <Input
+              id="manual-notes"
               type="text"
               name="notes"
-              placeholder="e.g., Forgot to start timer"
-              className="w-full bg-gray-700/50 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="e.g. forgot to start the timer"
             />
-          </div>
+          </Field>
 
-          {error && (
-            <div className="p-3 bg-red-900/30 border border-red-700/50 rounded-lg text-red-300 text-sm">
-              {error}
-            </div>
-          )}
+          {error && <Note tone="bad">{error}</Note>}
 
-          <button
-            type="submit"
-            disabled={isPending}
-            className="w-full bg-blue-600 hover:bg-blue-500 text-info-ink font-medium py-2.5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
-          >
-            {isPending ? "Adding..." : "Add Manual Entry"}
-          </button>
+          <Button type="submit" disabled={isPending} className="w-full">
+            {isPending ? "Adding…" : "Add entry"}
+          </Button>
         </form>
       )}
-    </div>
+    </Panel>
   );
 }

@@ -2,23 +2,21 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Tile } from "@/components/ui/tile";
+import { Pill, type PillTone } from "@/components/ui/pill";
+import { Tag } from "@/components/ui/tag";
+import { Note } from "@/components/ui/note";
+import { EmptyState } from "@/components/ui/empty-state";
+import { LinkButton } from "@/components/ui/button";
 import {
-  TrendingUp,
-  Target,
-  DollarSign,
-  ShoppingCart,
-  Clock,
-  CheckCircle,
-  Timer,
-  BarChart3,
-  PlusCircle,
-  ArrowUpRight,
-  ArrowDownRight,
-  Zap,
-  Pause,
-  Play,
-} from "lucide-react";
-import { StatCard } from "./stat-card";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { NeedsYou } from "./needs-you";
 
 interface Props {
   employeeName: string;
@@ -57,29 +55,17 @@ function formatCurrency(num: number): string {
   return `₱${num.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function queueIcon(reason: QueueItem["reason"]) {
+/** Why an ad is in the queue, as a status tone: good to scale, bad to pause. */
+function queueTone(reason: QueueItem["reason"]): PillTone {
   switch (reason) {
     case "scaling_winner":
-      return <ArrowUpRight size={14} />;
+      return "good";
     case "fading_winner":
-      return <ArrowDownRight size={14} />;
+      return "warn";
     case "new_winner":
-      return <Zap size={14} />;
+      return "info";
     case "dead_weight":
-      return <Pause size={14} />;
-  }
-}
-
-function queueColor(reason: QueueItem["reason"]) {
-  switch (reason) {
-    case "scaling_winner":
-      return "border-green-500/30 bg-green-500/5 text-green-400";
-    case "fading_winner":
-      return "border-orange-500/30 bg-orange-500/5 text-orange-400";
-    case "new_winner":
-      return "border-yellow-500/30 bg-yellow-500/5 text-yellow-400";
-    case "dead_weight":
-      return "border-red-500/30 bg-red-500/5 text-red-400";
+      return "bad";
   }
 }
 
@@ -91,11 +77,7 @@ function timeAgo(iso: string): string {
   return `${hours}h`;
 }
 
-export function MarketingDashboard({
-  employeeName: _employeeName,
-  hoursToday,
-  hasActiveSession,
-}: Props) {
+export function MarketingDashboard({ hasActiveSession }: Props) {
   const [loading, setLoading] = useState(true);
   const [totals, setTotals] = useState<AdsTotals | null>(null);
   const [error, setError] = useState(false);
@@ -127,201 +109,188 @@ export function MarketingDashboard({
       .finally(() => setQueueLoading(false));
   }, []);
 
+  const roas = totals?.roas ?? 0;
+  const losing = !!totals && totals.spend > 0 && roas < 1;
+  const count = (reason: QueueItem["reason"]) =>
+    queue.filter((item) => item.reason === reason).length;
+
   return (
-    <div>
-      {/* Personal */}
-      <div className="mb-8">
-        <div className="grid grid-cols-2 gap-4 max-w-md">
-          <StatCard
-            label="Hours Today"
-            value={hoursToday}
-            icon={<Clock size={16} />}
-            iconBg="bg-blue-500/20 text-blue-400"
-            accentBorder="border-blue-500/30"
-            loading={false}
-          />
-          <StatCard
-            label="Status"
-            value={hasActiveSession ? "Clocked In" : "Not Clocked In"}
-            icon={<CheckCircle size={16} />}
-            iconBg="bg-green-500/20 text-green-400"
-            accentBorder="border-green-500/30"
-            loading={false}
-          />
-        </div>
-      </div>
-
-      {/* Action Queue */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold text-white mb-4">Action Queue</h2>
-        {queueLoading ? (
-          <div className="space-y-2">
-            <div className="h-14 bg-gray-800/30 rounded-lg animate-pulse" />
-            <div className="h-14 bg-gray-800/30 rounded-lg animate-pulse" />
-          </div>
-        ) : queue.length === 0 ? (
-          <div className="bg-gray-900/30 border border-gray-800 rounded-xl p-6 text-center">
-            <p className="text-sm text-gray-400">No ads need attention right now.</p>
-            <p className="text-xs text-gray-600 mt-1">
-              The queue surfaces scaling winners, fading ads, and dead weight based on 7-day data.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {queue.map((item) => (
-              <Link
-                key={item.ad_id}
-                href={`/marketing/ads?ad_id=${encodeURIComponent(item.ad_id)}`}
-                className={`flex items-center gap-3 p-3 rounded-lg border transition-colors hover:bg-white/5 ${queueColor(item.reason)}`}
-              >
-                <div className="w-8 h-8 rounded-md bg-white/10 flex items-center justify-center flex-shrink-0">
-                  {queueIcon(item.reason)}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-white truncate">
-                    {item.ad_name}
-                  </p>
-                  <p className="text-xs text-gray-500">{item.reason_label}</p>
-                </div>
-                <div className="text-right flex-shrink-0">
-                  <p className="text-xs font-semibold">{item.roas_7d.toFixed(2)}x</p>
-                  <p className="text-[10px] text-gray-600">
-                    {item.purchases_7d} purchases
-                  </p>
-                </div>
-              </Link>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Today's Ad Performance */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold text-white mb-4">
-          Today&apos;s Ad Performance
-        </h2>
+    <div className="space-y-8">
+      <section>
+        <h2 className="mb-3 text-base text-fg">Today&apos;s ads</h2>
         {error && !loading ? (
-          <div className="bg-panel border border-line rounded-panel shadow-card p-6 text-center">
-            <p className="text-gray-400 text-sm">
-              Ad data unavailable. Please check your Facebook token configuration.
-            </p>
-          </div>
+          <Note tone="bad">
+            Ad data is unavailable. Check the Facebook token configuration.
+          </Note>
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatCard
-              label="Ad Spend"
+          <div className="grid grid-cols-2 gap-sys md:grid-cols-4">
+            <Tile
+              label="Ad spend"
               value={formatCurrency(totals?.spend ?? 0)}
-              icon={<TrendingUp size={16} />}
-              iconBg="bg-orange-500/20 text-orange-400"
-              accentBorder="border-orange-500/30"
               loading={loading}
             />
-            <StatCard
+            <Tile
               label="ROAS"
-              value={`${(totals?.roas ?? 0).toFixed(2)}x`}
-              icon={<Target size={16} />}
-              iconBg={
-                (totals?.roas ?? 0) > 1
-                  ? "bg-green-500/20 text-green-400"
-                  : "bg-red-500/20 text-red-400"
-              }
-              accentBorder={
-                (totals?.roas ?? 0) > 1 ? "border-green-500/30" : "border-red-500/30"
-              }
+              value={`${roas.toFixed(2)}x`}
+              delta={losing ? "below break-even" : undefined}
+              tone="bad"
+              hot={losing}
               loading={loading}
             />
-            <StatCard
+            <Tile
               label="CPA"
               value={formatCurrency(totals?.cpa ?? 0)}
-              icon={<DollarSign size={16} />}
-              iconBg="bg-blue-500/20 text-blue-400"
-              accentBorder="border-blue-500/30"
               loading={loading}
             />
-            <StatCard
+            <Tile
               label="Purchases"
               value={String(totals?.purchases ?? 0)}
-              icon={<ShoppingCart size={16} />}
-              iconBg="bg-purple-500/20 text-purple-400"
-              accentBorder="border-purple-500/30"
               loading={loading}
             />
           </div>
         )}
-      </div>
+      </section>
 
-      {/* Autopilot Activity */}
+      <section>
+        <h2 className="mb-3 text-base text-fg">Action queue</h2>
+        {queueLoading ? (
+          <div className="space-y-2">
+            <div className="h-9 animate-pulse rounded-control bg-raised" />
+            <div className="h-9 animate-pulse rounded-control bg-raised" />
+          </div>
+        ) : queue.length === 0 ? (
+          <EmptyState title="No ads need attention right now">
+            The queue surfaces scaling winners, fading ads and dead weight from 7-day data.
+          </EmptyState>
+        ) : (
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableHeader>Ad</TableHeader>
+                <TableHeader>Why</TableHeader>
+                <TableHeader num>7d spend</TableHeader>
+                <TableHeader num>7d ROAS</TableHeader>
+                <TableHeader num>Purchases</TableHeader>
+                <TableHeader />
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {queue.map((item) => (
+                <TableRow key={item.ad_id}>
+                  <TableCell className="max-w-xs">
+                    <Link
+                      href={`/marketing/ads?ad_id=${encodeURIComponent(item.ad_id)}`}
+                      className="block truncate text-fg hover:text-accent"
+                    >
+                      {item.ad_name}
+                    </Link>
+                    {item.campaign_name && (
+                      <p className="truncate text-xs text-muted">{item.campaign_name}</p>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Pill tone={queueTone(item.reason)}>{item.reason_label}</Pill>
+                  </TableCell>
+                  <TableCell num>{formatCurrency(item.spend_7d)}</TableCell>
+                  <TableCell num>{item.roas_7d.toFixed(2)}x</TableCell>
+                  <TableCell num>{item.purchases_7d}</TableCell>
+                  <TableCell num>
+                    <Link
+                      href={`/marketing/ads?ad_id=${encodeURIComponent(item.ad_id)}`}
+                      className="text-xs text-muted hover:text-accent"
+                    >
+                      Open →
+                    </Link>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </section>
+
       {autopilot.length > 0 && (
-        <div className="mb-8">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-white">
-              Autopilot — Last 24h
-            </h2>
+        <section>
+          <div className="mb-3 flex items-baseline justify-between gap-3">
+            <h2 className="text-base text-fg">Autopilot, last 24h</h2>
             <Link
               href="/marketing/ads?tab=autopilot"
-              className="text-xs text-gray-400 hover:text-white transition-colors"
+              className="text-xs text-muted hover:text-fg"
             >
               View log →
             </Link>
           </div>
-          <div className="bg-gray-900/40 border border-gray-800 rounded-xl divide-y divide-gray-800">
-            {autopilot.slice(0, 5).map((row) => (
-              <div key={row.id} className="flex items-center gap-3 px-4 py-2.5">
-                <div
-                  className={`w-6 h-6 rounded-md flex items-center justify-center flex-shrink-0 ${
-                    row.action === "paused"
-                      ? "bg-red-500/20 text-red-400"
-                      : "bg-green-500/20 text-green-400"
-                  }`}
-                >
-                  {row.action === "paused" ? <Pause size={12} /> : <Play size={12} />}
-                </div>
-                <span className="text-xs text-gray-400 capitalize flex-shrink-0 min-w-[50px]">
-                  {row.action}
-                </span>
-                <span className="text-xs text-gray-300 truncate flex-1">
-                  {row.ad_name ?? "Unknown ad"}
-                </span>
-                {row.rule_matched && (
-                  <span className="text-[10px] text-gray-500 font-mono hidden sm:inline">
-                    {row.rule_matched}
-                  </span>
-                )}
-                <span className="text-[10px] text-gray-600 flex-shrink-0">
-                  {timeAgo(row.created_at)}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableHeader>Action</TableHeader>
+                <TableHeader>Ad</TableHeader>
+                <TableHeader className="hidden sm:table-cell">Rule</TableHeader>
+                <TableHeader num>When</TableHeader>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {autopilot.slice(0, 5).map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell>
+                    <Pill tone={row.action === "paused" ? "bad" : "good"}>
+                      {row.action}
+                    </Pill>
+                  </TableCell>
+                  <TableCell className="max-w-xs truncate">
+                    {row.ad_name ?? "Unknown ad"}
+                  </TableCell>
+                  <TableCell className="hidden sm:table-cell">
+                    {row.rule_matched && <Tag>{row.rule_matched}</Tag>}
+                  </TableCell>
+                  <TableCell num className="text-muted">
+                    {timeAgo(row.created_at)} ago
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </section>
       )}
 
-      {/* Quick Links */}
-      <div className="mb-8">
-        <h2 className="text-lg font-semibold text-white mb-4">Quick Links</h2>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          <Link
-            href="/time-tracker"
-            className="flex items-center gap-3 p-4 bg-gray-700/30 rounded-lg hover:bg-gray-700/50 transition-colors"
-          >
-            <Timer size={20} className="text-blue-400" />
-            <span className="text-sm text-gray-300">Time Tracker</span>
-          </Link>
-          <Link
-            href="/marketing/ads"
-            className="flex items-center gap-3 p-4 bg-gray-700/30 rounded-lg hover:bg-gray-700/50 transition-colors"
-          >
-            <BarChart3 size={20} className="text-orange-400" />
-            <span className="text-sm text-gray-300">Ad Performance</span>
-          </Link>
-          <Link
-            href="/marketing/create"
-            className="flex items-center gap-3 p-4 bg-gray-700/30 rounded-lg hover:bg-gray-700/50 transition-colors"
-          >
-            <PlusCircle size={20} className="text-green-400" />
-            <span className="text-sm text-gray-300">Create Ad</span>
-          </Link>
-        </div>
+      <NeedsYou
+        loading={queueLoading}
+        items={[
+          {
+            label: "Dead-weight ads to pause",
+            count: count("dead_weight"),
+            href: "/marketing/ads",
+            severity: "danger",
+          },
+          {
+            label: "Fading winners to check",
+            count: count("fading_winner"),
+            href: "/marketing/ads",
+            severity: "warning",
+          },
+          {
+            label: "Winners ready to scale",
+            count: count("scaling_winner") + count("new_winner"),
+            href: "/marketing/ads",
+            severity: "info",
+          },
+          {
+            label: "You are not clocked in",
+            count: hasActiveSession ? 0 : 1,
+            href: "/time-tracker",
+            severity: "info",
+          },
+        ]}
+      />
+
+      <div className="flex flex-wrap items-center gap-2">
+        <LinkButton href="/marketing/ads">Ad performance</LinkButton>
+        <LinkButton href="/marketing/create" variant="secondary">
+          Create an ad
+        </LinkButton>
+        <LinkButton href="/time-tracker" variant="ghost">
+          Time tracker
+        </LinkButton>
       </div>
     </div>
   );
