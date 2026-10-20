@@ -73,7 +73,7 @@ export function CartoonHook({ id }: { id: string }) {
         method: "POST",
         body: JSON.stringify({ script: hook.script, direction: hook.direction, style: hook.style, resolution: hook.resolution, voice_on: hook.voice_on, voice_provider: hook.voice_provider, voice_id: hook.voice_id, voice_type: hook.voice_type, voice_name: hook.voice_name, variants: 1, batch_id: hook.batch_id }),
       });
-      router.push("/owner/cartoon-hooks");
+      router.push("/owner/cartoon-generator");
     });
 
   if (!hook) {
@@ -91,8 +91,8 @@ export function CartoonHook({ id }: { id: string }) {
     <div className="max-w-7xl space-y-5">
       {zoom && <Lightbox video={zoom.video} image={zoom.image} onClose={() => setZoom(null)} />}
       <div>
-        <Link href="/owner/cartoon-hooks" className="text-xs text-gray-500 hover:text-white inline-flex items-center gap-1">
-          <ArrowLeft size={12} /> Cartoon Hooks
+        <Link href="/owner/cartoon-generator" className="text-xs text-gray-500 hover:text-white inline-flex items-center gap-1">
+          <ArrowLeft size={12} /> Cartoon Generator
         </Link>
         <div className="flex items-center gap-3 flex-wrap mt-1">
           <h1 className="text-2xl font-bold text-white inline-flex items-center gap-2">
@@ -110,7 +110,7 @@ export function CartoonHook({ id }: { id: string }) {
             question="Delete this hook?"
             onConfirm={() => act("delete", async () => {
               await api(`/api/owner/cartoon-hooks/${id}`, { method: "DELETE" });
-              router.push("/owner/cartoon-hooks");
+              router.push("/owner/cartoon-generator");
             })}
             className="text-gray-500 hover:text-red-300 cursor-pointer p-1"
           >

@@ -10,7 +10,7 @@ import type { BeatStyle, CartoonStyle } from "./types";
  */
 
 const MODEL = "claude-opus-5-5";
-const BEAT_STYLES: BeatStyle[] = ["pixar3d", "flat2d", "medical"];
+const BEAT_STYLES: BeatStyle[] = ["pixar3d", "flat2d", "medical", "mascot"];
 
 export interface PlannedBeat {
   line: string;
@@ -66,8 +66,10 @@ const STYLE_RULE: Record<CartoonStyle, string> = {
   pixar3d: 'Every beat uses style "pixar3d" (3D animated movie look).',
   flat2d: 'Every beat uses style "flat2d" (flat 2D webcomic look, simple round-head people).',
   medical: 'Every beat uses style "medical" (glowing see-through anatomy, cells, hormones, lab glassware).',
+  mascot:
+    'Every beat uses style "mascot": the main character is the personified subject of the script, a thing with a face living in its own macro world, like the reference film where the hair strands themselves are the cast on the scalp. Pick it from the script: hair strands for hair (standing on the scalp, falling into the drain, one thin old strand), fat cells for weight, a stomach or gut cell for digestion, a capsule or a patch for the product. Design it once in "character.description": shape, size, face (big eyes, a mouth), colour, texture, what it stands on. Every beat uses the character (uses_character true) as one of them or a crowd of identical ones, acting out the words: worried, cheering, falling, hit by the villain (a shampoo bottle, a serum dropper, stress, a hormone), relieved when the fix arrives, thin and old, then full and happy. Vary the shots like the film: a wide crowd on the scalp, a close-up on one face, a group reaction, the villain or the product entering the frame, the sick version, the happy ending. Products and their generic forms (a tube, a dropper, a capsule) may appear as props when the script names them.',
   mixed:
-    'Mix styles like the reference ads: "pixar3d" or "flat2d" for people and everyday moments, "medical" when the line explains what happens inside the body (hormones, organs, cells, test results). Keep one main character style; the character only appears in "pixar3d" or "flat2d" beats of that same style.',
+    'Mix styles like the reference ads: "pixar3d" or "flat2d" for people and everyday moments, "medical" when the line explains what happens inside the body (hormones, organs, cells, test results). Keep one main character style; the character only appears in "pixar3d" or "flat2d" beats of that same style. Do not use "mascot" in a mixed hook.',
 };
 
 const VARIANT_ANGLE = [
@@ -84,8 +86,8 @@ Rules:
 - Use the script's words exactly, in order, split across the beats. Do not add, drop, translate or fix words; the beat lines joined with spaces must equal the script.
 - A beat is 1.5 to 4 seconds of speech. Taglish is spoken at about 2.6 words per second; set "seconds" from the word count (round to one decimal, minimum 1.5). Split long sentences; join very short fragments.
 - At most ${MAX_BEATS} beats.
-- One main character carries the story (from the marketer's notes if given, otherwise a Filipino man or woman who fits the script). Describe them once in "character.description" with age, build, face, hair and outfit so every image can match. Set "uses_character" on each beat where they appear. If no beat needs a recurring person, set character.needed to false.
-- "scene" describes only what the image shows: who, doing what, where, expression, framing. English. No text, captions, labels, numbers on screen, brand names or logos. No real or famous people. Do not show the product or any bottle unless the marketer's notes ask for it.
+- One main character carries the story (from the marketer's notes if given, otherwise a Filipino man or woman who fits the script; in the mascot style, the personified thing the style rule describes). Describe them once in "character.description" with age, build, face, hair and outfit (for a mascot: shape, face, colour, texture, where it lives) so every image can match. Set "uses_character" on each beat where they appear. If no beat needs a recurring person, set character.needed to false.
+- "scene" describes only what the image shows: who, doing what, where, expression, framing. English. No text, captions, labels, numbers on screen, brand names or logos. No real or famous people. Do not show the product or any bottle unless the marketer's notes ask for it (mascot style: generic props the script names are fine).
 - "motion" is one sentence: what moves in the next few seconds and what the camera does (slow push-in, static, slight pan). Keep it simple and physical so an image-to-video model can do it.
 - Keep everything tasteful: no nudity, gore or medical procedures.`;
 
@@ -110,7 +112,7 @@ function clean(plan: Plan, style: CartoonStyle): Plan {
   const needed = plan.character.needed && beats.some((b) => b.uses_character);
   return {
     title: plan.title.trim().slice(0, 80) || "Cartoon hook",
-    character: { needed, style: fixStyle(plan.character.style === "medical" ? "pixar3d" : plan.character.style), description: plan.character.description.trim() },
+    character: { needed, style: style === "mascot" ? "mascot" : fixStyle(plan.character.style === "medical" ? "pixar3d" : plan.character.style), description: plan.character.description.trim() },
     beats,
   };
 }

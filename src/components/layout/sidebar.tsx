@@ -394,8 +394,8 @@ const ownerNavEntries: NavEntry[] = [
         roles: ownerRoles,
       },
       {
-        label: "Cartoon Hooks",
-        href: "/owner/cartoon-hooks",
+        label: "Cartoon Generator",
+        href: "/owner/cartoon-generator",
         icon: <Sparkles size={18} />,
         roles: ownerRoles,
       },

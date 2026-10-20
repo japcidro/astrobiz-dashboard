@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 type Ctx = { params: Promise<{ id: string; beatId: string }> };
 
-const STYLES: BeatStyle[] = ["pixar3d", "flat2d", "medical"];
+const STYLES: BeatStyle[] = ["pixar3d", "flat2d", "medical", "mascot"];
 
 /** PATCH — edit a beat: { line?, seconds?, scene?, motion?, style?, uses_character? }. Use redo to remake its image or clip. */
 export async function PATCH(request: Request, ctx: Ctx) {

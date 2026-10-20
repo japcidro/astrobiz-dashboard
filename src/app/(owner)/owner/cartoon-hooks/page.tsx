@@ -1,8 +1,6 @@
-import { CartoonHooksList } from "@/components/cartoon/cartoon-hooks-list";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
-// Owner and marketing: the (owner) layout already 404s everyone else.
-export default function CartoonHooksPage() {
-  return <CartoonHooksList />;
+// Cartoon Hooks became the Cartoon Generator; old links still land there.
+export default function CartoonHooksRedirect() {
+  redirect("/owner/cartoon-generator");
 }

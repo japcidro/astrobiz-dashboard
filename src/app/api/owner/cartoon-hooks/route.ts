@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 // Claude plans every variant after the response goes out.
 export const maxDuration = 300;
 
-const STYLES: CartoonStyle[] = ["pixar3d", "flat2d", "medical", "mixed"];
+const STYLES: CartoonStyle[] = ["pixar3d", "flat2d", "medical", "mascot", "mixed"];
 
 /** GET — every cartoon hook, newest first. */
 export async function GET() {

@@ -1,9 +1,7 @@
-import { CartoonHook } from "@/components/cartoon/cartoon-hook";
+import { redirect } from "next/navigation";
 
-export const dynamic = "force-dynamic";
-
-// Owner and marketing: the (owner) layout already 404s everyone else.
-export default async function CartoonHookPage({ params }: { params: Promise<{ id: string }> }) {
+// Cartoon Hooks became the Cartoon Generator; old links still land there.
+export default async function CartoonHookRedirect({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  return <CartoonHook id={id} />;
+  redirect(`/owner/cartoon-generator/${id}`);
 }

@@ -1,4 +1,4 @@
-export type CartoonStyle = "pixar3d" | "flat2d" | "medical" | "mixed";
+export type CartoonStyle = "pixar3d" | "flat2d" | "medical" | "mascot" | "mixed";
 /** A beat's look; "science" belongs to the Science B-roll Generator, which shares these tables. */
 export type BeatStyle = Exclude<CartoonStyle, "mixed"> | "science";
 /** Which tool a row belongs to: Cartoon Hooks or the Science B-roll Generator. */

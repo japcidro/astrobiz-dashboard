@@ -32,7 +32,7 @@ interface Form {
 }
 
 /**
- * Cartoon Hooks: paste a script, Claude splits it into 2-3 second beats, and
+ * Cartoon Generator: paste a script, Claude splits it into 2-3 second beats, and
  * the Mac worker makes the character, a starting image and a clip per beat,
  * and joins them into one vertical hook. Captions are added in CapCut.
  */
@@ -131,9 +131,9 @@ export function CartoonHooksList() {
       <div className="flex items-start gap-4 flex-wrap">
         <div className="flex-1 min-w-0">
           <h1 className="text-2xl font-bold text-white inline-flex items-center gap-2">
-            <Sparkles size={22} className="text-purple-400" /> Cartoon Hooks
+            <Sparkles size={22} className="text-purple-400" /> Cartoon Generator
           </h1>
-          <p className="text-sm text-gray-500 mt-1">Paste a script. Claude splits it into 2–3 second beats, and the Mac makes a cartoon image and a clip for each one, then joins them into one vertical hook. Add captions in CapCut.</p>
+          <p className="text-sm text-gray-500 mt-1">Paste a script. Claude splits it into 2–3 second beats, and the Mac makes a cartoon image and a clip for each one, then joins them into one vertical video. Mascot world makes the subject itself the character, like the hair-strand film. Add captions in CapCut.</p>
         </div>
         {worker && (
           <span className="text-xs text-gray-400 inline-flex items-center gap-1.5 mt-2">
@@ -162,7 +162,7 @@ export function CartoonHooksList() {
             <input
               value={form.direction}
               onChange={(e) => setForm({ ...form, direction: e.target.value })}
-              placeholder="Notes for Claude (optional): main character is a Filipino tito, 45, with a big belly; end on a fit dad"
+              placeholder="Notes for Claude (optional): main character is a Filipino tito, 45, with a big belly; or for Mascot world: the hair strands are the cast, the shampoo bottle is the villain"
               className={field}
             />
           </div>
@@ -288,7 +288,7 @@ function HookCard({ hook: h, onDelete }: { hook: CartoonHookSummary; onDelete: (
           : `${h.beats_total} beats · ${h.final_seconds ?? "?"} s`;
   return (
     <div className="rounded-xl border border-gray-800 bg-gray-950 p-2 flex flex-col gap-1.5">
-      <Link href={`/owner/cartoon-hooks/${h.id}`} className="relative block aspect-[9/16] rounded-lg overflow-hidden bg-black">
+      <Link href={`/owner/cartoon-generator/${h.id}`} className="relative block aspect-[9/16] rounded-lg overflow-hidden bg-black">
         {h.final_url ? (
           <ClipVideo src={h.final_url} poster={h.cover_url} className="h-full" hoverOnly />
         ) : h.cover_url || h.character_url ? (
@@ -298,7 +298,7 @@ function HookCard({ hook: h, onDelete }: { hook: CartoonHookSummary; onDelete: (
           <div className="absolute inset-0 flex items-center justify-center">{h.status === "failed" ? <AlertTriangle size={18} className="text-red-300" /> : <Loader2 size={18} className="animate-spin text-purple-300" />}</div>
         )}
       </Link>
-      <Link href={`/owner/cartoon-hooks/${h.id}`} className="text-[12px] text-white font-semibold truncate hover:text-purple-200" title={h.title}>
+      <Link href={`/owner/cartoon-generator/${h.id}`} className="text-[12px] text-white font-semibold truncate hover:text-purple-200" title={h.title}>
         {h.title}
       </Link>
       <p className={`text-[11px] line-clamp-2 ${h.status === "failed" ? "text-red-300" : "text-gray-400"}`}>{progress}</p>
