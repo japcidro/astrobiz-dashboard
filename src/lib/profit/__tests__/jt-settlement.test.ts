@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  isOutForDelivery,
   observationTimeMs,
   parcelAgeDays,
   regionForProvince,
@@ -136,6 +137,22 @@ describe("returnProbabilityForOpenParcel", () => {
     const luzon = returnProbabilityForOpenParcel(DEFAULT_RETURN_HAZARD, "Luzon", 6);
     expect(vismin).toBeGreaterThan(0.8);
     expect(vismin).toBeGreaterThan(luzon);
+  });
+  it("out for delivery: age stops counting, capped at the fresh-parcel rate", () => {
+    // VisMin seen unsigned at day 4 reads 0.455 on the curve; a parcel the
+    // courier is carrying that day is back to the door-refusal rate, 0.29.
+    expect(returnProbabilityForOpenParcel(DEFAULT_RETURN_HAZARD, "VisMin", 4)).toBeCloseTo(0.455);
+    expect(returnProbabilityForOpenParcel(DEFAULT_RETURN_HAZARD, "VisMin", 4, true)).toBeCloseTo(0.29);
+    expect(returnProbabilityForOpenParcel(DEFAULT_RETURN_HAZARD, "Luzon", 3, true)).toBeCloseTo(0.14);
+  });
+  it("out for delivery never raises the probability", () => {
+    expect(returnProbabilityForOpenParcel(DEFAULT_RETURN_HAZARD, "Luzon", 0, true)).toBeCloseTo(0.14);
+  });
+  it("isOutForDelivery matches J&T's exact status only", () => {
+    expect(isOutForDelivery("Delivering")).toBe(true);
+    expect(isOutForDelivery(" Delivering ")).toBe(true);
+    expect(isOutForDelivery("In Transit")).toBe(false);
+    expect(isOutForDelivery(null)).toBe(false);
   });
   it("past the end of the curve everything open is a return", () => {
     expect(returnProbabilityForOpenParcel(DEFAULT_RETURN_HAZARD, "Luzon", 40)).toBe(1);

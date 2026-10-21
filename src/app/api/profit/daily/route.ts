@@ -22,6 +22,7 @@ import {
 import {
   buildReturnHazardCurve,
   calculateTrailingRtsRate,
+  isOutForDelivery,
   observationTimeMs,
   parcelAgeDays,
   regionForProvince,
@@ -44,6 +45,7 @@ type JtDailyRow = {
   store_name: string | null;
   province: string | null;
   updated_at: string | null;
+  order_status: string | null;
   shipping_cost: number | string | null;
   item_value: number | string | null;
   cod_amount: number | string | null;
@@ -630,7 +632,8 @@ export async function GET(request: Request) {
   // Each parcel is then settled on its own, as of the upload that last saw
   // it: delivered → nothing; returned, or in transit past its region's
   // cutoff → its COD is lost; still open → its COD × P(return | region, age
-  // when seen) from the hazard curve. "As of the upload" matters: a parcel
+  // when seen) from the hazard curve, capped at the fresh-parcel rate when
+  // J&T says the courier is out delivering it. "As of the upload" matters: a parcel
   // that was In Transit in Monday's file says nothing about Thursday, so its
   // age is frozen at Monday until a newer file is loaded (jt_data_as_of in
   // the response says how fresh the files are). This replaces the old "project from the order
@@ -669,7 +672,7 @@ export async function GET(request: Request) {
     const jtStartUtc = `${startDate}T00:00:00+08:00`;
     const jtEndUtc = `${endDate}T23:59:59+08:00`;
     const jtFields =
-      "submission_date, shopify_order_date, shopify_order_id, store_name, province, updated_at, shipping_cost, item_value, cod_amount, is_delivered, is_returned, classification";
+      "submission_date, shopify_order_date, shopify_order_id, store_name, province, updated_at, order_status, shipping_cost, item_value, cod_amount, is_delivered, is_returned, classification";
 
     // Date-windowed queries can blow past PostgREST's 1000-row cap once
     // we're shipping >30 parcels/day across stores, and the whole-table read
@@ -810,7 +813,8 @@ export async function GET(request: Request) {
         const p = returnProbabilityForOpenParcel(
           hazard,
           regionForProvince(row.province),
-          parcelAgeDays(row.submission_date, observedMs)
+          parcelAgeDays(row.submission_date, observedMs),
+          isOutForDelivery(row.order_status)
         );
         const expected = lostRevenue * p;
         if (expected > 0) {

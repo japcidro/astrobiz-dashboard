@@ -128,6 +128,13 @@ export function resolveParcelState(parcel: SettlementParcel, observedMs: number)
   return "open";
 }
 
+/** J&T's status for a parcel the courier is out delivering today. */
+export const OUT_FOR_DELIVERY_STATUS = "Delivering";
+
+export function isOutForDelivery(orderStatus: string | null | undefined): boolean {
+  return (orderStatus || "").trim() === OUT_FOR_DELIVERY_STATUS;
+}
+
 /**
  * Chance an open parcel of `region` still comes back, seen open at
  * `ageDays`.
@@ -138,11 +145,22 @@ export function resolveParcelState(parcel: SettlementParcel, observedMs: number)
  * part of the Luzon curve (0.37 → 0.60 → 0.75 over days 1–3) reading
  * bucket A alone over-charged a day's parcels by a third. Past the curve's
  * end everything still open is a return.
+ *
+ * `outForDelivery` — J&T's "Delivering" status — caps the result at the
+ * fresh-parcel rate, bucket 0. The curve only knows a parcel is unsigned;
+ * it reads "unsigned at day 4" as "probably stuck, probably coming back".
+ * A parcel the courier is carrying today has already arrived in the area,
+ * so its age says nothing about it any more; what is left is the chance of
+ * a refusal at the door, which is roughly the region's base rate. Checked
+ * on 2026-10-20 against the next export: of 77 "Delivering" parcels, 51
+ * resolved within hours and 12 came back (24%), where the age-based curve
+ * had expected 47%. Bucket 0 predicted 21% for that mix.
  */
 export function returnProbabilityForOpenParcel(
   curve: ReturnHazardCurve,
   region: Region,
-  ageDays: number | null
+  ageDays: number | null,
+  outForDelivery = false
 ): number {
   const series = curve[region] ?? DEFAULT_RETURN_HAZARD[region];
   const fallback = DEFAULT_RETURN_HAZARD[region];
@@ -153,8 +171,8 @@ export function returnProbabilityForOpenParcel(
     return Math.min(1, Math.max(0, v));
   };
   const age = ageDays == null || ageDays < 0 ? 0 : ageDays;
-  if (age === 0) return at(0);
-  return (at(age - 1) + at(age)) / 2;
+  const byAge = age === 0 ? at(0) : (at(age - 1) + at(age)) / 2;
+  return outForDelivery ? Math.min(byAge, at(0)) : byAge;
 }
 
 /**
