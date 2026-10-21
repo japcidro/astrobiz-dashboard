@@ -18,12 +18,14 @@ export const SHIPPING_RATE = 0.12; // 12% of revenue
 export const VOID_SETTLEMENT_DAYS = 14;
 export const RTS_WORST_CASE_RATE = 0.25; // 25% worst case
 export const RTS_MIN_DELIVERED = 200; // threshold to use actual rate
-// Number of days a parcel needs before its J&T outcome is "settled enough"
-// to trust without projection. Past this, actual delivered/returned counts
-// in the J&T file are treated as truth and no further projection is added.
-// Within this window, many Shopify orders haven't been picked-packed-shipped
-// yet — they're invisible to the J&T data and need projection from the
-// store's all-time RTS rate against the day's order count.
+// How many days after an order we still expect parcels to show up for it.
+// Pick-pack submits to J&T in batches (one day in October 2026 had 232
+// submissions, the day before had none), so a young date's Shopify orders
+// outnumber its parcels on file. Within this window the gap is charged
+// expected returns and shipping; past it, an order with no parcel is treated
+// as something other than an unshipped sale (unlinked parcel, manual
+// fulfilment) and no longer projected. Parcels that ARE on file are settled
+// individually by src/lib/profit/jt-settlement.ts, with no window at all.
 export const SETTLEMENT_WINDOW_DAYS = 6;
 
 /**
@@ -237,40 +239,39 @@ export function calculateInTransitProjectedReturns(
 }
 
 /**
- * Per-date returns projection from Shopify order count.
+ * Expected returns from a date's orders that have no J&T parcel yet.
  *
- * Replaces the old in-transit-pool model for established stores. Reasoning:
- * a recent date's J&T data is incomplete because pick-pack hasn't caught up,
- * so the date shows artificially low returns and the dashboard reports
- * inflated net profit. Using the date's Shopify order count as the
- * "expected total parcels" closes that gap — every paid order eventually
- * becomes a J&T parcel (or a cancellation, which is excluded upstream).
+ * Parcels already on file are settled one by one (delivered, returned, or
+ * open with a survival probability — see jt-settlement.ts). What remains is
+ * the orders pick-pack hasn't shipped: they will become parcels, and the
+ * store's share of them will come back. Charge that share at the average
+ * COD of a returned parcel.
  *
- * Only applies inside the settlement window. Past it, actual J&T data is
- * trusted as-is and no projection is added.
+ * COD only — NOT COD plus the J&T fee. A settled return is charged its COD
+ * here and its fee in the shipping line; the old projection added the fee
+ * again and ran ~7% high on days 0–5.
  *
- * Returns the ADDITIONAL returns to add on top of what's already counted.
- * If actual returns for the date already exceed the expected projection,
- * returns 0 — we don't override real data with a lower estimate.
+ * Only inside SETTLEMENT_WINDOW_DAYS: past it, orders without a parcel are
+ * not unshipped sales.
  */
-export function calculateUnsettledOrderProjection(
+export function calculateUnshippedOrderReturns(
   orderCount: number,
+  parcelCount: number,
   rtsRate: number,
-  avgReturnCost: number,
-  actualReturnsForDate: number,
+  avgReturnCod: number,
   ageDays: number
-): { projectedReturns: number; isProjected: boolean } {
+): { projectedReturns: number; missingParcels: number; isProjected: boolean } {
+  const missing = Math.max(0, orderCount - parcelCount);
   if (
     ageDays >= SETTLEMENT_WINDOW_DAYS ||
-    orderCount <= 0 ||
+    missing <= 0 ||
     rtsRate <= 0 ||
-    avgReturnCost <= 0
+    avgReturnCod <= 0
   ) {
-    return { projectedReturns: 0, isProjected: false };
+    return { projectedReturns: 0, missingParcels: missing, isProjected: false };
   }
-  const expectedTotalReturns = orderCount * rtsRate * avgReturnCost;
-  const additional = Math.max(0, expectedTotalReturns - actualReturnsForDate);
-  return { projectedReturns: additional, isProjected: additional > 0 };
+  const projectedReturns = missing * rtsRate * avgReturnCod;
+  return { projectedReturns, missingParcels: missing, isProjected: projectedReturns > 0 };
 }
 
 /**

@@ -5,7 +5,7 @@ import { matchAdToStore } from "@/lib/profit/store-matching";
 import {
   calculateNetProfit,
   calculateMarginPct,
-  calculateUnsettledOrderProjection,
+  calculateUnshippedOrderReturns,
   calculateVoidAdjustmentFactor,
   settledFractionForAge,
   calculateShippingWithProjection,
@@ -19,6 +19,18 @@ import {
   RTS_MIN_DELIVERED,
   SETTLEMENT_WINDOW_DAYS,
 } from "@/lib/profit/formulas";
+import {
+  buildReturnHazardCurve,
+  calculateTrailingRtsRate,
+  parcelAgeDays,
+  regionForProvince,
+  resolveParcelState,
+  returnProbabilityForOpenParcel,
+  DEFAULT_RETURN_HAZARD,
+  RTS_RATE_WINDOW_DAYS,
+  type ReturnHazardCurve,
+  type TrailingRtsRate,
+} from "@/lib/profit/jt-settlement";
 import { buildCacheKey, getCachedResponse, setCachedResponse } from "@/lib/data-cache";
 import { fbFetchWithLimits } from "@/lib/facebook/rate-limit";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -29,6 +41,7 @@ type JtDailyRow = {
   shopify_order_date: string | null;
   shopify_order_id: string | null;
   store_name: string | null;
+  province: string | null;
   shipping_cost: number | string | null;
   item_value: number | string | null;
   cod_amount: number | string | null;
@@ -39,6 +52,10 @@ type JtDailyRow = {
 
 type JtStoreRtsRow = {
   store_name: string | null;
+  submission_date: string | null;
+  signing_time: string | null;
+  province: string | null;
+  classification: string | null;
   is_delivered: boolean | null;
   is_returned: boolean | null;
   cod_amount: number | string | null;
@@ -590,33 +607,71 @@ export async function GET(request: Request) {
     warnings.push(`Facebook: ${message}`);
   }
 
-  // --- 5. Fetch J&T delivery data ---
-  // Strategy: prefer shopify_order_date for grouping when the parcel has been
+  // --- 5. J&T parcels -------------------------------------------------------
+  //
+  // Two reads of jt_deliveries:
+  //   (a) the whole table, for per-store statistics — average fee per parcel,
+  //       the trailing RTS rate, the average COD of a return — and the return
+  //       hazard curve (how likely a still-open parcel is to come back, by
+  //       region and age);
+  //   (b) the parcels that belong to the requested dates.
+  //
+  // Attribution for (b): prefer shopify_order_date when the parcel has been
   // linked back to its Shopify order (waybill ↔ tracking_number match). That
   // gives cohort-correct per-date margins — the row for date D shows revenue
   // from D's orders AND returns from those same orders, regardless of when
   // the J&T parcel was actually submitted (which lags 0-3 days behind order
-  // creation due to pick-pack).
+  // creation due to pick-pack). Unmatched rows fall back to submission_date
+  // so the data still surfaces, just less precisely.
   //
-  // For unmatched rows (linker hasn't found a Shopify order — unfilled
-  // tracking, manual fulfillment, or pre-migration history), fall back to
-  // submission_date so the data still surfaces, just less precisely.
-  //
-  // Two queries combined: matched-by-order-date + unmatched-by-submission-date.
+  // Each parcel is then settled on its own, as of NOW rather than as of its
+  // upload: delivered → nothing; returned, or in transit past its region's
+  // cutoff → its COD is lost; still open → its COD × P(return | region, age)
+  // from the hazard curve. This replaces the old "project from the order
+  // count for 6 days, then trust the file" rule, which showed only 61–68% of
+  // the final returns on dates 6–8 days old: Visayas/Mindanao returns take
+  // ~10 days to be marked and their aged cutoff is 8, so for three days
+  // nothing covered them.
   const shippingByDateStore = new Map<string, number>();
   const returnsByDateStore = new Map<string, number>();
   const inTransitByDate = new Map<string, number>();
+  const returnsProjectedDates = new Set<string>();
+  const shippingProjectedDates = new Set<string>();
+  // Blended actual J&T fee per parcel, per store. The fee is zone-based
+  // (PHP 78 Metro Manila -> PHP 259 far provinces), so each store's real mix
+  // gives a far better estimate for unshipped orders than any flat rate.
+  const storeAvgShipping = new Map<string, number>();
+  const nowMs = Date.now();
+
+  type StoreStats = {
+    parcels: number;
+    delivered: number;
+    returned: number;
+    totalReturnCod: number;
+    rate: TrailingRtsRate;
+  };
+  const storeStats = new Map<string, StoreStats>();
+  let hazard: ReturnHazardCurve = DEFAULT_RETURN_HAZARD;
 
   try {
     const jtStartUtc = `${startDate}T00:00:00+08:00`;
     const jtEndUtc = `${endDate}T23:59:59+08:00`;
     const jtFields =
-      "submission_date, shopify_order_date, shopify_order_id, store_name, shipping_cost, item_value, cod_amount, is_delivered, is_returned, classification";
+      "submission_date, shopify_order_date, shopify_order_id, store_name, province, shipping_cost, item_value, cod_amount, is_delivered, is_returned, classification";
 
     // Date-windowed queries can blow past PostgREST's 1000-row cap once
-    // we're shipping >30 parcels/day across stores. Drain via paginate
-    // so daily shipping/returns/in-transit aggregates aren't truncated.
-    const [matchedRes, unmatchedRes] = await Promise.all([
+    // we're shipping >30 parcels/day across stores, and the whole-table read
+    // always did. Drain everything via paginate.
+    const [historyRes, matchedRes, unmatchedRes] = await Promise.all([
+      fetchAllRows<JtStoreRtsRow>(
+        () =>
+          supabase
+            .from("jt_deliveries")
+            .select(
+              "store_name, submission_date, signing_time, province, classification, is_delivered, is_returned, cod_amount, shipping_cost"
+            ),
+        { orderColumn: "id", ascending: true }
+      ),
       fetchAllRows<JtDailyRow>(
         () => {
           let q = supabase
@@ -645,10 +700,59 @@ export async function GET(request: Request) {
       ),
     ]);
 
+    if (historyRes.error) warnings.push(`J&T history: ${historyRes.error.message}`);
     if (matchedRes.error) warnings.push(`J&T matched: ${matchedRes.error.message}`);
     if (unmatchedRes.error) warnings.push(`J&T unmatched: ${unmatchedRes.error.message}`);
 
+    // (a) per-store statistics and the hazard curve
+    if (historyRes.data.length > 0) {
+      hazard = buildReturnHazardCurve(historyRes.data, nowMs);
+
+      const perStore = new Map<
+        string,
+        {
+          parcels: number;
+          totalShip: number;
+          delivered: number;
+          returned: number;
+          totalReturnCod: number;
+          history: { submission_date: string | null; state: "delivered" | "returned" | "open" }[];
+        }
+      >();
+      for (const row of historyRes.data) {
+        const store = (row.store_name || "UNKNOWN").toUpperCase();
+        if (!perStore.has(store)) {
+          perStore.set(store, {
+            parcels: 0, totalShip: 0, delivered: 0, returned: 0, totalReturnCod: 0, history: [],
+          });
+        }
+        const st = perStore.get(store)!;
+        const state = resolveParcelState(row, nowMs);
+        st.parcels++;
+        st.totalShip += parseFloat(String(row.shipping_cost ?? 0)) || 0;
+        if (state === "delivered") {
+          st.delivered++;
+        } else if (state === "returned") {
+          st.returned++;
+          st.totalReturnCod += parseFloat(String(row.cod_amount ?? 0)) || 0;
+        }
+        st.history.push({ submission_date: row.submission_date, state });
+      }
+      for (const [store, st] of perStore) {
+        if (st.parcels > 0) storeAvgShipping.set(store, st.totalShip / st.parcels);
+        storeStats.set(store, {
+          parcels: st.parcels,
+          delivered: st.delivered,
+          returned: st.returned,
+          totalReturnCod: st.totalReturnCod,
+          rate: calculateTrailingRtsRate(st.history, nowMs),
+        });
+      }
+    }
+
+    // (b) the requested dates' parcels, settled one by one
     const jtData = [...matchedRes.data, ...unmatchedRes.data];
+    const openByStore = new Map<string, { count: number; expected: number }>();
 
     for (const row of jtData) {
       // Pick the date this parcel should be attributed to.
@@ -662,11 +766,13 @@ export async function GET(request: Request) {
       }
       if (!dateStr) continue;
 
-      const key = `${dateStr}::${(row.store_name || "UNKNOWN").toUpperCase()}`;
+      const store = (row.store_name || "UNKNOWN").toUpperCase();
+      const key = `${dateStr}::${store}`;
 
       // Every parcel costs its own zone-based J&T fee — delivered, returned or
-      // still moving. Previously only delivered parcels were counted here and
-      // the total was thrown away downstream in favour of a flat 12%.
+      // still moving. J&T bills one way only (delivered parcels average
+      // PHP 101.61, returned PHP 102.36: the same outbound leg, no return
+      // charge), so the fee lives here and only here.
       shippingByDateStore.set(
         key,
         (shippingByDateStore.get(key) || 0) +
@@ -674,175 +780,134 @@ export async function GET(request: Request) {
       );
       parcelCountByDateStore.set(key, (parcelCountByDateStore.get(key) || 0) + 1);
 
-      if (row.is_returned) {
-        // Returns cost = the COD the customer never paid. NOT the shipping —
-        // J&T bills one way only (delivered parcels average PHP 101.61,
-        // returned PHP 102.36: the same outbound leg, no return charge), and
-        // that fee is already in shippingByDateStore above. Adding it here too
-        // was double-counting the outbound leg.
-        // Use cod_amount (actual selling price) over item_value (declared/insured value)
-        const codAmount = parseFloat(String(row.cod_amount ?? 0)) || 0;
-        const itemValue = parseFloat(String(row.item_value ?? 0)) || 0;
-        const lostRevenue = codAmount > 0 ? codAmount : itemValue;
-        returnsByDateStore.set(
-          key,
-          (returnsByDateStore.get(key) || 0) + lostRevenue
+      // A return costs the COD the customer never paid. cod_amount is the
+      // actual selling price; item_value (declared/insured) is the fallback.
+      const codAmount = parseFloat(String(row.cod_amount ?? 0)) || 0;
+      const itemValue = parseFloat(String(row.item_value ?? 0)) || 0;
+      const lostRevenue = codAmount > 0 ? codAmount : itemValue;
+
+      const state = resolveParcelState(row, nowMs);
+      if (state === "returned") {
+        returnsByDateStore.set(key, (returnsByDateStore.get(key) || 0) + lostRevenue);
+      } else if (state === "open") {
+        const p = returnProbabilityForOpenParcel(
+          hazard,
+          regionForProvince(row.province),
+          parcelAgeDays(row.submission_date, nowMs)
         );
-      }
-      if (row.classification === "In Transit" || row.classification === "Pending") {
+        const expected = lostRevenue * p;
+        if (expected > 0) {
+          returnsByDateStore.set(key, (returnsByDateStore.get(key) || 0) + expected);
+          returnsProjectedDates.add(dateStr);
+        }
         inTransitByDate.set(dateStr, (inTransitByDate.get(dateStr) || 0) + 1);
+        const o = openByStore.get(store) || { count: 0, expected: 0 };
+        o.count++;
+        o.expected += expected;
+        openByStore.set(store, o);
       }
+    }
+
+    for (const [store, o] of openByStore) {
+      if (o.expected < 1) continue;
+      warnings.push(
+        `${store}: +₱${Math.round(o.expected).toLocaleString()} expected returns from ${o.count} parcel${o.count === 1 ? "" : "s"} still in transit`
+      );
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     warnings.push(`J&T: ${message}`);
   }
 
-  // --- 5b. RTS projection: per-date order-count model ----------------------
+  // --- 5b. Returns for orders that have no parcel yet -----------------------
   //
-  // Old model: project from the all-time in-transit pool, distribute by
-  // revenue across dates. Problem: in-transit only contains parcels that
-  // already reached J&T. For the most recent ~5 days, many Shopify orders
-  // haven't been picked-packed-shipped yet, so they're invisible and the
-  // dashboard overstated net profit on young dates.
-  //
-  // New model: per (date, store) within SETTLEMENT_WINDOW_DAYS, project
-  // expected returns from the date's Shopify order count using the store's
-  // all-time RTS rate. Older dates are left to actual J&T data (parcels
-  // settled by then). Stores with < 200 settled parcels still use the 25%
-  // worst-case rule at the store level — the rate isn't trustworthy yet.
-  const returnsProjectedDates = new Set<string>();
-  const shippingProjectedDates = new Set<string>();
-  // Blended actual J&T fee per parcel, per store. The fee is zone-based
-  // (PHP 78 Metro Manila -> PHP 259 far provinces), so each store's real mix
-  // gives a far better estimate for unshipped orders than any flat rate.
-  const storeAvgShipping = new Map<string, number>();
-
+  // Parcels on file are settled above. What's left on a young date is the
+  // Shopify orders pick-pack hasn't shipped: invisible to J&T, but the
+  // store's share of them will come back. Charge that share at the average
+  // COD of a return, using the store's trailing RTS rate. Stores with < 200
+  // settled parcels still use the 25% worst-case rule at the store level —
+  // their rate isn't trustworthy yet.
   try {
-    // No filter here at all — was always silently capped to 1000 rows by
-    // PostgREST. That broke the all-time per-store RTS rates that drive
-    // the unsettled-order projection, so net profit was off whenever the
-    // table grew past 1k. Drain everything.
-    const { data: allJtRows } = await fetchAllRows<JtStoreRtsRow>(
-      () =>
-        supabase
-          .from("jt_deliveries")
-          .select(
-            "store_name, is_delivered, is_returned, cod_amount, shipping_cost"
-          ),
-      { orderColumn: "id", ascending: true }
-    );
+    const allStoresInData = new Set<string>();
+    for (const key of revenueByDateStore.keys()) {
+      allStoresInData.add(key.split("::")[1]);
+    }
 
-    if (allJtRows.length > 0) {
-      const storeStats = new Map<string, {
-        delivered: number;
-        returned: number;
-        totalReturnCod: number;
-        totalReturnShip: number;
-        parcels: number;
-        totalShip: number;
-      }>();
+    for (const store of allStoresInData) {
+      const stats = storeStats.get(store);
+      const delivered = stats?.delivered || 0;
+      const returned = stats?.returned || 0;
+      const settled = delivered + returned;
 
-      for (const row of allJtRows) {
-        const store = (row.store_name || "UNKNOWN").toUpperCase();
-        if (!storeStats.has(store)) {
-          storeStats.set(store, {
-            delivered: 0, returned: 0, totalReturnCod: 0, totalReturnShip: 0,
-            parcels: 0, totalShip: 0,
-          });
+      // Strategy A — small store: keep 25% worst-case at store level.
+      // Distributed by revenue because we have no reliable rate yet.
+      if (settled < RTS_MIN_DELIVERED) {
+        let actualReturns = 0;
+        let storeRevenue = 0;
+        for (const [key, value] of returnsByDateStore) {
+          if (key.endsWith(`::${store}`)) actualReturns += value;
         }
-        const stats = storeStats.get(store)!;
-        stats.parcels++;
-        stats.totalShip += parseFloat(String(row.shipping_cost ?? 0)) || 0;
-        if (row.is_delivered) stats.delivered++;
-        if (row.is_returned) {
-          stats.returned++;
-          stats.totalReturnCod += parseFloat(String(row.cod_amount ?? 0)) || 0;
-          stats.totalReturnShip += parseFloat(String(row.shipping_cost ?? 0)) || 0;
+        for (const [key, value] of revenueByDateStore) {
+          if (key.endsWith(`::${store}`)) storeRevenue += value;
         }
-      }
+        if (storeRevenue <= 0) continue;
 
-      for (const [store, st] of storeStats) {
-        if (st.parcels > 0) storeAvgShipping.set(store, st.totalShip / st.parcels);
-      }
-
-      const allStoresInData = new Set<string>();
-      for (const key of revenueByDateStore.keys()) {
-        allStoresInData.add(key.split("::")[1]);
-      }
-
-      for (const store of allStoresInData) {
-        const stats = storeStats.get(store);
-        const delivered = stats?.delivered || 0;
-        const returned = stats?.returned || 0;
-        const settled = delivered + returned;
-
-        // Strategy A — small store: keep 25% worst-case at store level.
-        // Distributed by revenue because we have no reliable rate yet.
-        if (settled < RTS_MIN_DELIVERED) {
-          let actualReturns = 0;
-          let storeRevenue = 0;
-          for (const [key, value] of returnsByDateStore) {
-            if (key.endsWith(`::${store}`)) actualReturns += value;
-          }
-          for (const [key, value] of revenueByDateStore) {
-            if (key.endsWith(`::${store}`)) storeRevenue += value;
-          }
-          if (storeRevenue <= 0) continue;
-
-          const worstCase = storeRevenue * RTS_WORST_CASE_RATE;
-          if (worstCase > actualReturns) {
-            const additional = worstCase - actualReturns;
-            for (const [key, dateRevenue] of revenueByDateStore) {
-              if (!key.endsWith(`::${store}`)) continue;
-              const proportion = dateRevenue / storeRevenue;
-              returnsByDateStore.set(
-                key,
-                (returnsByDateStore.get(key) || 0) + additional * proportion
-              );
-              returnsProjectedDates.add(key.split("::")[0]);
-            }
-            warnings.push(
-              `${store}: Using 25% worst-case RTS (${settled}/${RTS_MIN_DELIVERED} settled)`
+        const worstCase = storeRevenue * RTS_WORST_CASE_RATE;
+        if (worstCase > actualReturns) {
+          const additional = worstCase - actualReturns;
+          for (const [key, dateRevenue] of revenueByDateStore) {
+            if (!key.endsWith(`::${store}`)) continue;
+            const proportion = dateRevenue / storeRevenue;
+            returnsByDateStore.set(
+              key,
+              (returnsByDateStore.get(key) || 0) + additional * proportion
             );
+            returnsProjectedDates.add(key.split("::")[0]);
           }
-          continue;
-        }
-
-        // Strategy B — established store: per-date order-count projection.
-        const rtsRate = settled > 0 ? returned / settled : 0;
-        const avgCod = returned > 0 ? stats!.totalReturnCod / returned : 0;
-        const avgShip = returned > 0 ? stats!.totalReturnShip / returned : 0;
-        const avgReturnCost = avgCod + avgShip;
-        if (rtsRate <= 0 || avgReturnCost <= 0) continue;
-
-        let storeProjected = 0;
-        for (const [key, orderCount] of orderCountByDateStore) {
-          if (!key.endsWith(`::${store}`)) continue;
-          const date = key.split("::")[0];
-          const age = ageDaysForDate(date);
-          const actualForDate = returnsByDateStore.get(key) || 0;
-
-          const { projectedReturns } = calculateUnsettledOrderProjection(
-            orderCount, rtsRate, avgReturnCost, actualForDate, age
-          );
-          if (projectedReturns > 0) {
-            returnsByDateStore.set(key, actualForDate + projectedReturns);
-            returnsProjectedDates.add(date);
-            storeProjected += projectedReturns;
-          }
-        }
-
-        if (storeProjected > 0) {
-          const rtsPct = Math.round(rtsRate * 1000) / 10;
           warnings.push(
-            `${store}: +₱${Math.round(storeProjected).toLocaleString()} projected returns from unsettled orders (last ${SETTLEMENT_WINDOW_DAYS} days, ${rtsPct}% RTS rate)`
+            `${store}: Using 25% worst-case RTS (${settled}/${RTS_MIN_DELIVERED} settled)`
           );
         }
+        continue;
+      }
+
+      // Strategy B — established store: unshipped orders × trailing rate × avg COD.
+      const rtsRate = stats!.rate.rate;
+      const avgReturnCod = returned > 0 ? stats!.totalReturnCod / returned : 0;
+      if (rtsRate <= 0 || avgReturnCod <= 0) continue;
+
+      let storeProjected = 0;
+      let storeMissing = 0;
+      for (const [key, orderCount] of orderCountByDateStore) {
+        if (!key.endsWith(`::${store}`)) continue;
+        const date = key.split("::")[0];
+        const { projectedReturns, missingParcels } = calculateUnshippedOrderReturns(
+          orderCount,
+          parcelCountByDateStore.get(key) || 0,
+          rtsRate,
+          avgReturnCod,
+          ageDaysForDate(date)
+        );
+        if (projectedReturns > 0) {
+          returnsByDateStore.set(key, (returnsByDateStore.get(key) || 0) + projectedReturns);
+          returnsProjectedDates.add(date);
+          storeProjected += projectedReturns;
+          storeMissing += missingParcels;
+        }
+      }
+
+      if (storeProjected > 0) {
+        const rtsPct = Math.round(rtsRate * 1000) / 10;
+        const basis = stats!.rate.windowed
+          ? `trailing ${RTS_RATE_WINDOW_DAYS}d`
+          : `all-time, ${stats!.rate.settled} settled`;
+        warnings.push(
+          `${store}: +₱${Math.round(storeProjected).toLocaleString()} expected returns for ~${Math.round(storeMissing)} orders not yet shipped (last ${SETTLEMENT_WINDOW_DAYS} days, ${rtsPct}% RTS rate, ${basis})`
+        );
       }
     }
   } catch {
-    // Non-critical — continue with actual returns data
+    // Non-critical — continue with what the parcels on file say
   }
 
   // --- 5c. Shipping: real per-parcel J&T fee, projected for unshipped orders --
