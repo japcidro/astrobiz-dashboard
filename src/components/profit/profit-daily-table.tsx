@@ -37,6 +37,32 @@ function profitColor(val: number) {
   return val >= 0 ? "text-green-400" : "text-red-400";
 }
 
+/**
+ * What the returns figure is made of, for the tooltip. The number itself is
+ * J&T fact plus two kinds of estimate, and a reader deciding whether a day
+ * is really negative needs to know which part is which.
+ */
+function returnsBreakdown(row: DailyPnlRow): string {
+  const parts: string[] = [];
+  const actual = row.returns_actual ?? 0;
+  const inTransit = row.returns_in_transit_est ?? 0;
+  const unshipped = row.returns_unshipped_est ?? 0;
+  parts.push(`${formatCurrency(actual)} confirmed returned by J&T`);
+  if (row.in_transit_count > 0) {
+    parts.push(
+      `${formatCurrency(inTransit)} expected from ${row.in_transit_count} parcel${row.in_transit_count === 1 ? "" : "s"} still in transit (each × its chance of coming back, by region and days out)`
+    );
+  }
+  if (unshipped > 0) {
+    parts.push(`${formatCurrency(unshipped)} expected for orders that have no J&T parcel yet`);
+  }
+  return parts.join("\n");
+}
+
+function isProjected(row: DailyPnlRow): boolean {
+  return row.shipping_projected || row.returns_projected || row.void_adjusted;
+}
+
 function renderCell(key: string, row: DailyPnlRow) {
   switch (key) {
     case "date":
@@ -62,17 +88,22 @@ function renderCell(key: string, row: DailyPnlRow) {
     case "aov":
     case "cpp":
       return formatCurrency(row[key]);
-    case "returns_value":
+    case "returns_value": {
+      const unshippedOnly = row.in_transit_count === 0 && (row.returns_unshipped_est ?? 0) > 0;
       return (
-        <span>
+        <span title={returnsBreakdown(row)}>
           {formatCurrency(row.returns_value)}
           {row.in_transit_count > 0 && (
-            <span className="text-yellow-400 text-xs ml-1.5" title={`${row.in_transit_count} parcels still in transit — returns not yet final`}>
+            <span className="text-yellow-400 text-xs ml-1.5">
               ({row.in_transit_count} in transit)
             </span>
           )}
+          {unshippedOnly && (
+            <span className="text-yellow-400 text-xs ml-1.5">(est)</span>
+          )}
         </span>
       );
+    }
     case "shipping":
       return (
         <span className={row.shipping_projected ? "text-yellow-400" : ""}>
@@ -89,7 +120,15 @@ function renderCell(key: string, row: DailyPnlRow) {
       );
     case "net_profit":
       return (
-        <span className={profitColor(row.net_profit)}>
+        <span
+          className={profitColor(row.net_profit)}
+          title={
+            isProjected(row)
+              ? "Projected — revenue, COGS and ad spend are actual; shipping and returns include estimates for parcels still moving or not yet shipped. Final once every parcel is delivered or returned."
+              : "Final — every parcel for this day is delivered or returned"
+          }
+        >
+          {isProjected(row) && <span className="text-gray-500 mr-0.5">≈</span>}
           {formatCurrency(row.net_profit)}
         </span>
       );

@@ -90,27 +90,54 @@ export function regionForProvince(province: string | null | undefined): Region {
 }
 
 /**
- * The parcel's state as of `nowMs`, not as of its last upload.
+ * When a parcel's status was last seen: the row's last write (the upload
+ * that carried it), never later than now.
  *
- * The upload route stamps `classification` once, with the age the parcel had
- * on upload day. Nothing re-ran that later, so a parcel uploaded as "In
- * Transit" stayed one until it showed up in another file — and a date's
- * aged returns only appeared if someone re-uploaded an overlapping range.
- * Re-applying the cutoff here makes the P&L move with the calendar.
+ * A status is only true as of the file it came from. A parcel that was "In
+ * Transit" in Monday's upload tells us nothing about Thursday — by then it
+ * has almost certainly been delivered or sent back, we just haven't loaded
+ * the file that says which. So every age-based judgement (the aged cutoff,
+ * the hazard curve) is made at the age the parcel had when it was observed,
+ * not at today's age. Otherwise a stale upload would turn every open parcel
+ * into a return a few days later.
  */
-export function resolveParcelState(parcel: SettlementParcel, nowMs: number): ParcelState {
+export function observationTimeMs(
+  updatedAt: string | null | undefined,
+  nowMs: number
+): number {
+  if (!updatedAt) return nowMs;
+  const t = new Date(updatedAt).getTime();
+  return Number.isFinite(t) ? Math.min(t, nowMs) : nowMs;
+}
+
+/**
+ * The parcel's state as of `observedMs` — the time its status was last
+ * seen (see observationTimeMs).
+ *
+ * Re-applies the region cutoff rather than trusting the stored
+ * `classification`, so every parcel is judged by one rule regardless of
+ * which version of the upload route stamped it.
+ */
+export function resolveParcelState(parcel: SettlementParcel, observedMs: number): ParcelState {
   if (parcel.is_delivered) return "delivered";
   if (parcel.is_returned) return "returned";
   if (parcel.classification === "In Transit") {
-    const age = parcelAgeDays(parcel.submission_date, nowMs);
+    const age = parcelAgeDays(parcel.submission_date, observedMs);
     if (age != null && age > getProvinceCutoff(parcel.province || "")) return "returned";
   }
   return "open";
 }
 
 /**
- * Chance an open parcel of `region` at `ageDays` still comes back.
- * Past the curve's end everything still open is a return.
+ * Chance an open parcel of `region` still comes back, seen open at
+ * `ageDays`.
+ *
+ * The curve's bucket A means "not signed by the END of day A". A status
+ * file is exported part-way through its day, so a parcel seen open at age A
+ * sits between bucket A-1 and bucket A; the two are averaged. On the steep
+ * part of the Luzon curve (0.37 → 0.60 → 0.75 over days 1–3) reading
+ * bucket A alone over-charged a day's parcels by a third. Past the curve's
+ * end everything still open is a return.
  */
 export function returnProbabilityForOpenParcel(
   curve: ReturnHazardCurve,
@@ -118,11 +145,16 @@ export function returnProbabilityForOpenParcel(
   ageDays: number | null
 ): number {
   const series = curve[region] ?? DEFAULT_RETURN_HAZARD[region];
+  const fallback = DEFAULT_RETURN_HAZARD[region];
+  const at = (a: number): number => {
+    if (a >= series.length) return 1;
+    const p = series[a];
+    const v = Number.isFinite(p) ? p : fallback[Math.min(a, fallback.length - 1)];
+    return Math.min(1, Math.max(0, v));
+  };
   const age = ageDays == null || ageDays < 0 ? 0 : ageDays;
-  if (age >= series.length) return 1;
-  const p = series[age];
-  if (!Number.isFinite(p)) return DEFAULT_RETURN_HAZARD[region][Math.min(age, DEFAULT_RETURN_HAZARD[region].length - 1)];
-  return Math.min(1, Math.max(0, p));
+  if (age === 0) return at(0);
+  return (at(age - 1) + at(age)) / 2;
 }
 
 /**

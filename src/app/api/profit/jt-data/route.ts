@@ -1,13 +1,14 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
 import { fetchAllRows } from "@/lib/supabase/paginate";
-import { parcelAgeDays, resolveParcelState } from "@/lib/profit/jt-settlement";
+import { observationTimeMs, parcelAgeDays, resolveParcelState } from "@/lib/profit/jt-settlement";
 
 export const dynamic = "force-dynamic";
 
 type JtDeliveryRow = {
   classification: string | null;
   submission_date: string | null;
+  updated_at: string | null;
   province: string | null;
   is_delivered: boolean | null;
   is_returned: boolean | null;
@@ -17,10 +18,9 @@ type JtDeliveryRow = {
   [key: string]: unknown;
 };
 
-// The upload route stamps classification with the parcel's age on upload
-// day and nothing re-ran it, so "In Transit" parcels only aged into
-// "Returned (Aged)" when they showed up in another file. Re-apply the
-// cutoff as of now so the J&T dashboard agrees with the P&L.
+// Judge every in-transit parcel by the same rule the P&L uses: the region
+// cutoff, at the age the parcel had in the upload that last saw it. (Not
+// today's age — a stale file must not turn every open parcel into a return.)
 const AGEABLE = ["In Transit", "Returned (Aged)"];
 
 export async function GET(request: Request) {
@@ -75,9 +75,10 @@ export async function GET(request: Request) {
   const deliveries = rawDeliveries
     .map((d) => {
       if (!AGEABLE.includes(d.classification || "")) return d;
-      const age = parcelAgeDays(d.submission_date, nowMs);
+      const observedMs = observationTimeMs(d.updated_at, nowMs);
+      const age = parcelAgeDays(d.submission_date, observedMs);
       if (age == null) return d;
-      const agedNow = resolveParcelState({ ...d, classification: "In Transit" }, nowMs) === "returned";
+      const agedNow = resolveParcelState({ ...d, classification: "In Transit" }, observedMs) === "returned";
       return {
         ...d,
         days_since_submit: age,

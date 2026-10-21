@@ -60,6 +60,14 @@ export interface DailyPnlRow {
   /** Revenue was held back for cancellations that haven't landed yet. */
   void_adjusted: boolean;
   in_transit_count: number;
+  /** COD of parcels J&T has confirmed returned (or that aged past the cutoff). */
+  returns_actual?: number;
+  /** Expected COD loss from parcels still moving: each × its chance of coming back. */
+  returns_in_transit_est?: number;
+  /** Expected COD loss from the day's orders that have no parcel on file yet. */
+  returns_unshipped_est?: number;
+  /** J&T parcels on file for the day's orders. */
+  parcel_count?: number;
 }
 
 export interface ProfitSummary {

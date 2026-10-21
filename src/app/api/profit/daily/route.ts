@@ -22,6 +22,7 @@ import {
 import {
   buildReturnHazardCurve,
   calculateTrailingRtsRate,
+  observationTimeMs,
   parcelAgeDays,
   regionForProvince,
   resolveParcelState,
@@ -42,6 +43,7 @@ type JtDailyRow = {
   shopify_order_id: string | null;
   store_name: string | null;
   province: string | null;
+  updated_at: string | null;
   shipping_cost: number | string | null;
   item_value: number | string | null;
   cod_amount: number | string | null;
@@ -56,6 +58,7 @@ type JtStoreRtsRow = {
   signing_time: string | null;
   province: string | null;
   classification: string | null;
+  updated_at: string | null;
   is_delivered: boolean | null;
   is_returned: boolean | null;
   cod_amount: number | string | null;
@@ -624,17 +627,26 @@ export async function GET(request: Request) {
   // creation due to pick-pack). Unmatched rows fall back to submission_date
   // so the data still surfaces, just less precisely.
   //
-  // Each parcel is then settled on its own, as of NOW rather than as of its
-  // upload: delivered → nothing; returned, or in transit past its region's
-  // cutoff → its COD is lost; still open → its COD × P(return | region, age)
-  // from the hazard curve. This replaces the old "project from the order
+  // Each parcel is then settled on its own, as of the upload that last saw
+  // it: delivered → nothing; returned, or in transit past its region's
+  // cutoff → its COD is lost; still open → its COD × P(return | region, age
+  // when seen) from the hazard curve. "As of the upload" matters: a parcel
+  // that was In Transit in Monday's file says nothing about Thursday, so its
+  // age is frozen at Monday until a newer file is loaded (jt_data_as_of in
+  // the response says how fresh the files are). This replaces the old "project from the order
   // count for 6 days, then trust the file" rule, which showed only 61–68% of
   // the final returns on dates 6–8 days old: Visayas/Mindanao returns take
   // ~10 days to be marked and their aged cutoff is 8, so for three days
   // nothing covered them.
   const shippingByDateStore = new Map<string, number>();
   const returnsByDateStore = new Map<string, number>();
+  // The three pieces of returnsByDateStore, kept apart so the table can say
+  // what is J&T fact and what is estimate.
+  const returnsActualByDateStore = new Map<string, number>();
+  const returnsInTransitByDateStore = new Map<string, number>();
+  const returnsUnshippedByDateStore = new Map<string, number>();
   const inTransitByDate = new Map<string, number>();
+  let jtDataAsOf: string | null = null;
   const returnsProjectedDates = new Set<string>();
   const shippingProjectedDates = new Set<string>();
   // Blended actual J&T fee per parcel, per store. The fee is zone-based
@@ -657,7 +669,7 @@ export async function GET(request: Request) {
     const jtStartUtc = `${startDate}T00:00:00+08:00`;
     const jtEndUtc = `${endDate}T23:59:59+08:00`;
     const jtFields =
-      "submission_date, shopify_order_date, shopify_order_id, store_name, province, shipping_cost, item_value, cod_amount, is_delivered, is_returned, classification";
+      "submission_date, shopify_order_date, shopify_order_id, store_name, province, updated_at, shipping_cost, item_value, cod_amount, is_delivered, is_returned, classification";
 
     // Date-windowed queries can blow past PostgREST's 1000-row cap once
     // we're shipping >30 parcels/day across stores, and the whole-table read
@@ -668,7 +680,7 @@ export async function GET(request: Request) {
           supabase
             .from("jt_deliveries")
             .select(
-              "store_name, submission_date, signing_time, province, classification, is_delivered, is_returned, cod_amount, shipping_cost"
+              "store_name, submission_date, signing_time, province, classification, updated_at, is_delivered, is_returned, cod_amount, shipping_cost"
             ),
         { orderColumn: "id", ascending: true }
       ),
@@ -727,7 +739,10 @@ export async function GET(request: Request) {
           });
         }
         const st = perStore.get(store)!;
-        const state = resolveParcelState(row, nowMs);
+        const state = resolveParcelState(row, observationTimeMs(row.updated_at, nowMs));
+        if (row.updated_at && (!jtDataAsOf || row.updated_at > jtDataAsOf)) {
+          jtDataAsOf = row.updated_at;
+        }
         st.parcels++;
         st.totalShip += parseFloat(String(row.shipping_cost ?? 0)) || 0;
         if (state === "delivered") {
@@ -786,18 +801,21 @@ export async function GET(request: Request) {
       const itemValue = parseFloat(String(row.item_value ?? 0)) || 0;
       const lostRevenue = codAmount > 0 ? codAmount : itemValue;
 
-      const state = resolveParcelState(row, nowMs);
+      const observedMs = observationTimeMs(row.updated_at, nowMs);
+      const state = resolveParcelState(row, observedMs);
       if (state === "returned") {
         returnsByDateStore.set(key, (returnsByDateStore.get(key) || 0) + lostRevenue);
+        returnsActualByDateStore.set(key, (returnsActualByDateStore.get(key) || 0) + lostRevenue);
       } else if (state === "open") {
         const p = returnProbabilityForOpenParcel(
           hazard,
           regionForProvince(row.province),
-          parcelAgeDays(row.submission_date, nowMs)
+          parcelAgeDays(row.submission_date, observedMs)
         );
         const expected = lostRevenue * p;
         if (expected > 0) {
           returnsByDateStore.set(key, (returnsByDateStore.get(key) || 0) + expected);
+          returnsInTransitByDateStore.set(key, (returnsInTransitByDateStore.get(key) || 0) + expected);
           returnsProjectedDates.add(dateStr);
         }
         inTransitByDate.set(dateStr, (inTransitByDate.get(dateStr) || 0) + 1);
@@ -862,6 +880,10 @@ export async function GET(request: Request) {
               key,
               (returnsByDateStore.get(key) || 0) + additional * proportion
             );
+            returnsUnshippedByDateStore.set(
+              key,
+              (returnsUnshippedByDateStore.get(key) || 0) + additional * proportion
+            );
             returnsProjectedDates.add(key.split("::")[0]);
           }
           warnings.push(
@@ -890,6 +912,7 @@ export async function GET(request: Request) {
         );
         if (projectedReturns > 0) {
           returnsByDateStore.set(key, (returnsByDateStore.get(key) || 0) + projectedReturns);
+          returnsUnshippedByDateStore.set(key, (returnsUnshippedByDateStore.get(key) || 0) + projectedReturns);
           returnsProjectedDates.add(date);
           storeProjected += projectedReturns;
           storeMissing += missingParcels;
@@ -959,6 +982,10 @@ export async function GET(request: Request) {
       ad_spend: number;
       shipping: number;
       returns_value: number;
+      returns_actual: number;
+      returns_in_transit_est: number;
+      returns_unshipped_est: number;
+      parcel_count: number;
     }
   >();
 
@@ -971,6 +998,10 @@ export async function GET(request: Request) {
         ad_spend: 0,
         shipping: 0,
         returns_value: 0,
+        returns_actual: 0,
+        returns_in_transit_est: 0,
+        returns_unshipped_est: 0,
+        parcel_count: 0,
       });
     }
   }
@@ -1006,6 +1037,18 @@ export async function GET(request: Request) {
     const row = dailyMap.get(date);
     if (row) row.returns_value += value;
   }
+  const breakdowns: [Map<string, number>, "returns_actual" | "returns_in_transit_est" | "returns_unshipped_est" | "parcel_count"][] = [
+    [returnsActualByDateStore, "returns_actual"],
+    [returnsInTransitByDateStore, "returns_in_transit_est"],
+    [returnsUnshippedByDateStore, "returns_unshipped_est"],
+    [parcelCountByDateStore, "parcel_count"],
+  ];
+  for (const [map, field] of breakdowns) {
+    for (const [key, value] of map) {
+      const row = dailyMap.get(key.split("::")[0]);
+      if (row) row[field] += value;
+    }
+  }
 
   // Build final daily array
   const daily: DailyPnlRow[] = [];
@@ -1038,6 +1081,10 @@ export async function GET(request: Request) {
       returns_projected: returnsProjected,
       void_adjusted: voidAdjustedDates.has(date),
       in_transit_count: inTransitByDate.get(date) || 0,
+      returns_actual: roundCurrency(row.returns_actual),
+      returns_in_transit_est: roundCurrency(row.returns_in_transit_est),
+      returns_unshipped_est: roundCurrency(row.returns_unshipped_est),
+      parcel_count: row.parcel_count,
     });
   }
 
@@ -1088,6 +1135,10 @@ export async function GET(request: Request) {
     stores: Array.from(allStoreNames).sort(),
     missing_cogs_skus: Array.from(missingCogsSkus).sort(),
     ad_spend_vat_rate: AD_SPEND_VAT_RATE,
+    // Newest J&T row write: how fresh the parcel statuses are. Every open
+    // parcel is judged at the age it had in its last upload, so this is the
+    // date the "in transit" estimates are really about.
+    jt_data_as_of: jtDataAsOf,
     warnings,
   };
 

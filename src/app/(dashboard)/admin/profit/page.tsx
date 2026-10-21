@@ -57,6 +57,9 @@ export default function ProfitPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
   const [fromCache, setFromCache] = useState(false);
+  const [jtDataAsOf, setJtDataAsOf] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [showHow, setShowHow] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -82,6 +85,8 @@ export default function ProfitPage() {
       if (json.stores) setStores(json.stores);
       if (json.missing_cogs_skus) setMissingCogsSkus(json.missing_cogs_skus);
       if (json.refreshed_at) setRefreshedAt(json.refreshed_at);
+      setJtDataAsOf(json.jt_data_as_of ?? null);
+      setWarnings(Array.isArray(json.warnings) ? json.warnings : []);
       setFromCache(!!json.from_cache);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load profit data");
@@ -143,6 +148,10 @@ export default function ProfitPage() {
       returns_projected: false,
       void_adjusted: false,
       in_transit_count: 0,
+      returns_actual: 0,
+      returns_in_transit_est: 0,
+      returns_unshipped_est: 0,
+      parcel_count: 0,
     };
     for (const row of daily) {
       totals.revenue += row.revenue;
@@ -153,8 +162,13 @@ export default function ProfitPage() {
       totals.returns_value += row.returns_value;
       totals.net_profit += row.net_profit;
       totals.in_transit_count += row.in_transit_count;
+      totals.returns_actual! += row.returns_actual ?? 0;
+      totals.returns_in_transit_est! += row.returns_in_transit_est ?? 0;
+      totals.returns_unshipped_est! += row.returns_unshipped_est ?? 0;
+      totals.parcel_count! += row.parcel_count ?? 0;
       totals.void_adjusted = totals.void_adjusted || row.void_adjusted;
       totals.shipping_projected = totals.shipping_projected || row.shipping_projected;
+      totals.returns_projected = totals.returns_projected || row.returns_projected;
     }
     totals.margin_pct =
       totals.revenue > 0
@@ -201,6 +215,8 @@ export default function ProfitPage() {
                 if (json.stores) setStores(json.stores);
                 if (json.missing_cogs_skus) setMissingCogsSkus(json.missing_cogs_skus);
                 if (json.refreshed_at) setRefreshedAt(json.refreshed_at);
+                setJtDataAsOf(json.jt_data_as_of ?? null);
+                setWarnings(Array.isArray(json.warnings) ? json.warnings : []);
                 setFromCache(false);
               })
               .catch((e) => setError(e instanceof Error ? e.message : "Failed"))
@@ -309,6 +325,41 @@ export default function ProfitPage() {
           voidAdjusted={daily.some((r) => r.void_adjusted)}
         />
       </div>
+
+      {/* What is fact and what is estimate */}
+      {!loading && (
+        <div className="mb-4 text-xs text-gray-400 flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span>
+            Revenue, COGS and ad spend are actual. Shipping and returns are actual for parcels on file
+            {" "}and estimated for parcels still moving or not yet shipped — rows marked{" "}
+            <span className="text-gray-300">≈</span> are projections of where the day will land.
+          </span>
+          {jtDataAsOf && (
+            <span className="text-gray-500">
+              J&T parcel data as of{" "}
+              {new Date(jtDataAsOf).toLocaleString("en-PH", {
+                month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "Asia/Manila",
+              })}
+            </span>
+          )}
+          {warnings.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowHow((v) => !v)}
+              className="underline hover:text-white transition-colors cursor-pointer"
+            >
+              {showHow ? "Hide" : "Show"} how the estimates were made
+            </button>
+          )}
+          {showHow && warnings.length > 0 && (
+            <ul className="w-full mt-1 space-y-0.5 text-gray-500 list-disc list-inside">
+              {warnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* Loading */}
       {loading && (

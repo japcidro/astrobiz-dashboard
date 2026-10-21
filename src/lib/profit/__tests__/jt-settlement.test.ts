@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  observationTimeMs,
   parcelAgeDays,
   regionForProvince,
   resolveParcelState,
@@ -64,7 +65,30 @@ describe("regionForProvince", () => {
   });
 });
 
-describe("resolveParcelState — the state as of now, not as of upload", () => {
+describe("observationTimeMs — a status is only true as of the file it came from", () => {
+  it("uses the row's last write when it is in the past", () => {
+    const seen = new Date("2026-10-18T17:00:00+08:00").getTime();
+    expect(observationTimeMs("2026-10-18T17:00:00+08:00", NOW)).toBe(seen);
+  });
+  it("never runs ahead of now", () => {
+    expect(observationTimeMs("2026-11-01T00:00:00+08:00", NOW)).toBe(NOW);
+  });
+  it("missing or unreadable → now", () => {
+    expect(observationTimeMs(null, NOW)).toBe(NOW);
+    expect(observationTimeMs("garbage", NOW)).toBe(NOW);
+  });
+  it("a stale upload does not age a parcel: In Transit seen 3 days after submission stays open a week later", () => {
+    const seen = new Date("2026-10-14T17:00:00+08:00").getTime(); // parcel submitted Oct 11, seen Oct 14
+    const p = parcel({ submission_date: "2026-10-11T15:00:00+08:00" });
+    expect(resolveParcelState(p, observationTimeMs("2026-10-14T17:00:00+08:00", NOW))).toBe("open");
+    expect(parcelAgeDays(p.submission_date, seen)).toBe(3);
+    // Judged at today's age it would have been flagged a return — wrongly, since
+    // we have no idea what happened after Oct 14.
+    expect(resolveParcelState(p, NOW)).toBe("returned");
+  });
+});
+
+describe("resolveParcelState — the state as of the time the status was seen", () => {
   it("delivered wins over everything", () => {
     expect(resolveParcelState(parcel({ is_delivered: true, is_returned: true }), NOW)).toBe("delivered");
   });
@@ -95,14 +119,23 @@ describe("resolveParcelState — the state as of now, not as of upload", () => {
 });
 
 describe("returnProbabilityForOpenParcel", () => {
-  it("reads the curve at the parcel's age", () => {
-    expect(returnProbabilityForOpenParcel(DEFAULT_RETURN_HAZARD, "VisMin", 7)).toBeCloseTo(0.93);
+  it("age 0 reads bucket 0; older ages average the bucket before and the bucket at that age", () => {
     expect(returnProbabilityForOpenParcel(DEFAULT_RETURN_HAZARD, "Luzon", 0)).toBeCloseTo(0.14);
+    // VisMin buckets 6 and 7 are 0.88 and 0.93: a parcel seen open part-way
+    // through day 7 sits between the two.
+    expect(returnProbabilityForOpenParcel(DEFAULT_RETURN_HAZARD, "VisMin", 7)).toBeCloseTo(0.905);
+  });
+  it("the averaging takes a third off the steep part of the Luzon curve", () => {
+    // Bucket 2 alone says 0.60; seen open during day 2 it is (0.37 + 0.60) / 2.
+    expect(returnProbabilityForOpenParcel(DEFAULT_RETURN_HAZARD, "Luzon", 2)).toBeCloseTo(0.485);
   });
   it("VisMin at day 6 is far more likely back than Luzon at day 6 — the old 6-day hole", () => {
     // Luzon returns are 91% visible by day 6, VisMin only 3.5%: a VisMin
     // parcel still open then is almost certainly coming back.
-    expect(returnProbabilityForOpenParcel(DEFAULT_RETURN_HAZARD, "VisMin", 6)).toBeGreaterThan(0.85);
+    const vismin = returnProbabilityForOpenParcel(DEFAULT_RETURN_HAZARD, "VisMin", 6);
+    const luzon = returnProbabilityForOpenParcel(DEFAULT_RETURN_HAZARD, "Luzon", 6);
+    expect(vismin).toBeGreaterThan(0.8);
+    expect(vismin).toBeGreaterThan(luzon);
   });
   it("past the end of the curve everything open is a return", () => {
     expect(returnProbabilityForOpenParcel(DEFAULT_RETURN_HAZARD, "Luzon", 40)).toBe(1);
@@ -112,9 +145,9 @@ describe("returnProbabilityForOpenParcel", () => {
     expect(returnProbabilityForOpenParcel(DEFAULT_RETURN_HAZARD, "Luzon", -2)).toBeCloseTo(0.14);
   });
   it("probabilities are clamped to [0, 1]", () => {
-    const odd = { Luzon: [1.7, -0.2], VisMin: [] as number[] };
+    const odd = { Luzon: [1.7, -0.2, -0.5], VisMin: [] as number[] };
     expect(returnProbabilityForOpenParcel(odd, "Luzon", 0)).toBe(1);
-    expect(returnProbabilityForOpenParcel(odd, "Luzon", 1)).toBe(0);
+    expect(returnProbabilityForOpenParcel(odd, "Luzon", 2)).toBe(0);
   });
 });
 
