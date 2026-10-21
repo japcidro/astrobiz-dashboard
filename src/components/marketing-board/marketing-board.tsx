@@ -16,6 +16,7 @@ import {
   type BoardView,
 } from "@/lib/marketing-board/types";
 import { Button, Pill, api } from "@/components/hook-studio/ui";
+import { GuideButton } from "@/components/guides/guide-button";
 import { ArchiveView } from "./archive-view";
 import { BoardCard } from "./board-card";
 import { ItemDetail } from "./item-detail";
@@ -254,6 +255,8 @@ export function MarketingBoard() {
   const doneThisWeek = view?.done_this_week ?? 0;
   const open = useMemo(() => items.filter((i) => i.status !== "done").length, [items]);
   const selected = selectedId ? items.find((i) => i.id === selectedId) ?? archive?.items.find((i) => i.id === selectedId) ?? null : null;
+  /** The card the guide points at: the first one on the board, whichever column has one. */
+  const firstCardId = BOARD_STATUSES.map((s) => columns[s][0]?.id).find(Boolean) ?? null;
 
   const storesInUse = useMemo(() => {
     const s = new Set<string>(view?.stores ?? []);
@@ -267,7 +270,7 @@ export function MarketingBoard() {
         <div>
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-white">Marketing Board</h1>
-            <div className="flex items-center gap-1 rounded-lg bg-gray-900 border border-gray-800 p-0.5" role="tablist" aria-label="Videos or images">
+            <div data-guide="board.tabs" className="flex items-center gap-1 rounded-lg bg-gray-900 border border-gray-800 p-0.5" role="tablist" aria-label="Videos or images">
               {(["video", "image"] as ItemKind[]).map((k) => (
                 <button key={k} type="button" role="tab" aria-selected={tab === k} onClick={() => tab !== k && setTab(k)} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold cursor-pointer ${tab === k ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"}`}>
                   {k === "video" ? <Video size={12} /> : <Images size={12} />} {k === "video" ? "Videos" : "Images"} · {counts[k]}
@@ -278,6 +281,7 @@ export function MarketingBoard() {
           <p className="text-sm text-gray-500 mt-1">{tab === "video" ? "Reference ads to copy, who makes them, and what came out." : "Image references for page posts and image ads; Make ours turns one into our own."}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <GuideButton guide="board" />
           <Pill tone="ok">
             <Check size={11} /> {doneThisWeek} done this week
           </Pill>
@@ -321,7 +325,7 @@ export function MarketingBoard() {
           }}
           className="mt-6 flex gap-2 flex-wrap"
         >
-          <div className="flex-1 min-w-64 flex items-center gap-2 bg-gray-900 border border-gray-700 rounded-lg px-3 focus-within:border-purple-500">
+          <div data-guide="board.add" className="flex-1 min-w-64 flex items-center gap-2 bg-gray-900 border border-gray-700 rounded-lg px-3 focus-within:border-purple-500">
             <LinkIcon size={14} className="text-gray-500 shrink-0" />
             <input
               value={url}
@@ -333,12 +337,14 @@ export function MarketingBoard() {
           <Button primary type="submit" busy={adding} disabled={!url.trim()}>
             <Plus size={14} /> Add reference
           </Button>
-          <Button
-            onClick={() => fileRef.current?.click()}
-            title={tab === "image" ? "Add image references from your files, or drop them anywhere on the page" : "Add ads you downloaded, e.g. from a spy tool whose links need its login, or drop them anywhere on the page"}
-          >
-            {uploadingCount > 0 ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {tab === "image" ? "Upload images" : "Upload videos"}
-          </Button>
+          <span data-guide="board.upload" className="inline-flex">
+            <Button
+              onClick={() => fileRef.current?.click()}
+              title={tab === "image" ? "Add image references from your files, or drop them anywhere on the page" : "Add ads you downloaded, e.g. from a spy tool whose links need its login, or drop them anywhere on the page"}
+            >
+              {uploadingCount > 0 ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />} {tab === "image" ? "Upload images" : "Upload videos"}
+            </Button>
+          </span>
           <input
             key={tab}
             ref={fileRef}
@@ -369,7 +375,7 @@ export function MarketingBoard() {
           ))}
         </select>
         {error && <span className="text-red-300">{error}</span>}
-        <div className="ml-auto flex items-center gap-1 rounded-lg bg-gray-900 border border-gray-800 p-0.5" role="tablist" aria-label="Board or archive">
+        <div data-guide="board.archive" className="ml-auto flex items-center gap-1 rounded-lg bg-gray-900 border border-gray-800 p-0.5" role="tablist" aria-label="Board or archive">
           <button type="button" role="tab" aria-selected={!showArchive} onClick={() => setShowArchive(false)} className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-md font-semibold cursor-pointer ${!showArchive ? "bg-gray-700 text-white" : "text-gray-400 hover:text-white"}`}>
             <LayoutGrid size={12} /> Board
           </button>
@@ -405,7 +411,7 @@ export function MarketingBoard() {
       )}
 
       {view && !showArchive && (
-        <div className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div data-guide="board.columns" className="mt-5 grid grid-cols-1 md:grid-cols-3 gap-3">
           {BOARD_STATUSES.map((status) => {
             const list = columns[status];
             const shown = status === "done" && !showAllDone ? list.slice(0, DONE_PREVIEW) : list;
@@ -462,6 +468,7 @@ export function MarketingBoard() {
                         if (dropSlot?.status !== status || dropSlot.index !== index) setDropSlot({ status, index });
                       }}
                       className="relative"
+                      data-guide={item.id === firstCardId ? "board.card" : undefined}
                     >
                       {slotted === idx && dragId !== item.id && <div className="absolute -top-1.5 left-1 right-1 h-0.5 rounded bg-purple-400" />}
                       <BoardCard item={item} selected={item.id === selectedId} onSelect={() => setSelectedId(item.id)} onDragStart={() => setDragId(item.id)} />
@@ -503,7 +510,7 @@ export function MarketingBoard() {
       {selected && view && (
         <>
           <div className="fixed inset-0 z-40 bg-black/50 lg:bg-black/30" onClick={() => setSelectedId(null)} />
-          <aside className="fixed inset-y-0 right-0 z-50 w-full sm:w-[520px] bg-gray-950 border-l border-gray-800 shadow-2xl">
+          <aside data-guide="board.drawer" className="fixed inset-y-0 right-0 z-50 w-full sm:w-[520px] bg-gray-950 border-l border-gray-800 shadow-2xl">
             <ItemDetail
               item={selected}
               people={view.people}

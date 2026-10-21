@@ -147,7 +147,7 @@ export function StepModeSelect({
       </p>
 
       {/* Account selector */}
-      <div className="mb-6">
+      <div className="mb-6" data-guide="create-ad.account">
         <label className="block text-sm text-gray-400 mb-1.5">Ad Account</label>
         <select
           value={adAccountId}
@@ -170,7 +170,7 @@ export function StepModeSelect({
       </div>
 
       {/* Mode cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6" data-guide="create-ad.mode">
         <button
           onClick={() =>
             onUpdate({

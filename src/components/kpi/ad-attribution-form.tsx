@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Plus, RefreshCw } from "lucide-react";
+import { GuideButton } from "@/components/guides/guide-button";
 
 interface Entry {
   fb_ad_id: string;
@@ -69,7 +70,7 @@ export function AdAttributionForm() {
   return (
     <div className="max-w-3xl">
       <div className="flex items-center justify-between mb-4">
-        <div>
+        <div data-guide="creative-attribution.intro">
           <h1 className="text-2xl font-bold text-white">Creative Attribution</h1>
           <p className="text-sm text-gray-500">
             Claim ownership of FB ads you created. Counts toward your
@@ -77,9 +78,12 @@ export function AdAttributionForm() {
             <span className="text-gray-300"> is_test = true</span>.
           </p>
         </div>
-        <button onClick={load} className="text-gray-400 hover:text-white p-2 rounded cursor-pointer">
-          <RefreshCw size={18} />
-        </button>
+        <div className="flex items-center gap-1">
+          <GuideButton guide="creative-attribution" />
+          <button onClick={load} className="text-gray-400 hover:text-white p-2 rounded cursor-pointer">
+            <RefreshCw size={18} />
+          </button>
+        </div>
       </div>
 
       <form
@@ -90,6 +94,7 @@ export function AdAttributionForm() {
           <label className="text-xs text-gray-400">
             FB ad ID
             <input
+              data-guide="creative-attribution.ad-id"
               type="text"
               value={adId}
               onChange={(e) => setAdId(e.target.value)}
@@ -109,7 +114,7 @@ export function AdAttributionForm() {
             />
           </label>
         </div>
-        <label className="flex items-center gap-2 text-xs text-gray-400">
+        <label data-guide="creative-attribution.test" className="flex items-center gap-2 text-xs text-gray-400">
           <input
             type="checkbox"
             checked={isTest}
@@ -119,6 +124,7 @@ export function AdAttributionForm() {
         </label>
         <div className="flex items-center gap-3">
           <button
+            data-guide="creative-attribution.submit"
             type="submit"
             disabled={submitting}
             className="flex items-center gap-2 bg-white text-gray-900 font-medium px-3 py-1.5 rounded cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
@@ -131,7 +137,7 @@ export function AdAttributionForm() {
       </form>
 
       <h2 className="text-sm font-medium text-gray-300 mb-2">Tagged in last 7 days</h2>
-      <div className="bg-gray-900/40 border border-gray-800 rounded-lg overflow-hidden">
+      <div data-guide="creative-attribution.list" className="bg-gray-900/40 border border-gray-800 rounded-lg overflow-hidden">
         {loading ? (
           <p className="p-4 text-xs text-gray-500">Loading…</p>
         ) : entries.length === 0 ? (

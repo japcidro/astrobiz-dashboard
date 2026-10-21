@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import type { DatePreset } from "@/lib/facebook/types";
+import { GuideButton } from "@/components/guides/guide-button";
 import { QuickActionsModal } from "@/components/marketing/quick-actions-modal";
 import { AutopilotModal } from "@/components/marketing/autopilot-modal";
 import { DisapprovalReasonModal } from "@/components/marketing/disapproval-reason-modal";
@@ -1388,6 +1389,7 @@ export default function AdsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <GuideButton guide="ad-performance" />
           <a
             href="/admin/settings"
             className="p-2 text-gray-400 hover:text-white transition-colors"
@@ -1397,6 +1399,7 @@ export default function AdsPage() {
           </a>
           {isAdmin && (
             <button
+              data-guide="ad-performance.autopilot"
               onClick={() => setAutopilotOpen(true)}
               className={`flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg transition-colors cursor-pointer border ${
                 autopilotEnabled
@@ -1422,6 +1425,7 @@ export default function AdsPage() {
           )}
           {isAdmin && (
             <button
+              data-guide="ad-performance.quick-actions"
               onClick={() => setQuickActionsOpen(true)}
               disabled={loading || allRows.length === 0}
               className="flex items-center gap-1.5 bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 text-sm px-3 py-2 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
@@ -1432,6 +1436,7 @@ export default function AdsPage() {
             </button>
           )}
           <button
+            data-guide="ad-performance.refresh"
             onClick={() => fetchData(true)}
             disabled={loading}
             className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm px-3 py-2 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
@@ -1479,7 +1484,7 @@ export default function AdsPage() {
       )}
 
       {/* Date Filter */}
-      <div className="flex gap-2 mb-4 overflow-x-auto pb-2">
+      <div data-guide="ad-performance.dates" className="flex gap-2 mb-4 overflow-x-auto pb-2">
         {DATE_PRESETS.map((preset) => (
           <button
             key={preset.value}
@@ -1554,7 +1559,7 @@ export default function AdsPage() {
       )}
 
       {/* Filters */}
-      <div className="flex items-center gap-5 mb-4 flex-wrap">
+      <div data-guide="ad-performance.filters" className="flex items-center gap-5 mb-4 flex-wrap">
         <div className="flex items-center gap-2">
           <label className="text-sm text-gray-400">Account:</label>
           <select
@@ -1771,7 +1776,7 @@ export default function AdsPage() {
       )}
 
       {/* Table */}
-      <div className="bg-panel border border-line rounded-panel shadow-card overflow-hidden">
+      <div data-guide="ad-performance.table" className="bg-panel border border-line rounded-panel shadow-card overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -1915,6 +1920,7 @@ export default function AdsPage() {
                 {METRIC_COLS.map((col) => (
                   <th
                     key={col.key}
+                    data-guide={col.key === "cpa" ? "ad-performance.cpa" : undefined}
                     onClick={() => handleSort(col.key)}
                     className="px-3 py-3 font-medium text-gray-400 whitespace-nowrap cursor-pointer hover:text-white transition-colors select-none text-right"
                   >
@@ -1992,6 +1998,7 @@ export default function AdsPage() {
                   return (
                     <tr
                       key={i}
+                      data-guide={i === 0 ? "ad-performance.row" : undefined}
                       onClick={() => isClickable && handleRowClick(row)}
                       className={`border-b border-gray-700/20 hover:bg-gray-700/20 transition-colors ${
                         isClickable ? "cursor-pointer" : ""
@@ -2119,7 +2126,10 @@ export default function AdsPage() {
                       {/* Preview link (ad level) */}
                       {drillLevel === "ad" && (
                         <td className="px-3 py-2.5 text-center whitespace-nowrap">
-                          <div className="flex items-center justify-center gap-2">
+                          <div
+                            data-guide={i === 0 ? "ad-performance.ad-actions" : undefined}
+                            className="flex items-center justify-center gap-2"
+                          >
                             <button
                               type="button"
                               onClick={(e) => {

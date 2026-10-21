@@ -23,6 +23,7 @@ import {
   TrendingUp,
   XCircle,
 } from "lucide-react";
+import { GuideButton } from "@/components/guides/guide-button";
 import { IlpDeconstructionModal } from "@/components/marketing/ilp-deconstruction-modal";
 import { WinnersLogModal } from "@/components/marketing/winners-log-modal";
 
@@ -867,6 +868,7 @@ function PageHeader({
         </p>
       </div>
       <div className="flex items-center gap-2">
+        <GuideButton guide="creatives" />
         {refreshedAt && (
           <span
             className={`text-[11px] ${throttled ? "text-amber-400" : "text-gray-500"}`}
@@ -881,6 +883,7 @@ function PageHeader({
           </span>
         )}
         <button
+          data-guide="creatives.refresh"
           onClick={onRefresh}
           disabled={refreshing}
           className="flex items-center gap-1.5 text-xs text-gray-300 hover:text-white border border-gray-700 hover:border-gray-600 rounded-lg px-3 py-1.5 cursor-pointer disabled:opacity-40"
@@ -907,7 +910,7 @@ function Tabs({
   counts: { all: number; winners: number };
 }) {
   return (
-    <div className="flex items-center gap-1 border-b border-gray-800">
+    <div data-guide="creatives.tabs" className="flex items-center gap-1 border-b border-gray-800">
       {(
         [
           { value: "all" as Tab, label: "All Creatives", n: counts.all },
@@ -918,6 +921,7 @@ function Tabs({
         return (
           <button
             key={t.value}
+            data-guide={t.value === "all" ? "creatives.tab-all" : "creatives.tab-pool"}
             onClick={() => onChange(t.value)}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors cursor-pointer ${active ? "border-amber-500 text-white" : "border-transparent text-gray-400 hover:text-gray-200"}`}
           >
@@ -962,7 +966,7 @@ function Filters({
   setSearch: (v: string) => void;
 }) {
   return (
-    <div className="flex items-center gap-2 flex-wrap">
+    <div data-guide="creatives.filters" className="flex items-center gap-2 flex-wrap">
       <select
         value={datePreset}
         onChange={(e) => setDatePreset(e.target.value as DatePreset)}
@@ -1014,6 +1018,7 @@ function Filters({
           className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500"
         />
         <input
+          data-guide="creatives.search"
           type="text"
           placeholder="Search ad / campaign / label…"
           value={search}
@@ -1040,7 +1045,7 @@ function WinnersPoolToolbar({
 }) {
   const ready = poolCount >= 1;
   return (
-    <div className="flex flex-wrap items-center gap-3 bg-amber-900/15 border border-amber-700/40 rounded-lg p-3">
+    <div data-guide="creatives.pool-toolbar" className="flex flex-wrap items-center gap-3 bg-amber-900/15 border border-amber-700/40 rounded-lg p-3">
       <div className="flex-1 min-w-0">
         <p className="text-sm text-amber-100">
           <span className="font-semibold">{poolCount}</span> ad
@@ -1131,7 +1136,7 @@ function CreativesTable({
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-900/60 text-[11px] uppercase tracking-wide text-gray-400">
-            <tr>
+            <tr data-guide="creatives.columns">
               {tab === "winners" && (
                 <th className="px-3 py-2 text-left w-8"></th>
               )}
@@ -1186,11 +1191,12 @@ function CreativesTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800">
-            {rows.map((r) => {
+            {rows.map((r, i) => {
               const selected = selectedIds.has(r.ad_id);
               return (
                 <tr
                   key={r.ad_id}
+                  data-guide={i === 0 ? "creatives.row" : undefined}
                   className={`hover:bg-gray-900/50 transition-colors cursor-pointer ${selected ? "bg-emerald-900/15" : ""}`}
                   onClick={() => onRowClick(r)}
                 >
@@ -1259,7 +1265,7 @@ function CreativesTable({
                   <td className="px-3 py-2.5 text-xs text-gray-300">
                     {r.store ?? "—"}
                   </td>
-                  <td className="px-3 py-2.5 text-xs">
+                  <td data-guide={i === 0 ? "creatives.status" : undefined} className="px-3 py-2.5 text-xs">
                     <StatusCell
                       status={r.status}
                       adId={r.ad_id}

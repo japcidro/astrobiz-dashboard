@@ -338,7 +338,7 @@ export function AdRowsTable({
   return (
     <div className="space-y-3">
       {/* Bulk upload button */}
-      <div>
+      <div data-guide="bulk-create.upload">
         <input
           ref={bulkInputRef}
           type="file"
@@ -364,7 +364,7 @@ export function AdRowsTable({
       </div>
 
       {/* Table */}
-      <div className="overflow-x-auto rounded border border-gray-700">
+      <div className="overflow-x-auto rounded border border-gray-700" data-guide="bulk-create.table">
         {/* Wide enough that the copy fields stay usable; scrolls sideways
             on a narrow screen instead of squeezing them. */}
         <table className="w-full min-w-[1280px] text-sm text-left">

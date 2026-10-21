@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { FileText, Trash2, Edit, Send, Loader2 } from "lucide-react";
+import { FileText, Trash2, Edit, Loader2 } from "lucide-react";
 import Link from "next/link";
 import type { DraftStatus } from "@/lib/facebook/types";
+import { GuideButton } from "@/components/guides/guide-button";
 
 interface Draft {
   id: string;
@@ -71,12 +72,16 @@ export default function DraftsPage() {
             Saved ad drafts — resume editing or submit to Facebook
           </p>
         </div>
-        <Link
-          href="/marketing/create"
-          className="bg-white text-gray-900 text-sm font-medium px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors"
-        >
-          + New Ad
-        </Link>
+        <div className="flex items-center gap-2">
+          <GuideButton guide="drafts" />
+          <Link
+            href="/marketing/create"
+            data-guide="drafts.new"
+            className="bg-white text-gray-900 text-sm font-medium px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors"
+          >
+            + New Ad
+          </Link>
+        </div>
       </div>
 
       {loading ? (
@@ -93,9 +98,10 @@ export default function DraftsPage() {
         </div>
       ) : (
         <div className="space-y-3">
-          {drafts.map((draft) => (
+          {drafts.map((draft, i) => (
             <div
               key={draft.id}
+              data-guide={i === 0 ? "drafts.row" : undefined}
               className="bg-panel border border-line rounded-panel shadow-card p-4 flex items-center justify-between"
             >
               <div className="flex-1 min-w-0">
@@ -104,6 +110,7 @@ export default function DraftsPage() {
                     {draft.name}
                   </h3>
                   <span
+                    data-guide={i === 0 ? "drafts.status" : undefined}
                     className={`text-[10px] font-medium px-1.5 py-0.5 rounded uppercase ${STATUS_STYLES[draft.status]}`}
                   >
                     {draft.status}
@@ -122,6 +129,7 @@ export default function DraftsPage() {
                 {(draft.status === "draft" || draft.status === "failed") && (
                   <Link
                     href={`/marketing/create?draft=${draft.id}`}
+                    data-guide={i === 0 ? "drafts.edit" : undefined}
                     className="text-gray-400 hover:text-white p-1.5 transition-colors"
                     title="Edit & Retry"
                   >
@@ -131,6 +139,7 @@ export default function DraftsPage() {
                 <button
                   onClick={() => handleDelete(draft.id)}
                   disabled={deletingId === draft.id}
+                  data-guide={i === 0 ? "drafts.delete" : undefined}
                   className="text-gray-400 hover:text-red-400 p-1.5 transition-colors cursor-pointer disabled:opacity-50"
                   title="Delete"
                 >

@@ -19,6 +19,7 @@ import {
   CircleStop,
   Eye,
 } from "lucide-react";
+import { GuideButton } from "@/components/guides/guide-button";
 
 // ── Types ──
 interface RejectedAd {
@@ -597,13 +598,16 @@ export default function FixRejectionsPage() {
           <ShieldCheck className="text-emerald-400" size={26} />
           <h1 className="text-2xl font-bold">Fix Rejections</h1>
         </div>
-        <button
-          onClick={() => loadAds()}
-          className="flex items-center gap-2 px-3 py-2 text-sm bg-gray-800 hover:bg-gray-700 rounded-lg"
-        >
-          <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <GuideButton guide="fix-rejections" />
+          <button
+            onClick={() => loadAds()}
+            className="flex items-center gap-2 px-3 py-2 text-sm bg-gray-800 hover:bg-gray-700 rounded-lg"
+          >
+            <RefreshCw size={15} className={loading ? "animate-spin" : ""} />
+            Refresh
+          </button>
+        </div>
       </div>
       <p className="text-sm text-gray-400 mb-6 max-w-3xl">
         Upload safe images once — they stay in your library with AI-written copy.
@@ -618,7 +622,7 @@ export default function FixRejectionsPage() {
       </p>
 
       {/* ── Library ── */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+      <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6" data-guide="fix-rejections.library">
         <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <h2 className="font-semibold flex items-center gap-2">
             <ImageIcon size={18} /> Image library
@@ -646,6 +650,7 @@ export default function FixRejectionsPage() {
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading}
+              data-guide="fix-rejections.add"
               className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-600 rounded border border-emerald-600 disabled:opacity-50"
             >
               {uploading ? (
@@ -832,7 +837,7 @@ export default function FixRejectionsPage() {
         )}
 
         {/* Engagement burst settings */}
-        <div className="grid grid-cols-2 gap-4 mt-4 border-t border-gray-800 pt-4 max-w-md">
+        <div className="grid grid-cols-2 gap-4 mt-4 border-t border-gray-800 pt-4 max-w-md" data-guide="fix-rejections.burst">
           <div>
             <label className="text-xs text-gray-400">
               Lifetime budget (₱ total)
@@ -869,7 +874,7 @@ export default function FixRejectionsPage() {
 
       {/* ── Fixed-ads tracker ── */}
       {watchlist.length > 0 && (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6">
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-6" data-guide="fix-rejections.tracker">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold flex items-center gap-2">
               <Eye size={18} /> Fixed ads
@@ -994,7 +999,7 @@ export default function FixRejectionsPage() {
           Rejected ads{" "}
           <span className="text-gray-500 font-normal">({ads.length})</span>
         </h2>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" data-guide="fix-rejections.actions">
           <button
             onClick={() => refreshStatuses(ads.map((a) => a.ad_id))}
             disabled={loadingStatuses || ads.length === 0}
@@ -1055,7 +1060,7 @@ export default function FixRejectionsPage() {
           No rejected ads in your nursery campaigns. 🎉
         </div>
       ) : (
-        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden" data-guide="fix-rejections.table">
           <table className="w-full text-sm">
             <thead className="bg-gray-800/60 text-gray-400 text-xs uppercase">
               <tr>
@@ -1075,7 +1080,7 @@ export default function FixRejectionsPage() {
               </tr>
             </thead>
             <tbody>
-              {ads.map((ad) => {
+              {ads.map((ad, i) => {
                 const st = fixStates[ad.ad_id];
                 return (
                   <tr
@@ -1114,6 +1119,7 @@ export default function FixRejectionsPage() {
                       ) : (
                         <button
                           onClick={() => loadReason(ad.ad_id)}
+                          data-guide={i === 0 ? "fix-rejections.why" : undefined}
                           className="flex items-center gap-1 text-blue-400 hover:underline"
                         >
                           <HelpCircle size={12} /> Why?

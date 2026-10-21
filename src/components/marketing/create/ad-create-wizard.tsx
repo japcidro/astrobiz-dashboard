@@ -17,6 +17,7 @@ import { StepAdset } from "./step-adset";
 import { StepAd } from "./step-ad";
 import { StepReview } from "./step-review";
 import { StoreDefaultsSelector } from "../store-defaults-selector";
+import { GuideButton } from "@/components/guides/guide-button";
 import {
   resolveNamePattern,
   type StoreAdDefaults,
@@ -449,11 +450,12 @@ export function AdCreateWizard() {
           <ArrowLeft size={20} />
         </Link>
         <h1 className="text-2xl font-bold text-white">Create Ad</h1>
+        <GuideButton guide="create-ad" />
       </div>
 
       {/* Per-store autofill — pick a store to pre-fill account, page,
           pixel, URL, CTA, targeting. No-op until you click Apply. */}
-      <div className="mb-4">
+      <div className="mb-4" data-guide="create-ad.store">
         <StoreDefaultsSelector
           selectedStoreId={selectedStoreId}
           onStoreChange={(id) => {
@@ -465,7 +467,7 @@ export function AdCreateWizard() {
       </div>
 
       {/* Clickable step progress bar */}
-      <div className="flex items-center gap-1 mb-6">
+      <div className="flex items-center gap-1 mb-6" data-guide="create-ad.progress">
         {steps.map((step, i) => {
           const isActive = i === currentStep;
           const isCompleted = i < currentStep;

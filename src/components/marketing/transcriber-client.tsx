@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import type { TranscriberAnalysis } from "@/lib/gemini/transcriber";
+import { GuideButton } from "@/components/guides/guide-button";
 
 const MAX_UPLOAD_MB = 500;
 // Two at a time. Gemini's free tier throttles hard past that, and a stalled
@@ -644,11 +645,14 @@ export function TranscriberClient() {
 
   return (
     <div className="max-w-5xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-          <AudioLines size={24} className="text-emerald-400" />
-          Transcriber
-        </h1>
+      <div data-guide="transcriber.intro">
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+            <AudioLines size={24} className="text-emerald-400" />
+            Transcriber
+          </h1>
+          <GuideButton guide="transcriber" />
+        </div>
         <p className="text-gray-400 text-sm mt-1">
           Drop in videos — get the transcript, the tone of voice, and a full
           breakdown of the music. Multiple files at a time.
@@ -657,6 +661,7 @@ export function TranscriberClient() {
 
       {/* Dropzone */}
       <div
+        data-guide="transcriber.dropzone"
         onDragOver={(e) => {
           e.preventDefault();
           setDragging(true);
@@ -695,7 +700,7 @@ export function TranscriberClient() {
       </div>
 
       {jobs.length > 0 && (
-        <div className="flex flex-wrap items-center gap-3">
+        <div data-guide="transcriber.actions" className="flex flex-wrap items-center gap-3">
           {running ? (
             <button
               onClick={cancel}
@@ -741,11 +746,12 @@ export function TranscriberClient() {
 
       {/* Queue */}
       <div className="space-y-3">
-        {jobs.map((job) => {
+        {jobs.map((job, i) => {
           const open = expanded.has(job.id);
           return (
             <div
               key={job.id}
+              data-guide={i === 0 ? "transcriber.job" : undefined}
               className="border border-gray-800 rounded-xl overflow-hidden bg-gray-900/40"
             >
               <div className="flex items-center gap-3 p-4">
@@ -808,7 +814,9 @@ export function TranscriberClient() {
                 </p>
               )}
               {job.status === "done" && open && job.analysis && (
-                <Result job={job} />
+                <div data-guide={done[0]?.id === job.id ? "transcriber.result" : undefined}>
+                  <Result job={job} />
+                </div>
               )}
             </div>
           );

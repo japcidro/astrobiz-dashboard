@@ -161,7 +161,7 @@ export function ItemDetail({
             className="mt-2 w-full bg-transparent text-base font-semibold text-white placeholder:text-gray-600 focus:outline-none border-b border-transparent focus:border-gray-600"
           />
         </div>
-        <button type="button" onClick={onClose} aria-label="Close" className="text-gray-400 hover:text-white cursor-pointer p-1">
+        <button type="button" onClick={onClose} aria-label="Close" data-guide="board.close" className="text-gray-400 hover:text-white cursor-pointer p-1">
           <X size={18} />
         </button>
       </div>

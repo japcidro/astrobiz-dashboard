@@ -17,6 +17,7 @@ import { StepCampaign } from "@/components/marketing/create/step-campaign";
 import { StepAdset } from "@/components/marketing/create/step-adset";
 import { PageSelector } from "@/components/marketing/create/page-selector";
 import { StoreDefaultsSelector } from "../store-defaults-selector";
+import { GuideButton } from "@/components/guides/guide-button";
 import {
   resolveNamePattern,
   type StoreAdDefaults,
@@ -571,19 +572,22 @@ export function BulkCreateWizard() {
           <ArrowLeft size={20} />
         </Link>
         <h1 className="text-2xl font-bold text-white">Bulk Create Ads</h1>
+        <GuideButton guide="bulk-create" />
       </div>
 
       <div className="space-y-4">
         {/* ─── Section 0: Store (per-store autofill) ─── */}
-        <StoreDefaultsSelector
-          selectedStoreId={selectedStoreId}
-          onStoreChange={(id, name) => {
-            setSelectedStoreId(id);
-            setSelectedStoreName(name);
-          }}
-          onApply={handleApplyStoreDefaults}
-          buildSnapshot={buildStoreDefaultsSnapshot}
-        />
+        <div data-guide="bulk-create.store">
+          <StoreDefaultsSelector
+            selectedStoreId={selectedStoreId}
+            onStoreChange={(id, name) => {
+              setSelectedStoreId(id);
+              setSelectedStoreName(name);
+            }}
+            onApply={handleApplyStoreDefaults}
+            buildSnapshot={buildStoreDefaultsSnapshot}
+          />
+        </div>
 
         {/* ─── Section A: Setup ─── */}
         <Section title="A. Setup">
@@ -611,7 +615,7 @@ export function BulkCreateWizard() {
           </div>
 
           {/* Mode Toggle */}
-          <div className="mb-6">
+          <div className="mb-6" data-guide="bulk-create.mode">
             <label className="block text-sm text-gray-400 mb-2">Mode</label>
             <div className="flex flex-wrap gap-3">
               <button
@@ -701,6 +705,7 @@ export function BulkCreateWizard() {
         </Section>
 
         {/* ─── Section B: Adset Template ─── */}
+        <div data-guide="bulk-create.adset">
         {usingExistingAdset ? (
           <div className="bg-gray-800/30 border border-line rounded-xl px-6 py-4">
             <h2 className="text-white font-semibold">B. Adset Template</h2>
@@ -733,11 +738,12 @@ export function BulkCreateWizard() {
           />
         </Section>
         )}
+        </div>
 
         {/* ─── Section C: Shared Ad Settings + Ad Rows ─── */}
         <Section title="C. Ad Creatives">
           {/* Shared fields */}
-          <div className="space-y-4 mb-6">
+          <div className="space-y-4 mb-6" data-guide="bulk-create.shared">
             {/* Page Selector */}
             <div className="max-w-lg">
               <PageSelector
@@ -803,7 +809,7 @@ export function BulkCreateWizard() {
           </div>
 
           {/* Default Copy (fill all rows) */}
-          <div className="mb-4 bg-gray-700/20 border border-line rounded-lg p-4">
+          <div className="mb-4 bg-gray-700/20 border border-line rounded-lg p-4" data-guide="bulk-create.copy">
             <div className="flex items-center justify-between mb-3">
               <p className="text-sm text-gray-400">Default ad copy (optional — fills all empty rows)</p>
               <button
@@ -880,7 +886,7 @@ export function BulkCreateWizard() {
         </Section>
 
         {/* ─── Section D: Submit ─── */}
-        <div className="bg-gray-800/30 border border-line rounded-xl p-6 mt-6">
+        <div className="bg-gray-800/30 border border-line rounded-xl p-6 mt-6" data-guide="bulk-create.submit">
           <div className="flex items-center gap-4">
             <button
               disabled={!canSubmit}

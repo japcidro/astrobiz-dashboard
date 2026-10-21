@@ -344,6 +344,7 @@ export function VideoReviewModal({
       onClick={onClose}
     >
       <div
+        data-guide="submitted.modal"
         className="bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
@@ -371,6 +372,7 @@ export function VideoReviewModal({
             </button>
             <button
               onClick={onClose}
+              data-guide="submitted.close"
               className="text-gray-400 hover:text-white p-1 cursor-pointer"
             >
               <X size={20} />

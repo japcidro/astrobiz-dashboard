@@ -12,6 +12,7 @@ import {
 import Link from "next/link";
 import type { DatePreset } from "@/lib/facebook/types";
 import { ChatPanel } from "@/components/marketing/chat-panel";
+import { GuideButton } from "@/components/guides/guide-button";
 
 const DATE_PRESETS: { label: string; value: DatePreset }[] = [
   { label: "Today", value: "today" },
@@ -94,18 +95,22 @@ export default function AiAnalyticsPage() {
             </p>
           </div>
         </div>
-        <button
-          onClick={() => setRefreshNonce((n) => n + 1)}
-          disabled={loadingAds}
-          title="Force-refresh ads data (skips cache)"
-          className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm px-3 py-2 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
-        >
-          <RefreshCw size={14} className={loadingAds ? "animate-spin" : ""} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <GuideButton guide="ai-analytics" />
+          <button
+            onClick={() => setRefreshNonce((n) => n + 1)}
+            disabled={loadingAds}
+            title="Force-refresh ads data (skips cache)"
+            className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm px-3 py-2 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            <RefreshCw size={14} className={loadingAds ? "animate-spin" : ""} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       <Link
+        data-guide="ai-analytics.creatives-link"
         href="/marketing/creatives"
         className="mb-4 flex items-center justify-between gap-3 p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg hover:bg-amber-500/15 transition-colors"
       >
@@ -124,7 +129,7 @@ export default function AiAnalyticsPage() {
         <ArrowRight size={16} className="text-amber-300" />
       </Link>
 
-      <div className="flex flex-wrap items-center gap-1.5 mb-3">
+      <div data-guide="ai-analytics.dates" className="flex flex-wrap items-center gap-1.5 mb-3">
         {DATE_PRESETS.map((p) => {
           const active = datePreset === p.value;
           return (

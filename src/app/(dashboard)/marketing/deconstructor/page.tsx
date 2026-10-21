@@ -18,6 +18,7 @@ import {
   type ZonesRecord,
 } from "@/components/marketing/ilp-zone-renderer";
 import type { ZoneId } from "@/lib/ai/ilp-deconstruct-parser";
+import { GuideButton } from "@/components/guides/guide-button";
 
 interface HistoryItem {
   id: string;
@@ -160,12 +161,13 @@ export default function DeconstructorPage() {
             </p>
           </div>
         </div>
+        <GuideButton guide="deconstructor" />
       </div>
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-4 overflow-hidden">
         <div className="flex flex-col gap-3 overflow-hidden min-w-0">
           {/* Input */}
-          <div className="bg-panel border border-line rounded-panel shadow-card p-4">
+          <div data-guide="deconstructor.input" className="bg-panel border border-line rounded-panel shadow-card p-4">
             <label className="block text-xs font-medium text-gray-400 uppercase mb-2">
               Ad transcript
             </label>
@@ -182,6 +184,7 @@ export default function DeconstructorPage() {
                 {sourceText.length.toLocaleString()} chars · Claude Sonnet 4.6
               </p>
               <button
+                data-guide="deconstructor.run"
                 onClick={handleDeconstruct}
                 disabled={loading || !sourceText.trim()}
                 className="bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-good-ink text-sm font-medium px-4 py-2 rounded-lg flex items-center gap-2 cursor-pointer"
@@ -215,7 +218,7 @@ export default function DeconstructorPage() {
           )}
 
           {/* Output */}
-          <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+          <div data-guide="deconstructor.output" className="flex-1 overflow-y-auto space-y-2 pr-1">
             {loading && !result && (
               <div className="flex flex-col items-center justify-center py-16 text-gray-400 gap-3">
                 <Loader2
@@ -243,7 +246,7 @@ export default function DeconstructorPage() {
         </div>
 
         {/* History sidebar */}
-        <div className="bg-panel border border-line rounded-panel shadow-card overflow-hidden flex flex-col">
+        <div data-guide="deconstructor.history" className="bg-panel border border-line rounded-panel shadow-card overflow-hidden flex flex-col">
           <div className="px-3 py-2.5 border-b border-line flex items-center gap-2">
             <History size={14} className="text-gray-400" />
             <p className="text-xs font-medium text-gray-400 uppercase flex-1">
@@ -319,7 +322,7 @@ export default function DeconstructorPage() {
 
 function ResultHeader({ result }: { result: DeconstructionResult }) {
   return (
-    <div className="bg-gray-800/30 border border-line rounded-xl p-3 flex items-center gap-3 flex-wrap">
+    <div data-guide="deconstructor.result-header" className="bg-gray-800/30 border border-line rounded-xl p-3 flex items-center gap-3 flex-wrap">
       <div className="flex-1 min-w-0">
         <p className="text-sm text-white font-medium truncate">
           {result.ad_title ?? "Deconstructed Ad"}

@@ -389,7 +389,7 @@ export function ChatPanel({ datePreset }: { datePreset: DatePreset }) {
         <div className="text-xs text-gray-400">
           {sessionId ? "Continuing previous chat" : "New chat"}
         </div>
-        <div className="flex items-center gap-1">
+        <div data-guide="ai-analytics.toolbar" className="flex items-center gap-1">
           <div className="relative" ref={historyRef}>
             <button
               onClick={() => setHistoryOpen((v) => !v)}
@@ -458,7 +458,7 @@ export function ChatPanel({ datePreset }: { datePreset: DatePreset }) {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div data-guide="ai-analytics.messages" className="flex-1 overflow-y-auto p-4 space-y-4">
         {loadingSession && (
           <div className="flex items-center justify-center py-6">
             <Loader2 size={16} className="animate-spin text-gray-500" />
@@ -475,7 +475,7 @@ export function ChatPanel({ datePreset }: { datePreset: DatePreset }) {
               I can pull live FB performance, past deconstructions, comparative
               reports, scaling campaigns, and autopilot activity.
             </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 w-full max-w-xl">
+            <div data-guide="ai-analytics.prompts" className="grid grid-cols-1 md:grid-cols-2 gap-2 w-full max-w-xl">
               {SAMPLE_PROMPTS.map((p) => (
                 <button
                   key={p}
@@ -562,7 +562,7 @@ export function ChatPanel({ datePreset }: { datePreset: DatePreset }) {
       <div className="border-t border-line p-3">
         <p className="text-[10px] text-gray-500 mb-1.5">
           Default scope: <span className="text-gray-300">{DATE_PRESET_LABELS[datePreset]}</span>{" "}
-          · override anytime in your message (e.g. "last 30 days").
+          · override anytime in your message (e.g. &quot;last 30 days&quot;).
         </p>
         <form
           onSubmit={(e) => {
@@ -572,6 +572,7 @@ export function ChatPanel({ datePreset }: { datePreset: DatePreset }) {
           className="flex items-end gap-2"
         >
           <textarea
+            data-guide="ai-analytics.input"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {

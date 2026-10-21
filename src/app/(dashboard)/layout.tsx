@@ -8,6 +8,9 @@ import { ThemeSync } from "@/components/theme/theme-sync";
 import { ClockStatusBanner } from "@/components/attendance/clock-status-banner";
 import { canOpenDevDashboard, isOwnerEmail } from "@/lib/owner";
 import { asTheme } from "@/lib/theme";
+import { Suspense } from "react";
+import { GuideRunner } from "@/components/guides/guide-runner";
+import { loadGuideProgress } from "@/lib/guides/load";
 
 export default async function DashboardLayout({
   children,
@@ -62,6 +65,7 @@ export default async function DashboardLayout({
   }
 
   const theme = asTheme(employee.theme);
+  const guideProgress = await loadGuideProgress(employee);
 
   return (
     <div className="flex h-dvh bg-canvas">
@@ -77,6 +81,9 @@ export default async function DashboardLayout({
         <ClockStatusBanner />
         <div className="p-4 pt-16 lg:p-8">{children}</div>
       </main>
+      <Suspense fallback={null}>
+        <GuideRunner progress={guideProgress} />
+      </Suspense>
       <BackgroundRefresh />
     </div>
   );

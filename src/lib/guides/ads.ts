@@ -1,0 +1,256 @@
+import type { Guide } from "./types";
+
+/**
+ * Ad management guides. Targets are in src/components/marketing (create,
+ * bulk-create, submitted) and the drafts and fix-rejections pages under
+ * src/app/(dashboard)/marketing.
+ */
+export const adGuides: Guide[] = [
+  {
+    id: "create-ad",
+    area: "ads",
+    title: "Create one ad",
+    blurb: "Pick the store, choose new or existing, fill the steps, submit to Facebook.",
+    href: "/marketing/create",
+    minutes: 2,
+    steps: [
+      {
+        target: "create-ad.store",
+        place: "bottom",
+        title: "Start with the store",
+        body: "Pick the store the ad is for. **Apply store defaults** fills the ad account, Page, pixel, website URL, call to action, targeting and ad copy saved for that store, and never replaces something you have already typed. **Save current as default** keeps what is on the form now for next time.",
+      },
+      {
+        target: "create-ad.progress",
+        place: "bottom",
+        title: "The steps",
+        body: "Setup, Campaign, Ad Set, Ad Creative, then Review. Click a label to jump to that step. Adding to an existing campaign or ad set drops the steps you do not need.",
+      },
+      {
+        target: "create-ad.account",
+        place: "bottom",
+        title: "Ad account",
+        body: "The account the campaign is created in. Accounts that are not active are greyed out.",
+        tryIt: "Try it: open the dropdown to see the accounts. The walkthrough waits.",
+      },
+      {
+        target: "create-ad.mode",
+        place: "top",
+        title: "New or existing",
+        body: "**Create New Campaign** builds a campaign, an ad set and the ad. **Add to Existing** puts the ad into a campaign you already run, in one of its ad sets or in a new one. Paused campaigns and ad sets are listed too, marked paused.",
+      },
+      {
+        target: "create-ad.save",
+        place: "top",
+        title: "Save a draft any time",
+        body: "**Save Draft** keeps everything typed so far in Ad Drafts, as long as an account is picked. Open the draft from there to continue where you left off.",
+      },
+      {
+        target: "create-ad.next",
+        place: "top",
+        title: "Next",
+        body: "Next stays off until the step has what Facebook needs: an account on Setup, a name and objective on Campaign, a name on Ad Set, an ad name and primary text on Ad Creative.",
+      },
+      {
+        target: "create-ad.progress",
+        place: "bottom",
+        title: "Review and submit",
+        body: "Review shows every setting with an Edit link back to its step. **Submit to Facebook** creates the campaign, ad set and ad as active, so they start on the ad set's start date, which is tomorrow unless you change it. If Facebook says no, the draft keeps the error so you can fix it and retry from Ad Drafts.",
+      },
+    ],
+  },
+  {
+    id: "bulk-create",
+    area: "ads",
+    title: "Bulk create ads",
+    blurb: "Upload a batch of creatives, fill one row per ad, submit them all at once.",
+    href: "/marketing/bulk-create",
+    minutes: 2,
+    steps: [
+      {
+        target: "bulk-create.store",
+        place: "bottom",
+        title: "Start with the store",
+        body: "Pick the store, then **Apply store defaults** fills the ad account, Page, website URL, call to action, budget and targeting saved for it. Saved copy goes into the default copy box and into every row that is still blank.",
+      },
+      {
+        target: "bulk-create.mode",
+        place: "bottom",
+        title: "Pick a mode",
+        body: "**New Campaign** makes one campaign with a new ad set for each row. **Existing Campaign** adds new ad sets to a campaign you already run. **Existing Ad Set** puts every ad into an ad set you pick on its row and creates nothing above the ad.",
+      },
+      {
+        target: "bulk-create.adset",
+        place: "top",
+        title: "The ad set template",
+        body: "Budget, schedule and targeting here apply to every ad set made from the table. When the ad sets carry the budget, the amount is set per ad set in the table's **Budget** column instead; a campaign with its own budget gives its ad sets none.",
+      },
+      {
+        target: "bulk-create.shared",
+        place: "right",
+        title: "Shared ad settings",
+        body: "The Facebook Page, website URL, URL parameters and call to action are the same for every ad on the page.",
+      },
+      {
+        target: "bulk-create.copy",
+        place: "top",
+        title: "Default ad copy",
+        body: "Type primary text, headline and description once, then **Fill Empty Rows** copies them into rows that are still blank. A row with its own text is left alone.",
+        tryIt: "Try it: type a headline in the default copy box. The walkthrough waits.",
+      },
+      {
+        target: "bulk-create.upload",
+        place: "right",
+        title: "Upload many files at once",
+        body: "**Upload Files** takes images and videos together. Files land on the rows in order, and any extra file gets a new row of its own. Each upload goes straight to Facebook, three at a time.",
+      },
+      {
+        target: "bulk-create.table",
+        place: "top",
+        title: "One row, one ad",
+        body: "Each row is an ad: its ad set name or pick, the budget on the ad set's first row, ad name, creative and copy. A red border marks a field still missing. **+ Ad** adds another ad to the same ad set, **Add Row** adds a new one, and the bookmark on a field lists copy saved for the store.",
+      },
+      {
+        target: "bulk-create.submit",
+        place: "top",
+        title: "Submit all",
+        body: "**Submit All to Facebook** stays off while the list beside it names what is missing. The ads are sent one by one with each row's result shown as it goes. **Retry Failed** sends only the rows that failed and reuses the campaign and ad sets already created, so nothing is duplicated.",
+      },
+    ],
+  },
+  {
+    id: "drafts",
+    area: "ads",
+    title: "Ad drafts",
+    blurb: "Find a saved or failed ad, read its status, reopen it or clear it out.",
+    href: "/marketing/drafts",
+    minutes: 2,
+    steps: [
+      {
+        target: "drafts.new",
+        place: "bottom",
+        title: "Where drafts come from",
+        body: "**Save Draft** in Create Ad puts the ad here, newest change first. Every ad submitted through Create Ad or Bulk Create is logged here as well, so the list is also a history. **+ New Ad** starts a fresh one.",
+      },
+      {
+        target: "drafts.row",
+        place: "bottom",
+        title: "Reading a draft",
+        body: "The name is the campaign or ad name, then when it was last changed. If Facebook turned the submission down, the error shows in red next to the date.",
+      },
+      {
+        target: "drafts.status",
+        place: "right",
+        title: "What the status means",
+        body: "**draft** is saved and not sent. **submitting** is on its way to Facebook right now. **submitted** is live on Facebook. **failed** means Facebook rejected the submission; nothing more happens until you retry.",
+      },
+      {
+        target: "drafts.edit",
+        place: "left",
+        title: "Edit and retry",
+        body: "Opens the draft in Create Ad with everything filled in. A failed draft goes back to draft when opened, so you can fix the problem and submit again. Only drafts and failed submissions can be reopened.",
+      },
+      {
+        target: "drafts.delete",
+        place: "left",
+        title: "Delete",
+        body: "Asks first, then removes the draft from this list. Anything already created on Facebook is not touched.",
+      },
+    ],
+  },
+  {
+    id: "submitted",
+    area: "ads",
+    title: "Submitted ad videos",
+    blurb: "See every ad the team has submitted, watch it, star the good ones.",
+    href: "/marketing/submitted",
+    minutes: 2,
+    steps: [
+      {
+        target: "submitted.refresh",
+        place: "bottom",
+        title: "What this page shows",
+        body: "Every ad created on the team's ad accounts in the date range, straight from Facebook, including scheduled ads that are not in Ad Performance yet. The marketer comes from the code in the ad name. The list is kept for five minutes; **Refresh** pulls it again.",
+      },
+      {
+        target: "submitted.filters",
+        place: "bottom",
+        title: "Narrow it down",
+        body: "Search by ad, marketer, campaign or store, and filter by type, date range, marketer and store. It opens on the last 7 days; pick **Custom range** for exact dates.",
+        tryIt: "Try it: type part of an ad name in the search box. The walkthrough waits.",
+      },
+      {
+        target: "submitted.starred",
+        place: "bottom",
+        title: "Star the good ones",
+        body: "The star on a card marks a creative worth keeping, and everyone on the team sees the same stars. **Starred** shows only those.",
+      },
+      {
+        target: "submitted.card",
+        place: "right",
+        title: "Reading a card",
+        body: "Video or image, who made it and for which store, and how long ago it was created. **Scheduled** means the ad set's start date has not arrived yet. A green border and tick mean it has been reviewed; the speech bubble means it has a note.",
+      },
+      {
+        target: "submitted.modal",
+        place: "right",
+        clickBefore: "submitted.card",
+        clickAfter: "submitted.close",
+        title: "Open an ad",
+        body: "Click a card to watch the video or see the image, with lifetime spend, purchases, cost per purchase and ROAS from Facebook, and any note left on it. **Get transcript** writes out what is said in the video, a small AI cost the first time and saved after that. **Copy all** copies the details, results and transcript to paste into an AI, and **Open in Ads Manager** goes to the ad on Facebook.",
+      },
+    ],
+  },
+  {
+    id: "fix-rejections",
+    area: "ads",
+    title: "Fix rejected ads",
+    blurb: "Swap a rejected creative for a safe image and get the ad reviewed again.",
+    href: "/marketing/fix-rejections",
+    minutes: 2,
+    steps: [
+      {
+        target: "fix-rejections.library",
+        place: "bottom",
+        title: "The safe image library",
+        body: "Benign images that replace a rejected creative. Each one carries an AI-written headline, primary text, description and call to action, and stays here for next time. Click a thumbnail to select it for the next fix. **Regenerate** writes new copy, **Edit** lets you change it, **Remove** takes the image out.",
+      },
+      {
+        target: "fix-rejections.add",
+        place: "bottom",
+        title: "Add images",
+        body: "Pick one or many image files. Each is shrunk in the browser, uploaded, then read by the AI, which writes its copy; the log under the button says whether that worked. New images are selected as soon as they land.",
+      },
+      {
+        target: "fix-rejections.burst",
+        place: "top",
+        title: "Spend cap and run length",
+        body: "**Lifetime budget** is the total a fixed ad may spend after the fix before it is paused automatically. **Max run (days)** sets an end date on a normal ad's ad set in case the cap is never reached. Ads in scaling campaigns keep their budget; only the auto-pause cap applies to them.",
+      },
+      {
+        target: "fix-rejections.tracker",
+        place: "bottom",
+        title: "Fixed ads",
+        body: "Every fixed ad stays here after its image is swapped. The bar is spend since the fix against the cap, updated about every 15 minutes; **Watching** turns into **Paused (limit hit)** when the cap is reached, and the live Facebook status shows under it. **Remove** stops the watch, and with it the auto-pause.",
+      },
+      {
+        target: "fix-rejections.table",
+        place: "top",
+        title: "Rejected ads",
+        body: "Ads Facebook disapproved or flagged with issues, in NURSERY campaigns only, even when the campaign or ad set is paused. Tick the ads to fix; the checkbox in the header ticks them all.",
+      },
+      {
+        target: "fix-rejections.why",
+        place: "right",
+        title: "Why was it rejected",
+        body: "**Why?** pulls Meta's policy feedback for that ad into the **Reason** column.",
+      },
+      {
+        target: "fix-rejections.actions",
+        place: "bottom",
+        title: "Fix selected",
+        body: "After you confirm, each ticked ad gets a random selected image, with no repeats until the pool runs out. The image and its copy replace the creative on the same ad, the ad is set active so Meta reviews it again, and its ad set is set to the burst budget with an end date; the ad is paused once its spend since the fix reaches the cap. The **Result** column says what happened and the status turns to In review. **Stop selected** pauses the ticked ads now; **Refresh statuses** checks their live status.",
+      },
+    ],
+  },
+];

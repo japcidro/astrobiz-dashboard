@@ -5,6 +5,9 @@ import { canOpenDevDashboard, isOwnerEmail } from "@/lib/owner";
 import { Sidebar } from "@/components/layout/sidebar";
 import { ThemeSync } from "@/components/theme/theme-sync";
 import { asTheme } from "@/lib/theme";
+import { Suspense } from "react";
+import { GuideRunner } from "@/components/guides/guide-runner";
+import { loadGuideProgress } from "@/lib/guides/load";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +30,7 @@ export default async function OwnerLayout({
   if (!canOpenDevDashboard(user.email, employee.role)) notFound();
 
   const theme = asTheme(employee.theme);
+  const guideProgress = await loadGuideProgress(employee);
 
   return (
     <div className="flex h-dvh bg-canvas">
@@ -42,6 +46,9 @@ export default async function OwnerLayout({
       <main className="flex-1 overflow-auto">
         <div className="p-4 pt-16 lg:p-8">{children}</div>
       </main>
+      <Suspense fallback={null}>
+        <GuideRunner progress={guideProgress} />
+      </Suspense>
     </div>
   );
 }

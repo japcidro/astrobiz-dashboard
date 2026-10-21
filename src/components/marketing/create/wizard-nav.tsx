@@ -60,6 +60,7 @@ export function WizardNav({
         <button
           onClick={onSaveDraft}
           disabled={saving}
+          data-guide="create-ad.save"
           className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-white text-sm px-4 py-2 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
         >
           {saving ? (
@@ -74,6 +75,7 @@ export function WizardNav({
           <button
             onClick={onNext}
             disabled={!canNext}
+            data-guide="create-ad.next"
             className="flex items-center gap-1.5 bg-white text-gray-900 text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50 cursor-pointer hover:bg-gray-100"
           >
             {nextLabel || "Next"}

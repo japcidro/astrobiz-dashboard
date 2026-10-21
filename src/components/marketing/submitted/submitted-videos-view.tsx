@@ -16,6 +16,7 @@ import {
 import { cachedFetch } from "@/lib/client-cache";
 import type { SubmittedAd } from "@/lib/marketing/submitted-videos";
 import { VideoReviewModal } from "./video-review-modal";
+import { GuideButton } from "@/components/guides/guide-button";
 
 type TypeFilter = "all" | "video" | "image";
 type ReviewedFilter = "all" | "unreviewed" | "reviewed";
@@ -290,18 +291,22 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
             )}
           </p>
         </div>
-        <button
-          onClick={() => load(true)}
-          disabled={refreshing}
-          className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 text-white text-sm px-3 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
-        >
-          <RefreshCw size={15} className={refreshing ? "animate-spin" : ""} />
-          Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <GuideButton guide="submitted" />
+          <button
+            onClick={() => load(true)}
+            disabled={refreshing}
+            data-guide="submitted.refresh"
+            className="flex items-center gap-2 bg-gray-800 hover:bg-gray-700 text-white text-sm px-3 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw size={15} className={refreshing ? "animate-spin" : ""} />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-2 mb-5">
+      <div className="flex flex-wrap items-center gap-2 mb-5" data-guide="submitted.filters">
         <div className="relative flex-1 min-w-[180px] max-w-xs">
           <Search
             size={15}
@@ -328,6 +333,7 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
         <button
           onClick={() => setStarredOnly((v) => !v)}
           title="Show starred ads only"
+          data-guide="submitted.starred"
           className={`flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg border transition-colors cursor-pointer ${
             starredOnly
               ? "bg-amber-400/15 border-amber-400/60 text-amber-300"
@@ -429,10 +435,11 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
         </div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-          {filtered.map((ad) => (
+          {filtered.map((ad, i) => (
             <AdCard
               key={ad.fb_ad_id}
               ad={ad}
+              guide={i === 0 ? "submitted.card" : undefined}
               onOpen={() => setActive(ad)}
               onToggleStar={toggleStar}
             />
@@ -456,10 +463,13 @@ export function SubmittedVideosView({ role }: { role: "admin" | "marketing" }) {
 
 function AdCard({
   ad,
+  guide,
   onOpen,
   onToggleStar,
 }: {
   ad: SubmittedAd;
+  /** The `data-guide` name for the walkthrough; only the first card gets one. */
+  guide?: string;
   onOpen: () => void;
   onToggleStar: (id: string, next: boolean) => void;
 }) {
@@ -469,6 +479,7 @@ function AdCard({
   return (
     <button
       onClick={onOpen}
+      data-guide={guide}
       className={`group text-left rounded-xl overflow-hidden transition-colors cursor-pointer ${
         ad.reviewed_at
           ? "bg-green-500/10 border-2 border-green-500/70 ring-1 ring-green-500/40"

@@ -48,6 +48,7 @@ import {
   Mic,
   Film,
   Headphones,
+  BookOpen,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -365,6 +366,13 @@ const navEntries: NavEntry[] = [
     roles: ["admin"],
   },
   {
+    // Walkthroughs of the marketing pages, for marketers and the admins who onboard them.
+    label: "Guides",
+    href: "/guides",
+    icon: <BookOpen size={20} />,
+    roles: ["admin", "marketing"],
+  },
+  {
     label: "Settings",
     href: "/admin/settings",
     icon: <Settings size={20} />,
@@ -460,6 +468,12 @@ const ownerNavEntries: NavEntry[] = [
     label: "Marketing Board",
     href: "/owner/marketing-board",
     icon: <Kanban size={20} />,
+    roles: ownerRoles,
+  },
+  {
+    label: "Guides",
+    href: "/owner/guides",
+    icon: <BookOpen size={20} />,
     roles: ownerRoles,
   },
   {
