@@ -40,6 +40,9 @@ export interface CallCoachConsent {
   signed_at: string;
 }
 
+/** Where a recording came from: the PC-mic recorder, or a file the VA uploaded from her phone. */
+export type SegmentSource = "pc_mic" | "phone_upload";
+
 export interface SegmentRow {
   id: string;
   employee_id: string;
@@ -55,6 +58,53 @@ export interface SegmentRow {
   status: "stored" | "transcribed" | "scored" | "failed";
   transcribe_attempts: number;
   transcribe_error: string | null;
+  source: SegmentSource;
+  /** Order number or customer phone the VA typed with a phone upload. */
+  reference: string | null;
+  original_name: string | null;
+}
+
+// ─── Phone uploads: a VA with no signal at her desk calls from her phone ───
+
+/** One phone recording may be this big. The bucket enforces the same cap. */
+export const PHONE_UPLOAD_MAX_BYTES = 100 * 1024 * 1024;
+
+/** A phone recording longer than this is almost certainly not one call. */
+export const PHONE_UPLOAD_MAX_SECONDS = 4 * 60 * 60;
+
+/**
+ * What the phone's file picker offers and what the bucket accepts. Android
+ * call recorders write m4a, aac, amr or mp3; iPhone Voice Memos writes m4a.
+ */
+export const PHONE_UPLOAD_ACCEPT = ".m4a,.mp3,.aac,.ogg,.oga,.opus,.amr,.awb,.3gp,.wav,.webm,.flac,audio/*";
+
+export const PHONE_UPLOAD_EXT: Record<string, string> = {
+  m4a: "audio/mp4",
+  mp4: "audio/mp4",
+  mp3: "audio/mpeg",
+  aac: "audio/aac",
+  ogg: "audio/ogg",
+  oga: "audio/ogg",
+  opus: "audio/ogg",
+  amr: "audio/amr",
+  awb: "audio/amr-wb",
+  "3gp": "audio/3gpp",
+  wav: "audio/wav",
+  webm: "audio/webm",
+  flac: "audio/flac",
+};
+
+/** The MIME type a phone file goes to the bucket (and to Gemini) as, by its extension; null when it is not audio we take. */
+export function phoneUploadMime(fileName: string, browserType?: string): string | null {
+  const ext = fileName.toLowerCase().split(".").pop() ?? "";
+  if (PHONE_UPLOAD_EXT[ext]) return PHONE_UPLOAD_EXT[ext];
+  const t = (browserType ?? "").split(";")[0].trim().toLowerCase();
+  if (t === "audio/x-m4a" || t === "audio/m4a") return "audio/mp4";
+  if (t === "audio/mp3") return "audio/mpeg";
+  if (t === "audio/x-wav" || t === "audio/wave") return "audio/wav";
+  if (t === "video/3gpp") return "audio/3gpp";
+  if (Object.values(PHONE_UPLOAD_EXT).includes(t)) return t;
+  return null;
 }
 
 export interface MicEventRow {
@@ -173,6 +223,7 @@ export interface CallMoment {
 export interface CallRow {
   id: string;
   position: number;
+  source: SegmentSource;
   started_at: string;
   ended_at: string;
   outcome: CallOutcome;

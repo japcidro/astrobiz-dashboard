@@ -68,3 +68,31 @@ export async function signSegmentPaths(db: SupabaseClient, paths: string[]): Pro
   }
   return out;
 }
+
+/**
+ * The time entry a phone-uploaded call belongs to: the entry whose window
+ * covers the call's start (paused and completed ones included), else the
+ * latest entry of that day, else null when the VA never clocked in.
+ */
+export async function shiftEntryAt(db: SupabaseClient, employeeId: string, at: Date): Promise<string | null> {
+  const iso = at.toISOString();
+  const { data: covering } = await db
+    .from("time_entries")
+    .select("id")
+    .eq("employee_id", employeeId)
+    .lte("started_at", iso)
+    .or(`ended_at.is.null,ended_at.gte.${iso}`)
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (covering?.id) return covering.id as string;
+  const { data: sameDay } = await db
+    .from("time_entries")
+    .select("id")
+    .eq("employee_id", employeeId)
+    .eq("date", iso.slice(0, 10))
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return (sameDay?.id as string | undefined) ?? null;
+}

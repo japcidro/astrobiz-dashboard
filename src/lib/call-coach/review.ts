@@ -10,6 +10,7 @@ import {
   type MicEventRow,
   type ReviewRow,
   type RubricKey,
+  type SegmentSource,
   type TranscriptTurn,
 } from "./shared";
 
@@ -30,6 +31,10 @@ interface SegmentWithTranscript {
   voice_seconds: number;
   status: string;
   turns: TranscriptTurn[] | null;
+  /** Missing on a PC-mic minute; "phone_upload" for a call the VA uploaded from her phone. */
+  source?: SegmentSource;
+  /** Order number or customer phone the VA typed with a phone upload. */
+  reference?: string | null;
 }
 
 /** "HH:MM:SS" on the Manila clock. */
@@ -77,6 +82,11 @@ export function buildTimeline(segments: SegmentWithTranscript[], events: MicEven
       const gapMin = Math.round((new Date(seg.started_at).getTime() - new Date(prevEnd).getTime()) / 60000);
       if (gapMin >= 2) lines.push(`(quiet for ${gapMin} min)`);
     }
+    const phone = seg.source === "phone_upload";
+    if (phone) {
+      const minutes = Math.max(1, Math.round((new Date(seg.ended_at).getTime() - new Date(seg.started_at).getTime()) / 60000));
+      lines.push(`[${phClock(seg.started_at)}] (phone call recording uploaded by the VA${seg.reference ? `, for ${seg.reference}` : ""}, ${minutes} min)`);
+    }
     if (seg.turns.length === 0) {
       lines.push(`[${phClock(seg.started_at)}] (noise, no words)`);
     } else {
@@ -85,6 +95,7 @@ export function buildTimeline(segments: SegmentWithTranscript[], events: MicEven
         lines.push(`[${phClock(new Date(base + turn.t * 1000))}] ${SPEAKER[turn.speaker] ?? "OTHER"}: ${turn.text}`);
       }
     }
+    if (phone) lines.push(`[${phClock(seg.ended_at)}] (end of phone recording)`);
     prevEnd = seg.ended_at;
   }
   flushEvents(null);
@@ -97,6 +108,7 @@ What you are reading:
 - Lines look like "[HH:MM:SS] VA: ..." on the Manila clock. CUSTOMER lines exist only when the phone was on loudspeaker; often you only hear the VA's side and must infer the customer from the VA's replies.
 - "(quiet for N min)", "(noise, no words)" and mic events separate stretches. Calls are usually 30 seconds to 5 minutes, separated by quiet.
 - Taglish is normal. Transcripts have errors; read for meaning.
+- "(phone call recording uploaded by the VA ...)" opens a call the VA made from her mobile phone, away from the PC, and uploaded herself; "(end of phone recording)" closes it. Inside it both sides are audible and the CUSTOMER lines are real. One recording is normally one call, possibly with dialing or ringing at the start. When the opening line says "for 1234" or "for 09171234567", that is the order number or customer phone the VA typed for it; mention it in the call's summary.
 
 Your job:
 1. Split the day into calls. A call starts with a greeting or dialing talk and ends with a goodbye, a hang-up, or the next greeting. Voicemail, "the number you dialed", and one-sided "hello? hello?" are calls with outcome no_answer. Talking to a teammate, reading orders aloud, or personal talk is one or more not_sales entries; keep those short and do not score them.
@@ -229,7 +241,7 @@ export async function reviewDay(
   const [{ data: segRows }, { data: existing }] = await Promise.all([
     db
       .from("call_coach_segments")
-      .select("id, started_at, ended_at, voice_seconds, status, call_coach_transcripts(turns)")
+      .select("id, started_at, ended_at, voice_seconds, status, source, reference, call_coach_transcripts(turns)")
       .eq("employee_id", employeeId)
       .eq("date", date)
       .order("started_at"),
@@ -245,6 +257,8 @@ export async function reviewDay(
       ended_at: r.ended_at as string,
       voice_seconds: Number(r.voice_seconds),
       status: r.status as string,
+      source: (r.source as SegmentSource | undefined) ?? "pc_mic",
+      reference: (r.reference as string | null | undefined) ?? null,
       turns: r.status === "transcribed" || r.status === "scored" ? (turns ?? []) : null,
     };
   });
@@ -329,7 +343,9 @@ ${timeline}`;
       };
     })
     .filter((c): c is NonNullable<typeof c> => c !== null)
-    .sort((a, b) => a.started_at.localeCompare(b.started_at));
+    .sort((a, b) => a.started_at.localeCompare(b.started_at))
+    // A call that starts inside a phone recording came from the phone.
+    .map((c) => ({ ...c, source: callSource(segments, c.started_at) }));
 
   const sales = calls.filter((c) => c.outcome !== "not_sales");
   const scoredCalls = sales.filter((c) => c.overall !== null);
@@ -379,6 +395,17 @@ ${timeline}`;
     .eq("status", "transcribed");
 
   return { status: "done", review: saved as ReviewRow };
+}
+
+/** Where a call came from: "phone_upload" when its start falls inside a phone recording (a minute of slack for rounded times). */
+export function callSource(segments: Array<Pick<SegmentWithTranscript, "started_at" | "ended_at" | "source">>, startedAt: string): SegmentSource {
+  const t = new Date(startedAt).getTime();
+  const SLACK = 60_000;
+  for (const s of segments) {
+    if (s.source !== "phone_upload") continue;
+    if (new Date(s.started_at).getTime() - SLACK <= t && t <= new Date(s.ended_at).getTime() + SLACK) return "phone_upload";
+  }
+  return "pc_mic";
 }
 
 /** Every recorded employee with transcribed minutes on a date that a done review does not yet cover. */

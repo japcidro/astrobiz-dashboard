@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
-import { Headphones, Sparkles, TrendingDown, TrendingUp, Minus } from "lucide-react";
+import { Headphones, Smartphone, Sparkles, TrendingDown, TrendingUp, Minus } from "lucide-react";
+import { LinkButton } from "@/components/ui/button";
+import { Pill } from "@/components/ui/pill";
 import { getEmployee } from "@/lib/supabase/get-employee";
 import { createServiceClient } from "@/lib/supabase/service";
 import { isRecordedRole } from "@/lib/call-coach/server";
@@ -54,7 +56,7 @@ export default async function MyCallsPage() {
   const { data: callRows } = reviews.length
     ? await db
         .from("call_coach_calls")
-        .select("id, review_id, position, started_at, ended_at, outcome, scores, overall, summary, upsell_attempted, upsell_converted, flags")
+        .select("id, review_id, position, started_at, ended_at, outcome, scores, overall, summary, upsell_attempted, upsell_converted, flags, source")
         .in("review_id", reviews.map((r) => r.id))
         .order("position")
     : { data: [] };
@@ -71,14 +73,20 @@ export default async function MyCallsPage() {
 
   return (
     <div className="max-w-4xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-          <Headphones size={24} className="text-purple-400" /> My Calls
-        </h1>
-        <p className="text-gray-400 mt-1">
-          How your customer calls went, {first}. Scores are out of 5 and come from a review of each day&apos;s calls. Use the notes to pick one thing to try
-          tomorrow.
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+            <Headphones size={24} className="text-purple-400" /> My Calls
+          </h1>
+          <p className="text-gray-400 mt-1">
+            How your customer calls went, {first}. Scores are out of 5 and come from a review of each day&apos;s calls. Use the notes to pick one thing to try
+            tomorrow.
+          </p>
+        </div>
+        {/* Calls made from the phone, away from the PC recorder, come in here. */}
+        <LinkButton href="/va/my-calls/upload" variant="secondary" size="sm" className="shrink-0">
+          <Smartphone size={14} /> Upload from phone
+        </LinkButton>
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -128,6 +136,7 @@ export default async function MyCallsPage() {
       {reviews.map((r, idx) => {
         const prev = reviews[idx + 1]?.score ?? null;
         const calls = (callsByReview.get(r.id) ?? []).filter((c) => c.outcome !== "not_sales");
+        const phoneCalls = calls.filter((c) => c.source === "phone_upload").length;
         return (
           <div key={r.id} className="bg-gray-800/50 border border-gray-700/50 rounded-xl p-5">
             <div className="flex flex-wrap items-baseline justify-between gap-3">
@@ -144,6 +153,7 @@ export default async function MyCallsPage() {
             <p className="text-xs text-gray-500 mt-0.5">
               {r.calls_count} calls · {r.reached_count} reached · {r.confirmed_count} confirmed · upsell offered on {r.upsell_attempted}
               {r.upsell_converted > 0 && `, taken ${r.upsell_converted}`}
+              {phoneCalls > 0 && ` · ${phoneCalls} from phone`}
             </p>
 
             <div className="flex flex-wrap gap-x-4 gap-y-1 mt-3">
@@ -178,6 +188,11 @@ export default async function MyCallsPage() {
                     <li key={c.id} className="bg-gray-900/50 border border-gray-700/60 rounded-lg px-3 py-2">
                       <div className="flex flex-wrap items-center gap-3 text-xs">
                         <span className="font-mono text-white">{formatClock(c.started_at)}</span>
+                        {c.source === "phone_upload" && (
+                          <Pill tone="info">
+                            <Smartphone size={11} aria-hidden /> phone
+                          </Pill>
+                        )}
                         <span className="text-gray-400">{OUTCOME[c.outcome] ?? c.outcome}</span>
                         {c.overall !== null && <span className={`font-mono font-semibold ${toneClass(scoreTone(c.overall))}`}>{c.overall.toFixed(1)}</span>}
                         {c.upsell_attempted && <span className="text-gray-400">upsell {c.upsell_converted ? "taken" : "offered"}</span>}

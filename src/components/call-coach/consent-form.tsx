@@ -10,7 +10,19 @@ import { CONSENT_TEXT } from "@/lib/call-coach/shared";
  * they agree to is stored with the signature, so later edits to CONSENT_TEXT
  * never change what someone already signed.
  */
-export function ConsentForm({ fullName }: { fullName: string }) {
+interface Props {
+  fullName: string;
+  /**
+   * Ask Chrome for the microphone inside the click (the PC recorder). Off on
+   * the phone upload page, where there is nothing to record.
+   */
+  askMic?: boolean;
+  /** The line under the title; the default talks about the PC microphone. */
+  intro?: string;
+  buttonLabel?: string;
+}
+
+export function ConsentForm({ fullName, askMic = true, intro, buttonLabel }: Props) {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -25,7 +37,7 @@ export function ConsentForm({ fullName }: { fullName: string }) {
   const sign = async () => {
     setError(null);
     setMicNote(null);
-    if (navigator.mediaDevices?.getUserMedia) {
+    if (askMic && navigator.mediaDevices?.getUserMedia) {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
         for (const t of stream.getTracks()) t.stop();
@@ -60,7 +72,7 @@ export function ConsentForm({ fullName }: { fullName: string }) {
         <h2 className="text-lg font-semibold text-white">Before your first shift: recording consent</h2>
       </div>
       <p className="text-sm text-gray-400 mb-4">
-        Your shifts are recorded from this computer&apos;s microphone for quality and training. Read this once and sign to start your timer.
+        {intro ?? "Your shifts are recorded from this computer's microphone for quality and training. Read this once and sign to start your timer."}
       </p>
 
       <div className="bg-gray-900/70 border border-gray-700 rounded-lg p-4 text-sm text-gray-300 whitespace-pre-line leading-relaxed max-h-64 overflow-y-auto">
@@ -81,9 +93,11 @@ export function ConsentForm({ fullName }: { fullName: string }) {
       <p className="text-xs text-gray-500 mt-1.5">
         Signed as {fullName} on {new Date().toLocaleDateString("en-PH", { year: "numeric", month: "long", day: "numeric", timeZone: "Asia/Manila" })}.
       </p>
-      <p className="text-xs text-amber-200/80 mt-3">
-        Pagka-click ng button, magtatanong si Chrome: &quot;astrobiz.live wants to use your microphone&quot;. I-click ang <strong>Allow</strong>. Isang beses lang ito.
-      </p>
+      {askMic && (
+        <p className="text-xs text-amber-200/80 mt-3">
+          Pagka-click ng button, magtatanong si Chrome: &quot;astrobiz.live wants to use your microphone&quot;. I-click ang <strong>Allow</strong>. Isang beses lang ito.
+        </p>
+      )}
       {micNote && <p className="text-xs text-amber-300 mt-2">{micNote}</p>}
 
       {error && (
@@ -97,7 +111,7 @@ export function ConsentForm({ fullName }: { fullName: string }) {
         className="mt-5 inline-flex items-center gap-2 bg-amber-600 hover:bg-amber-500 text-white font-medium py-2.5 px-5 rounded-lg transition-colors disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
       >
         <ShieldCheck size={18} />
-        {pending ? "Saving…" : "I agree, let me start my shift"}
+        {pending ? "Saving…" : (buttonLabel ?? "I agree, let me start my shift")}
       </button>
     </div>
   );

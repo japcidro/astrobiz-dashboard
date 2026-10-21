@@ -13,6 +13,7 @@ import {
   Pause,
   Play,
   RefreshCw,
+  Smartphone,
   Sparkles,
   TrendingDown,
   TrendingUp,
@@ -653,6 +654,11 @@ function DayTimeline({
               <span className="text-xs text-gray-400 w-[90px]">
                 {Math.round(seg.voice_seconds)}s voice / {Math.round(seg.duration_seconds)}s
               </span>
+              {seg.source === "phone_upload" && (
+                <span className="inline-flex items-center gap-1 text-[11px] text-info font-mono" title="Uploaded from the VA's phone">
+                  <Smartphone size={11} /> phone{seg.reference ? ` · ${seg.reference}` : ""}
+                </span>
+              )}
               {seg.url ? (
                 <audio
                   controls

@@ -1,14 +1,19 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { CALL_COACH_BUCKET, TRANSCRIBE_MODEL, type TranscriptTurn } from "./shared";
+import { startUploadSession, uploadChunk, waitUntilActive } from "@/lib/gemini/transcriber";
+import { CALL_COACH_BUCKET, TRANSCRIBE_MODEL, type SegmentSource, type TranscriptTurn } from "./shared";
 
 /**
- * Call Coach transcription: one Gemini call per stored segment. A segment is
- * at most a minute of audio (about 250 KB), so it travels inline in the
- * request; no File API round trip. Taglish stays Taglish.
+ * Call Coach transcription: one Gemini call per stored segment. A PC-mic
+ * segment is at most a minute of audio (about 250 KB), so it travels inline
+ * in the request. A phone upload is a whole call and can be tens of MB; past
+ * INLINE_MAX_BYTES it goes through Gemini's File API first. Taglish stays
+ * Taglish.
  */
 
 const GEMINI_API_BASE = "https://generativelanguage.googleapis.com";
 const MAX_ATTEMPTS = 3;
+/** Gemini takes 20 MB of inline request; base64 adds a third, so 14 MB of audio is the ceiling. */
+const INLINE_MAX_BYTES = 14 * 1024 * 1024;
 /** Give the browser time to finish uploading the current minute before we read it. */
 const SETTLE_SECONDS = 60;
 
@@ -26,6 +31,9 @@ Rules:
 - Start a new turn whenever the speaker changes or after a clear pause. Give each turn its start time in seconds from the start of the clip, to one decimal.
 - Mark unintelligible words as [unclear]. Do not invent words. If the clip has no speech, return an empty turns list.
 - language: what you heard most: "taglish", "tagalog", "english", "bisaya", or "none".`;
+
+/** Added for a call the VA recorded on her phone and uploaded: the mix is different from the PC mic. */
+const PHONE_INSTRUCTION = `This clip is one phone call the VA made from her mobile phone and uploaded herself, not the laptop microphone. Both sides are usually audible at similar volume: the VA is the one who names the store and reads the order back; the other voice is the customer, label it "customer" even when it is clear and loud. Keep dialing tones, ringing and voicemail prompts out of the turns.`;
 
 const RESPONSE_SCHEMA = {
   type: "object",
@@ -65,23 +73,42 @@ export function renderTranscript(turns: TranscriptTurn[]): string {
     .join("\n");
 }
 
-export async function transcribeAudio(apiKey: string, bytes: Uint8Array, mime: string): Promise<Transcription> {
+/** Puts a big clip in Gemini's File API and waits until it can be referenced. */
+async function uploadToGeminiFile(apiKey: string, bytes: Uint8Array, mime: string): Promise<{ uri: string; name: string }> {
+  const sessionUrl = await startUploadSession("call-coach-phone-upload", mime, bytes.byteLength, apiKey);
+  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  const file = await uploadChunk(sessionUrl, buffer, 0, true);
+  if (!file) throw new Error("Gemini did not return the uploaded file");
+  await waitUntilActive(file.name, apiKey);
+  return { uri: file.uri, name: file.name };
+}
+
+export async function transcribeAudio(
+  apiKey: string,
+  bytes: Uint8Array,
+  mime: string,
+  opts: { source?: SegmentSource } = {},
+): Promise<Transcription> {
+  const phone = opts.source === "phone_upload";
+  let geminiFile: { uri: string; name: string } | null = null;
+  const audioPart =
+    bytes.byteLength > INLINE_MAX_BYTES
+      ? { fileData: { mimeType: mime, fileUri: (geminiFile = await uploadToGeminiFile(apiKey, bytes, mime)).uri } }
+      : { inlineData: { mimeType: mime, data: Buffer.from(bytes).toString("base64") } };
   const body = {
-    systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
+    systemInstruction: { parts: [{ text: phone ? `${SYSTEM_INSTRUCTION}\n\n${PHONE_INSTRUCTION}` : SYSTEM_INSTRUCTION }] },
     contents: [
       {
         role: "user",
-        parts: [
-          { inlineData: { mimeType: mime, data: Buffer.from(bytes).toString("base64") } },
-          { text: "Transcribe this clip. Return JSON matching the schema." },
-        ],
+        parts: [audioPart, { text: "Transcribe this clip. Return JSON matching the schema." }],
       },
     ],
     generationConfig: {
       responseMimeType: "application/json",
       responseSchema: RESPONSE_SCHEMA,
       temperature: 0.1,
-      maxOutputTokens: 8192,
+      // A PC-mic minute needs a few hundred tokens; a 30-minute phone call can need 20k.
+      maxOutputTokens: phone ? 32768 : 8192,
     },
   };
 
@@ -90,6 +117,10 @@ export async function transcribeAudio(apiKey: string, bytes: Uint8Array, mime: s
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+  if (geminiFile) {
+    // Gemini drops it after 48 hours anyway; this just keeps the file list clean.
+    void fetch(`${GEMINI_API_BASE}/v1beta/${geminiFile.name}?key=${encodeURIComponent(apiKey)}`, { method: "DELETE" }).catch(() => {});
+  }
   const json = (await res.json().catch(() => ({}))) as {
     error?: { message?: string };
     candidates?: Array<{ content?: { parts?: Array<{ text?: string }> }; finishReason?: string }>;
@@ -133,6 +164,7 @@ interface PendingSegment {
   storage_path: string;
   mime: string;
   transcribe_attempts: number;
+  source: SegmentSource;
 }
 
 export interface BatchFilter {
@@ -160,7 +192,7 @@ export async function runTranscriptionBatch(
 
   let q = db
     .from("call_coach_segments")
-    .select("id, employee_id, date, storage_path, mime, transcribe_attempts")
+    .select("id, employee_id, date, storage_path, mime, transcribe_attempts, source")
     .eq("status", "stored")
     .lt("transcribe_attempts", MAX_ATTEMPTS)
     .lt("ended_at", new Date(Date.now() - SETTLE_SECONDS * 1000).toISOString())
@@ -193,7 +225,7 @@ async function transcribeSegment(db: SupabaseClient, apiKey: string, seg: Pendin
     const dl = await db.storage.from(CALL_COACH_BUCKET).download(seg.storage_path);
     if (dl.error || !dl.data) throw new Error(`Download failed: ${dl.error?.message ?? "no data"}`);
     const bytes = new Uint8Array(await dl.data.arrayBuffer());
-    const result = await transcribeAudio(apiKey, bytes, seg.mime || "audio/webm");
+    const result = await transcribeAudio(apiKey, bytes, seg.mime || "audio/webm", { source: seg.source });
 
     const { error: upsertError } = await db.from("call_coach_transcripts").upsert(
       {

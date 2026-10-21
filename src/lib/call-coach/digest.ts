@@ -31,6 +31,7 @@ Rules:
 - coaching has 2 or 3 items, each one concrete behaviour with an example line.
 - wins has 1 to 3 items. If the week was poor, still find the truest one.
 - If only one or two days were reviewed, say so in summary and keep the advice proportionate.
+- A day may say "from phone N": those calls the VA made from her mobile phone away from the desk and uploaded herself. They count like any other call; the customer is clearly audible in them, so their scores are the most reliable.
 
 Rubric items: ${RUBRIC_ITEMS.map((i) => `${i.key} = ${i.label}`).join("; ")}.`;
 
@@ -160,8 +161,9 @@ export async function buildWeeklyDigest(
   const dayBlocks = reviews.map((r) => {
     const rubric = RUBRIC_ITEMS.map((i) => `${i.key} ${r.scores[i.key] ?? "n/a"}`).join(", ");
     const dayCalls = calls.filter((c) => c.review_id === r.id && c.outcome !== "not_sales");
+    const phone = dayCalls.filter((c) => c.source === "phone_upload").length;
     const flagged = dayCalls.filter((c) => c.flags.length > 0).map((c) => `  - ${phClock(c.started_at)} ${c.outcome}${c.overall !== null ? ` ${c.overall}` : ""} [${c.flags.join(", ")}] ${c.summary}`);
-    return `## ${r.date}  score ${r.score ?? "n/a"}  calls ${r.calls_count} (reached ${r.reached_count}, confirmed ${r.confirmed_count}, upsell offered ${r.upsell_attempted}, taken ${r.upsell_converted})
+    return `## ${r.date}  score ${r.score ?? "n/a"}  calls ${r.calls_count} (reached ${r.reached_count}, confirmed ${r.confirmed_count}, upsell offered ${r.upsell_attempted}, taken ${r.upsell_converted}${phone ? `, from phone ${phone}` : ""})
 rubric: ${rubric}
 summary: ${r.summary ?? ""}
 coaching that day: ${r.coaching.join(" | ")}
