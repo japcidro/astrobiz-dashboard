@@ -4,7 +4,7 @@ import { HOOK_BUCKET, signPaths as signHookPaths } from "@/lib/hook-studio/stora
 import { isLookId } from "@/lib/hook-studio/presets";
 import { DEFAULT_CLIP_ENGINE, DEFAULT_CLIP_ENGINE_FOR, getClipEngine, isClipEngine, veoLengthFor, type ClipEngineId } from "./engines";
 import { castRecipe, motionPrompt, stillPrompt, veoPrompt } from "./prompts";
-import type { BrandImage, BrandKit, CastSource, Person, PersonFolder, PersonLibrary, ProjectRow, ProjectSummary, ProjectView, ShotRow, ShotView } from "./types";
+import type { BrandImage, BrandKit, BrandKitSummary, CastSource, Person, PersonFolder, PersonLibrary, ProjectRow, ProjectSummary, ProjectView, ShotRow, ShotView } from "./types";
 import { brandCheck, describeProduct, detectChanges, labelShots } from "./vision";
 
 const UUID = /^[0-9a-f-]{36}$/;
@@ -34,6 +34,25 @@ export async function loadBrandKit(db: SupabaseClient, store: string | null, sig
   const rows = (imgs ?? []) as Array<Omit<BrandImage, "url">>;
   const s = signed ?? (await signBoardPaths(db, rows.map((r) => r.path)));
   return { store, rules: (kit?.rules as string | undefined) ?? "", profile: (kit?.profile as string | undefined) ?? "", images: rows.map((r) => ({ ...r, url: s.get(r.path) ?? null })) };
+}
+
+/** Every brand the Brand Kit page lists: the active Shopify stores, plus any store that already has a kit. */
+export async function loadBrandKitOverview(db: SupabaseClient): Promise<BrandKitSummary[]> {
+  const [{ data: stores }, { data: kits }, { data: imgs }] = await Promise.all([
+    db.from("shopify_stores").select("name").eq("is_active", true),
+    db.from("remake_brand_kits").select("store, rules, profile"),
+    db.from("remake_brand_images").select("store, kind"),
+  ]);
+  const kitRows = (kits ?? []) as Array<{ store: string; rules: string | null; profile: string | null }>;
+  const imgRows = (imgs ?? []) as Array<{ store: string; kind: string | null }>;
+  const names = new Set([...((stores ?? []) as Array<{ name: string }>).map((s) => s.name), ...kitRows.map((k) => k.store), ...imgRows.map((i) => i.store)]);
+  return [...names]
+    .sort((a, b) => a.localeCompare(b))
+    .map((store) => {
+      const kit = kitRows.find((k) => k.store === store);
+      const own = imgRows.filter((i) => i.store === store);
+      return { store, photos: own.length, unlabelled: own.filter((i) => !i.kind).length, has_profile: !!kit?.profile?.trim(), has_rules: !!kit?.rules?.trim() };
+    });
 }
 
 // ─── Projects ───

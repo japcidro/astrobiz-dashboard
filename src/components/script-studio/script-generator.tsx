@@ -460,7 +460,15 @@ export function ScriptGenerator() {
                   </option>
                 ))}
               </select>
-              {store && page && !page.profiled.includes(store) && <p className="text-[11px] text-amber-300 mt-1">No brand profile for {store} yet; the writer will only know the product&apos;s name. Add one in the Clipper&apos;s brand kit.</p>}
+              {store && page && !page.profiled.includes(store) && (
+                <p className="text-[11px] text-amber-300 mt-1">
+                  No brand profile for {store} yet; the writer will only know the product&apos;s name.{" "}
+                  <Link href={`/owner/brand-kit?store=${encodeURIComponent(store)}`} className="text-purple-300 hover:text-white">
+                    Add one in the Brand Kit
+                  </Link>
+                  .
+                </p>
+              )}
             </div>
             <div>
               <Label>Notes · optional</Label>

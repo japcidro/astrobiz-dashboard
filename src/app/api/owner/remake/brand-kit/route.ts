@@ -1,18 +1,18 @@
 import { requireBoardUser } from "@/lib/marketing-board/auth";
 import { BOARD_BUCKET } from "@/lib/marketing-board/storage";
 import { PRODUCT_FORMS, type ProductForm } from "@/lib/remake/types";
-import { isUuid, labelBrandImage, loadBrandKit } from "@/lib/remake/views";
+import { isUuid, labelBrandImage, loadBrandKit, loadBrandKitOverview } from "@/lib/remake/views";
 
 export const dynamic = "force-dynamic";
 
 const storeOf = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim().slice(0, 80) : null);
 
-/** GET ?store= — the store's product photos and rules. */
+/** GET ?store= — the store's product photos and rules. Without a store: every brand and how far its kit is filled in. */
 export async function GET(request: Request) {
   const auth = await requireBoardUser();
   if (auth.error) return auth.error;
   const store = storeOf(new URL(request.url).searchParams.get("store"));
-  if (!store) return Response.json({ error: "Missing store" }, { status: 400 });
+  if (!store) return Response.json({ stores: await loadBrandKitOverview(auth.db) });
   return Response.json({ kit: await loadBrandKit(auth.db, store) });
 }
 

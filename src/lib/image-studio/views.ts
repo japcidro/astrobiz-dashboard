@@ -80,7 +80,7 @@ export async function loadStudioPage(db: SupabaseClient, itemId: string | null):
   const [itemRow, { data: storeRows }, { data: kits }, sources, runs] = await Promise.all([
     itemId ? db.from("marketing_board_items").select("id, title, store, image_path").eq("id", itemId).maybeSingle().then((r) => r.data) : Promise.resolve(null),
     db.from("shopify_stores").select("name").eq("is_active", true).order("name"),
-    db.from("remake_brand_kits").select("store, rules"),
+    db.from("remake_brand_kits").select("store, profile"),
     loadSources(db),
     loadRuns(db, itemId),
   ]);
@@ -93,7 +93,7 @@ export async function loadStudioPage(db: SupabaseClient, itemId: string | null):
   return {
     item,
     stores: ((storeRows ?? []) as Array<{ name: string }>).map((s) => s.name),
-    brand_rules: Object.fromEntries(((kits ?? []) as Array<{ store: string; rules: string }>).map((k) => [k.store, k.rules])),
+    profiled: ((kits ?? []) as Array<{ store: string; profile: string | null }>).filter((k) => k.profile?.trim()).map((k) => k.store),
     sources,
     runs,
   };

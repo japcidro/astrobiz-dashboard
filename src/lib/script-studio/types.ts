@@ -155,7 +155,7 @@ export interface BoardVideo {
 export interface StudioPage {
   item: { id: string; title: string | null; store: string | null; has_video: boolean } | null;
   stores: string[];
-  /** Stores with a brand profile in the Clipper's brand kit. */
+  /** Stores with a brand profile in the Brand Kit. */
   profiled: string[];
   dna: Record<string, DnaView>;
   winners: Record<string, WinnersView>;

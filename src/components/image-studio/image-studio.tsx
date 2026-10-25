@@ -251,7 +251,24 @@ export function ImageStudio() {
                   </option>
                 ))}
               </select>
-              {store && page && !page.brand_rules[store] && <p className="text-[11px] text-amber-300 mt-1">No brand profile for {store} yet; the planner will only know what the product photos show. Add one in the Clipper&apos;s brand kit.</p>}
+              {store && page && !page.sources.brand.some((b) => b.store === store) && (
+                <p className="text-[11px] text-amber-300 mt-1">
+                  No product photos for {store} yet, so our pack cannot go into the ad.{" "}
+                  <Link href={`/owner/brand-kit?store=${encodeURIComponent(store)}`} className="text-purple-300 hover:text-white">
+                    Upload them in the Brand Kit
+                  </Link>
+                  .
+                </p>
+              )}
+              {store && page && !page.profiled.includes(store) && (
+                <p className="text-[11px] text-amber-300 mt-1">
+                  No brand profile for {store} yet; the planner will only know what the product photos show.{" "}
+                  <Link href={`/owner/brand-kit?store=${encodeURIComponent(store)}`} className="text-purple-300 hover:text-white">
+                    Add one in the Brand Kit
+                  </Link>
+                  .
+                </p>
+              )}
             </div>
             <div>
               <Label>Notes · optional</Label>

@@ -137,6 +137,15 @@ export interface BrandKit {
   images: BrandImage[];
 }
 
+/** One brand on the Brand Kit page: how far its kit is filled in. */
+export interface BrandKitSummary {
+  store: string;
+  photos: number;
+  unlabelled: number;
+  has_profile: boolean;
+  has_rules: boolean;
+}
+
 export interface ProjectView extends ProjectRow {
   source_url: string | null;
   strip_url: string | null;

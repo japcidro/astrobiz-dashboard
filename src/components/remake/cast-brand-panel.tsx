@@ -1,6 +1,7 @@
 "use client";
 
-import { Loader2, Plus, Trash2, UserCheck } from "lucide-react";
+import { ExternalLink, Loader2, Plus, Trash2, UserCheck } from "lucide-react";
+import Link from "next/link";
 import { DEFAULT_VOICE_PROFILE } from "@/lib/remake/prompts";
 import { useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -135,7 +136,15 @@ export function CastBrandPanel({
       </Panel>
 
       <Panel>
-        <Label>Brand kit · our product</Label>
+        <div className="flex items-start justify-between gap-2">
+          <Label>Brand kit · our product</Label>
+          <Link
+            href={project.store ? `/owner/brand-kit?store=${encodeURIComponent(project.store)}` : "/owner/brand-kit"}
+            className="text-[11px] text-purple-300 hover:text-white inline-flex items-center gap-1 shrink-0"
+          >
+            Open the Brand Kit <ExternalLink size={10} />
+          </Link>
+        </div>
         <input
           list="remake-stores"
           defaultValue={project.store ?? ""}

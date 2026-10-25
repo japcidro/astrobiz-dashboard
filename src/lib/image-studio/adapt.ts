@@ -3,13 +3,11 @@ import { HOOK_BUCKET, signPaths as signHookPaths } from "@/lib/hook-studio/stora
 import { BOARD_BUCKET, signBoardPaths } from "@/lib/marketing-board/storage";
 import { STILL_CREDITS } from "@/lib/remake/engines";
 import { askVision } from "@/lib/remake/vision";
-import type { AdaptPlan, Attachment, ReviewScores } from "./types";
+import { isContents, pickStaticAdPhotos, type AdaptPlan, type Attachment, type ReviewScores } from "./types";
+
+export { isContents };
 
 const UUID = /^[0-9a-f-]{36}$/;
-
-/** Brand photos of what is inside the pack; the pack itself is any other kind (bottle, box, jar, …). */
-const CONTENT_KINDS = new Set(["capsules", "gummies"]);
-export const isContents = (kind: string | null | undefined) => CONTENT_KINDS.has(kind ?? "");
 
 type BrandImageRow = { id: string; path: string; kind: string | null; description: string | null; pack_spec: string | null };
 
@@ -195,9 +193,7 @@ export async function createAdaptRun(db: SupabaseClient, input: AdaptInput, crea
   const profile = (kit?.profile as string | undefined) ?? "";
   const brandImages = (productRows ?? []) as BrandImageRow[];
   // The pack is what gets reproduced; a close-up of the capsules is only for scenes that show them loose.
-  let packRows = brandImages.filter((p) => !isContents(p.kind)).slice(0, 2);
-  if (packRows.length === 0) packRows = brandImages.slice(0, 1);
-  const contentRows = brandImages.filter((p) => isContents(p.kind) && !packRows.includes(p)).slice(0, 1);
+  const { packs: packRows, contents: contentRows } = pickStaticAdPhotos(brandImages);
   const packSigned = await signBoardPaths(db, packRows.map((p) => p.path));
   const packs = await Promise.all(
     packRows.map(async (p) => {

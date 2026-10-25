@@ -3,6 +3,22 @@ import type { BrandCheck } from "@/lib/remake/types";
 export type AttachmentRole = "reference" | "model" | "product" | "look";
 export const ROLE_LABEL: Record<AttachmentRole, string> = { reference: "Reference · copy the layout", model: "Model · this face", product: "Product · exact label", look: "Look · style only" };
 
+/** Brand photos of what is inside the pack; the pack itself is any other kind (bottle, box, jar, …). */
+const CONTENT_KINDS = new Set(["capsules", "gummies"]);
+export const isContents = (kind: string | null | undefined) => CONTENT_KINDS.has(kind ?? "");
+
+/**
+ * The brand photos an adapt run attaches, in brand kit order: up to two of the
+ * pack (what gets reproduced) and one of the contents, for scenes that show
+ * them loose. The Brand Kit page marks the same photos.
+ */
+export function pickStaticAdPhotos<T extends { kind: string | null }>(images: T[]): { packs: T[]; contents: T[] } {
+  let packs = images.filter((p) => !isContents(p.kind)).slice(0, 2);
+  if (packs.length === 0) packs = images.slice(0, 1);
+  const contents = images.filter((p) => isContents(p.kind) && !packs.includes(p)).slice(0, 1);
+  return { packs, contents };
+}
+
 export interface Attachment {
   bucket: string;
   path: string;
@@ -104,7 +120,8 @@ export interface StudioSources {
 export interface StudioPage {
   item: { id: string; title: string | null; store: string | null; bucket: string; path: string | null; url: string | null } | null;
   stores: string[];
-  brand_rules: Record<string, string>;
+  /** Stores with a brand profile in the Brand Kit. */
+  profiled: string[];
   sources: StudioSources;
   runs: RunView[];
 }

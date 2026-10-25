@@ -444,6 +444,13 @@ const ownerNavEntries: NavEntry[] = [
     ],
   },
   {
+    // Product photos, profile and rules per brand; every marketing tool reads it.
+    label: "Brand Kit",
+    href: "/owner/brand-kit",
+    icon: <Package size={20} />,
+    roles: ownerRoles,
+  },
+  {
     // The creative tooling behind the mobile app's ads. Owner only.
     label: "Mobile App",
     icon: <Smartphone size={20} />,
