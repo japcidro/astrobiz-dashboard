@@ -396,6 +396,12 @@ export function BrandKitPage() {
                     </Button>
                   </div>
                 </Panel>
+
+                <Panel title="Model">
+                  <p className="text-sm text-muted">
+                    When the person library has a folder named <span className="font-mono text-fg">{store}</span>, static ads use its newest photo, and only when that person fits who the ad needs (a child stays a child). Without one, the planner casts someone who fits the reference and the profile. Folders live in the person library (Clipper, &ldquo;Use existing image&rdquo;).
+                  </p>
+                </Panel>
               </div>
             </div>
           )}

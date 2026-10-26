@@ -42,25 +42,42 @@ const lockLine = (spec: string) => `Our product pack, exactly as in its photo: $
  */
 export async function planAdaptation(
   db: SupabaseClient,
-  input: { referenceUrl: string; store: string; profile: string; rules: string; packs: Array<{ url: string; spec: string | null; kind: string | null; description: string | null }>; hasContents: boolean; notes: string; hasModel: boolean }
+  input: {
+    referenceUrl: string;
+    store: string;
+    profile: string;
+    rules: string;
+    packs: Array<{ url: string; spec: string | null; kind: string | null; description: string | null }>;
+    hasContents: boolean;
+    notes: string;
+    /** The brand's model photo, if it has one; the planner decides whether it fits the person the ad needs. */
+    modelUrl: string | null;
+    /** The model was asked for by name: use it whenever a person appears. */
+    modelForced: boolean;
+  }
 ): Promise<AdaptPlan | null> {
   const system = `You are a senior creative director for direct-response static ads in the Philippines. You adapt a competitor's winning ad for our brand: keep what makes it win (the angle, the structure, the hierarchy, the mood) and replace everything that is theirs (product, brand, claims, prices, people) with ours, using only facts from the brand profile. Never invent prices, claims or numbers. Never keep the competitor's name, product or logo. Keep required compliance lines. Taglish is welcome when the reference is casual. The result must look like a designed ad, not a product photo: strong type hierarchy, one clear message, breathing room, real texture.
 Answer with JSON only, exactly this shape:
 {"study":{"angle":string,"structure":string,"style":string,"why_it_works":string},
- "plan":{"text":[{"from":string,"to":string}],"final_text":string,"needs_person":boolean,"needs_product":boolean,"shows_contents":boolean,"design_spec":string}}
+ "plan":{"text":[{"from":string,"to":string}],"final_text":string,"needs_person":boolean,"use_model":boolean,"needs_product":boolean,"shows_contents":boolean,"design_spec":string}}
 - study.structure: the zones top to bottom (e.g. "headline bar top; product in hand center; price badge right; CTA strip bottom").
 - plan.text: every text block in the reference mapped to our wording (keep the role: headline stays a headline). Leave out tiny legal print except our compliance line.
 - plan.final_text: all the text that will appear on our image, one block per line, in reading order. Exact wording, exact capitalisation.
 - plan.needs_person: true only when a human (face, hands, body) is part of the reference's composition.
+- plan.use_model: true only when a person is needed AND the OUR MODEL photo is attached AND that person fits who the design needs: the same age group and role as the reference's person, adapted to our audience (a child stays a child, a mother stays an adult woman). Otherwise false, and you cast the person yourself.
 - plan.shows_contents: true only when loose capsules or gummies appear outside the pack in our design (scattered, in a hand, spilling); label text that mentions capsules does not count.
-- plan.design_spec: 150–250 words for an image model: the composition zone by zone, where our product sits and how big (true size: a supplement bottle fits in a hand), the product described exactly as it looks in its photo (its real body, cap and label colours, never colours taken from the ad's palette; the palette is for background, panels and type), the person if any (pose, expression, clothing), background and lighting, palette with hex codes from the brand, typography (weight, case, colour, placement) for each text block quoting the exact words, and a short line on finish (phone-real vs studio). Describe, do not list rules.`;
+- plan.design_spec: 150–250 words for an image model: the composition zone by zone, where our product sits and how big (true size: a supplement bottle fits in a hand), the product described exactly as it looks in its photo (its real body, cap and label colours, never colours taken from the ad's palette; the palette is for background, panels and type), the person if any (when use_model is false: who they are, with age, gender and look, keeping the reference person's role and age group and matching the brand's audience; then pose, expression, clothing), background and lighting, palette with hex codes from the brand, typography (weight, case, colour, placement) for each text block quoting the exact words, and a short line on finish (phone-real vs studio). Describe, do not list rules.`;
   const facts = [
     `Brand profile for ${input.store}:\n${input.profile.trim() || "(no profile yet; use only what the product photos show)"}`,
     input.rules.trim() ? `Brand rules: ${input.rules.trim()}` : "",
     input.packs.length
       ? `Our product pack (photo attached): ${input.packs.map((p) => p.spec ?? `${p.kind ?? "product"}${p.description ? ` (${p.description})` : ""}`).join(" Also: ")}${input.hasContents ? " A close-up of the capsules inside is also available." : ""}`
       : "No product photos available.",
-    input.hasModel ? "A photo of our model is available if a person is needed." : "No model photo is attached; if a person is needed, describe a Filipino man in his 30s.",
+    input.modelUrl
+      ? input.modelForced
+        ? "The OUR MODEL photo is the person to use: if a person is needed, set use_model true."
+        : "The OUR MODEL photo is the brand's model. Use it only if that person fits who the design needs; otherwise set use_model false and cast the person yourself."
+      : "No model photo for this brand. If a person is needed, set use_model false and cast them yourself: the reference person's role and age group (a child stays a child), matched to the audience in the brand profile.",
     input.notes.trim() ? `The marketer's notes, which win over everything above: ${input.notes.trim()}` : "",
   ]
     .filter(Boolean)
@@ -71,7 +88,11 @@ Answer with JSON only, exactly this shape:
     out = await askVision<AdaptPlan>(
       db,
       system,
-      [{ url: input.referenceUrl, label: "The competitor's ad to adapt:" }, ...input.packs.slice(0, 1).map((p) => ({ url: p.url, label: "OUR product pack, as it really looks:" }))],
+      [
+        { url: input.referenceUrl, label: "The competitor's ad to adapt:" },
+        ...input.packs.slice(0, 1).map((p) => ({ url: p.url, label: "OUR product pack, as it really looks:" })),
+        ...(input.modelUrl ? [{ url: input.modelUrl, label: "OUR MODEL, the brand's model photo:" }] : []),
+      ],
       `${facts}\n\nAnswer with JSON only, no markdown fences, no line breaks inside strings (use \\n).`,
       8000
     );
@@ -89,6 +110,7 @@ Answer with JSON only, exactly this shape:
       text: Array.isArray(out.plan.text) ? out.plan.text.filter((t) => t && typeof t.from === "string" && typeof t.to === "string").slice(0, 20).map((t) => ({ from: t.from.slice(0, 200), to: t.to.slice(0, 200) })) : [],
       final_text: String(out.plan.final_text ?? "").slice(0, 800),
       needs_person: out.plan.needs_person === true,
+      use_model: out.plan.use_model === true,
       needs_product: out.plan.needs_product !== false,
       shows_contents: out.plan.shows_contents === true,
       design_spec: out.plan.design_spec.slice(0, 2500),
@@ -169,16 +191,23 @@ export interface AdaptInput {
   change: { run_id: string; note: string } | null;
 }
 
-/** Our model for the brand when none was given: the newest person in a folder named like the store, else the newest person. */
-async function autoModel(db: SupabaseClient, store: string): Promise<{ bucket: string; path: string; label: string } | null> {
+type ModelPic = { bucket: string; path: string; label: string };
+
+/**
+ * The brand's own models: the person-library folder named like the store,
+ * newest first. Never anyone from another folder: a brand without a folder
+ * gets a person cast from the reference and its profile, not FOLIQ's model.
+ */
+async function brandModels(db: SupabaseClient, store: string): Promise<ModelPic[]> {
   const { data: folders } = await db.from("remake_people_folders").select("id, name");
   const folder = ((folders ?? []) as Array<{ id: string; name: string }>).find((f) => f.name.trim().toLowerCase() === store.trim().toLowerCase());
-  let q = db.from("remake_people").select("bucket, path, name").order("created_at", { ascending: false }).limit(1);
-  if (folder) q = q.eq("folder_id", folder.id);
-  const { data } = await q;
-  const p = (data ?? [])[0] as { bucket: string; path: string; name: string } | undefined;
-  return p ? { bucket: p.bucket, path: p.path, label: p.name || `${store} model` } : null;
+  if (!folder) return [];
+  const { data } = await db.from("remake_people").select("bucket, path, name").eq("folder_id", folder.id).order("created_at", { ascending: false }).limit(100);
+  return ((data ?? []) as Array<{ bucket: string; path: string; name: string }>).map((p) => ({ bucket: p.bucket, path: p.path, label: p.name || `${store} model` }));
 }
+
+const signOne = async (db: SupabaseClient, pic: { bucket: string; path: string }) =>
+  (pic.bucket === HOOK_BUCKET ? await signHookPaths(db, [pic.path]) : await signBoardPaths(db, [pic.path])).get(pic.path) ?? null;
 
 /** Steps 1–3: plan (or reuse a plan on a change), attach, write the prompt, queue the renders. */
 export async function createAdaptRun(db: SupabaseClient, input: AdaptInput, createdBy: string | null): Promise<{ id: string } | { error: string }> {
@@ -204,18 +233,21 @@ export async function createAdaptRun(db: SupabaseClient, input: AdaptInput, crea
   const productLock = packs.map((p) => p.spec).filter((x): x is string => !!x).join(" Also: ") || null;
 
   let plan: AdaptPlan | null = null;
-  let modelPic = input.model;
+  let modelPic: ModelPic | null = null;
+  const models = await brandModels(db, input.store);
   if (input.change) {
     const { data: prev } = await db.from("image_studio_runs").select("plan, attachments").eq("id", input.change.run_id).maybeSingle();
     plan = (prev?.plan as AdaptPlan | null) ?? null;
     if (!plan) return { error: "That run has no plan to reuse" };
+    // Keep the earlier run's model only if it is one of this brand's own (older runs could borrow another brand's).
     const prevModel = ((prev?.attachments as Attachment[]) ?? []).find((a) => a.role === "model");
-    if (!modelPic && prevModel) modelPic = { bucket: prevModel.bucket, path: prevModel.path, label: prevModel.label };
+    modelPic = input.model ?? (prevModel && models.some((m) => m.path === prevModel.path) ? { bucket: prevModel.bucket, path: prevModel.path, label: prevModel.label } : null);
     plan = { ...plan, plan: { ...plan.plan, design_spec: `${plan.plan.design_spec} Change requested by the marketer, apply it: ${input.change.note.trim()}` } };
   } else {
-    const refSigned = input.reference.bucket === HOOK_BUCKET ? await signHookPaths(db, [input.reference.path]) : await signBoardPaths(db, [input.reference.path]);
-    const referenceUrl = refSigned.get(input.reference.path);
+    const referenceUrl = await signOne(db, input.reference);
     if (!referenceUrl) return { error: "Reference image not found" };
+    const candidate = input.model ?? models[0] ?? null;
+    const modelUrl = candidate ? await signOne(db, candidate) : null;
     plan = await planAdaptation(db, {
       referenceUrl,
       store: input.store,
@@ -224,11 +256,12 @@ export async function createAdaptRun(db: SupabaseClient, input: AdaptInput, crea
       packs: packs.filter((p) => p.url).map((p) => ({ url: p.url!, spec: p.spec, kind: p.row.kind, description: p.row.description })),
       hasContents: contentRows.length > 0,
       notes: input.notes,
-      hasModel: true,
+      modelUrl,
+      modelForced: !!input.model && !!modelUrl,
     });
     if (!plan) return { error: "Claude could not study the reference (is the Anthropic key set?)" };
+    if (plan.plan.needs_person && modelUrl && (input.model || plan.plan.use_model)) modelPic = candidate;
   }
-  if (plan.plan.needs_person && !modelPic) modelPic = await autoModel(db, input.store);
   plan.model_label = modelPic?.label ?? null;
   plan.product_lock = productLock;
   const showsContents = plan.plan.shows_contents === true;

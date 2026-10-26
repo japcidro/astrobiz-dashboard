@@ -362,7 +362,7 @@ export function ImageStudio() {
                       </tbody>
                     </table>
                     <p className="text-gray-500">
-                      {run.plan.plan.needs_person ? `Person: yes${run.plan.model_label ? `, ${run.plan.model_label}` : ""}` : "Person: none"} · {run.plan.plan.needs_product ? "Product: in" : "Product: none"}
+                      {run.plan.plan.needs_person ? `Person: ${run.plan.model_label ? `the brand's model, ${run.plan.model_label}` : "cast by the planner from the reference and the profile"}` : "Person: none"} · {run.plan.plan.needs_product ? "Product: in" : "Product: none"}
                     </p>
                   </div>
                   <div className="rounded-lg bg-gray-950 border border-gray-800 p-3 space-y-1.5">
