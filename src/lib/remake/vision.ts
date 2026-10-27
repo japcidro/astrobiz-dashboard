@@ -109,8 +109,13 @@ function escapeControlCharsInStrings(text: string): string {
   return out;
 }
 
+/** Why the last Claude call failed, in the API's words (out of credits, overloaded…), for error messages. */
+let lastError: string | null = null;
+export const lastClaudeError = () => lastError;
+
 async function ask<T>(db: SupabaseClient, system: string, content: Array<Record<string, unknown>>, maxTokens = 1200): Promise<T | null> {
   const key = await apiKey(db);
+  lastError = key ? null : "no Anthropic API key in Settings";
   if (!key) return null;
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -119,7 +124,13 @@ async function ask<T>(db: SupabaseClient, system: string, content: Array<Record<
       body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system, messages: [{ role: "user", content }] }),
     });
     if (!res.ok) {
-      if (process.env.VISION_DEBUG) console.error("[vision]", res.status, (await res.text()).slice(0, 600));
+      const body = await res.text();
+      if (process.env.VISION_DEBUG) console.error("[vision]", res.status, body.slice(0, 600));
+      try {
+        lastError = (JSON.parse(body) as { error?: { message?: string } }).error?.message ?? `Anthropic API error ${res.status}`;
+      } catch {
+        lastError = `Anthropic API error ${res.status}`;
+      }
       return null;
     }
     const json = (await res.json()) as { content?: Array<{ type: string; text?: string }>; stop_reason?: string };
@@ -128,8 +139,10 @@ async function ask<T>(db: SupabaseClient, system: string, content: Array<Record<
     if (process.env.VISION_DEBUG && !parsed) {
       console.error("[vision] unparsed", json.stop_reason, "len", text.length, "head:", text.slice(0, 200).replace(/\n/g, "⏎"), "tail:", text.slice(-200).replace(/\n/g, "⏎"));
     }
+    if (!parsed) lastError = "Claude's answer could not be read, try again";
     return parsed;
   } catch {
+    lastError = "could not reach the Anthropic API";
     return null;
   }
 }

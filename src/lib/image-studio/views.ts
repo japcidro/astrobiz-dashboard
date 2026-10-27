@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { HOOK_BUCKET, signPaths as signHookPaths } from "@/lib/hook-studio/storage";
 import { BOARD_BUCKET, signBoardPaths } from "@/lib/marketing-board/storage";
 import { STILL_CREDITS } from "@/lib/remake/engines";
-import { brandCheck } from "@/lib/remake/vision";
+import { brandCheck, lastClaudeError } from "@/lib/remake/vision";
 import { isContents, retryResult, reviewAdaptation } from "./adapt";
 import { aspectFor, studioPrompt } from "./prompt";
 import type { AdaptPlan, Attachment, AttachmentView, ResultRow, ResultView, RunInput, RunRow, RunView, StudioPage, StudioSources } from "./types";
@@ -232,10 +232,14 @@ export async function runPendingChecks(db: SupabaseClient, itemId: string | null
           profile: profiles.get(run.store ?? "") ?? "",
           modelUrl: model ? signed.get(key(model.bucket, model.path)) ?? null : null,
         });
-        if (review && !review.ok && review.fixable && (r.attempts ?? 1) < 2) {
+        // A wrong product or person gets two more tries (they are what make an ad unusable); anything else one.
+        const tries = review && (review.productOk === false || review.personOk === false) ? 3 : 2;
+        if (review && !review.ok && review.fixable && (r.attempts ?? 1) < tries) {
           const fix =
             review.productOk === false
-              ? `${review.productIssue || "The product does not match our pack."} Every pack must look exactly like our product photo${run.plan.product_lock ? `: ${run.plan.product_lock}` : "."} Keep its own colours; do not recolour it to match the ad.`
+              ? /pasted|floating|cutout|cut-out|overlay|shadow|lit |lighting|perspective|scale|size/i.test(review.productIssue)
+                ? `${review.productIssue} Photograph our pack inside the scene: resting on a surface or in a hand at its true size, lit by the scene's light with a soft contact shadow, matching perspective, focus and grain, front label toward the camera; never a cutout laid on top.`
+                : `${review.productIssue || "The product does not match our pack."} Every pack must look exactly like our product photo${run.plan.product_lock ? `: ${run.plan.product_lock}` : "."} Keep its own colours; do not recolour it to match the ad.`
               : review.personOk === false
                 ? `${review.notes} The person must be our model from the model photo (same face, hair, skin tone and age), replacing the reference's person entirely.`
                 : review.notes;
@@ -247,7 +251,7 @@ export async function runPendingChecks(db: SupabaseClient, itemId: string | null
           .update({
             brand_check: review
               ? { ok: review.ok, notes: review.notes, scores: review.scores, product_ok: review.productOk }
-              : { ok: true, notes: "Not reviewed: Claude could not read the image." },
+              : { ok: true, notes: `Not reviewed: ${lastClaudeError() ?? "Claude could not read the image."}` },
           })
           .eq("id", r.id);
         return;

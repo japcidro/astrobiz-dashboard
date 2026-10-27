@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { HOOK_BUCKET, signPaths as signHookPaths } from "@/lib/hook-studio/storage";
 import { BOARD_BUCKET, signBoardPaths } from "@/lib/marketing-board/storage";
 import { STILL_CREDITS } from "@/lib/remake/engines";
-import { askVision } from "@/lib/remake/vision";
+import { askVision, lastClaudeError } from "@/lib/remake/vision";
 import { loadBrandModels } from "@/lib/remake/views";
 import { isContents, pickStaticAdPhotos, type AdaptPlan, type Attachment, type ReviewScores } from "./types";
 
@@ -33,7 +33,7 @@ async function packSpecFor(db: SupabaseClient, img: BrandImageRow, url: string):
 }
 
 /** The pack's lock line for prompts and reviews: what it must look like, whatever the ad's colours. */
-const lockLine = (spec: string) => `Our product pack, exactly as in its photo: ${spec} It keeps these exact colours and label whatever the ad's palette: the palette is for the background, panels and type, never for the product. Every pack shown is this same pack.`;
+const lockLine = (spec: string) => `Our product pack, exactly as in its photo: ${spec} It keeps these exact colours and label whatever the ad's palette: the palette is for the background, panels and type, never for the product. Every pack shown is this same pack. Its look comes from the photo, its light does not: it is photographed in this scene, never cut out of its photo and laid on top.`;
 
 /**
  * The "adapt an ad" skill, step 1 + 2: read the competitor's static ad like
@@ -68,7 +68,7 @@ Answer with JSON only, exactly this shape:
 - plan.needs_person: true only when a human (face, hands, body) is part of the reference's composition.
 - plan.model: when a person is needed and OUR MODEL photos are attached, the number of the one who best fits who the design needs: the same age group, gender and role as the reference's person, adapted to our audience (a girl of about 5 for a little girl; never an adult for a child, never a child for a parent). 0 when none fits, when no model photo is attached, or when no person is needed; then you cast the person yourself.
 - plan.shows_contents: true only when what is inside our pack appears outside it in our design (loose capsules or gummies, scattered or in a hand; a patch worn on the skin or held up); label text that mentions it does not count.
-- plan.design_spec: 150–250 words for an image model: the composition zone by zone, where our product sits and how big (true size: a supplement bottle fits in a hand) — our pack always shows its FRONT, the side in its photo, facing the camera with the front label readable, big and clear enough that someone scrolling a feed recognises the product at a glance (a hero placement, never a small prop in the background, never its back or side) — the product described exactly as it looks in its photo (its real body, cap and label colours, never colours taken from the ad's palette; the palette is for background, panels and type), the person if any (when model is 0: who they are, with age, gender and look, keeping the reference person's role and age group and matching the brand's audience; when a model is picked, only their pose, expression and clothing, since the face comes from the photo), background and lighting, palette with hex codes from the brand, typography (weight, case, colour, placement) for each text block quoting the exact words, and a short line on finish (phone-real vs studio). Describe, do not list rules.`;
+- plan.design_spec: 150–250 words for an image model: the composition zone by zone, where our product sits and how big — a real object in the scene, not a graphic: it rests on a surface or is held in a hand, at its true size next to the people and things around it (a supplement bottle or a small carton fits in an adult's hand), in the same light as the room with a soft contact shadow, the same perspective and the same focus; its FRONT, the side in its photo, is turned toward the camera (a slight angle is natural) with the front label readable, in the foreground or mid-ground, sharp, so someone scrolling a feed recognises it at a glance; never floating, never a flat cutout over the photo or a panel, never its back or side, never hidden in the background — the product described exactly as it looks in its photo (its real body, cap and label colours, never colours taken from the ad's palette; the palette is for background, panels and type), the person if any (when model is 0: who they are, with age, gender and look, keeping the reference person's role and age group and matching the brand's audience; when a model is picked, only their pose, expression and clothing, since the face comes from the photo), background and lighting, palette with hex codes from the brand, typography (weight, case, colour, placement) for each text block quoting the exact words, and a short line on finish (phone-real vs studio). Describe, do not list rules.`;
   const facts = [
     `Brand profile for ${input.store}:\n${input.profile.trim() || "(no profile yet; use only what the product photos show)"}`,
     input.rules.trim() ? `Brand rules: ${input.rules.trim()}` : "",
@@ -131,7 +131,7 @@ export async function reviewAdaptation(
   input: { resultUrl: string; referenceUrl: string | null; productUrls: string[]; productLock: string | null; finalText: string; profile: string; modelUrl?: string | null }
 ): Promise<{ ok: boolean; notes: string; scores: ReviewScores; fixable: boolean; productOk: boolean | null; productIssue: string; personOk: boolean | null } | null> {
   const system = `You are an art director reviewing an AI-generated static ad before it ships. Score 0–10: "design" (hierarchy, readability, balance, polish, does it look like a real ad), "brand" (our product reproduced faithfully with legible correct label text, brand colours, no competitor branding, compliance line present when the bottle label is visible), "structure" (keeps the reference's winning structure and angle). ok=false when any text on the image is garbled, misspelled or different from the planned text, when the product label is wrong or unreadable, when a competitor name or logo appears, when the person is deformed, or when design < 6. "fixable" is true when a regeneration with a note could fix it (text, label, small artefacts, a wrong product), false when the whole concept is off. "notes": one or two short sentences, the most important fix first, or "Looks great."
-Product check, strictest of all because a wrong product wastes the ad: compare EVERY pack in IMAGE A with OUR PRODUCT photo and its description: the container shape, the body colour, the cap colour, the label colour, the stripes and accents, the logo and the label wording. "product_ok" is false if any pack differs in any of these (a body recoloured to match the ad, a different logo or icon, label lines invented, missing or reworded, a different kind of container), or if our product is missing when the ad shows a product, or if our pack is seen only from the back or side, or is so small, cropped or hidden that someone scrolling a feed would not recognise it at a glance. Small text you cannot read at this size is not a difference by itself; a wrong colour or a wrong word you can read is. When product_ok is false, ok is false and fixable is true, and "product_issue" says concretely what differs (e.g. "the bottles are dark green; ours is white with thin teal stripes"). When there is no product photo, product_ok is null.
+Product check, strictest of all because a wrong product wastes the ad: compare EVERY pack in IMAGE A with OUR PRODUCT photo and its description: the container shape, the body colour, the cap colour, the label colour, the stripes and accents, the logo and the label wording. "product_ok" is false if any pack differs in any of these (a body recoloured to match the ad, a different logo or icon, label lines invented, missing or reworded, a different kind of container), or if our product is missing when the ad shows a product, or if our pack is seen only from the back or side, or is so small, cropped or hidden that someone scrolling a feed would not recognise it at a glance, or if it looks pasted on: floating, a flat cutout laid over the photo or over a design panel, lit differently from the scene, without a shadow where it touches a surface, in a different perspective or sharpness, or at a size that is not true to life next to the people and things around it (say "looks pasted on" in product_issue and how). Small text you cannot read at this size is not a difference by itself; a wrong colour or a wrong word you can read is. When product_ok is false, ok is false and fixable is true, and "product_issue" says concretely what differs (e.g. "the bottles are dark green; ours is white with thin teal stripes"). When there is no product photo, product_ok is null.
 Person check, when an OUR MODEL photo is given: every person in IMAGE A must be that person (same face, hair, skin tone and age). "person_ok" is false when a person in IMAGE A is the one from IMAGE B or anyone else; then ok is false, fixable is true, and "person_issue" says who appears instead (e.g. "the girl is the reference's girl, not our model"). Without a model photo, person_ok is null.
 Answer with JSON only: {"ok":boolean,"fixable":boolean,"design":number,"brand":number,"structure":number,"product_ok":boolean|null,"product_issue":string,"person_ok":boolean|null,"person_issue":string,"notes":string}.`;
   const images: Array<{ url: string; label: string; maxSide?: number }> = [{ url: input.resultUrl, label: "IMAGE A — the generated ad to review:" }];
@@ -169,10 +169,13 @@ Answer with JSON only: {"ok":boolean,"fixable":boolean,"design":number,"brand":n
 export function adaptPrompt(plan: AdaptPlan, attachments: Attachment[], rules: string, fix?: string): string {
   const roles = attachments.map((a, n) => {
     const k = n + 1;
-    if (a.role === "reference") return `Image ${k} is the competitor's ad: copy its layout, composition, hierarchy and mood exactly; do not copy its product, people, brand name, logo or words, and do not take its product's colours.`;
+    if (a.role === "reference") {
+      const hasModel = attachments.some((x) => x.role === "model");
+      return `Image ${k} is the competitor's ad: copy its layout, composition, hierarchy and mood exactly; do not copy its product, people, brand name, logo or words, and do not take its product's colours.${hasModel ? " Its person is only a placeholder for the pose and placement: our model takes their place completely, and nobody from this image appears in ours." : ""}`;
+    }
     if (a.role === "product" && isContents(a.kind)) return `Image ${k} shows what is inside our pack (the ${a.kind}): wherever ${a.kind} appear outside the pack (loose, in a hand, a patch on the skin) they look exactly like this; it is not the packaging.`;
-    if (a.role === "product") return `Image ${k} is the front of our product pack: reproduce it exactly, same container, same body, cap and label colours, every word of the label copied letter for letter and legible, at true size (it fits in a hand). Show this front facing the camera, large and clear enough to recognise at a glance; never its back or side instead. Do not recolour it to match the ad.`;
-    if (a.role === "model") return `Image ${k} is our model: whenever a person appears, it is this exact individual (same face, hair, skin), never anyone from the reference.`;
+    if (a.role === "product") return `Image ${k} is the front of our product pack: reproduce it exactly, same container, same body, cap and label colours, every word of the label copied letter for letter and legible, at true size (it fits in a hand). Photograph it inside the scene, not as a cutout: it rests on a surface or sits in a hand at its true size, lit by the scene's own light with a soft contact shadow, matching the camera's perspective, focus and grain. Its front faces the camera (a slight angle is natural), sharp and readable; never its back or side. Do not recolour it to match the ad.`;
+    if (a.role === "model") return `Image ${k} is our model: the only person in the ad is this exact individual (same face, hair, skin tone and age), in the pose the reference's person had; never the reference's person.`;
     return `Image ${k} is a look reference: style only.`;
   });
   const text = plan.plan.final_text.trim()
@@ -184,7 +187,7 @@ export function adaptPrompt(plan: AdaptPlan, attachments: Attachment[], rules: s
     plan.product_lock && attachments.some((a) => a.role === "product" && !isContents(a.kind)) ? lockLine(plan.product_lock) : "",
     text,
     plan.plan.needs_person ? "" : "No person in the image unless the design above asks for hands.",
-    "Square 1:1. A finished, designed advertisement: photoreal product and people, clean vector-sharp typography, no watermark, no competitor branding, nothing that looks pasted on.",
+    "Square 1:1. A finished, designed advertisement: the photo is one real photograph, where the product, the people and the room share the same light, shadows, perspective, focus and grain, and nothing looks pasted on or floats; clean vector-sharp typography sits on top of the photo; no watermark, no competitor branding.",
     rules.trim() ? `Brand rules: ${rules.trim()}.` : "",
     fix ? `The previous attempt had this problem, fix it this time: ${fix}` : "",
   ]
@@ -266,7 +269,7 @@ export async function createAdaptRun(db: SupabaseClient, input: AdaptInput, crea
       models: candidates.map((c) => ({ url: c.url, label: c.label })),
       modelForced: !!asked,
     });
-    if (!plan) return { error: "Claude could not study the reference (is the Anthropic key set?)" };
+    if (!plan) return { error: `Claude could not study the reference: ${lastClaudeError() ?? "it gave no usable plan, try again"}` };
     const pick = asked ? 1 : plan.plan.model_pick ?? 0;
     const chosen = plan.plan.needs_person ? candidates[pick - 1] : undefined;
     if (chosen) modelPic = { bucket: chosen.bucket, path: chosen.path, label: chosen.label };
