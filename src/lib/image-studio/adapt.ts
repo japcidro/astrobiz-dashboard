@@ -56,6 +56,8 @@ export async function planAdaptation(
     models: Array<{ url: string; label: string }>;
     /** The one model was asked for by name: use it whenever a person appears. */
     modelForced: boolean;
+    /** Headlines of the brand's latest ads, so a new one does not repeat them. */
+    recentHeadlines: string[];
   }
 ): Promise<AdaptPlan | null> {
   const system = `You are a senior creative director for direct-response static ads in the Philippines. You adapt a competitor's winning ad for our brand: keep what makes it win (the angle, the structure, the hierarchy, the mood) and replace everything that is theirs (product, brand, claims, prices, people) with ours, using only facts from the brand profile. Never invent prices, claims or numbers. Never keep the competitor's name, product or logo. Keep required compliance lines. Taglish is welcome when the reference is casual. The result must look like a designed ad, not a product photo: strong type hierarchy, one clear message, breathing room, real texture.
@@ -67,7 +69,7 @@ Fill "plan" in this order: first decide who is in our image (needs_person, model
 - plan.needs_person: true only when a human (face, hands, body) is part of the reference's composition.
 - plan.model: when a person is needed and OUR MODEL photos are attached, the number of the one who best fits who the design needs: the same age group, gender and role as the reference's person, adapted to our audience (a girl of about 5 for a little girl; never an adult for a child, never a child for a parent). 0 when none fits, when no model photo is attached, or when no person is needed; then you cast the person yourself.
 - plan.person: who appears in our image, in a few words with gender and age (e.g. "girl, about 5", "mother, early 30s"), or "" when nobody does. When a model is picked, it is that model.
-- plan.text: every text block in the reference mapped to our wording (keep the role: headline stays a headline). Leave out tiny legal print except our compliance line.
+- plan.text: every text block in the reference mapped to our wording (keep the role: headline stays a headline). Our headline is written from the reference's headline: the same device (an apology, a question, a crossed-out claim, two short contrasting phrases), about the same length, carried over to our angle; every reference gets its own. Leave out tiny legal print except our compliance line.
 - plan.final_text: all the text that will appear on our image, one block per line, in reading order. Exact wording, exact capitalisation. Every word that points at the person matches plan.person: a girl is "her", "she", "daughter", "anak na babae"; a boy is "his", "he", "son". When the reference's words point at someone of another gender (e.g. "TALL FOR HIS AGE" over our girl), change them ("TALL FOR HER AGE"); when unsure, use words without gender ("your child", "anak", "siya").
 - plan.shows_contents: true only when what is inside our pack appears outside it in our design (loose capsules or gummies, scattered or in a hand; a patch worn on the skin or held up); label text that mentions it does not count.
 - plan.design_spec: 150–250 words for an image model: the composition zone by zone, where our product sits and how big — a real object in the scene, not a graphic: it rests on a surface or is held in a hand, at its true size next to the people and things around it (a supplement bottle or a small carton fits in an adult's hand), in the same light as the room with a soft contact shadow, the same perspective and the same focus; its FRONT, the side in its photo, is turned toward the camera (a slight angle is natural) with the front label readable, in the foreground or mid-ground, sharp, so someone scrolling a feed recognises it at a glance; never floating, never a flat cutout over the photo or a panel, never its back or side, never hidden in the background — the product described exactly as it looks in its photo (its real body, cap and label colours, never colours taken from the ad's palette; the palette is for background, panels and type), the person if any (when model is 0: who they are, with age, gender and look, keeping the reference person's role and age group and matching the brand's audience; when a model is picked, only their pose, expression and clothing, since the face comes from the photo), background and lighting, palette with hex codes from the brand, typography (weight, case, colour, placement) for each text block quoting the exact words, and a short line on finish (phone-real vs studio). Describe, do not list rules.`;
@@ -85,7 +87,12 @@ Fill "plan" in this order: first decide who is in our image (needs_person, model
         ? "The OUR MODEL 1 photo is the person to use: if a person is needed, set model to 1."
         : `${input.models.length === 1 ? "One photo" : `${input.models.length} photos`} of the brand's models ${input.models.length === 1 ? "is" : "are"} attached (OUR MODEL 1${input.models.length > 1 ? `–${input.models.length}` : ""}). If a person is needed, pick the one who fits who the design needs; if none fits, set model to 0 and cast the person yourself.`
       : "No model photos for this brand. If a person is needed, set model to 0 and cast them yourself: the reference person's role and age group (a child stays a child), matched to the audience in the brand profile.",
-    input.notes.trim() ? `The marketer's notes, which win over everything above: ${input.notes.trim()}` : "",
+    input.recentHeadlines.length
+      ? `Headlines on this brand's latest ads: ${input.recentHeadlines.map((h) => `"${h}"`).join(", ")}. Ours is new: not one of these and not their key phrase reworded, unless the notes ask for it.`
+      : "",
+    input.notes.trim()
+      ? `The marketer's notes, which win over everything above: ${input.notes.trim()}\nA headline or line the notes quote as an example to beat or to match shows the angle and the emotion wanted, not the words: write new lines on this reference's headline device, without the example's key phrase. Put quoted words on the ad as they are only when the notes say to use them.`
+      : "",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -103,7 +110,9 @@ Fill "plan" in this order: first decide who is in our image (needs_person, model
         ...input.models.map((m, i) => ({ url: m.url, label: `OUR MODEL ${i + 1}${m.label ? ` (${m.label})` : ""}:`, maxSide: 640 })),
       ],
       `${facts}\n\nAnswer with JSON only, no markdown fences, no line breaks inside strings (use \\n).`,
-      8000
+      // The model thinks before it answers: at the default effort a copy-heavy reference spent 16000 tokens and five minutes on thinking alone.
+      16000,
+      "medium"
     );
     if (out && (!out.study || !out.plan || typeof out.plan.design_spec !== "string")) out = null;
   }
@@ -214,6 +223,20 @@ type ModelPic = { bucket: string; path: string; label: string };
 /** How many of the brand's models (newest first) the planner chooses from. */
 const PLANNER_MODELS = 8;
 
+/** The first line of each recent ad's text that is not just the brand's wordmark, newest first, no repeats. */
+function recentHeadlines(runs: Array<{ text_on_image: string | null }>, store: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const r of runs) {
+    const line = (r.text_on_image ?? "").split("\n").map((l) => l.trim()).find((l) => l && l.replace(/[™®]/g, "").trim().toLowerCase() !== store.toLowerCase());
+    if (!line || seen.has(line.toLowerCase())) continue;
+    seen.add(line.toLowerCase());
+    out.push(line.replace(/"/g, "'").slice(0, 120));
+    if (out.length === 10) break;
+  }
+  return out;
+}
+
 const signOne = async (db: SupabaseClient, pic: { bucket: string; path: string }) =>
   (pic.bucket === HOOK_BUCKET ? await signHookPaths(db, [pic.path]) : await signBoardPaths(db, [pic.path])).get(pic.path) ?? null;
 
@@ -261,6 +284,7 @@ export async function createAdaptRun(db: SupabaseClient, input: AdaptInput, crea
       input.model && asked
         ? [{ ...input.model, url: asked }]
         : models.slice(0, PLANNER_MODELS).map((m) => ({ bucket: m.bucket, path: m.path, label: m.name || `${input.store} model`, url: m.url! }));
+    const { data: recentRuns } = await db.from("image_studio_runs").select("text_on_image").eq("store", input.store).eq("preset", "adapt").order("created_at", { ascending: false }).limit(30);
     plan = await planAdaptation(db, {
       referenceUrl,
       store: input.store,
@@ -271,6 +295,7 @@ export async function createAdaptRun(db: SupabaseClient, input: AdaptInput, crea
       notes: input.notes,
       models: candidates.map((c) => ({ url: c.url, label: c.label })),
       modelForced: !!asked,
+      recentHeadlines: recentHeadlines(recentRuns ?? [], input.store),
     });
     if (!plan) return { error: `Claude could not study the reference: ${lastClaudeError() ?? "it gave no usable plan, try again"}` };
     const pick = asked ? 1 : plan.plan.model_pick ?? 0;

@@ -113,7 +113,8 @@ function escapeControlCharsInStrings(text: string): string {
 let lastError: string | null = null;
 export const lastClaudeError = () => lastError;
 
-async function ask<T>(db: SupabaseClient, system: string, content: Array<Record<string, unknown>>, maxTokens = 1200): Promise<T | null> {
+/** effort caps how long the model thinks before it answers (the API default is "high"). */
+async function ask<T>(db: SupabaseClient, system: string, content: Array<Record<string, unknown>>, maxTokens = 1200, effort?: "low" | "medium" | "high"): Promise<T | null> {
   const key = await apiKey(db);
   lastError = key ? null : "no Anthropic API key in Settings";
   if (!key) return null;
@@ -121,7 +122,7 @@ async function ask<T>(db: SupabaseClient, system: string, content: Array<Record<
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system, messages: [{ role: "user", content }] }),
+      body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system, messages: [{ role: "user", content }], ...(effort ? { output_config: { effort } } : {}) }),
     });
     if (!res.ok) {
       const body = await res.text();
@@ -300,7 +301,7 @@ export async function readImageText(db: SupabaseClient, url: string): Promise<{ 
 }
 
 /** Ask Claude about one or more images with a question; JSON answer. Used by the Image Studio skill. */
-export async function askVision<T>(db: SupabaseClient, system: string, images: Array<{ url: string; label: string; maxSide?: number }>, question: string, maxTokens = 1200): Promise<T | null> {
+export async function askVision<T>(db: SupabaseClient, system: string, images: Array<{ url: string; label: string; maxSide?: number }>, question: string, maxTokens = 1200, effort?: "low" | "medium" | "high"): Promise<T | null> {
   const blocks: Array<Record<string, unknown>> = [];
   for (const img of images) {
     const b = await imageBlock(img.url, img.maxSide);
@@ -308,5 +309,5 @@ export async function askVision<T>(db: SupabaseClient, system: string, images: A
   }
   if (blocks.length === 0) return null;
   blocks.push({ type: "text", text: question });
-  return ask<T>(db, system, blocks, maxTokens);
+  return ask<T>(db, system, blocks, maxTokens, effort);
 }

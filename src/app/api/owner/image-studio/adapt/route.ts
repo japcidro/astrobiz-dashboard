@@ -4,6 +4,7 @@ import { createAdaptRun } from "@/lib/image-studio/adapt";
 import { loadStudioPage } from "@/lib/image-studio/views";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 /**
  * POST — the adapt skill: { item_id?, store, reference: {bucket, path, label}, notes?, versions?, model?, change?: {run_id, note} }.
