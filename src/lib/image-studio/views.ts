@@ -3,7 +3,7 @@ import { HOOK_BUCKET, signPaths as signHookPaths } from "@/lib/hook-studio/stora
 import { BOARD_BUCKET, signBoardPaths } from "@/lib/marketing-board/storage";
 import { STILL_CREDITS } from "@/lib/remake/engines";
 import { brandCheck, lastClaudeError } from "@/lib/remake/vision";
-import { isContents, retryResult, reviewAdaptation } from "./adapt";
+import { isContents, recoverFailedRenders, retryResult, reviewAdaptation } from "./adapt";
 import { aspectFor, studioPrompt } from "./prompt";
 import type { AdaptPlan, Attachment, AttachmentView, ResultRow, ResultView, RunInput, RunRow, RunView, StudioPage, StudioSources } from "./types";
 
@@ -185,7 +185,8 @@ async function reviewImageUrl(fullUrl: string | undefined, previewUrl: string | 
 
 /** Brand-check finished results once; a model attachment makes it a person check too. Adapt runs get the art-director review and one automatic fix. */
 export async function runPendingChecks(db: SupabaseClient, itemId: string | null): Promise<void> {
-  let q = db.from("image_studio_results").select("*, image_studio_runs!inner(id, item_id, store, product_mode, person_mode, attachments, plan)").eq("status", "done").is("brand_check", null).limit(4);
+  await recoverFailedRenders(db, itemId);
+  let q =db.from("image_studio_results").select("*, image_studio_runs!inner(id, item_id, store, product_mode, person_mode, attachments, plan)").eq("status", "done").is("brand_check", null).limit(4);
   if (itemId) q = q.eq("image_studio_runs.item_id", itemId);
   const { data } = await q;
   type Row = ResultRow & { image_studio_runs: { id: string; item_id: string | null; store: string | null; product_mode: string; person_mode: string; attachments: Attachment[]; plan: AdaptPlan | null } };
@@ -243,7 +244,7 @@ export async function runPendingChecks(db: SupabaseClient, itemId: string | null
               : review.personOk === false
                 ? `${review.notes} The person must be our model from the model photo (same face, hair, skin tone and age), replacing the reference's person entirely.`
                 : review.notes;
-          await retryResult(db, r.id, fix);
+          await retryResult(db, r.id, fix, { ok: false, notes: review.notes, scores: review.scores, product_ok: review.productOk });
           return;
         }
         await db

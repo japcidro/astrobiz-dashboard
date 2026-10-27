@@ -70,7 +70,7 @@ Fill "plan" in this order: first decide who is in our image (needs_person, model
 - plan.model: when a person is needed and OUR MODEL photos are attached, the number of the one who best fits who the design needs: the same age group, gender and role as the reference's person, adapted to our audience (a girl of about 5 for a little girl; never an adult for a child, never a child for a parent). 0 when none fits, when no model photo is attached, or when no person is needed; then you cast the person yourself.
 - plan.person: who appears in our image, in a few words with gender and age (e.g. "girl, about 5", "mother, early 30s"), or "" when nobody does. When a model is picked, it is that model.
 - plan.text: every text block in the reference mapped to our wording (keep the role: headline stays a headline). Our headline is written from the reference's headline: the same device (an apology, a question, a crossed-out claim, two short contrasting phrases), about the same length, carried over to our angle; every reference gets its own. Leave out tiny legal print except our compliance line.
-- plan.final_text: all the text that will appear on our image, one block per line, in reading order. Exact wording, exact capitalisation. Every word that points at the person matches plan.person: a girl is "her", "she", "daughter", "anak na babae"; a boy is "his", "he", "son". When the reference's words point at someone of another gender (e.g. "TALL FOR HIS AGE" over our girl), change them ("TALL FOR HER AGE"); when unsure, use words without gender ("your child", "anak", "siya").
+- plan.final_text: all the text that will appear on our image, one block per line, in reading order. Exact wording, exact capitalisation. Every word that points at the person matches plan.person: a girl is "her", "she", "daughter", "anak na babae"; a boy is "his", "he", "son". When the reference's words point at someone of another gender (e.g. "TALL FOR HIS AGE" over our girl), change them ("TALL FOR HER AGE"); when nobody appears in our image or you are unsure, use words without gender ("your child", "anak", "siya").
 - plan.shows_contents: true only when what is inside our pack appears outside it in our design (loose capsules or gummies, scattered or in a hand; a patch worn on the skin or held up); label text that mentions it does not count.
 - plan.design_spec: 150–250 words for an image model: the composition zone by zone, where our product sits and how big — a real object in the scene, not a graphic: it rests on a surface or is held in a hand, at its true size next to the people and things around it (a supplement bottle or a small carton fits in an adult's hand), in the same light as the room with a soft contact shadow, the same perspective and the same focus; its FRONT, the side in its photo, is turned toward the camera (a slight angle is natural) with the front label readable, in the foreground or mid-ground, sharp, so someone scrolling a feed recognises it at a glance; never floating, never a flat cutout over the photo or a panel, never its back or side, never hidden in the background — the product described exactly as it looks in its photo (its real body, cap and label colours, never colours taken from the ad's palette; the palette is for background, panels and type), the person if any (when model is 0: who they are, with age, gender and look, keeping the reference person's role and age group and matching the brand's audience; when a model is picked, only their pose, expression and clothing, since the face comes from the photo), background and lighting, palette with hex codes from the brand, typography (weight, case, colour, placement) for each text block quoting the exact words, and a short line on finish (phone-real vs studio). Describe, do not list rules.`;
   const facts = [
@@ -223,18 +223,82 @@ type ModelPic = { bucket: string; path: string; label: string };
 /** How many of the brand's models (newest first) the planner chooses from. */
 const PLANNER_MODELS = 8;
 
-/** The first line of each recent ad's text that is not just the brand's wordmark, newest first, no repeats. */
+/** An ad's headline: the first line of its text that is not just the brand's wordmark. */
+const headlineOf = (text: string | null, store: string) =>
+  (text ?? "").split("\n").map((l) => l.trim()).find((l) => l && l.replace(/[™®]/g, "").trim().toLowerCase() !== store.toLowerCase()) ?? "";
+
+/** The headlines of the brand's recent ads, newest first, no repeats. */
 function recentHeadlines(runs: Array<{ text_on_image: string | null }>, store: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const r of runs) {
-    const line = (r.text_on_image ?? "").split("\n").map((l) => l.trim()).find((l) => l && l.replace(/[™®]/g, "").trim().toLowerCase() !== store.toLowerCase());
+    const line = headlineOf(r.text_on_image, store);
     if (!line || seen.has(line.toLowerCase())) continue;
     seen.add(line.toLowerCase());
     out.push(line.replace(/"/g, "'").slice(0, 120));
     if (out.length === 10) break;
   }
   return out;
+}
+
+const words = (s: string) => s.toLowerCase().replace(/[’‘]/g, "'").replace(/[^a-z0-9'₱]+/g, " ").split(" ").filter(Boolean);
+
+/** A run of words two lines share ("the gap you can't"): four words, or all of a shorter line of at least two. */
+function sharedPhrase(line: string, other: string): string | null {
+  const a = words(line);
+  const b = words(other);
+  const n = Math.min(4, b.length);
+  if (n < 2) return null;
+  const grams = new Set<string>();
+  for (let i = 0; i + n <= b.length; i++) grams.add(b.slice(i, i + n).join(" "));
+  for (let i = 0; i + n <= a.length; i++) {
+    const g = a.slice(i, i + n).join(" ");
+    if (grams.has(g)) return g;
+  }
+  return null;
+}
+
+/** Lines the notes put in quotes, e.g. an example headline to beat. */
+const quotedLines = (notes: string) => [...notes.matchAll(/["“]([^"”]{8,300})["”]/g)].map((m) => m[1].trim());
+
+/**
+ * The planner tends to rewrite an example headline from the notes, or one the brand
+ * already ran, instead of writing a new one. When ours shares a phrase with one of
+ * them, one quick call writes a fresh headline and it replaces the old one everywhere.
+ */
+async function avoidRepeatedHeadline(
+  db: SupabaseClient,
+  plan: AdaptPlan,
+  input: { store: string; referenceUrl: string; notes: string; profile: string; recent: string[] }
+): Promise<AdaptPlan> {
+  // "use this headline exactly" means the marketer wants those words.
+  if (/\b(exact|exactly|as is|word for word|same headline)\b/i.test(input.notes)) return plan;
+  const headline = headlineOf(plan.plan.final_text, input.store);
+  if (!headline) return plan;
+  const avoid = [...input.recent, ...quotedLines(input.notes)];
+  const phrase = avoid.map((a) => sharedPhrase(headline, a)).find(Boolean);
+  if (!phrase) return plan;
+  const person = plan.plan.person;
+  const out = await askVision<{ headline?: unknown }>(
+    db,
+    "You are a direct-response copywriter for static ads in the Philippines. You rewrite one headline. Answer with JSON only.",
+    [{ url: input.referenceUrl, label: "The competitor's ad we adapt; our headline uses the same device as its headline:", maxSide: 800 }],
+    `Our headline: "${headline}"\nIt reuses "${phrase}", a phrase the brand's recent ads or the marketer's example already used. Write a new headline with the same message and emotion, on the device of the reference's headline (an apology, a question, a crossed-out claim, two short contrasting phrases…), about the same length and in the same capitalisation style. None of these phrases or a rewording of them: ${avoid.map((a) => `"${a}"`).join(", ")}.\n${person ? `It is about ${person}; pronouns match.` : "Nobody is shown, so no he, she, his or her."} Facts and claims only from the brand profile.\n\nBrand profile:\n${input.profile.trim()}\n\nThe marketer's notes: ${input.notes.trim()}\n\nAnswer with JSON only: {"headline":string}`,
+    4000,
+    "low"
+  );
+  const fresh = typeof out?.headline === "string" ? out.headline.trim().slice(0, 160) : "";
+  if (!fresh || avoid.some((a) => sharedPhrase(fresh, a))) return plan;
+  const swap = (s: string) => s.replace(new RegExp(headline.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), fresh);
+  return {
+    ...plan,
+    plan: {
+      ...plan.plan,
+      final_text: plan.plan.final_text.split("\n").map((l) => (l.trim() === headline ? fresh : l)).join("\n"),
+      text: plan.plan.text.map((t) => ({ ...t, to: swap(t.to) })),
+      design_spec: swap(plan.plan.design_spec),
+    },
+  };
 }
 
 const signOne = async (db: SupabaseClient, pic: { bucket: string; path: string }) =>
@@ -285,6 +349,7 @@ export async function createAdaptRun(db: SupabaseClient, input: AdaptInput, crea
         ? [{ ...input.model, url: asked }]
         : models.slice(0, PLANNER_MODELS).map((m) => ({ bucket: m.bucket, path: m.path, label: m.name || `${input.store} model`, url: m.url! }));
     const { data: recentRuns } = await db.from("image_studio_runs").select("text_on_image").eq("store", input.store).eq("preset", "adapt").order("created_at", { ascending: false }).limit(30);
+    const recent = recentHeadlines(recentRuns ?? [], input.store);
     plan = await planAdaptation(db, {
       referenceUrl,
       store: input.store,
@@ -295,9 +360,10 @@ export async function createAdaptRun(db: SupabaseClient, input: AdaptInput, crea
       notes: input.notes,
       models: candidates.map((c) => ({ url: c.url, label: c.label })),
       modelForced: !!asked,
-      recentHeadlines: recentHeadlines(recentRuns ?? [], input.store),
+      recentHeadlines: recent,
     });
     if (!plan) return { error: `Claude could not study the reference: ${lastClaudeError() ?? "it gave no usable plan, try again"}` };
+    plan = await avoidRepeatedHeadline(db, plan, { store: input.store, referenceUrl, notes: input.notes, profile, recent });
     const pick = asked ? 1 : plan.plan.model_pick ?? 0;
     const chosen = plan.plan.needs_person ? candidates[pick - 1] : undefined;
     if (chosen) modelPic = { bucket: chosen.bucket, path: chosen.path, label: chosen.label };
@@ -358,15 +424,49 @@ export async function createAdaptRun(db: SupabaseClient, input: AdaptInput, crea
 }
 
 /** One more try for a result the reviewer flagged as fixable: same images, the prompt plus the fix. */
-export async function retryResult(db: SupabaseClient, resultId: string, fix: string): Promise<void> {
-  const { data } = await db.from("image_studio_results").select("id, run_id, attempts, image_studio_runs!inner(prompt, attachments)").eq("id", resultId).maybeSingle();
+export async function retryResult(db: SupabaseClient, resultId: string, fix: string, check: Record<string, unknown>): Promise<void> {
+  const { data } = await db.from("image_studio_results").select("id, run_id, attempts, path, preview_path, pair_paths, image_studio_runs!inner(prompt, attachments)").eq("id", resultId).maybeSingle();
   if (!data) return;
-  const r = data as unknown as { id: string; run_id: string; attempts: number; image_studio_runs: { prompt: string; attachments: Attachment[] } };
+  const r = data as unknown as { id: string; run_id: string; attempts: number; path: string | null; preview_path: string | null; pair_paths: unknown; image_studio_runs: { prompt: string; attachments: Attachment[] } };
   const prompt = `${r.image_studio_runs.prompt} The previous attempt had this problem, fix it this time: ${fix}`;
+  // The earlier render and its review ride along, so a retry that fails can give it back (recoverFailedRenders).
+  const previous = r.path ? { path: r.path, preview_path: r.preview_path, pair_paths: r.pair_paths, brand_check: check } : null;
   const { data: job } = await db
     .from("hook_studio_jobs")
-    .insert({ kind: "image_gen", engine: "nano_banana_pro", status: "queued", params: { run_id: r.run_id, result_id: r.id, prompt, images: r.image_studio_runs.attachments.map((a) => ({ bucket: a.bucket, path: a.path })), aspect_ratio: "1:1", split: false } })
+    .insert({ kind: "image_gen", engine: "nano_banana_pro", status: "queued", params: { run_id: r.run_id, result_id: r.id, prompt, images: r.image_studio_runs.attachments.map((a) => ({ bucket: a.bucket, path: a.path })), aspect_ratio: "1:1", split: false, previous } })
     .select("id")
     .single();
   await db.from("image_studio_results").update({ status: "queued", job_id: (job?.id as string | undefined) ?? null, path: null, preview_path: null, brand_check: null, attempts: (r.attempts ?? 1) + 1, error: null }).eq("id", r.id);
+}
+
+/**
+ * Renders the image model refused (it flags kids' vitamin ads as nsfw now and then): a first
+ * render is tried once more, and a failed retry gives back the earlier render with its review
+ * instead of an empty card. Only recent ones, so old failures do not spend credits.
+ */
+export async function recoverFailedRenders(db: SupabaseClient, itemId: string | null): Promise<void> {
+  let q = db
+    .from("image_studio_results")
+    .select("id, error, job_id, attempts, image_studio_runs!inner(item_id)")
+    .eq("status", "failed")
+    .not("job_id", "is", null)
+    .gte("created_at", new Date(Date.now() - 2 * 3600_000).toISOString())
+    .limit(8);
+  if (itemId) q = q.eq("image_studio_runs.item_id", itemId);
+  const { data } = await q;
+  for (const r of (data ?? []) as Array<{ id: string; error: string | null; job_id: string; attempts: number | null }>) {
+    if ((r.attempts ?? 1) < 2) {
+      if (/nsfw/i.test(r.error ?? "")) await retryResult(db, r.id, "The image model flagged the last render as unsafe. Keep it plainly family-friendly: anyone shown fully dressed in everyday clothes, nothing suggestive.", { ok: false });
+      continue;
+    }
+    const { data: job } = await db.from("hook_studio_jobs").select("params").eq("id", r.job_id).maybeSingle();
+    const prev = (job?.params as { previous?: { path: string; preview_path: string | null; pair_paths: unknown; brand_check: { notes?: string } & Record<string, unknown> } | null } | null)?.previous;
+    if (!prev?.path) continue;
+    const why = /nsfw/i.test(r.error ?? "") ? "the image model blocked it as unsafe" : "it failed";
+    await db
+      .from("image_studio_results")
+      .update({ status: "done", path: prev.path, preview_path: prev.preview_path, pair_paths: prev.pair_paths, brand_check: { ...prev.brand_check, notes: `Earlier version: the retry did not render (${why}). ${prev.brand_check.notes ?? ""}`.trim() }, error: null })
+      .eq("id", r.id)
+      .eq("status", "failed");
+  }
 }
