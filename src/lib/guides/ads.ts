@@ -99,6 +99,12 @@ export const adGuides: Guide[] = [
         tryIt: "Try it: type a headline in the default copy box. The walkthrough waits.",
       },
       {
+        target: "bulk-create.suggest",
+        place: "top",
+        title: "Copy written from each image",
+        body: "With this on, every image you upload is read by Claude and gets its own primary text, headline and description, written to the person and moment in that picture. It fills only empty fields, marked with a purple border and a **Suggested** tag; a field you edit turns blue with an **Undo**. Click **Suggested** or the thumbnail to see what it saw, pick another headline, or regenerate. The language mix and the on/off switch are saved per store.",
+      },
+      {
         target: "bulk-create.upload",
         place: "right",
         title: "Upload many files at once",

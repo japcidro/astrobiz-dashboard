@@ -1,5 +1,11 @@
 // ── Bulk create: one row per ad ─────────────────────────────────────────────
 //
+// Copy suggested from the image: once an image is uploaded, Claude reads it
+// and writes the three copy fields (src/lib/ai/suggest-ad-copy.ts). The
+// suggestion fills only fields that are still empty, and `suggested` keeps
+// the exact values written so the table can tell "suggested, untouched" from
+// "edited by you" and offer an undo.
+//
 // One row per ad. `group_id` says which ad set the ad belongs to: a row added
 // with "+ Ad" next to another shares its group, and every row in a group
 // carries the same `adset_name`, `adset_budget` and `existing_adset_id`. In
@@ -26,7 +32,45 @@ export interface BulkAdRow {
   description: string;
   status: "pending" | "uploading" | "submitting" | "done" | "error";
   error: string | null;
+  // Object URL of the uploaded image, for the thumbnail. Null for videos.
+  preview_url: string | null;
+  suggest_status: "idle" | "writing" | "done" | "error";
+  suggest_error: string | null;
+  // The last suggestion as Claude returned it (what it saw, alternatives).
+  suggestion: CopySuggestion | null;
+  // The suggested values this row's fields were last set to.
+  suggested: { primary_text: string | null; headline: string | null; description: string | null };
 }
+
+/** What Claude saw in the image, shown on the row so the copy makes sense. */
+export interface ImageRead {
+  person: string;
+  setting: string;
+  text_on_image: string;
+  product_visible: boolean;
+  promo: string;
+  angle: string;
+}
+
+export interface CopySuggestion {
+  read: ImageRead;
+  primary_text: string;
+  headline: string;
+  description: string;
+  headline_alternatives: string[];
+}
+
+export type CopyField = "primary_text" | "headline" | "description";
+export const COPY_FIELDS: CopyField[] = ["primary_text", "headline", "description"];
+
+/** "suggested": the field still holds what was suggested; "edited": it was suggested and then changed; null: never suggested. */
+export function suggestedState(row: BulkAdRow, field: CopyField): "suggested" | "edited" | null {
+  const was = row.suggested[field];
+  if (was == null) return null;
+  return row[field] === was ? "suggested" : "edited";
+}
+
+export const NO_SUGGESTED = { primary_text: null, headline: null, description: null } as const;
 
 // An ad set Facebook already has, offered in the "Existing Ad Set" mode's
 // per-row dropdown. Budgets are in pesos; both null under a campaign budget.
@@ -90,6 +134,11 @@ export function makeEmptyRow(
     description: "",
     status: "pending",
     error: null,
+    preview_url: null,
+    suggest_status: "idle",
+    suggest_error: null,
+    suggestion: null,
+    suggested: { ...NO_SUGGESTED },
   };
 }
 

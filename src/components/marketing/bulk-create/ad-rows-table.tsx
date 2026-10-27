@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useCallback } from "react";
+import { useRef, useCallback, useEffect, useState } from "react";
 import {
   Upload,
   X,
@@ -9,14 +9,30 @@ import {
   Loader2,
   Plus,
   CornerDownRight,
+  Sparkles,
 } from "lucide-react";
 import { PresetPicker } from "./preset-picker";
 import {
+  COPY_FIELDS,
+  NO_SUGGESTED,
   existingAdsetLabel,
   makeEmptyRow,
   type BulkAdRow,
+  type CopyField,
   type ExistingAdset,
 } from "./types";
+import {
+  SuggestBar,
+  SuggestFieldTags,
+  SuggestionPopover,
+  applySuggestion,
+  copyBorderClass,
+  keepSuggestions,
+  limitSuggest,
+  requestSuggestion,
+  type SuggestContextInfo,
+  type SuggestProps,
+} from "./suggest-copy";
 
 const FB_API_BASE = "https://graph.facebook.com/v21.0";
 
@@ -41,7 +57,14 @@ interface AdRowsTableProps {
   // which a blank cell falls back to.
   budget: { kind: "daily" | "lifetime"; fallback: number | null } | null;
   onBudgetKindChange: (kind: "daily" | "lifetime") => void;
-  onUpdateRow: (id: string, updates: Partial<BulkAdRow>) => void;
+  // A function patch reads the row as it is when the patch lands, which the
+  // suggestion flow needs: by then the marketer may have typed in a field.
+  onUpdateRow: (
+    id: string,
+    updates: Partial<BulkAdRow> | ((row: BulkAdRow) => Partial<BulkAdRow>)
+  ) => void;
+  // Copy suggested from each uploaded image: the settings and the store.
+  suggest: SuggestProps;
   // Sets the ad set name / budget / existing ad set on every ad in that ad set.
   onUpdateGroup: (
     groupId: string,
@@ -225,9 +248,95 @@ export function AdRowsTable({
   onUpdateGroup,
   onAddRows,
   onRemoveRow,
+  suggest,
 }: AdRowsTableProps) {
   const bulkInputRef = useRef<HTMLInputElement>(null);
   const rowInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  // ── Suggested copy ──
+  // The uploaded image files, kept so a row can ask for another take.
+  const filesRef = useRef<Record<string, File>>({});
+  // The settings as they are when an async suggestion starts.
+  const suggestRef = useRef(suggest);
+  useEffect(() => {
+    suggestRef.current = suggest;
+  }, [suggest]);
+  const [openSuggestRow, setOpenSuggestRow] = useState<string | null>(null);
+  const [lastContext, setLastContext] = useState<SuggestContextInfo | null>(null);
+
+  const suggestRow = useCallback(
+    async (
+      rowId: string,
+      mode: {
+        replace: boolean;
+        instruction?: string;
+        previous?: { primary_text: string; headline: string; description: string } | null;
+      }
+    ) => {
+      const file = filesRef.current[rowId];
+      if (!file || !file.type.startsWith("image/")) return;
+      const { settings, storeId } = suggestRef.current;
+      onUpdateRow(rowId, { suggest_status: "writing", suggest_error: null });
+      try {
+        const { suggestion, context } = await limitSuggest(() =>
+          requestSuggestion(file, {
+            storeId,
+            language: settings.language,
+            useWinners: settings.use_winners,
+            instruction: mode.instruction,
+            previous: mode.previous ?? null,
+          })
+        );
+        setLastContext(context);
+        onUpdateRow(rowId, (row) => applySuggestion(row, suggestion, mode.replace));
+      } catch (err) {
+        onUpdateRow(rowId, {
+          suggest_status: "error",
+          suggest_error: err instanceof Error ? err.message : "Could not suggest copy",
+        });
+      }
+    },
+    [onUpdateRow]
+  );
+
+  // Another take for a row: what it holds now is what to move away from.
+  const regenerateRow = useCallback(
+    (row: BulkAdRow, instruction?: string) =>
+      suggestRow(row.id, {
+        replace: true,
+        instruction,
+        previous: { primary_text: row.primary_text, headline: row.headline, description: row.description },
+      }),
+    [suggestRow]
+  );
+
+  const undoField = useCallback(
+    (row: BulkAdRow, field: CopyField) => {
+      const was = row.suggested[field];
+      if (was != null) onUpdateRow(row.id, { [field]: was });
+    },
+    [onUpdateRow]
+  );
+
+  // Rows with an image (a thumbnail means the file is kept) whose copy still
+  // has a hole, and no suggestion running.
+  const suggestibleRows = rows.filter(
+    (r) =>
+      !!r.preview_url &&
+      r.suggest_status !== "writing" &&
+      COPY_FIELDS.some((f) => !r[f].trim())
+  );
+  const suggestCounts = {
+    writing: rows.filter((r) => r.suggest_status === "writing").length,
+    done: rows.filter((r) => r.suggest_status === "done").length,
+    error: rows.filter((r) => r.suggest_status === "error").length,
+    suggestible: suggestibleRows.length,
+  };
+  const handleSuggestAll = useCallback(() => {
+    for (const r of suggestibleRows) void suggestRow(r.id, { replace: false });
+  }, [suggestibleRows, suggestRow]);
+
+  const openRow = openSuggestRow ? rows.find((r) => r.id === openSuggestRow) ?? null : null;
 
   // Either column groups rows into ad sets; which one depends on the mode.
   const pickExisting = existingAdsets != null;
@@ -252,8 +361,33 @@ export function AdRowsTable({
   // Upload a single file for a given row — detect type from file MIME
   const uploadFileForRow = useCallback(
     async (file: File, rowId: string, token: string) => {
-      onUpdateRow(rowId, { status: "uploading", error: null });
       const isVideo = file.type.startsWith("video/");
+      // A new image replaces the old one's thumbnail and suggestion; text the
+      // marketer already has stays, only the "Suggested" marks come off.
+      let preview_url: string | null = null;
+      if (isVideo) {
+        delete filesRef.current[rowId];
+      } else {
+        filesRef.current[rowId] = file;
+        preview_url = URL.createObjectURL(file);
+      }
+      onUpdateRow(rowId, (row) => {
+        if (row.preview_url) URL.revokeObjectURL(row.preview_url);
+        return {
+          status: "uploading",
+          error: null,
+          preview_url,
+          suggest_status: "idle",
+          suggest_error: null,
+          suggestion: null,
+          suggested: { ...NO_SUGGESTED },
+        };
+      });
+      // The copy is written while the file uploads to Facebook; neither
+      // waits for the other.
+      if (!isVideo && suggestRef.current.settings.enabled) {
+        void suggestRow(rowId, { replace: false });
+      }
       try {
         if (isVideo) {
           const { video_id } = await uploadVideo(file, adAccountId, token);
@@ -283,7 +417,7 @@ export function AdRowsTable({
         });
       }
     },
-    [adAccountId, onUpdateRow],
+    [adAccountId, onUpdateRow, suggestRow],
   );
 
   // Bulk upload: match files to rows by position
@@ -337,6 +471,16 @@ export function AdRowsTable({
 
   return (
     <div className="space-y-3">
+      {/* Copy suggested from each image: settings and progress */}
+      <SuggestBar
+        settings={suggest.settings}
+        onChange={suggest.onChange}
+        storeId={suggest.storeId}
+        counts={suggestCounts}
+        lastContext={lastContext}
+        onSuggestAll={handleSuggestAll}
+      />
+
       {/* Bulk upload button */}
       <div data-guide="bulk-create.upload">
         <input
@@ -393,7 +537,7 @@ export function AdRowsTable({
                 </th>
               )}
               <th className="px-2 py-2 w-36">Ad Name</th>
-              <th className="px-2 py-2 w-36">Creative</th>
+              <th className="px-2 py-2 w-48">Creative</th>
               <th className="px-2 py-2 min-w-[300px]">Primary Text</th>
               <th className="px-2 py-2 w-40">Headline</th>
               <th className="px-2 py-2 w-40">Description</th>
@@ -595,6 +739,19 @@ export function AdRowsTable({
                     }}
                   />
                   <div className="space-y-1">
+                    <div className="flex items-start gap-2">
+                      {row.preview_url && (
+                        <button
+                          type="button"
+                          onClick={() => row.suggestion && setOpenSuggestRow(row.id)}
+                          className="shrink-0 overflow-hidden rounded border border-gray-700 bg-gray-900"
+                          title={row.suggestion ? "See what Claude saw" : row.file_name ?? undefined}
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={row.preview_url} alt="" className="h-14 w-14 object-cover" />
+                        </button>
+                      )}
+                      <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex items-center gap-1.5">
                       {row.status === "uploading" && (
                         <Loader2 size={14} className="shrink-0 animate-spin text-blue-400" />
@@ -634,6 +791,44 @@ export function AdRowsTable({
                         </button>
                       )}
                     </div>
+                    {/* Suggested copy: where it stands for this image */}
+                    {row.suggest_status === "writing" && (
+                      <span className="flex items-center gap-1 text-[11px] text-blue-300">
+                        <Loader2 size={11} className="animate-spin" />
+                        Reading image, writing copy…
+                      </span>
+                    )}
+                    {row.suggest_status === "done" && row.suggestion && (
+                      <button
+                        type="button"
+                        onClick={() => setOpenSuggestRow(row.id)}
+                        className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200"
+                        title="See what Claude saw and the alternatives"
+                      >
+                        <Sparkles size={11} />
+                        Suggested · what it saw
+                      </button>
+                    )}
+                    {row.suggest_status === "error" && (
+                      <span className="flex flex-wrap items-center gap-1 text-[11px] text-yellow-400">
+                        <span title={row.suggest_error ?? undefined}>Could not suggest</span>
+                        <button
+                          type="button"
+                          onClick={() => suggestRow(row.id, { replace: false })}
+                          className="rounded border border-gray-600 px-1.5 py-0 text-gray-300 hover:bg-gray-700"
+                        >
+                          Retry
+                        </button>
+                      </span>
+                    )}
+                    {row.suggest_status === "done" && row.suggestion && (
+                      <p className="line-clamp-2 text-[11px] leading-snug text-gray-500" title={`${row.suggestion.read.person}. ${row.suggestion.read.setting}.${row.suggestion.read.text_on_image ? ` Text: “${row.suggestion.read.text_on_image}”` : ""}`}>
+                        Saw: {row.suggestion.read.person}
+                        {row.suggestion.read.text_on_image ? ` · “${row.suggestion.read.text_on_image}”` : ""}
+                      </p>
+                    )}
+                      </div>
+                    </div>
                   </div>
                 </td>
 
@@ -653,13 +848,19 @@ export function AdRowsTable({
                     <textarea
                       rows={3}
                       value={row.primary_text}
-                      placeholder="Primary text..."
+                      placeholder={row.suggest_status === "writing" && !row.primary_text.trim() ? "Writing from the image…" : "Primary text..."}
                       onChange={(e) =>
                         onUpdateRow(row.id, { primary_text: e.target.value })
                       }
-                      className={`w-full resize-y rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
-                        !row.primary_text.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
-                      }`}
+                      className={`w-full resize-y rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${copyBorderClass(row, "primary_text")}`}
+                    />
+                    <SuggestFieldTags
+                      row={row}
+                      field="primary_text"
+                      onUndo={() => undoField(row, "primary_text")}
+                      onRegenerate={() => regenerateRow(row)}
+                      onMoreEnglish={() => regenerateRow(row, "Use more English and less Filipino than before.")}
+                      onOpen={() => setOpenSuggestRow(row.id)}
                     />
                   </div>
                 </td>
@@ -682,13 +883,17 @@ export function AdRowsTable({
                     <input
                       type="text"
                       value={row.headline}
-                      placeholder="Headline"
+                      placeholder={row.suggest_status === "writing" && !row.headline.trim() ? "Writing…" : "Headline"}
                       onChange={(e) =>
                         onUpdateRow(row.id, { headline: e.target.value })
                       }
-                      className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
-                        !row.headline.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
-                      }`}
+                      className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${copyBorderClass(row, "headline")}`}
+                    />
+                    <SuggestFieldTags
+                      row={row}
+                      field="headline"
+                      onUndo={() => undoField(row, "headline")}
+                      onOpen={() => setOpenSuggestRow(row.id)}
                     />
                   </div>
                 </td>
@@ -709,13 +914,17 @@ export function AdRowsTable({
                     <input
                       type="text"
                       value={row.description}
-                      placeholder="Description"
+                      placeholder={row.suggest_status === "writing" && !row.description.trim() ? "Writing…" : "Description"}
                       onChange={(e) =>
                         onUpdateRow(row.id, { description: e.target.value })
                       }
-                      className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${
-                        !row.description.trim() ? "border-red-500/50 focus:border-red-500" : "border-gray-600 focus:border-blue-500"
-                      }`}
+                      className={`w-full rounded border bg-gray-900 px-2 py-1 text-sm text-white placeholder-gray-500 focus:outline-none ${copyBorderClass(row, "description")}`}
+                    />
+                    <SuggestFieldTags
+                      row={row}
+                      field="description"
+                      onUndo={() => undoField(row, "description")}
+                      onOpen={() => setOpenSuggestRow(row.id)}
                     />
                   </div>
                 </td>
@@ -743,7 +952,11 @@ export function AdRowsTable({
                     </button>
                   <button
                     type="button"
-                    onClick={() => onRemoveRow(row.id)}
+                    onClick={() => {
+                      delete filesRef.current[row.id];
+                      if (row.preview_url) URL.revokeObjectURL(row.preview_url);
+                      onRemoveRow(row.id);
+                    }}
                     className="rounded p-1 text-gray-500 hover:bg-gray-700 hover:text-red-400 transition-colors"
                     title="Remove row"
                   >
@@ -768,6 +981,23 @@ export function AdRowsTable({
         Add Row
       </button>
 
+      {openRow && openRow.suggestion && (
+        <SuggestionPopover
+          row={openRow}
+          onClose={() => setOpenSuggestRow(null)}
+          onPick={(field, value) =>
+            onUpdateRow(openRow.id, (r) => ({
+              [field]: value,
+              suggested: { ...r.suggested, [field]: value },
+            }))
+          }
+          onRegenerate={(instruction) => regenerateRow(openRow, instruction)}
+          onKeepAll={() => {
+            onUpdateRow(openRow.id, keepSuggestions());
+            setOpenSuggestRow(null);
+          }}
+        />
+      )}
     </div>
   );
 }

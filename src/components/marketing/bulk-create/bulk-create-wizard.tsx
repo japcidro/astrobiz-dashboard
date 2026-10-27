@@ -24,6 +24,7 @@ import {
 } from "@/lib/marketing/store-defaults";
 import { AdRowsTable } from "./ad-rows-table";
 import { BulkSubmissionProgress } from "./bulk-submission-progress";
+import { DEFAULT_SUGGEST_SETTINGS, type SuggestSettings } from "./suggest-copy";
 import {
   EMPTY_COPY,
   groupRows,
@@ -71,6 +72,16 @@ function getTomorrowDate(): string {
   const d = new Date();
   d.setDate(d.getDate() + 1);
   return `${d.toISOString().split("T")[0]}T00:00:00+08:00`;
+}
+
+// The suggestion settings a store saved, or the defaults for a store that
+// has none yet.
+function suggestSettingsFrom(d: Partial<StoreAdDefaults>): SuggestSettings {
+  return {
+    enabled: d.suggest_copy_enabled ?? DEFAULT_SUGGEST_SETTINGS.enabled,
+    language: d.suggest_copy_language ?? DEFAULT_SUGGEST_SETTINGS.language,
+    use_winners: d.suggest_copy_use_winners ?? DEFAULT_SUGGEST_SETTINGS.use_winners,
+  };
 }
 
 // ─── Defaults ───
@@ -170,6 +181,8 @@ export function BulkCreateWizard() {
   const [callToAction, setCallToAction] = useState<CTAType>("SHOP_NOW");
   // "Default ad copy" box — saved with the store defaults.
   const [defaultCopy, setDefaultCopy] = useState<DefaultCopy>(EMPTY_COPY);
+  // Copy suggested from each uploaded image — saved per store too.
+  const [suggestSettings, setSuggestSettings] = useState<SuggestSettings>(DEFAULT_SUGGEST_SETTINGS);
 
   // Section 0: Store (drives per-store autofill; nullable)
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
@@ -279,6 +292,42 @@ export function BulkCreateWizard() {
     };
   }, [existingCampaignId, usingExistingAdset]);
 
+  // ─── Suggestion settings per store ───
+  // Loaded as soon as a store is picked (they are not part of "Apply store
+  // defaults": a toggle should not wait for a click), saved on every change.
+  useEffect(() => {
+    if (!selectedStoreId) return;
+    let cancelled = false;
+    fetch(`/api/marketing/store-defaults?storeId=${encodeURIComponent(selectedStoreId)}`)
+      .then((r) => r.json())
+      .then((json: { data?: StoreAdDefaults | null }) => {
+        if (cancelled || !json.data) return;
+        setSuggestSettings(suggestSettingsFrom(json.data));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedStoreId]);
+
+  const handleSuggestSettingsChange = useCallback(
+    (next: SuggestSettings) => {
+      setSuggestSettings(next);
+      if (!selectedStoreId) return;
+      fetch("/api/marketing/store-defaults", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          shopify_store_id: selectedStoreId,
+          suggest_copy_enabled: next.enabled,
+          suggest_copy_language: next.language,
+          suggest_copy_use_winners: next.use_winners,
+        }),
+      }).catch(() => {});
+    },
+    [selectedStoreId]
+  );
+
   // ─── Store defaults handlers ───
   //
   // Apply: click-triggered. Patches only the shared/repeatable fields
@@ -293,6 +342,7 @@ export function BulkCreateWizard() {
       if (d.website_url) setWebsiteUrl(d.website_url);
       if (d.url_parameters) setUrlParameters(d.url_parameters);
       if (d.default_cta) setCallToAction(d.default_cta);
+      setSuggestSettings(suggestSettingsFrom(d));
 
       // Saved default copy goes into the box and into any ad whose copy is
       // still empty — same as clicking "Fill Empty Rows".
@@ -391,9 +441,13 @@ export function BulkCreateWizard() {
       ...(defaultCopy.description.trim() && {
         default_description: defaultCopy.description,
       }),
+      suggest_copy_enabled: suggestSettings.enabled,
+      suggest_copy_language: suggestSettings.language,
+      suggest_copy_use_winners: suggestSettings.use_winners,
     };
   }, [
     defaultCopy,
+    suggestSettings,
     adAccountId,
     pageId,
     pageName,
@@ -405,9 +459,16 @@ export function BulkCreateWizard() {
 
   // ─── Row handlers ───
   const handleUpdateRow = useCallback(
-    (id: string, updates: Partial<BulkAdRow>) => {
+    (
+      id: string,
+      updates: Partial<BulkAdRow> | ((row: BulkAdRow) => Partial<BulkAdRow>)
+    ) => {
       setRows((prev) =>
-        prev.map((r) => (r.id === id ? { ...r, ...updates } : r))
+        prev.map((r) =>
+          r.id === id
+            ? { ...r, ...(typeof updates === "function" ? updates(r) : updates) }
+            : r
+        )
       );
     },
     []
@@ -811,7 +872,7 @@ export function BulkCreateWizard() {
           {/* Default Copy (fill all rows) */}
           <div className="mb-4 bg-gray-700/20 border border-line rounded-lg p-4" data-guide="bulk-create.copy">
             <div className="flex items-center justify-between mb-3">
-              <p className="text-sm text-gray-400">Default ad copy (optional — fills all empty rows)</p>
+              <p className="text-sm text-gray-400">Default ad copy (optional — fills rows that still have no copy, e.g. videos)</p>
               <button
                 type="button"
                 onClick={() => {
@@ -882,6 +943,11 @@ export function BulkCreateWizard() {
             onRemoveRow={handleRemoveRow}
             adAccountId={adAccountId}
             shopifyStoreId={selectedStoreId}
+            suggest={{
+              settings: suggestSettings,
+              onChange: handleSuggestSettingsChange,
+              storeId: selectedStoreId,
+            }}
           />
         </Section>
 

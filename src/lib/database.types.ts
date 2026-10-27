@@ -2340,6 +2340,9 @@ export type Database = {
           page_name: string | null
           pixel_id: string | null
           shopify_store_id: string
+          suggest_copy_enabled: boolean
+          suggest_copy_language: string
+          suggest_copy_use_winners: boolean
           updated_at: string
           updated_by: string | null
           url_parameters: string | null
@@ -2364,6 +2367,9 @@ export type Database = {
           page_name?: string | null
           pixel_id?: string | null
           shopify_store_id: string
+          suggest_copy_enabled?: boolean
+          suggest_copy_language?: string
+          suggest_copy_use_winners?: boolean
           updated_at?: string
           updated_by?: string | null
           url_parameters?: string | null
@@ -2388,6 +2394,9 @@ export type Database = {
           page_name?: string | null
           pixel_id?: string | null
           shopify_store_id?: string
+          suggest_copy_enabled?: boolean
+          suggest_copy_language?: string
+          suggest_copy_use_winners?: boolean
           updated_at?: string
           updated_by?: string | null
           url_parameters?: string | null

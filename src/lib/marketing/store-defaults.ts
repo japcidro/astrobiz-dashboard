@@ -3,6 +3,9 @@ import type { CTAType } from "@/lib/facebook/types";
 
 // ─── Types ───
 
+// The language mix suggested ad copy is written in.
+export type SuggestCopyLanguage = "taglish" | "english" | "tagalog";
+
 export interface StoreInfo {
   id: string;
   name: string;
@@ -30,6 +33,10 @@ export interface StoreAdDefaults {
   campaign_name_pattern: string | null;
   adset_name_pattern: string | null;
   ad_name_pattern: string | null;
+  // Copy suggested from each uploaded image in Bulk Create.
+  suggest_copy_enabled: boolean;
+  suggest_copy_language: SuggestCopyLanguage;
+  suggest_copy_use_winners: boolean;
 }
 
 export interface StoreWithDefaults extends StoreInfo {

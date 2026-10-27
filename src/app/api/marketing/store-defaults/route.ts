@@ -68,6 +68,9 @@ const WRITABLE_FIELDS = [
   "campaign_name_pattern",
   "adset_name_pattern",
   "ad_name_pattern",
+  "suggest_copy_enabled",
+  "suggest_copy_language",
+  "suggest_copy_use_winners",
 ] as const;
 
 // PUT /api/marketing/store-defaults
