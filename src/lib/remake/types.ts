@@ -115,8 +115,11 @@ export interface ShotView extends ShotRow {
 }
 
 /** What a product photo or a held object shows. */
-export type ProductForm = "bottle" | "gummies" | "capsules" | "box" | "sachet" | "tube" | "jar" | "other";
-export const PRODUCT_FORMS: ProductForm[] = ["bottle", "gummies", "capsules", "box", "sachet", "tube", "jar", "other"];
+export type ProductForm = "bottle" | "gummies" | "capsules" | "patches" | "box" | "sachet" | "tube" | "jar" | "other";
+export const PRODUCT_FORMS: ProductForm[] = ["bottle", "gummies", "capsules", "patches", "box", "sachet", "tube", "jar", "other"];
+
+/** How a brand photo is used in static ads: the pack to reproduce, never, or decided automatically (null). */
+export type AdUse = "main" | "skip";
 
 export interface BrandImage {
   id: string;
@@ -125,6 +128,7 @@ export interface BrandImage {
   label: string | null;
   kind: ProductForm | null;
   description: string | null;
+  ad_use: AdUse | null;
   url: string | null;
   created_at: string;
 }

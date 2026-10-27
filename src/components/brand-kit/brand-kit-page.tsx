@@ -181,7 +181,7 @@ export function BrandKitPage() {
     return () => window.removeEventListener("paste", onPaste);
   }, [uploadFiles]);
 
-  const patchPhoto = async (id: string, body: { kind?: string; description?: string }) => {
+  const patchPhoto = async (id: string, body: PhotoPatch) => {
     try {
       applyKit((await api<{ kit: BrandKit }>(ENDPOINT, { method: "PATCH", body: JSON.stringify({ id, ...body }) })).kit);
     } catch (e) {
@@ -323,7 +323,7 @@ export function BrandKitPage() {
                   )}
 
                   <p className="mt-3 text-xs text-muted">
-                    One photo per form you sell, on a plain background: the bottle or pouch, the loose gummies or capsules, the box. The Static Ad Generator uses the first two pack photos and one contents photo (marked); the Clipper picks the form the person in the clip holds.
+                    One photo per form you sell: the front of the pack, the back if you like, and the contents (the patches, gummies or capsules). Static ads reproduce the <span className="text-fg">main pack</span> facing the camera, so set the front of the pack to &ldquo;main pack&rdquo; and the back or a label close-up to &ldquo;don&apos;t use&rdquo;; left on auto, a front-of-pack photo is picked. The contents photo goes in when the ad shows them, like a patch on the skin. The Clipper picks the form the person in the clip holds.
                   </p>
                 </Panel>
 
@@ -547,6 +547,8 @@ function ModelCard({ model, considered, onRemove }: { model: BrandModel; conside
   );
 }
 
+type PhotoPatch = { kind?: string; description?: string; ad_use?: "main" | "skip" | null };
+
 function PhotoCard({
   img,
   role,
@@ -555,7 +557,7 @@ function PhotoCard({
 }: {
   img: BrandImage;
   role: "pack" | "contents" | null;
-  onPatch: (body: { kind?: string; description?: string }) => Promise<void>;
+  onPatch: (body: PhotoPatch) => Promise<void>;
   onRemove: () => Promise<void>;
 }) {
   const [confirming, setConfirming] = useState(false);
@@ -566,10 +568,14 @@ function PhotoCard({
           // eslint-disable-next-line @next/next/no-img-element
           <img src={img.url} alt={img.description ?? img.label ?? ""} className="h-full w-full object-contain" />
         )}
-        {role && (
+        {role ? (
           <Tag tone="info" className="absolute left-1.5 top-1.5">
-            Static ads · {role}
+            Static ads · {role === "pack" ? "main pack" : role}
           </Tag>
+        ) : (
+          img.ad_use === "skip" && (
+            <Tag className="absolute left-1.5 top-1.5">Not in static ads</Tag>
+          )
         )}
       </div>
       <div className="grid gap-1.5 p-2">
@@ -592,6 +598,15 @@ function PhotoCard({
           onBlur={(e) => e.target.value.trim() !== (img.description ?? "") && void onPatch({ description: e.target.value })}
           className="h-8 text-xs"
         />
+        <Select
+          value={img.ad_use ?? ""}
+          onChange={(e) => void onPatch({ ad_use: e.target.value === "main" || e.target.value === "skip" ? e.target.value : null })}
+          aria-label="How static ads use this photo"
+        >
+          <option value="">Static ads: auto</option>
+          <option value="main">Static ads: main pack</option>
+          <option value="skip">Static ads: don&apos;t use</option>
+        </Select>
         <div className="flex items-center justify-end gap-1.5">
           {confirming ? (
             <>

@@ -221,6 +221,7 @@ export async function runPendingChecks(db: SupabaseClient, itemId: string | null
         const ref = run.attachments.find((a) => a.role === "reference");
         // Only the pack is compared; a close-up of the capsules is not what the bottles must match.
         const packs = run.product_mode === "in" ? run.attachments.filter((a) => a.role === "product" && !isContents(a.kind)).map((a) => signed.get(key(a.bucket, a.path))).filter((u): u is string => !!u) : [];
+        const model = run.attachments.find((a) => a.role === "model");
         const reviewUrl = await reviewImageUrl(r.path ? signed.get(key(BOARD_BUCKET, r.path)) : undefined, url);
         const review = await reviewAdaptation(db, {
           resultUrl: reviewUrl ?? url,
@@ -229,12 +230,15 @@ export async function runPendingChecks(db: SupabaseClient, itemId: string | null
           productLock: run.plan.product_lock ?? null,
           finalText: run.plan.plan.final_text,
           profile: profiles.get(run.store ?? "") ?? "",
+          modelUrl: model ? signed.get(key(model.bucket, model.path)) ?? null : null,
         });
         if (review && !review.ok && review.fixable && (r.attempts ?? 1) < 2) {
           const fix =
             review.productOk === false
               ? `${review.productIssue || "The product does not match our pack."} Every pack must look exactly like our product photo${run.plan.product_lock ? `: ${run.plan.product_lock}` : "."} Keep its own colours; do not recolour it to match the ad.`
-              : review.notes;
+              : review.personOk === false
+                ? `${review.notes} The person must be our model from the model photo (same face, hair, skin tone and age), replacing the reference's person entirely.`
+                : review.notes;
           await retryResult(db, r.id, fix);
           return;
         }

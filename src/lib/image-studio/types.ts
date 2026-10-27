@@ -4,18 +4,27 @@ export type AttachmentRole = "reference" | "model" | "product" | "look";
 export const ROLE_LABEL: Record<AttachmentRole, string> = { reference: "Reference · copy the layout", model: "Model · this face", product: "Product · exact label", look: "Look · style only" };
 
 /** Brand photos of what is inside the pack; the pack itself is any other kind (bottle, box, jar, …). */
-const CONTENT_KINDS = new Set(["capsules", "gummies"]);
+const CONTENT_KINDS = new Set(["capsules", "gummies", "patches"]);
 export const isContents = (kind: string | null | undefined) => CONTENT_KINDS.has(kind ?? "");
 
+/** A photo of the back or side of a pack, or a label close-up: shoppers do not recognise the product from it. */
+const BACK_OF_PACK = /\b(back|rear|side|ingredients?|nutrition|supplement facts|directions|barcode)\b/i;
+const frontScore = (description: string | null | undefined) => (/\bfront\b/i.test(description ?? "") ? 2 : BACK_OF_PACK.test(description ?? "") ? 0 : 1);
+
 /**
- * The brand photos an adapt run attaches, in brand kit order: up to two of the
- * pack (what gets reproduced) and one of the contents, for scenes that show
- * them loose. The Brand Kit page marks the same photos.
+ * The brand photos an adapt run attaches: the pack to reproduce (the photos
+ * marked "main pack" in the Brand Kit, up to two, else the best front-of-pack
+ * photo) and one photo of the contents, for scenes that show them (a patch on
+ * the skin, capsules in a hand). Photos marked "skip" are never used. The
+ * Brand Kit page marks the same photos.
  */
-export function pickStaticAdPhotos<T extends { kind: string | null }>(images: T[]): { packs: T[]; contents: T[] } {
-  let packs = images.filter((p) => !isContents(p.kind)).slice(0, 2);
-  if (packs.length === 0) packs = images.slice(0, 1);
-  const contents = images.filter((p) => isContents(p.kind) && !packs.includes(p)).slice(0, 1);
+export function pickStaticAdPhotos<T extends { kind: string | null; description?: string | null; ad_use?: string | null }>(images: T[]): { packs: T[]; contents: T[] } {
+  const usable = images.filter((p) => p.ad_use !== "skip");
+  const marked = usable.filter((p) => p.ad_use === "main").slice(0, 2);
+  const auto = usable.filter((p) => !isContents(p.kind)).sort((a, b) => frontScore(b.description) - frontScore(a.description));
+  let packs = marked.length ? marked : auto.slice(0, 1);
+  if (packs.length === 0) packs = usable.slice(0, 1);
+  const contents = usable.filter((p) => isContents(p.kind) && !packs.includes(p)).slice(0, 1);
   return { packs, contents };
 }
 

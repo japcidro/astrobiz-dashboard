@@ -60,15 +60,16 @@ export async function POST(request: Request) {
   return Response.json({ kit: await loadBrandKit(auth.db, store) });
 }
 
-/** PATCH { id, kind?, description? } — correct a product photo's label. */
+/** PATCH { id, kind?, description?, ad_use? } — correct a product photo's label, or how static ads use it (main | skip | null = auto). */
 export async function PATCH(request: Request) {
   const auth = await requireBoardUser();
   if (auth.error) return auth.error;
-  const b = (await request.json().catch(() => null)) as { id?: unknown; kind?: unknown; description?: unknown } | null;
+  const b = (await request.json().catch(() => null)) as { id?: unknown; kind?: unknown; description?: unknown; ad_use?: unknown } | null;
   if (!isUuid(b?.id)) return Response.json({ error: "Missing id" }, { status: 400 });
   const patch: Record<string, unknown> = {};
   if (typeof b?.kind === "string" && (PRODUCT_FORMS as string[]).includes(b.kind)) patch.kind = b.kind as ProductForm;
   if (typeof b?.description === "string") patch.description = b.description.trim().slice(0, 160) || null;
+  if (b && "ad_use" in b && (b.ad_use === null || b.ad_use === "main" || b.ad_use === "skip")) patch.ad_use = b.ad_use;
   if (Object.keys(patch).length === 0) return Response.json({ error: "Nothing to change" }, { status: 400 });
   const { data: img, error } = await auth.db.from("remake_brand_images").update(patch).eq("id", b!.id as string).select("store").single();
   if (error || !img) return Response.json({ error: error?.message ?? "Not found" }, { status: 404 });

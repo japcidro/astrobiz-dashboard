@@ -263,7 +263,7 @@ export async function describeProduct(db: SupabaseClient, url: string): Promise<
   if (!img) return null;
   const out = await ask<{ kind?: unknown; description?: unknown }>(
     db,
-    `You label product photos for an ad tool. "kind" is the physical form shown: ${FORMS}. "description" is one short line: what it is, colors, label text if readable (e.g. "white bottle with teal label, Relax Gummies"). Answer with JSON only.`,
+    `You label product photos for an ad tool. "kind" is the physical form shown: ${FORMS}. "description" is one short line: what it is, which side of the pack faces the camera (front, back or side) when it is packaging, colors, label text if readable (e.g. "front of a white bottle with teal label, Relax Gummies"). A sheet or close-up of patches or stickers is "patches". Answer with JSON only.`,
     [img, { type: "text", text: 'Answer with JSON only: {"kind": string, "description": string}.' }],
     200
   );
