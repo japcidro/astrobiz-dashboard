@@ -802,7 +802,7 @@ export function AdRowsTable({
                       <button
                         type="button"
                         onClick={() => setOpenSuggestRow(row.id)}
-                        className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200"
+                        className="flex items-center gap-1 text-[11px] text-accent hover:text-accent-hover"
                         title="See what Claude saw and the alternatives"
                       >
                         <Sparkles size={11} />

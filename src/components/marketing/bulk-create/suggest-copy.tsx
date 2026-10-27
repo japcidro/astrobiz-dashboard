@@ -142,7 +142,7 @@ export function keepSuggestions(): Partial<BulkAdRow> {
 /** The border of a copy field: purple while it holds a suggestion, blue once edited. */
 export function copyBorderClass(row: BulkAdRow, field: CopyField): string {
   const state = suggestedState(row, field);
-  if (state === "suggested") return "border-violet-500 focus:border-violet-400";
+  if (state === "suggested") return "border-accent focus:border-accent-hover";
   if (state === "edited") return "border-blue-500 focus:border-blue-400";
   if (row.suggest_status === "writing" && !row[field].trim()) return "border-gray-600 animate-pulse";
   return !row[field].trim()
@@ -171,14 +171,14 @@ export function SuggestBar({ settings, onChange, storeId, counts, lastContext, o
   return (
     <div
       className={`flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-lg border px-4 py-2.5 ${
-        settings.enabled ? "border-violet-400/40 bg-violet-500/5" : "border-gray-700 bg-gray-800/40"
+        settings.enabled ? "border-accent/50 bg-accent-soft/60" : "border-line bg-panel"
       }`}
       data-guide="bulk-create.suggest"
     >
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <label className="flex cursor-pointer items-center gap-2">
-          <Sparkles size={16} className={settings.enabled ? "text-violet-300" : "text-gray-500"} />
-          <span className={`text-sm font-medium ${settings.enabled ? "text-violet-100" : "text-gray-400"}`}>
+          <Sparkles size={16} className={settings.enabled ? "text-accent" : "text-gray-500"} />
+          <span className={`text-sm font-medium ${settings.enabled ? "text-fg" : "text-gray-400"}`}>
             Suggest copy from each image
           </span>
           <button
@@ -186,10 +186,10 @@ export function SuggestBar({ settings, onChange, storeId, counts, lastContext, o
             role="switch"
             aria-checked={settings.enabled}
             onClick={() => onChange({ ...settings, enabled: !settings.enabled })}
-            className={`relative h-5 w-9 rounded-full transition-colors ${settings.enabled ? "bg-violet-600" : "bg-gray-600"}`}
+            className={`relative h-5 w-9 rounded-full transition-colors ${settings.enabled ? "bg-accent" : "bg-gray-600"}`}
           >
             <span
-              className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-transform ${
+              className={`absolute top-0.5 h-4 w-4 rounded-full ${settings.enabled ? "bg-accent-ink" : "bg-white"} transition-transform ${
                 settings.enabled ? "translate-x-4" : "translate-x-0.5"
               }`}
             />
@@ -204,7 +204,7 @@ export function SuggestBar({ settings, onChange, storeId, counts, lastContext, o
           <select
             value={settings.language}
             onChange={(e) => onChange({ ...settings, language: e.target.value as SuggestCopyLanguage })}
-            className="rounded border border-gray-600 bg-gray-900 px-2 py-1 text-xs text-gray-200 focus:border-violet-500 focus:outline-none"
+            className="rounded border border-gray-600 bg-gray-900 px-2 py-1 text-xs text-gray-200 focus:border-accent focus:outline-none"
           >
             {(Object.keys(LANGUAGE_LABELS) as SuggestCopyLanguage[]).map((l) => (
               <option key={l} value={l}>
@@ -219,7 +219,7 @@ export function SuggestBar({ settings, onChange, storeId, counts, lastContext, o
             type="checkbox"
             checked={settings.use_winners}
             onChange={(e) => onChange({ ...settings, use_winners: e.target.checked })}
-            className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-900 accent-violet-500"
+            className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-900 accent-accent"
           />
           Tone from winners, last 14d
         </label>
@@ -238,7 +238,7 @@ export function SuggestBar({ settings, onChange, storeId, counts, lastContext, o
 
       <div className="flex items-center gap-3">
         {status && (
-          <span className="flex items-center gap-1.5 text-xs text-violet-200">
+          <span className="flex items-center gap-1.5 text-xs text-accent">
             {counts.writing > 0 && <Loader2 size={12} className="animate-spin" />}
             {status}
           </span>
@@ -284,8 +284,8 @@ export function SuggestFieldTags({ row, field, onUndo, onRegenerate, onMoreEngli
           type="button"
           onClick={onOpen}
           title={onOpen ? "See what Claude saw and the alternatives" : undefined}
-          className={`flex items-center gap-1 rounded-full border border-violet-400/40 bg-violet-500/15 px-2 py-0.5 text-violet-200 ${
-            onOpen ? "hover:bg-violet-500/25" : "cursor-default"
+          className={`flex items-center gap-1 rounded-full border border-accent/50 bg-accent-soft px-2 py-0.5 text-accent ${
+            onOpen ? "hover:border-accent" : "cursor-default"
           }`}
         >
           <Sparkles size={10} />
@@ -372,9 +372,9 @@ export function SuggestionPopover({ row, onClose, onPick, onRegenerate, onKeepAl
       >
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Sparkles size={16} className="text-violet-300" />
+            <Sparkles size={16} className="text-accent" />
             <span className="font-medium text-white">Suggested copy · {row.file_name ?? "this image"}</span>
-            {busy && <Loader2 size={14} className="animate-spin text-violet-300" />}
+            {busy && <Loader2 size={14} className="animate-spin text-accent" />}
           </div>
           <button type="button" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-white" aria-label="Close">
             <X size={16} />
@@ -397,7 +397,7 @@ export function SuggestionPopover({ row, onClose, onPick, onRegenerate, onKeepAl
                 </div>
               ))}
               <dt className="text-gray-400">Angle</dt>
-              <dd className="text-violet-200">{s.read.angle || "—"}</dd>
+              <dd className="text-accent">{s.read.angle || "—"}</dd>
             </dl>
             <p className="border-t border-gray-700 pt-2 text-[11px] leading-relaxed text-gray-400">
               Wrong read? Regenerate with a note below.
@@ -423,7 +423,7 @@ export function SuggestionPopover({ row, onClose, onPick, onRegenerate, onKeepAl
                 type="button"
                 disabled={!anySuggested}
                 onClick={onKeepAll}
-                className="rounded bg-violet-600 px-3 py-1 font-medium text-white hover:bg-violet-500 disabled:opacity-50"
+                className="rounded bg-accent px-3 py-1 font-medium text-accent-ink hover:bg-accent-hover disabled:opacity-50"
                 title="Accept the suggested fields as your own copy"
               >
                 Keep all
@@ -452,7 +452,7 @@ export function SuggestionPopover({ row, onClose, onPick, onRegenerate, onKeepAl
                   </div>
                   <div
                     className={`whitespace-pre-wrap rounded border bg-gray-950 px-3 py-2 text-sm text-gray-100 ${
-                      state === "suggested" ? "border-violet-500" : state === "edited" ? "border-blue-500" : "border-gray-700"
+                      state === "suggested" ? "border-accent" : state === "edited" ? "border-blue-500" : "border-gray-700"
                     }`}
                   >
                     {value || <span className="text-gray-500">Empty</span>}
@@ -467,7 +467,7 @@ export function SuggestionPopover({ row, onClose, onPick, onRegenerate, onKeepAl
                             key={h}
                             type="button"
                             onClick={() => onPick("headline", h)}
-                            className="rounded-full border border-gray-600 bg-gray-900 px-2.5 py-0.5 text-gray-200 hover:border-violet-400 hover:text-white"
+                            className="rounded-full border border-gray-600 bg-gray-900 px-2.5 py-0.5 text-gray-200 hover:border-accent hover:text-white"
                           >
                             {h}
                           </button>
