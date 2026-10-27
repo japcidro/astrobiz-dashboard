@@ -3,22 +3,27 @@
 // Claude looks at the creative and writes primary text, a headline and a
 // description to the person and moment in that picture, using what the
 // store already knows about its product (Brand Kit profile, default copy,
-// saved presets, recent winner copy). One call per image; the caller fills
+// saved presets) and the copy of its best-selling ads, which sets the bar:
+// their length, structure and voice. One call per image; the caller fills
 // only empty fields in the row with the result.
 //
 // Same SDK shape as the Script Generator and Hook Generator planners.
-// Sonnet, as the approved mockup states: about ₱1 per image.
+// Sonnet: about ₱2 per image with the best sellers' copy in the prompt.
 
 import Anthropic from "@anthropic-ai/sdk";
 import type { SuggestCopyLanguage } from "@/lib/marketing/store-defaults";
+import type { WinningCopy } from "@/lib/marketing/winning-copy";
 
 export const SUGGEST_COPY_MODEL = "claude-sonnet-5-5";
 
-// Facebook's recommended lengths; the prompt asks for them and the result
-// is clipped as a last resort.
-export const HEADLINE_MAX = 40;
-export const DESCRIPTION_MAX = 30;
-export const PRIMARY_TEXT_MAX = 300;
+// Room for what sells: the best-selling primary texts run 1,000 to 2,700
+// characters and some winning headlines and descriptions 80. The prompt
+// sets the length from the store's best sellers; these clip as a last resort.
+export const HEADLINE_MAX = 90;
+export const DESCRIPTION_MAX = 90;
+export const PRIMARY_TEXT_MAX = 3000;
+/** Primary text to write when the store has no best sellers to measure against. */
+const DEFAULT_PRIMARY_LENGTH = "800 to 1,500 characters";
 
 /** What Claude saw in the image, shown on the row so the copy makes sense. */
 export interface ImageRead {
@@ -46,8 +51,8 @@ export interface SuggestContext {
   brandRules: string | null;
   defaultCopy: { primary_text: string; headline: string; description: string } | null;
   presets: Array<{ kind: string; content: string }>;
-  // Copy of recent winner ads: tone and structure to learn from.
-  winners: Array<{ primary_text: string; headline: string }>;
+  // The store's best-selling primary texts, headlines and descriptions, with what each sold.
+  winning: WinningCopy | null;
   language: SuggestCopyLanguage;
   // Regenerate / "More English" / "Shorter": what to do differently.
   instruction: string | null;
@@ -57,7 +62,7 @@ export interface SuggestContext {
 
 const LANGUAGE_RULES: Record<SuggestCopyLanguage, string> = {
   taglish:
-    "Write in Taglish that is roughly 75% English and 25% Filipino: mostly English with a natural sprinkle of Filipino words and phrases the way Filipinos actually post on Facebook. Never translate word for word.",
+    "Write in Taglish, roughly 75% English: English with Filipino mixed into the same paragraphs and often the same sentence, the way Filipinos actually post on Facebook. When the store's best-selling copy is given below, match its mix. Never translate word for word.",
   english: "Write in plain, warm Philippine English. No Filipino words.",
   tagalog:
     "Write mostly in conversational Filipino (Tagalog), with English only for product names and words Filipinos normally say in English (COD, order, free shipping).",
@@ -65,20 +70,24 @@ const LANGUAGE_RULES: Record<SuggestCopyLanguage, string> = {
 
 function buildSystemPrompt(ctx: SuggestContext): string {
   const parts: string[] = [];
+  const top = ctx.winning?.primary_texts[0];
+  const primaryLength = top
+    ? `about ${Math.round(top.text.length / 100) * 100} characters, as long as the store's best-selling primary text, and built the way the best-selling primary texts below are built (how they open, the order of their beats, how they bring in the product and close). Where they leave it open:`
+    : `${DEFAULT_PRIMARY_LENGTH}:`;
   parts.push(
-    `You write Facebook ad copy for a Philippine e-commerce store${ctx.storeName ? ` called ${ctx.storeName}` : ""}. You are given ONE ad image. First read it carefully: who is shown (age range, gender, what they are doing), the setting and mood, every word printed on the image, whether the product is visible, and any promo. Then write copy for THAT image: speak to the person and the moment in the picture, so an ad showing a grandmother rubbing her knee reads differently from one showing a man jogging. When the image carries a headline or promo text, the headline must echo it, never contradict it.`
+    `You write Facebook ad copy for a Philippine e-commerce store${ctx.storeName ? ` called ${ctx.storeName}` : ""}. You are given ONE ad image. First read it carefully: who is shown (age range, gender, what they are doing), the setting and mood, every word printed on the image, whether the product is visible, and any promo. Then write copy for THAT image: the story belongs to the person and the moment in the picture, so an ad showing a grandmother rubbing her knee reads differently from one showing a man jogging. When the image carries a headline or promo text, the headline must echo it, never contradict it.`
   );
   parts.push(LANGUAGE_RULES[ctx.language]);
   parts.push(
     `Rules:
-- Use only product facts given below. Never invent prices, discounts, ingredients, numbers, awards or results. If no product facts are given, stay with the feeling and the offer mechanics you are told about, and never name a product you cannot see.
-- No medical, cure, or guaranteed-result claims; no before/after; no personal attributes ("you are overweight", "your diabetes"). Speak to the situation, not the person's condition.
-- Refer to the person shown in a way that matches the image. If nobody is shown, do not say he/she or address a specific person.
-- primary_text: 2 to 4 short sentences, at most ${PRIMARY_TEXT_MAX} characters, a hook first, the offer or call to action last. One emoji at most.
-- headline: at most ${HEADLINE_MAX} characters.
-- description: at most ${DESCRIPTION_MAX} characters, usually the offer mechanic (COD, free shipping) or a short promise.
-- headline_alternatives: 3 different headlines, each at most ${HEADLINE_MAX} characters, with different angles (question, benefit, promo).
-- Do not write "it's not X, it's Y" reveals, and do not start with "Introducing".`
+- Use only product facts given below. Never invent prices, discounts, ingredients, numbers, reviews, awards or results. If no product facts are given, stay with the feeling and the offer mechanics you are told about, and never name a product you cannot see.
+- No medical, cure, or guaranteed-result claims, and never say the product changed a person's body, health or behaviour: say what an ingredient supports ("supports normal immune function"), not what the product did. No personal attributes aimed at the reader ("you are overweight", "your diabetes"); a customer telling their own story is fine.
+- Refer to the person shown in a way that matches the image. If nobody is shown, the story is told by a customer from the store's audience, about their own life.
+- primary_text: ${primaryLength} one real customer telling what happened, in the first person, in this order: a first line that is a concrete moment, confession or question in their own words (most people see only that line before "See more", so it carries the ad; never the product name); the struggle in specific, everyday detail (what they tried, what went wrong, small true-to-life particulars); the feeling they would not say out loud; how they found the product and the one thing that won them over; what it is and what is in it, from the product facts; an honest limit (what it did not fix) that makes it believable; the real payoff; then the specs, the offer and a plain call to action. Short lines, one thought each, a blank line between them. At most one emoji, at the end.
+- headline: at most ${HEADLINE_MAX} characters, in the shape of the best-selling headlines when given: the product's promise in a few words, or the customer's situation as a question.
+- description: at most ${DESCRIPTION_MAX} characters: what it is, who it is for, and the offer mechanic (COD, free shipping, money-back).
+- headline_alternatives: 3 different headlines, each at most ${HEADLINE_MAX} characters, with different angles (promise, situation, offer).
+- Do not start with "Introducing", and use at most one "it wasn't X, it was Y" turn in the whole text.`
   );
   if (ctx.brandProfile?.trim()) parts.push(`Product facts (Brand Kit profile):\n${ctx.brandProfile.trim().slice(0, 6000)}`);
   if (ctx.brandRules?.trim()) parts.push(`Brand rules:\n${ctx.brandRules.trim().slice(0, 3000)}`);
@@ -95,13 +104,16 @@ function buildSystemPrompt(ctx: SuggestContext): string {
         .join("\n")}`
     );
   }
-  if (ctx.winners.length > 0) {
-    parts.push(
-      `Copy of this store's recent winning ads. Learn the tone, rhythm and structure; do not repeat them:\n${ctx.winners
-        .slice(0, 6)
-        .map((w, i) => `Winner ${i + 1}\nPrimary text: ${w.primary_text.replace(/\s+/g, " ").slice(0, 600)}\nHeadline: ${w.headline}`)
-        .join("\n\n")}`
-    );
+  const w = ctx.winning;
+  if (w && (w.primary_texts.length > 0 || w.headlines.length > 0)) {
+    const sold = (x: { purchases: number; cpp: number }) => `${x.purchases} purchases at ₱${x.cpp} each`;
+    const lines = [
+      `This store's best-selling ad copy over the last ${w.days} days, ranked by purchases${w.store_cpp ? ` (the store averages ₱${w.store_cpp} per purchase; lower is better)` : ""}. This is the bar: write copy as strong as these, with their length, structure, voice and language mix, told for THIS image. Do not reuse their story or lines, except the offer and call-to-action lines, which you may reuse word for word. Learn only from entries that sell the product; skip any page-post bait unrelated to it (a cute-animal caption).`,
+      ...w.primary_texts.map((p, i) => `Best-selling primary text ${i + 1}, ${sold(p)}:\n"""\n${p.text}\n"""`),
+    ];
+    if (w.headlines.length > 0) lines.push(`Best-selling headlines:\n${w.headlines.map((h) => `- "${h.text}" (${sold(h)})`).join("\n")}`);
+    if (w.descriptions.length > 0) lines.push(`Best-selling descriptions:\n${w.descriptions.map((d) => `- "${d.text}" (${sold(d)})`).join("\n")}`);
+    parts.push(lines.join("\n\n"));
   }
   return parts.join("\n\n");
 }
@@ -113,7 +125,7 @@ function buildQuestion(ctx: SuggestContext): string {
       `The copy below was already suggested for this image. Write something clearly different: a different hook and a different headline, not a rewording.\nPrevious primary text: ${ctx.previous.primary_text}\nPrevious headline: ${ctx.previous.headline}\nPrevious description: ${ctx.previous.description}`
     );
   }
-  if (ctx.instruction?.trim()) lines.push(`Extra instruction from the marketer: ${ctx.instruction.trim().slice(0, 400)}`);
+  if (ctx.instruction?.trim()) lines.push(`Extra instruction from the marketer, which overrides the length and structure rules: ${ctx.instruction.trim().slice(0, 400)}`);
   return lines.join("\n\n");
 }
 
@@ -178,24 +190,31 @@ function clip(s: unknown, max: number): string {
   return t.length > max ? t.slice(0, max).trim() : t;
 }
 
+/** Like clip, but keeps the line breaks: long primary text is written as short lines with blank lines between. */
+function clipLines(s: unknown, max: number): string {
+  const t = typeof s === "string" ? s.replace(/[^\S\n]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim() : "";
+  return t.length > max ? t.slice(0, max).trim() : t;
+}
+
 /** One image in, one suggestion out. The error is in the API's words when the call fails. */
 export async function suggestAdCopy(
   apiKey: string,
   image: { base64: string; mediaType: "image/jpeg" | "image/png" | "image/webp" | "image/gif" },
   ctx: SuggestContext
 ): Promise<SuggestResult> {
+  // A long story takes 15–30 seconds; the route allows 120, room for one retry.
   const client = new Anthropic({ apiKey, timeout: 55_000, maxRetries: 1 });
   try {
     const response = await client.beta.messages.create({
       model: SUGGEST_COPY_MODEL,
-      max_tokens: 2000,
+      max_tokens: 5000,
       // A safety decline on an ordinary ad photo is rare; when it happens
       // the API retries on a fallback model in the same call.
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
-      // Reading one image and writing three short fields is routine work;
-      // low effort keeps it at a few seconds.
-      output_config: { effort: "low", format: { type: "json_schema", schema: OUTPUT_SCHEMA } },
+      // A long story written to the best sellers' bar: medium effort, about
+      // fifteen seconds.
+      output_config: { effort: "medium", format: { type: "json_schema", schema: OUTPUT_SCHEMA } },
       system: buildSystemPrompt(ctx),
       messages: [
         {
@@ -222,7 +241,7 @@ export async function suggestAdCopy(
       return { suggestion: null, error: "Claude returned copy in an unexpected shape" };
     }
     const headline = clip(parsed.headline, HEADLINE_MAX);
-    const primary = clip(parsed.primary_text, PRIMARY_TEXT_MAX);
+    const primary = clipLines(parsed.primary_text, PRIMARY_TEXT_MAX);
     if (!headline || !primary) return { suggestion: null, error: "Claude returned empty copy" };
     const read = parsed.read ?? ({} as Partial<ImageRead>);
     return {

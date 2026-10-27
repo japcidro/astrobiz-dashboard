@@ -251,7 +251,7 @@ export function SuggestBar({ settings, onChange, storeId, counts, lastContext, o
             onChange={(e) => onChange({ ...settings, use_winners: e.target.checked })}
             className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-900 accent-accent"
           />
-          Tone from winners, last 14d
+          Write to the best sellers, last 90d
         </label>
 
         <span className="text-xs text-gray-500">
@@ -262,7 +262,7 @@ export function SuggestBar({ settings, onChange, storeId, counts, lastContext, o
                 ? `Product facts: Brand Kit · ${lastContext.store ?? "store"} ✓`
                 : `No Brand Kit profile for ${lastContext.store ?? "this store"}: using default copy only`
               : "Product facts from the store's Brand Kit profile"}
-          {lastContext && settings.use_winners && lastContext.winners > 0 && ` · ${lastContext.winners} winner ads read`}
+          {lastContext && settings.use_winners && lastContext.winners > 0 && ` · copy of ${lastContext.winners} best-selling ads read`}
         </span>
       </div>
 

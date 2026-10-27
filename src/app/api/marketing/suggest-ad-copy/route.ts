@@ -8,88 +8,34 @@ import {
   type SuggestContext,
 } from "@/lib/ai/suggest-ad-copy";
 import type { SuggestCopyLanguage } from "@/lib/marketing/store-defaults";
+import { loadWinningCopy, type WinningCopy } from "@/lib/marketing/winning-copy";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
-const FB_API_BASE = "https://graph.facebook.com/v21.0";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const LANGUAGES: SuggestCopyLanguage[] = ["taglish", "english", "tagalog"];
 
-// Copy of a store's recent winner ads, kept for ten minutes so a drop of
-// twenty images asks Facebook once.
-const winnersCache = new Map<string, { at: number; winners: Array<{ primary_text: string; headline: string }> }>();
-const WINNERS_TTL = 10 * 60 * 1000;
+// A store's best-selling copy, kept for half an hour so a drop of twenty
+// images reads it once: the promise is cached, so requests that arrive
+// together share one load.
+const winningCache = new Map<string, { at: number; winning: Promise<WinningCopy | null> }>();
+const WINNING_TTL = 30 * 60 * 1000;
 
-async function loadWinners(
-  db: SupabaseClient,
-  storeName: string
-): Promise<Array<{ primary_text: string; headline: string }>> {
-  const hit = winnersCache.get(storeName);
-  if (hit && Date.now() - hit.at < WINNERS_TTL) return hit.winners;
-  const out: Array<{ primary_text: string; headline: string }> = [];
-  try {
-    const [{ data: pool }, { data: tokenRow }] = await Promise.all([
-      db
-        .from("winner_pool_ads")
-        .select("ad_id, is_winner, tagged_at")
-        .eq("store_name", storeName)
-        .order("tagged_at", { ascending: false })
-        .limit(12),
-      db.from("app_settings").select("value").eq("key", "fb_access_token").maybeSingle(),
-    ]);
-    const token = tokenRow?.value as string | undefined;
-    const ids = ((pool ?? []) as Array<{ ad_id: string; is_winner: boolean | null }>)
-      .filter((r) => r.is_winner !== false)
-      .map((r) => r.ad_id)
-      .slice(0, 6);
-    if (token && ids.length > 0) {
-      const params = new URLSearchParams({
-        access_token: token,
-        ids: ids.join(","),
-        fields: "creative{body,title,object_story_spec}",
-      });
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 6000);
-      try {
-        const res = await fetch(`${FB_API_BASE}/?${params}`, { cache: "no-store", signal: controller.signal });
-        if (res.ok) {
-          type Node = {
-            creative?: {
-              body?: string;
-              title?: string;
-              object_story_spec?: {
-                link_data?: { message?: string; name?: string };
-                video_data?: { message?: string; title?: string };
-              };
-            };
-          };
-          const json = (await res.json()) as Record<string, Node>;
-          for (const node of Object.values(json)) {
-            const c = node?.creative;
-            if (!c) continue;
-            const spec = c.object_story_spec;
-            const primary = c.body ?? spec?.link_data?.message ?? spec?.video_data?.message ?? "";
-            const headline = c.title ?? spec?.link_data?.name ?? spec?.video_data?.title ?? "";
-            if (primary.trim() || headline.trim()) out.push({ primary_text: primary.trim(), headline: headline.trim() });
-          }
-        }
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-  } catch {
-    // Winners are a nice-to-have; the suggestion goes on without them.
-  }
-  winnersCache.set(storeName, { at: Date.now(), winners: out });
-  return out;
+function winningCopy(db: SupabaseClient, storeName: string): Promise<WinningCopy | null> {
+  const hit = winningCache.get(storeName);
+  if (hit && Date.now() - hit.at < WINNING_TTL) return hit.winning;
+  // The best sellers are a nice-to-have; the suggestion goes on without them.
+  const winning = loadWinningCopy(db, storeName).catch(() => null);
+  winningCache.set(storeName, { at: Date.now(), winning });
+  return winning;
 }
 
 // POST multipart/form-data
 //   image       the creative file (image/*)
 //   store_id    shopify store uuid (optional: no store, no product facts)
 //   language    taglish | english | tagalog
-//   use_winners "1" to learn tone from recent winner ads
+//   use_winners "1" to write to the bar of the store's best-selling ads
 //   instruction free text: what to do differently (optional)
 //   previous    JSON {primary_text, headline, description} being replaced (optional)
 // → { suggestion } or { error }
@@ -155,7 +101,7 @@ export async function POST(request: Request) {
   let brandRules: string | null = null;
   let defaultCopy: SuggestContext["defaultCopy"] = null;
   let presets: SuggestContext["presets"] = [];
-  let winners: SuggestContext["winners"] = [];
+  let winning: WinningCopy | null = null;
 
   if (storeId) {
     const [{ data: store }, { data: defaults }, { data: presetRows }] = await Promise.all([
@@ -185,11 +131,11 @@ export async function POST(request: Request) {
     if (storeName) {
       const [{ data: kit }, w] = await Promise.all([
         db.from("remake_brand_kits").select("profile, rules").eq("store", storeName).maybeSingle(),
-        useWinners ? loadWinners(db, storeName) : Promise.resolve([]),
+        useWinners ? winningCopy(db, storeName) : Promise.resolve(null),
       ]);
       brandProfile = (kit?.profile as string | null) ?? null;
       brandRules = (kit?.rules as string | null) ?? null;
-      winners = w;
+      winning = w;
     }
   }
 
@@ -202,7 +148,7 @@ export async function POST(request: Request) {
     brandRules,
     defaultCopy,
     presets,
-    winners,
+    winning,
     language,
     instruction,
     previous,
@@ -215,7 +161,7 @@ export async function POST(request: Request) {
     context: {
       store: storeName,
       brand_profile: !!brandProfile?.trim(),
-      winners: winners.length,
+      winners: winning?.ads ?? 0,
     },
   });
 }
