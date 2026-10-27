@@ -62,12 +62,40 @@ export interface SuggestRequest {
   previous?: { primary_text: string; headline: string; description: string } | null;
 }
 
+/**
+ * The server reads images at 1024px anyway, and Vercel refuses request
+ * bodies over 4.5 MB before the route runs: a 2K PNG ad from the Static Ad
+ * Generator is 4–8 MB. So the browser sends a 1024px JPEG instead.
+ */
+async function shrinkForSuggest(file: File): Promise<Blob> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 1024 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    // JPEG has no transparency; white is what a transparent PNG shows on Facebook.
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+    return blob ?? file;
+  } catch {
+    // A format the browser cannot draw goes up as it is; the server says if it cannot read it.
+    return file;
+  }
+}
+
 export async function requestSuggestion(
   file: File,
   opts: SuggestRequest
 ): Promise<{ suggestion: CopySuggestion; context: SuggestContextInfo }> {
   const fd = new FormData();
-  fd.append("image", file);
+  const image = await shrinkForSuggest(file);
+  fd.append("image", image, image === file ? file.name : file.name.replace(/\.[^.]+$/, "") + ".jpg");
   if (opts.storeId) fd.append("store_id", opts.storeId);
   fd.append("language", opts.language);
   fd.append("use_winners", opts.useWinners ? "1" : "0");
@@ -79,7 +107,9 @@ export async function requestSuggestion(
     context?: SuggestContextInfo;
     error?: string;
   };
-  if (!res.ok || !json.suggestion) throw new Error(json.error || `Suggestion failed (${res.status})`);
+  if (!res.ok || !json.suggestion) {
+    throw new Error(json.error || (res.status === 413 ? "Image too large to send" : `Suggestion failed (${res.status})`));
+  }
   return {
     suggestion: json.suggestion,
     context: json.context ?? { store: null, brand_profile: false, winners: 0 },

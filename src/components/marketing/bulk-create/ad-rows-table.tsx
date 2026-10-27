@@ -819,6 +819,7 @@ export function AdRowsTable({
                         >
                           Retry
                         </button>
+                        {row.suggest_error && <span className="line-clamp-2 w-full text-[10px] leading-snug text-gray-500">{row.suggest_error}</span>}
                       </span>
                     )}
                     {row.suggest_status === "done" && row.suggestion && (
