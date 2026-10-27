@@ -4,7 +4,7 @@ import { HOOK_BUCKET, signPaths as signHookPaths } from "@/lib/hook-studio/stora
 import { isLookId } from "@/lib/hook-studio/presets";
 import { DEFAULT_CLIP_ENGINE, DEFAULT_CLIP_ENGINE_FOR, getClipEngine, isClipEngine, veoLengthFor, type ClipEngineId } from "./engines";
 import { castRecipe, motionPrompt, stillPrompt, veoPrompt } from "./prompts";
-import type { BrandImage, BrandKit, BrandKitSummary, CastSource, Person, PersonFolder, PersonLibrary, ProjectRow, ProjectSummary, ProjectView, ShotRow, ShotView } from "./types";
+import type { BrandImage, BrandKit, BrandKitSummary, BrandModel, CastSource, Person, PersonFolder, PersonLibrary, ProjectRow, ProjectSummary, ProjectView, ShotRow, ShotView } from "./types";
 import { brandCheck, describeProduct, detectChanges, labelShots } from "./vision";
 
 const UUID = /^[0-9a-f-]{36}$/;
@@ -53,6 +53,25 @@ export async function loadBrandKitOverview(db: SupabaseClient): Promise<BrandKit
       const own = imgRows.filter((i) => i.store === store);
       return { store, photos: own.length, unlabelled: own.filter((i) => !i.kind).length, has_profile: !!kit?.profile?.trim(), has_rules: !!kit?.rules?.trim() };
     });
+}
+
+/** The person-library folder named like the store (any case), if there is one. */
+export async function findBrandFolder(db: SupabaseClient, store: string): Promise<{ id: string; name: string } | null> {
+  const { data } = await db.from("remake_people_folders").select("id, name");
+  return ((data ?? []) as Array<{ id: string; name: string }>).find((f) => f.name.trim().toLowerCase() === store.trim().toLowerCase()) ?? null;
+}
+
+/** The brand's models, newest first: the people in its folder, signed. */
+export async function loadBrandModels(db: SupabaseClient, store: string, limit = 50): Promise<BrandModel[]> {
+  const folder = await findBrandFolder(db, store);
+  if (!folder) return [];
+  const { data } = await db.from("remake_people").select("id, name, bucket, path, created_at").eq("folder_id", folder.id).order("created_at", { ascending: false }).limit(limit);
+  const rows = (data ?? []) as Array<Omit<BrandModel, "url">>;
+  const [board, hook] = await Promise.all([
+    signBoardPaths(db, rows.filter((r) => r.bucket === BOARD_BUCKET).map((r) => r.path)),
+    signHookPaths(db, rows.filter((r) => r.bucket === HOOK_BUCKET).map((r) => r.path)),
+  ]);
+  return rows.map((r) => ({ ...r, url: (r.bucket === HOOK_BUCKET ? hook : board).get(r.path) ?? null }));
 }
 
 // ─── Projects ───

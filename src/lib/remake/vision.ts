@@ -25,13 +25,28 @@ function sniffImageType(buf: Buffer): "image/png" | "image/jpeg" | "image/webp" 
   return null;
 }
 
-export async function imageBlock(url: string): Promise<Record<string, unknown> | null> {
+/**
+ * An image as a base64 block. Anything bigger than Claude reads (1568 px on
+ * the long side) is shrunk to a JPEG first, so a few full-size photos in one
+ * question stay under the request limit; `maxSide` shrinks further when a
+ * thumbnail is enough (a model photo to judge age and look).
+ */
+export async function imageBlock(url: string, maxSide = 1568): Promise<Record<string, unknown> | null> {
   try {
     const res = await fetch(url);
     if (!res.ok) return null;
-    const buf = Buffer.from(await res.arrayBuffer());
-    const type = sniffImageType(buf);
+    let buf: Buffer = Buffer.from(await res.arrayBuffer());
+    let type = sniffImageType(buf);
     if (!type) return null;
+    if (type !== "image/gif" && (buf.byteLength > 1024 * 1024 || maxSide < 1568)) {
+      try {
+        const sharp = (await import("sharp")).default;
+        buf = await sharp(buf).rotate().resize(maxSide, maxSide, { fit: "inside", withoutEnlargement: true }).jpeg({ quality: 88 }).toBuffer();
+        type = "image/jpeg";
+      } catch {
+        // Keep the original; the size check below decides.
+      }
+    }
     if (buf.byteLength > 4.9 * 1024 * 1024) return null;
     return { type: "image", source: { type: "base64", media_type: type, data: buf.toString("base64") } };
   } catch {
@@ -272,10 +287,10 @@ export async function readImageText(db: SupabaseClient, url: string): Promise<{ 
 }
 
 /** Ask Claude about one or more images with a question; JSON answer. Used by the Image Studio skill. */
-export async function askVision<T>(db: SupabaseClient, system: string, images: Array<{ url: string; label: string }>, question: string, maxTokens = 1200): Promise<T | null> {
+export async function askVision<T>(db: SupabaseClient, system: string, images: Array<{ url: string; label: string; maxSide?: number }>, question: string, maxTokens = 1200): Promise<T | null> {
   const blocks: Array<Record<string, unknown>> = [];
   for (const img of images) {
-    const b = await imageBlock(img.url);
+    const b = await imageBlock(img.url, img.maxSide);
     if (b) blocks.push({ type: "text", text: img.label }, b);
   }
   if (blocks.length === 0) return null;

@@ -3,6 +3,7 @@ import { HOOK_BUCKET, signPaths as signHookPaths } from "@/lib/hook-studio/stora
 import { BOARD_BUCKET, signBoardPaths } from "@/lib/marketing-board/storage";
 import { STILL_CREDITS } from "@/lib/remake/engines";
 import { askVision } from "@/lib/remake/vision";
+import { loadBrandModels } from "@/lib/remake/views";
 import { isContents, pickStaticAdPhotos, type AdaptPlan, type Attachment, type ReviewScores } from "./types";
 
 export { isContents };
@@ -50,34 +51,34 @@ export async function planAdaptation(
     packs: Array<{ url: string; spec: string | null; kind: string | null; description: string | null }>;
     hasContents: boolean;
     notes: string;
-    /** The brand's model photo, if it has one; the planner decides whether it fits the person the ad needs. */
-    modelUrl: string | null;
-    /** The model was asked for by name: use it whenever a person appears. */
+    /** The brand's models; the planner picks the one who fits the person the ad needs, or none. */
+    models: Array<{ url: string; label: string }>;
+    /** The one model was asked for by name: use it whenever a person appears. */
     modelForced: boolean;
   }
 ): Promise<AdaptPlan | null> {
   const system = `You are a senior creative director for direct-response static ads in the Philippines. You adapt a competitor's winning ad for our brand: keep what makes it win (the angle, the structure, the hierarchy, the mood) and replace everything that is theirs (product, brand, claims, prices, people) with ours, using only facts from the brand profile. Never invent prices, claims or numbers. Never keep the competitor's name, product or logo. Keep required compliance lines. Taglish is welcome when the reference is casual. The result must look like a designed ad, not a product photo: strong type hierarchy, one clear message, breathing room, real texture.
 Answer with JSON only, exactly this shape:
 {"study":{"angle":string,"structure":string,"style":string,"why_it_works":string},
- "plan":{"text":[{"from":string,"to":string}],"final_text":string,"needs_person":boolean,"use_model":boolean,"needs_product":boolean,"shows_contents":boolean,"design_spec":string}}
+ "plan":{"text":[{"from":string,"to":string}],"final_text":string,"needs_person":boolean,"model":number,"needs_product":boolean,"shows_contents":boolean,"design_spec":string}}
 - study.structure: the zones top to bottom (e.g. "headline bar top; product in hand center; price badge right; CTA strip bottom").
 - plan.text: every text block in the reference mapped to our wording (keep the role: headline stays a headline). Leave out tiny legal print except our compliance line.
 - plan.final_text: all the text that will appear on our image, one block per line, in reading order. Exact wording, exact capitalisation.
 - plan.needs_person: true only when a human (face, hands, body) is part of the reference's composition.
-- plan.use_model: true only when a person is needed AND the OUR MODEL photo is attached AND that person fits who the design needs: the same age group and role as the reference's person, adapted to our audience (a child stays a child, a mother stays an adult woman). Otherwise false, and you cast the person yourself.
+- plan.model: when a person is needed and OUR MODEL photos are attached, the number of the one who best fits who the design needs: the same age group, gender and role as the reference's person, adapted to our audience (a girl of about 5 for a little girl; never an adult for a child, never a child for a parent). 0 when none fits, when no model photo is attached, or when no person is needed; then you cast the person yourself.
 - plan.shows_contents: true only when loose capsules or gummies appear outside the pack in our design (scattered, in a hand, spilling); label text that mentions capsules does not count.
-- plan.design_spec: 150–250 words for an image model: the composition zone by zone, where our product sits and how big (true size: a supplement bottle fits in a hand), the product described exactly as it looks in its photo (its real body, cap and label colours, never colours taken from the ad's palette; the palette is for background, panels and type), the person if any (when use_model is false: who they are, with age, gender and look, keeping the reference person's role and age group and matching the brand's audience; then pose, expression, clothing), background and lighting, palette with hex codes from the brand, typography (weight, case, colour, placement) for each text block quoting the exact words, and a short line on finish (phone-real vs studio). Describe, do not list rules.`;
+- plan.design_spec: 150–250 words for an image model: the composition zone by zone, where our product sits and how big (true size: a supplement bottle fits in a hand), the product described exactly as it looks in its photo (its real body, cap and label colours, never colours taken from the ad's palette; the palette is for background, panels and type), the person if any (when model is 0: who they are, with age, gender and look, keeping the reference person's role and age group and matching the brand's audience; when a model is picked, only their pose, expression and clothing, since the face comes from the photo), background and lighting, palette with hex codes from the brand, typography (weight, case, colour, placement) for each text block quoting the exact words, and a short line on finish (phone-real vs studio). Describe, do not list rules.`;
   const facts = [
     `Brand profile for ${input.store}:\n${input.profile.trim() || "(no profile yet; use only what the product photos show)"}`,
     input.rules.trim() ? `Brand rules: ${input.rules.trim()}` : "",
     input.packs.length
       ? `Our product pack (photo attached): ${input.packs.map((p) => p.spec ?? `${p.kind ?? "product"}${p.description ? ` (${p.description})` : ""}`).join(" Also: ")}${input.hasContents ? " A close-up of the capsules inside is also available." : ""}`
       : "No product photos available.",
-    input.modelUrl
+    input.models.length
       ? input.modelForced
-        ? "The OUR MODEL photo is the person to use: if a person is needed, set use_model true."
-        : "The OUR MODEL photo is the brand's model. Use it only if that person fits who the design needs; otherwise set use_model false and cast the person yourself."
-      : "No model photo for this brand. If a person is needed, set use_model false and cast them yourself: the reference person's role and age group (a child stays a child), matched to the audience in the brand profile.",
+        ? "The OUR MODEL 1 photo is the person to use: if a person is needed, set model to 1."
+        : `${input.models.length === 1 ? "One photo" : `${input.models.length} photos`} of the brand's models ${input.models.length === 1 ? "is" : "are"} attached (OUR MODEL 1${input.models.length > 1 ? `–${input.models.length}` : ""}). If a person is needed, pick the one who fits who the design needs; if none fits, set model to 0 and cast the person yourself.`
+      : "No model photos for this brand. If a person is needed, set model to 0 and cast them yourself: the reference person's role and age group (a child stays a child), matched to the audience in the brand profile.",
     input.notes.trim() ? `The marketer's notes, which win over everything above: ${input.notes.trim()}` : "",
   ]
     .filter(Boolean)
@@ -91,7 +92,8 @@ Answer with JSON only, exactly this shape:
       [
         { url: input.referenceUrl, label: "The competitor's ad to adapt:" },
         ...input.packs.slice(0, 1).map((p) => ({ url: p.url, label: "OUR product pack, as it really looks:" })),
-        ...(input.modelUrl ? [{ url: input.modelUrl, label: "OUR MODEL, the brand's model photo:" }] : []),
+        // Thumbnails are enough to judge age, gender and look.
+        ...input.models.map((m, i) => ({ url: m.url, label: `OUR MODEL ${i + 1}${m.label ? ` (${m.label})` : ""}:`, maxSide: 640 })),
       ],
       `${facts}\n\nAnswer with JSON only, no markdown fences, no line breaks inside strings (use \\n).`,
       8000
@@ -110,7 +112,7 @@ Answer with JSON only, exactly this shape:
       text: Array.isArray(out.plan.text) ? out.plan.text.filter((t) => t && typeof t.from === "string" && typeof t.to === "string").slice(0, 20).map((t) => ({ from: t.from.slice(0, 200), to: t.to.slice(0, 200) })) : [],
       final_text: String(out.plan.final_text ?? "").slice(0, 800),
       needs_person: out.plan.needs_person === true,
-      use_model: out.plan.use_model === true,
+      model_pick: Math.max(0, Math.round(Number((out.plan as { model?: unknown }).model) || 0)),
       needs_product: out.plan.needs_product !== false,
       shows_contents: out.plan.shows_contents === true,
       design_spec: out.plan.design_spec.slice(0, 2500),
@@ -193,18 +195,8 @@ export interface AdaptInput {
 
 type ModelPic = { bucket: string; path: string; label: string };
 
-/**
- * The brand's own models: the person-library folder named like the store,
- * newest first. Never anyone from another folder: a brand without a folder
- * gets a person cast from the reference and its profile, not FOLIQ's model.
- */
-async function brandModels(db: SupabaseClient, store: string): Promise<ModelPic[]> {
-  const { data: folders } = await db.from("remake_people_folders").select("id, name");
-  const folder = ((folders ?? []) as Array<{ id: string; name: string }>).find((f) => f.name.trim().toLowerCase() === store.trim().toLowerCase());
-  if (!folder) return [];
-  const { data } = await db.from("remake_people").select("bucket, path, name").eq("folder_id", folder.id).order("created_at", { ascending: false }).limit(100);
-  return ((data ?? []) as Array<{ bucket: string; path: string; name: string }>).map((p) => ({ bucket: p.bucket, path: p.path, label: p.name || `${store} model` }));
-}
+/** How many of the brand's models (newest first) the planner chooses from. */
+const PLANNER_MODELS = 8;
 
 const signOne = async (db: SupabaseClient, pic: { bucket: string; path: string }) =>
   (pic.bucket === HOOK_BUCKET ? await signHookPaths(db, [pic.path]) : await signBoardPaths(db, [pic.path])).get(pic.path) ?? null;
@@ -234,7 +226,8 @@ export async function createAdaptRun(db: SupabaseClient, input: AdaptInput, crea
 
   let plan: AdaptPlan | null = null;
   let modelPic: ModelPic | null = null;
-  const models = await brandModels(db, input.store);
+  // The brand's own models only (its person-library folder): a brand without one gets a person cast from the reference and its profile, never another brand's model.
+  const models = (await loadBrandModels(db, input.store)).filter((m) => m.url);
   if (input.change) {
     const { data: prev } = await db.from("image_studio_runs").select("plan, attachments").eq("id", input.change.run_id).maybeSingle();
     plan = (prev?.plan as AdaptPlan | null) ?? null;
@@ -246,8 +239,11 @@ export async function createAdaptRun(db: SupabaseClient, input: AdaptInput, crea
   } else {
     const referenceUrl = await signOne(db, input.reference);
     if (!referenceUrl) return { error: "Reference image not found" };
-    const candidate = input.model ?? models[0] ?? null;
-    const modelUrl = candidate ? await signOne(db, candidate) : null;
+    const asked = input.model ? await signOne(db, input.model) : null;
+    const candidates: Array<ModelPic & { url: string }> =
+      input.model && asked
+        ? [{ ...input.model, url: asked }]
+        : models.slice(0, PLANNER_MODELS).map((m) => ({ bucket: m.bucket, path: m.path, label: m.name || `${input.store} model`, url: m.url! }));
     plan = await planAdaptation(db, {
       referenceUrl,
       store: input.store,
@@ -256,11 +252,13 @@ export async function createAdaptRun(db: SupabaseClient, input: AdaptInput, crea
       packs: packs.filter((p) => p.url).map((p) => ({ url: p.url!, spec: p.spec, kind: p.row.kind, description: p.row.description })),
       hasContents: contentRows.length > 0,
       notes: input.notes,
-      modelUrl,
-      modelForced: !!input.model && !!modelUrl,
+      models: candidates.map((c) => ({ url: c.url, label: c.label })),
+      modelForced: !!asked,
     });
     if (!plan) return { error: "Claude could not study the reference (is the Anthropic key set?)" };
-    if (plan.plan.needs_person && modelUrl && (input.model || plan.plan.use_model)) modelPic = candidate;
+    const pick = asked ? 1 : plan.plan.model_pick ?? 0;
+    const chosen = plan.plan.needs_person ? candidates[pick - 1] : undefined;
+    if (chosen) modelPic = { bucket: chosen.bucket, path: chosen.path, label: chosen.label };
   }
   plan.model_label = modelPic?.label ?? null;
   plan.product_lock = productLock;

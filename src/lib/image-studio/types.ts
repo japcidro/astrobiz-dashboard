@@ -57,7 +57,7 @@ export interface RunInput {
 /** What the adapt skill decided before generating. */
 export interface AdaptPlan {
   study: { angle: string; structure: string; style: string; why_it_works: string };
-  plan: { text: Array<{ from: string; to: string }>; final_text: string; needs_person: boolean; /** The brand's model photo fits the person the design needs (older plans: unset). */ use_model?: boolean; needs_product: boolean; design_spec: string; /** Loose capsules or gummies outside the pack in the design. */ shows_contents?: boolean };
+  plan: { text: Array<{ from: string; to: string }>; final_text: string; needs_person: boolean; /** Which of the brand's models the planner picked, 1-based; 0 = it cast the person itself (older plans: unset). */ model_pick?: number; needs_product: boolean; design_spec: string; /** Loose capsules or gummies outside the pack in the design. */ shows_contents?: boolean };
   model_label?: string | null;
   /** The exact look of our pack (colours, every label line), from the brand photo; locks the product in the prompt and the review. */
   product_lock?: string | null;

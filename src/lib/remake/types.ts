@@ -137,6 +137,16 @@ export interface BrandKit {
   images: BrandImage[];
 }
 
+/** A person in the brand's own person-library folder (named like the store): its models for static ads. */
+export interface BrandModel {
+  id: string;
+  name: string;
+  bucket: string;
+  path: string;
+  url: string | null;
+  created_at: string;
+}
+
 /** One brand on the Brand Kit page: how far its kit is filled in. */
 export interface BrandKitSummary {
   store: string;

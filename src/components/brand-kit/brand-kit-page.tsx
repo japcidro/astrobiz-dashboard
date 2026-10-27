@@ -6,7 +6,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { pickStaticAdPhotos } from "@/lib/image-studio/types";
-import { PRODUCT_FORMS, type BrandImage, type BrandKit, type BrandKitSummary } from "@/lib/remake/types";
+import { PRODUCT_FORMS, type BrandImage, type BrandKit, type BrandKitSummary, type BrandModel } from "@/lib/remake/types";
 import { api } from "@/components/hook-studio/ui";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -23,12 +23,16 @@ import { cn } from "@/lib/utils";
 
 // Same tables and API the Clipper's brand kit panel uses, so both stay in step.
 const ENDPOINT = "/api/owner/remake/brand-kit";
+const MODELS_ENDPOINT = "/api/owner/remake/brand-kit/models";
+/** Matches PLANNER_MODELS in src/lib/image-studio/adapt.ts. */
+const PLANNER_MODELS = 8;
 const MAX_PHOTOS = 8;
 const PROFILE_MAX = 6000;
 const RULES_MAX = 1500;
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
 const message = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback);
+const stripExt = (name: string) => name.replace(/\.[a-z0-9]+$/i, "");
 
 const summarize = (k: BrandKit): BrandKitSummary => ({
   store: k.store,
@@ -70,9 +74,7 @@ export function BrandKitPage() {
   const [saving, setSaving] = useState<"profile" | "rules" | null>(null);
   const [labelling, setLabelling] = useState(false);
   const [uploads, setUploads] = useState<{ done: number; total: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const applyKit = useCallback((k: BrandKit) => {
     setKit(k);
@@ -162,7 +164,6 @@ export function BrandKitPage() {
         setError(message(e, "Upload failed"));
       } finally {
         setUploads(null);
-        if (fileRef.current) fileRef.current.value = "";
       }
     },
     [current, uploads, applyKit]
@@ -287,77 +288,47 @@ export function BrandKitPage() {
             </p>
           ) : (
             <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)]">
-              <Panel
-                title="Product photos"
-                actions={
-                  <span className="font-num text-xs text-muted">
-                    {images.length} / {MAX_PHOTOS}
-                  </span>
-                }
-              >
-                <div
-                  role="button"
-                  tabIndex={0}
-                  aria-disabled={full || !!uploads}
-                  onClick={() => !full && !uploads && fileRef.current?.click()}
-                  onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && !full && !uploads && fileRef.current?.click()}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setDragging(true);
-                  }}
-                  onDragLeave={() => setDragging(false)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setDragging(false);
-                    void uploadFiles(Array.from(e.dataTransfer.files));
-                  }}
-                  className={cn(
-                    "grid justify-items-center gap-1 rounded-panel border border-dashed px-4 py-6 text-center transition-colors",
-                    dragging ? "border-accent bg-accent-soft" : "border-line-strong hover:border-dim",
-                    full || uploads ? "cursor-default" : "cursor-pointer",
-                    full && "opacity-60"
-                  )}
+              <div className="grid gap-5">
+                <Panel
+                  title="Product photos"
+                  actions={
+                    <span className="font-num text-xs text-muted">
+                      {images.length} / {MAX_PHOTOS}
+                    </span>
+                  }
                 >
-                  {uploads ? <Loader2 size={18} className="animate-spin text-accent" /> : <Upload size={18} className="text-muted" />}
-                  <p className="font-display text-sm text-fg">
-                    {uploads
-                      ? `Uploading ${Math.min(uploads.done + 1, uploads.total)} of ${uploads.total}…`
-                      : full
-                        ? `${MAX_PHOTOS} photos is the most a brand holds; remove one to add another`
-                        : "Drop product photos here, paste a screenshot, or click to choose"}
+                  <DropZone
+                    busy={uploads}
+                    full={full ? `${MAX_PHOTOS} photos is the most a brand holds; remove one to add another` : null}
+                    title="Drop product photos here, paste a screenshot, or click to choose"
+                    hint="PNG, JPG or WebP, several at once. Claude labels each one (bottle, gummies, box…) as it lands."
+                    onFiles={(files) => void uploadFiles(files)}
+                  />
+
+                  {images.length > 0 && (
+                    <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                      {images.map((img) => (
+                        <PhotoCard key={img.id} img={img} role={roleOf(img)} onPatch={(body) => patchPhoto(img.id, body)} onRemove={() => removePhoto(img.id)} />
+                      ))}
+                    </div>
+                  )}
+
+                  {(summary?.unlabelled ?? 0) > 0 && (
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-muted">
+                      {summary!.unlabelled} unlabelled
+                      <Button size="sm" variant="secondary" onClick={() => void relabel()} disabled={labelling}>
+                        {labelling ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Label with Claude
+                      </Button>
+                    </div>
+                  )}
+
+                  <p className="mt-3 text-xs text-muted">
+                    One photo per form you sell, on a plain background: the bottle or pouch, the loose gummies or capsules, the box. The Static Ad Generator uses the first two pack photos and one contents photo (marked); the Clipper picks the form the person in the clip holds.
                   </p>
-                  <p className="text-xs text-muted">PNG, JPG or WebP, several at once. Claude labels each one (bottle, gummies, box…) as it lands.</p>
-                </div>
-                <input
-                  ref={fileRef}
-                  type="file"
-                  multiple
-                  accept={IMAGE_TYPES.join(",")}
-                  className="hidden"
-                  onChange={(e) => e.target.files && void uploadFiles(Array.from(e.target.files))}
-                />
+                </Panel>
 
-                {images.length > 0 && (
-                  <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-                    {images.map((img) => (
-                      <PhotoCard key={img.id} img={img} role={roleOf(img)} onPatch={(body) => patchPhoto(img.id, body)} onRemove={() => removePhoto(img.id)} />
-                    ))}
-                  </div>
-                )}
-
-                {(summary?.unlabelled ?? 0) > 0 && (
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-muted">
-                    {summary!.unlabelled} unlabelled
-                    <Button size="sm" variant="secondary" onClick={() => void relabel()} disabled={labelling}>
-                      {labelling ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Label with Claude
-                    </Button>
-                  </div>
-                )}
-
-                <p className="mt-3 text-xs text-muted">
-                  One photo per form you sell, on a plain background: the bottle or pouch, the loose gummies or capsules, the box. The Static Ad Generator uses the first two pack photos and one contents photo (marked); the Clipper picks the form the person in the clip holds.
-                </p>
-              </Panel>
+                <ModelsPanel key={store} store={store} onError={setError} />
+              </div>
 
               <div className="grid gap-5">
                 <Panel
@@ -396,17 +367,182 @@ export function BrandKitPage() {
                     </Button>
                   </div>
                 </Panel>
-
-                <Panel title="Model">
-                  <p className="text-sm text-muted">
-                    When the person library has a folder named <span className="font-mono text-fg">{store}</span>, static ads use its newest photo, and only when that person fits who the ad needs (a child stays a child). Without one, the planner casts someone who fits the reference and the profile. Folders live in the person library (Clipper, &ldquo;Use existing image&rdquo;).
-                  </p>
-                </Panel>
               </div>
             </div>
           )}
         </>
       )}
+    </div>
+  );
+}
+
+/** A dashed drop target that also opens the file chooser; several files at once. */
+function DropZone({
+  busy,
+  full,
+  title,
+  hint,
+  onFiles,
+}: {
+  busy: { done: number; total: number } | null;
+  /** Set when nothing more fits: the message shown instead of the title. */
+  full: string | null;
+  title: string;
+  hint: string;
+  onFiles: (files: File[]) => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const open = () => !full && !busy && fileRef.current?.click();
+  return (
+    <>
+      <div
+        role="button"
+        tabIndex={0}
+        aria-disabled={!!full || !!busy}
+        onClick={open}
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && open()}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragging(false);
+          if (!full && !busy) onFiles(Array.from(e.dataTransfer.files));
+        }}
+        className={cn(
+          "grid justify-items-center gap-1 rounded-panel border border-dashed px-4 py-6 text-center transition-colors",
+          dragging ? "border-accent bg-accent-soft" : "border-line-strong hover:border-dim",
+          full || busy ? "cursor-default" : "cursor-pointer",
+          full && "opacity-60"
+        )}
+      >
+        {busy ? <Loader2 size={18} className="animate-spin text-accent" /> : <Upload size={18} className="text-muted" />}
+        <p className="font-display text-sm text-fg">{busy ? `Uploading ${Math.min(busy.done + 1, busy.total)} of ${busy.total}…` : full ?? title}</p>
+        <p className="text-xs text-muted">{hint}</p>
+      </div>
+      <input
+        ref={fileRef}
+        type="file"
+        multiple
+        accept={IMAGE_TYPES.join(",")}
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files) onFiles(Array.from(e.target.files));
+          e.target.value = "";
+        }}
+      />
+    </>
+  );
+}
+
+/**
+ * The brand's models: its folder in the person library. The static ad
+ * planner picks the one who fits each reference, or casts someone new.
+ */
+function ModelsPanel({ store, onError }: { store: string; onError: (m: string | null) => void }) {
+  const [models, setModels] = useState<BrandModel[] | null>(null);
+  const [uploads, setUploads] = useState<{ done: number; total: number } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api<{ models: BrandModel[] }>(`${MODELS_ENDPOINT}?store=${encodeURIComponent(store)}`)
+      .then((r) => !cancelled && setModels(r.models))
+      .catch((e) => !cancelled && onError(message(e, "Could not load the models")));
+    return () => {
+      cancelled = true;
+    };
+  }, [store, onError]);
+
+  const upload = async (files: File[]) => {
+    const images = files.filter((f) => IMAGE_TYPES.includes(f.type));
+    onError(images.length < files.length ? `${files.length - images.length} skipped: only PNG, JPG or WebP` : null);
+    if (images.length === 0) return;
+    setUploads({ done: 0, total: images.length });
+    try {
+      for (const [i, file] of images.entries()) {
+        const { path, token, bucket } = await api<{ path: string; token: string; bucket: string }>("/api/owner/remake/upload-url", {
+          method: "POST",
+          body: JSON.stringify({ kind: "person", mime: file.type }),
+        });
+        const up = await createClient().storage.from(bucket).uploadToSignedUrl(path, token, file, { contentType: file.type });
+        if (up.error) throw new Error(up.error.message);
+        const r = await api<{ models: BrandModel[] }>(MODELS_ENDPOINT, { method: "POST", body: JSON.stringify({ store, path, name: stripExt(file.name).slice(0, 120) }) });
+        setModels(r.models);
+        setUploads({ done: i + 1, total: images.length });
+      }
+    } catch (e) {
+      onError(message(e, "Upload failed"));
+    } finally {
+      setUploads(null);
+    }
+  };
+
+  const remove = async (id: string) => {
+    try {
+      setModels((await api<{ models: BrandModel[] }>(`${MODELS_ENDPOINT}?id=${id}&store=${encodeURIComponent(store)}`, { method: "DELETE" })).models);
+    } catch (e) {
+      onError(message(e, "Could not remove"));
+    }
+  };
+
+  return (
+    <Panel title="Models" actions={models && <span className="font-num text-xs text-muted">{models.length}</span>}>
+      <p className="mb-3 text-sm text-muted">
+        The people in this brand&apos;s ads. For each static ad the planner picks the one who fits the reference (a little girl for a little girl), or casts someone new when none does. It looks at the newest {PLANNER_MODELS}.
+      </p>
+      <DropZone busy={uploads} full={null} title="Drop model photos here, or click to choose" hint="A clear face, one person per photo. PNG, JPG or WebP, several at once." onFiles={(files) => void upload(files)} />
+      {models === null ? (
+        <p className="mt-3 inline-flex items-center gap-2 text-sm text-muted">
+          <Loader2 size={14} className="animate-spin" /> Loading models…
+        </p>
+      ) : (
+        models.length > 0 && (
+          <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-4">
+            {models.map((m, i) => (
+              <ModelCard key={m.id} model={m} considered={i < PLANNER_MODELS} onRemove={() => remove(m.id)} />
+            ))}
+          </div>
+        )
+      )}
+      <p className="mt-3 text-xs text-muted">
+        This is the <span className="font-mono text-fg">{store}</span> folder of the person library, so the Clipper and the Hook Generator see the same people. Removing a model only takes them out of the folder.
+      </p>
+    </Panel>
+  );
+}
+
+function ModelCard({ model, considered, onRemove }: { model: BrandModel; considered: boolean; onRemove: () => Promise<void> }) {
+  const [confirming, setConfirming] = useState(false);
+  return (
+    <div className={cn("min-w-0 overflow-hidden rounded-panel border border-line bg-raised", !considered && "opacity-60")}>
+      <div className="aspect-[3/4] bg-canvas">
+        {model.url && (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={model.url} alt={model.name} className="h-full w-full object-cover" loading="lazy" />
+        )}
+      </div>
+      <div className="grid gap-1 p-1.5">
+        <p className="truncate text-xs text-muted" title={model.name}>
+          {model.name || "Unnamed"}
+        </p>
+        {confirming ? (
+          <div className="flex items-center gap-1">
+            <Button size="sm" variant="danger" onClick={() => void onRemove()} className="flex-1 px-1">
+              Remove
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setConfirming(false)} className="px-1.5">
+              No
+            </Button>
+          </div>
+        ) : (
+          <Button size="sm" variant="ghost" onClick={() => setConfirming(true)}>
+            <Trash2 size={12} /> Remove
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
