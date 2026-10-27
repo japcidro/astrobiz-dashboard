@@ -300,6 +300,11 @@ export async function readImageText(db: SupabaseClient, url: string): Promise<{ 
   return { has_text: out.has_text === true, text: typeof out.text === "string" ? out.text.trim().slice(0, 600) : "" };
 }
 
+/** Ask Claude a question with no image; JSON answer. */
+export async function askText<T>(db: SupabaseClient, system: string, question: string, maxTokens = 1200, effort?: "low" | "medium" | "high"): Promise<T | null> {
+  return ask<T>(db, system, [{ type: "text", text: question }], maxTokens, effort);
+}
+
 /** Ask Claude about one or more images with a question; JSON answer. Used by the Image Studio skill. */
 export async function askVision<T>(db: SupabaseClient, system: string, images: Array<{ url: string; label: string; maxSide?: number }>, question: string, maxTokens = 1200, effort?: "low" | "medium" | "high"): Promise<T | null> {
   const blocks: Array<Record<string, unknown>> = [];

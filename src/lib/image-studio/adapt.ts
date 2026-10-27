@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { HOOK_BUCKET, signPaths as signHookPaths } from "@/lib/hook-studio/storage";
 import { BOARD_BUCKET, signBoardPaths } from "@/lib/marketing-board/storage";
 import { STILL_CREDITS } from "@/lib/remake/engines";
-import { askVision, lastClaudeError } from "@/lib/remake/vision";
+import { askText, askVision, lastClaudeError } from "@/lib/remake/vision";
 import { loadBrandModels } from "@/lib/remake/views";
 import { isContents, pickStaticAdPhotos, type AdaptPlan, type Attachment, type ReviewScores } from "./types";
 
@@ -143,7 +143,7 @@ export async function reviewAdaptation(
   input: { resultUrl: string; referenceUrl: string | null; productUrls: string[]; productLock: string | null; finalText: string; profile: string; modelUrl?: string | null }
 ): Promise<{ ok: boolean; notes: string; scores: ReviewScores; fixable: boolean; productOk: boolean | null; productIssue: string; personOk: boolean | null } | null> {
   const system = `You are an art director reviewing an AI-generated static ad before it ships. Score 0–10: "design" (hierarchy, readability, balance, polish, does it look like a real ad), "brand" (our product reproduced faithfully with legible correct label text, brand colours, no competitor branding, compliance line present when the bottle label is visible), "structure" (keeps the reference's winning structure and angle). ok=false when any text on the image is garbled, misspelled or different from the planned text, when the product label is wrong or unreadable, when a competitor name or logo appears, when the person is deformed, or when design < 6. "fixable" is true when a regeneration with a note could fix it (text, label, small artefacts, a wrong product), false when the whole concept is off. "notes": one or two short sentences, the most important fix first, or "Looks great."
-Product check, strictest of all because a wrong product wastes the ad: compare EVERY pack in IMAGE A with OUR PRODUCT photo and its description: the container shape, the body colour, the cap colour, the label colour, the stripes and accents, the logo and the label wording. "product_ok" is false if any pack differs in any of these (a body recoloured to match the ad, a different logo or icon, label lines invented, missing or reworded, a different kind of container), or if our product is missing when the ad shows a product, or if our pack is seen only from the back or side, or is so small, cropped or hidden that someone scrolling a feed would not recognise it at a glance, or if it looks pasted on: floating, a flat cutout laid over the photo or over a design panel, lit differently from the scene, without a shadow where it touches a surface, in a different perspective or sharpness, or at a size that is not true to life next to the people and things around it (say "looks pasted on" in product_issue and how). The words that must be right are the ones a shopper reads on a phone: the brand name, the product name and the big label lines. Small print on the pack (a usage strip, ingredient text, tiny badges, a footer line) that is a few pixels tall in the ad does not fail the product check even when it comes out garbled; a wrong colour, or a wrong word in the brand name, product name or big label lines, does. When product_ok is false, ok is false and fixable is true, and "product_issue" says concretely what differs (e.g. "the bottles are dark green; ours is white with thin teal stripes"). When there is no product photo, product_ok is null.
+Product check, strictest of all because a wrong product wastes the ad: compare EVERY pack in IMAGE A with OUR PRODUCT photo and its description: the container shape, the body colour, the cap colour, the label colour, the stripes and accents, the logo, the label wording, and the artwork printed on the front (its illustrations, shapes and graphic elements, and where each one sits). A pack is its printed design, not just its colours and words. "product_ok" is false if any pack differs in any of these (a body recoloured to match the ad, a different logo or icon, label lines invented, missing or reworded, a different kind of container, or the front redesigned: an illustration, shape or graphic element that ours does not have, one of ours missing, swapped for another or moved, e.g. a row of letter blocks on a box that has none, a different cloud, different fruit). An illustration drawn a little differently in its detail is fine; a different design is not. or if our product is missing when the ad shows a product, or if our pack is seen only from the back or side, or is so small, cropped or hidden that someone scrolling a feed would not recognise it at a glance, or if it looks pasted on: floating, a flat cutout laid over the photo or over a design panel, lit differently from the scene, without a shadow where it touches a surface, in a different perspective or sharpness, or at a size that is not true to life next to the people and things around it (say "looks pasted on" in product_issue and how). The words that must be right are the ones a shopper reads on a phone: the brand name, the product name and the big label lines. Small print on the pack (a usage strip, ingredient text, a footer line) that is a few pixels tall in the ad does not fail the product check even when it comes out garbled; this is about tiny text only, never the artwork; a wrong colour, or a wrong word in the brand name, product name or big label lines, does. When product_ok is false, ok is false and fixable is true, and "product_issue" says concretely what differs (e.g. "the bottles are dark green; ours is white with thin teal stripes"). When there is no product photo, product_ok is null.
 Person check, when an OUR MODEL photo is given: every person in IMAGE A must be that person (same face, hair, skin tone and age). "person_ok" is false when a person in IMAGE A is the one from IMAGE B or anyone else; then ok is false, fixable is true, and "person_issue" says who appears instead (e.g. "the girl is the reference's girl, not our model"). Without a model photo, person_ok is null.
 Answer with JSON only: {"ok":boolean,"fixable":boolean,"design":number,"brand":number,"structure":number,"product_ok":boolean|null,"product_issue":string,"person_ok":boolean|null,"person_issue":string,"notes":string}.`;
   const images: Array<{ url: string; label: string; maxSide?: number }> = [{ url: input.resultUrl, label: "IMAGE A — the generated ad to review:" }];
@@ -155,7 +155,8 @@ Answer with JSON only: {"ok":boolean,"fixable":boolean,"design":number,"brand":n
     system,
     images,
     `${input.productLock ? `Our product, described: ${input.productLock}\n\n` : ""}Planned text on the image, which must appear exactly:\n${input.finalText || "(no text planned)"}\n\nBrand profile excerpt: ${input.profile.slice(0, 1200)}\n\nAnswer with JSON only.`,
-    2000
+    // The model thinks first; 2000 left little room for the answer once the pack check got longer.
+    6000
   );
   if (!out || typeof out.ok !== "boolean") return null;
   const n = (v: unknown) => Math.max(0, Math.min(10, Math.round(Number(v) || 0)));
@@ -289,16 +290,45 @@ async function avoidRepeatedHeadline(
   );
   const fresh = typeof out?.headline === "string" ? out.headline.trim().slice(0, 160) : "";
   if (!fresh || avoid.some((a) => sharedPhrase(fresh, a))) return plan;
-  const swap = (s: string) => s.replace(new RegExp(headline.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), fresh);
+  return swapLines(plan, new Map([[headline, fresh]]));
+}
+
+/** Puts new wording in place of old lines everywhere the plan carries them: the image's text, the text list and the design spec. */
+function swapLines(plan: AdaptPlan, swaps: Map<string, string>): AdaptPlan {
+  if (swaps.size === 0) return plan;
+  const swap = (s: string) => [...swaps].reduce((acc, [from, to]) => acc.replace(new RegExp(from.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), () => to), s);
   return {
     ...plan,
     plan: {
       ...plan.plan,
-      final_text: plan.plan.final_text.split("\n").map((l) => (l.trim() === headline ? fresh : l)).join("\n"),
+      final_text: plan.plan.final_text.split("\n").map((l) => swaps.get(l.trim()) ?? l).join("\n"),
       text: plan.plan.text.map((t) => ({ ...t, to: swap(t.to) })),
       design_spec: swap(plan.plan.design_spec),
     },
   };
+}
+
+const GENDERED = /\b(she|her|hers|herself|he|him|his|himself|daughter|son)\b|anak na (babae|lalaki)/i;
+
+/** With nobody in the image, "her plate" or "his growth" speaks to only half the parents; those lines are rewritten without gender. */
+async function genderFreeCopy(db: SupabaseClient, plan: AdaptPlan): Promise<AdaptPlan> {
+  if (plan.plan.needs_person) return plan;
+  const lines = plan.plan.final_text.split("\n").map((l) => l.trim()).filter((l) => GENDERED.test(l));
+  if (lines.length === 0) return plan;
+  const out = await askText<{ lines?: unknown }>(
+    db,
+    "You edit ad copy for a Philippine kids' brand. Answer with JSON only.",
+    `Nobody is shown in this ad, so these lines must not say he, she, his, her, him, son or daughter. Rewrite each one with words that fit any child ("your child", "their", "kids", "anak", "siya"), keeping its meaning, its length, its tone, its language and its capitalisation:\n${lines.map((l, i) => `${i + 1}. ${l}`).join("\n")}\n\nAnswer with JSON only: {"lines":[string]}, in the same order.`,
+    3000,
+    "low"
+  );
+  const fresh = Array.isArray(out?.lines) ? out.lines : [];
+  const swaps = new Map<string, string>();
+  lines.forEach((l, i) => {
+    const f = typeof fresh[i] === "string" ? fresh[i].trim().slice(0, 300) : "";
+    if (f && !GENDERED.test(f)) swaps.set(l, f);
+  });
+  return swapLines(plan, swaps);
 }
 
 const signOne = async (db: SupabaseClient, pic: { bucket: string; path: string }) =>
@@ -363,7 +393,7 @@ export async function createAdaptRun(db: SupabaseClient, input: AdaptInput, crea
       recentHeadlines: recent,
     });
     if (!plan) return { error: `Claude could not study the reference: ${lastClaudeError() ?? "it gave no usable plan, try again"}` };
-    plan = await avoidRepeatedHeadline(db, plan, { store: input.store, referenceUrl, notes: input.notes, profile, recent });
+    plan = await genderFreeCopy(db, await avoidRepeatedHeadline(db, plan, { store: input.store, referenceUrl, notes: input.notes, profile, recent }));
     const pick = asked ? 1 : plan.plan.model_pick ?? 0;
     const chosen = plan.plan.needs_person ? candidates[pick - 1] : undefined;
     if (chosen) modelPic = { bucket: chosen.bucket, path: chosen.path, label: chosen.label };

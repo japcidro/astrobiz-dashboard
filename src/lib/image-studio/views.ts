@@ -240,7 +240,7 @@ export async function runPendingChecks(db: SupabaseClient, itemId: string | null
             review.productOk === false
               ? /pasted|floating|cutout|cut-out|overlay|shadow|lit |lighting|perspective|scale|size/i.test(review.productIssue)
                 ? `${review.productIssue} Photograph our pack inside the scene: resting on a surface or in a hand at its true size, lit by the scene's light with a soft contact shadow, matching perspective, focus and grain, front label toward the camera; never a cutout laid on top.`
-                : `${review.productIssue || "The product does not match our pack."} Every pack must look exactly like our product photo${run.plan.product_lock ? `: ${run.plan.product_lock}` : "."} Keep its own colours; do not recolour it to match the ad.`
+                : `${review.productIssue || "The product does not match our pack."} Every pack must look exactly like our product photo${run.plan.product_lock ? `: ${run.plan.product_lock}` : "."} Keep its own colours and the exact artwork printed on its front; do not recolour it to match the ad or add, drop or redraw anything on it.`
               : review.personOk === false
                 ? `${review.notes} The person must be our model from the model photo (same face, hair, skin tone and age), replacing the reference's person entirely.`
                 : review.notes;
