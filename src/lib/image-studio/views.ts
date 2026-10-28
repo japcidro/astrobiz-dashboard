@@ -101,7 +101,8 @@ export async function loadStudioPage(db: SupabaseClient, itemId: string | null):
 
 const okAttachment = (a: unknown): a is Attachment => {
   const x = a as Attachment;
-  return !!x && (x.bucket === BOARD_BUCKET || x.bucket === HOOK_BUCKET) && typeof x.path === "string" && /^[\w./-]{3,300}$/.test(x.path) && !x.path.includes("..") && ["reference", "model", "product", "look"].includes(x.role);
+  // Brand photos live under the store's name, which can hold spaces ("brand/I Love Patches/…").
+  return !!x && (x.bucket === BOARD_BUCKET || x.bucket === HOOK_BUCKET) && typeof x.path === "string" && /^[\w ./-]{3,300}$/.test(x.path) && !x.path.includes("..") && ["reference", "model", "product", "look"].includes(x.role);
 };
 
 /** Save the run, make one result row per image, and queue a Nano Banana job for each. */
