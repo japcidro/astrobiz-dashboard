@@ -4,7 +4,8 @@ import { BOARD_BUCKET, signBoardPaths } from "@/lib/marketing-board/storage";
 import { STILL_CREDITS } from "@/lib/remake/engines";
 import { askText, askVision, lastClaudeError } from "@/lib/remake/vision";
 import { loadBrandModels } from "@/lib/remake/views";
-import { isContents, pickStaticAdPhotos, type AdaptPlan, type Attachment, type ReviewScores } from "./types";
+import { aspectFor } from "./prompt";
+import { isContents, pickStaticAdPhotos, type AdaptPlan, type Attachment, type ImageFormat, type OutputMode, type ReviewScores } from "./types";
 
 export { isContents };
 
@@ -459,15 +460,16 @@ export async function createAdaptRun(db: SupabaseClient, input: AdaptInput, crea
 
 /** One more try for a result the reviewer flagged as fixable: same images, the prompt plus the fix. */
 export async function retryResult(db: SupabaseClient, resultId: string, fix: string, check: Record<string, unknown>): Promise<void> {
-  const { data } = await db.from("image_studio_results").select("id, run_id, attempts, path, preview_path, pair_paths, image_studio_runs!inner(prompt, attachments)").eq("id", resultId).maybeSingle();
+  const { data } = await db.from("image_studio_results").select("id, run_id, attempts, path, preview_path, pair_paths, image_studio_runs!inner(prompt, attachments, format, output)").eq("id", resultId).maybeSingle();
   if (!data) return;
-  const r = data as unknown as { id: string; run_id: string; attempts: number; path: string | null; preview_path: string | null; pair_paths: unknown; image_studio_runs: { prompt: string; attachments: Attachment[] } };
+  const r = data as unknown as { id: string; run_id: string; attempts: number; path: string | null; preview_path: string | null; pair_paths: unknown; image_studio_runs: { prompt: string; attachments: Attachment[]; format: ImageFormat | null; output: OutputMode | null } };
   const prompt = `${r.image_studio_runs.prompt} The previous attempt had this problem, fix it this time: ${fix}`;
   // The earlier render and its review ride along, so a retry that fails can give it back (recoverFailedRenders).
   const previous = r.path ? { path: r.path, preview_path: r.preview_path, pair_paths: r.pair_paths, brand_check: check } : null;
   const { data: job } = await db
     .from("hook_studio_jobs")
-    .insert({ kind: "image_gen", engine: "nano_banana_pro", status: "queued", params: { run_id: r.run_id, result_id: r.id, prompt, images: r.image_studio_runs.attachments.map((a) => ({ bucket: a.bucket, path: a.path })), aspect_ratio: "1:1", split: false, previous } })
+    // The retry keeps the run's shape: a 4:5 feed ad must not come back square.
+    .insert({ kind: "image_gen", engine: "nano_banana_pro", status: "queued", params: { run_id: r.run_id, result_id: r.id, prompt, images: r.image_studio_runs.attachments.map((a) => ({ bucket: a.bucket, path: a.path })), aspect_ratio: aspectFor(r.image_studio_runs.format ?? "1:1", "single"), split: false, previous } })
     .select("id")
     .single();
   await db.from("image_studio_results").update({ status: "queued", job_id: (job?.id as string | undefined) ?? null, path: null, preview_path: null, brand_check: null, attempts: (r.attempts ?? 1) + 1, error: null }).eq("id", r.id);

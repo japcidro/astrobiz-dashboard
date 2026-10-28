@@ -187,10 +187,10 @@ async function reviewImageUrl(fullUrl: string | undefined, previewUrl: string | 
 /** Brand-check finished results once; a model attachment makes it a person check too. Adapt runs get the art-director review and one automatic fix. */
 export async function runPendingChecks(db: SupabaseClient, itemId: string | null): Promise<void> {
   await recoverFailedRenders(db, itemId);
-  let q =db.from("image_studio_results").select("*, image_studio_runs!inner(id, item_id, store, product_mode, person_mode, attachments, plan)").eq("status", "done").is("brand_check", null).limit(4);
+  let q =db.from("image_studio_results").select("*, image_studio_runs!inner(id, item_id, store, product_mode, person_mode, attachments, plan, text_on_image)").eq("status", "done").is("brand_check", null).limit(4);
   if (itemId) q = q.eq("image_studio_runs.item_id", itemId);
   const { data } = await q;
-  type Row = ResultRow & { image_studio_runs: { id: string; item_id: string | null; store: string | null; product_mode: string; person_mode: string; attachments: Attachment[]; plan: AdaptPlan | null } };
+  type Row = ResultRow & { image_studio_runs: { id: string; item_id: string | null; store: string | null; product_mode: string; person_mode: string; attachments: Attachment[]; plan: AdaptPlan | null; text_on_image: string | null } };
   const rows = (data ?? []) as unknown as Row[];
   if (rows.length === 0) return;
   const kits = new Map<string, string>();
@@ -259,7 +259,8 @@ export async function runPendingChecks(db: SupabaseClient, itemId: string | null
         return;
       }
       const model = run.person_mode === "model" ? run.attachments.find((a) => a.role === "model") : undefined;
-      const result = url ? await brandCheck(db, url, products, kits.get(run.store ?? "") ?? "", run.product_mode === "none", model ? { castUrl: signed.get(key(model.bucket, model.path)) ?? null, frameUrl: null } : undefined) : null;
+      // A studio render is a finished ad, not a still to animate: its text is meant to be there.
+      const result = url ? await brandCheck(db, url, products, kits.get(run.store ?? "") ?? "", run.product_mode === "none", model ? { castUrl: signed.get(key(model.bucket, model.path)) ?? null, frameUrl: null } : undefined, { text: run.text_on_image ?? "" }) : null;
       await db
         .from("image_studio_results")
         .update({ brand_check: result ? { ok: result.ok, notes: result.notes } : { ok: true, notes: "Not checked: Claude could not read the image." } })

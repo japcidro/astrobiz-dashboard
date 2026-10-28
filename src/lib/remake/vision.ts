@@ -234,7 +234,9 @@ export async function brandCheck(
   productUrls: string[],
   rules: string,
   copyScene = false,
-  people?: { castUrl: string | null; frameUrl: string | null }
+  people?: { castUrl: string | null; frameUrl: string | null },
+  /** A finished static ad rather than a still to animate: its headline and captions are designed, not leftovers. `text` is what it was asked to print, when known. */
+  staticAd?: { text: string }
 ): Promise<(BrandCheck & { voice: VoiceGender | null; person_ok: boolean | null }) | null> {
   const blocks: Array<Record<string, unknown>> = [];
   const still = await imageBlock(stillUrl);
@@ -259,10 +261,14 @@ export async function brandCheck(
   }
   blocks.push({
     type: "text",
-    text: `Check the generated still${checkPerson ? " (IMAGE A)" : ""}. ${checkPerson ? "person_ok is true only when the face in IMAGE A is the same individual as IMAGE B (the picked person); it is false when IMAGE A still shows the person from IMAGE C or someone else. Ignore clothing, which is meant to come from IMAGE C. " : ""}${copyScene ? "This still copies the reference scene with a new person; none of our product is expected in it, so do not fail it for a missing or generic product. " : ""}${rules.trim() ? `Brand rules: ${rules.trim()}. ` : ""}Answer with JSON only: {"ok": boolean, "notes": string, "voice": "male" | "female" | null${checkPerson ? ', "person_ok": boolean' : ""}}.`,
+    text: `Check the generated ${staticAd ? "ad" : "still"}${checkPerson ? " (IMAGE A)" : ""}. ${checkPerson ? "person_ok is true only when the face in IMAGE A is the same individual as IMAGE B (the picked person); it is false when IMAGE A still shows the person from IMAGE C or someone else. Ignore clothing, which is meant to come from IMAGE C. " : ""}${copyScene ? "This still copies the reference scene with a new person; none of our product is expected in it, so do not fail it for a missing or generic product. " : ""}${staticAd?.text.trim() ? `The ad was asked to print this text: "${staticAd.text.trim().replace(/"/g, "'")}". ` : ""}${rules.trim() ? `Brand rules: ${rules.trim()}. ` : ""}Answer with JSON only: {"ok": boolean, "notes": string, "voice": "male" | "female" | null${checkPerson ? ', "person_ok": boolean' : ""}}.`,
   });
-  const system = `You review AI-generated ad stills before they are animated.
-Fail (ok=false) when: a product, box or label in the still is not our product as shown in the reference photos; any other brand's name, logo or label is readable; leftover captions, UI, stickers or watermarks remain; the person is obviously deformed (extra fingers, warped face); the brand rules are broken; or, when a picked person is given, the person in the still is not that individual (person_ok=false, and start "notes" with "Wrong person:"). Compare faces, not clothes: the clothing is meant to come from the original frame.
+  // A still is animated next, so any text on it is a leftover; a static ad's text is the ad.
+  const textRule = staticAd
+    ? "the headline, captions or any designed text is garbled, misspelled, cut off or differs from the text it was asked to print (headlines, captions, chat bubbles and post text are part of the design and expected; never fail an ad for having them)"
+    : "leftover captions, UI, stickers or watermarks remain";
+  const system = `You review AI-generated ${staticAd ? "static ad images before they run" : "ad stills before they are animated"}.
+Fail (ok=false) when: a product, box or label in the ${staticAd ? "ad" : "still"} is not our product as shown in the reference photos, or its label text is misspelled or garbled; any other brand's name, logo or label is readable; ${textRule}; the person is obviously deformed (extra fingers, warped face); the brand rules are broken; or, when a picked person is given, the person shown is not that individual (person_ok=false, and start "notes" with "Wrong person:"). Compare faces, not clothes${staticAd ? "" : ": the clothing is meant to come from the original frame"}.
 Pass (ok=true) otherwise. "notes" is one or two short sentences naming what to fix, or "Looks clean." when it passes. No brand names of competitors.
 "voice": the voice the main person in the still would speak with, "male" or "female" from how they present; null only when no person is visible. Answer with JSON only.`;
   const out = await ask<BrandCheck & { voice?: unknown; person_ok?: unknown }>(db, system, blocks, 400);
