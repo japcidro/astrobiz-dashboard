@@ -9,6 +9,13 @@ import type {
 } from "@/lib/profit/types";
 import { ProfitSummaryCards } from "@/components/profit/profit-summary-cards";
 import { ProfitDailyTable } from "@/components/profit/profit-daily-table";
+import { calculateBestCaseNetProfit } from "@/lib/profit/formulas";
+import {
+  formatJtAsOf,
+  formatJtDataAge,
+  isJtDataStale,
+  jtDataAgeHours,
+} from "@/lib/profit/freshness";
 
 const DATE_PRESETS: { label: string; value: ProfitDateFilter }[] = [
   { label: "Today", value: "today" },
@@ -179,6 +186,18 @@ export default function ProfitPage() {
     return totals;
   }, [daily]);
 
+  // The last J&T upload is what every in-transit figure is "as of". Past a
+  // day old, parcels have very likely settled since, so the page says so
+  // instead of letting a Sunday reader take a Friday snapshot as a verdict.
+  const jtAgeHours = jtDataAgeHours(jtDataAsOf);
+  const jtStale = isJtDataStale(jtDataAsOf);
+  const anyParcelProjection = daily.some((r) => r.returns_projected || r.shipping_projected);
+  const bestCaseNetProfit = calculateBestCaseNetProfit(
+    summary.net_profit,
+    computedTotals.returns_in_transit_est,
+    computedTotals.returns_unshipped_est
+  );
+
   return (
     <div>
       {/* Header */}
@@ -315,6 +334,31 @@ export default function ProfitPage() {
         </div>
       )}
 
+      {/* Stale J&T data: every shipping and return estimate is frozen at the last upload */}
+      {!loading && jtStale && jtDataAsOf && jtAgeHours != null && anyParcelProjection && (
+        <div className="mb-4 p-4 bg-yellow-900/20 border border-yellow-700/50 rounded-xl flex items-center gap-3">
+          <AlertTriangle size={20} className="text-yellow-400 shrink-0" />
+          <div className="text-yellow-300 text-sm">
+            <p className="font-medium">
+              J&T parcel data is {formatJtDataAge(jtAgeHours)} old (last upload {formatJtAsOf(jtDataAsOf)})
+            </p>
+            <p className="text-yellow-400/70 mt-0.5">
+              Shipping and return estimates are frozen at that upload
+              {computedTotals.in_transit_count > 0
+                ? `, including ${computedTotals.in_transit_count} parcel${computedTotals.in_transit_count === 1 ? "" : "s"} still counted as in transit`
+                : ""}
+              . Parcels delivered or shipped since are not reflected until a newer extract is loaded.{" "}
+              <a
+                href="/admin/jt-dashboard"
+                className="underline hover:text-yellow-200 transition-colors"
+              >
+                Upload J&T extract
+              </a>
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Summary Cards */}
       <div className="mb-4">
         <ProfitSummaryCards
@@ -323,6 +367,7 @@ export default function ProfitPage() {
           returnsProjected={daily.some((r) => r.returns_projected)}
           shippingProjected={daily.some((r) => r.shipping_projected)}
           voidAdjusted={daily.some((r) => r.void_adjusted)}
+          bestCaseNetProfit={bestCaseNetProfit}
         />
       </div>
 
@@ -336,10 +381,7 @@ export default function ProfitPage() {
           </span>
           {jtDataAsOf && (
             <span className="text-gray-500">
-              J&T parcel data as of{" "}
-              {new Date(jtDataAsOf).toLocaleString("en-PH", {
-                month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "Asia/Manila",
-              })}
+              J&T parcel data as of {formatJtAsOf(jtDataAsOf)}
             </span>
           )}
           {warnings.length > 0 && (
@@ -376,6 +418,7 @@ export default function ProfitPage() {
           sortKey={sortKey}
           sortDir={sortDir}
           onSort={handleSort}
+          jtDataAsOf={jtDataAsOf}
         />
       )}
 

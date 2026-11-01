@@ -1,5 +1,26 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-11-01: Net Profit — best case beside projected figures, stale J&T data warning
+
+**Best case.** A projected row's net profit now carries a second line,
+"up to ₱X if all deliver": the figure with the in-transit and unshipped-order
+return estimates added back. Confirmed returns and the cancellation holdback
+stay, and so does shipping, which J&T charges whether the parcel delivers or
+comes back. The Net Profit card shows the same for the period and is marked
+≈ / PROJECTED like the other cards. The ≈ figure itself is unchanged — it is
+still the expected value — the line only says how far the day can still
+move. `calculateBestCaseNetProfit` in `src/lib/profit/formulas.ts`.
+
+**Stale J&T data.** When the last J&T upload is more than a day old and the
+period has any projected shipping or returns, a yellow banner at the top says
+how old the data is, that the estimates are frozen at that upload (and how
+many parcels still count as in transit), and links to the uploader. A row's
+"(N in transit)" marker adds "as of Oct 30" while the data is stale, and its
+tooltip names the upload. Every open parcel is settled at the age it had when
+last seen, so a missed weekend never inflates the estimate — but it does not
+shrink it either, and until now the page gave no sign that a Sunday reader
+was looking at a Friday snapshot. `src/lib/profit/freshness.ts`.
+
 ## 2026-10-15: Bulk Create — more than one ad per ad set, ad copy saved as a store default
 
 **"+ Ad" on a row** adds another ad to that row's ad set: the new row goes

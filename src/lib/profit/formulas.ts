@@ -370,3 +370,25 @@ export function calculateCpp(adSpend: number, orderCount: number): number {
   if (orderCount <= 0) return 0;
   return adSpend / orderCount;
 }
+
+/**
+ * Where a projected day lands if every parcel still in transit delivers and
+ * every unshipped order ships and delivers: the projected net profit with
+ * both return estimates added back. Confirmed returns and the cancellation
+ * holdback stay, since those are not going to reverse. Shipping stays too:
+ * J&T charges the fee whether the parcel delivers or comes back.
+ *
+ * Shown beside the ≈ figure so a young date reads as a range with an
+ * expected value, not a verdict. The 25% worst case on a new store, or 28
+ * parcels still out on a Sunday with no upload since Friday, can make a
+ * good day look like a bad one until the next extract is loaded.
+ */
+export function calculateBestCaseNetProfit(
+  netProfit: number,
+  returnsInTransitEst: number | null | undefined,
+  returnsUnshippedEst: number | null | undefined
+): number {
+  const inTransit = Math.max(0, Number(returnsInTransitEst) || 0);
+  const unshipped = Math.max(0, Number(returnsUnshippedEst) || 0);
+  return netProfit + inTransit + unshipped;
+}

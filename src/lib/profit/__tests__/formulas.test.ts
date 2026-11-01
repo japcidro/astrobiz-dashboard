@@ -24,6 +24,7 @@ import {
   buildCogsMap,
   applyAdSpendVat,
   AD_SPEND_VAT_RATE,
+  calculateBestCaseNetProfit,
 } from "../formulas";
 import {
   matchAdToStore,
@@ -1046,5 +1047,27 @@ describe("formatOrderCount", () => {
 
   it("survives rubbish input", () => {
     expect(formatOrderCount(NaN)).toBe("0");
+  });
+});
+
+describe("Best-case net profit", () => {
+  it("adds both return estimates back onto the projected figure", () => {
+    // Oct 29 on a Sunday: ≈₱11,737.57 projected, ₱15,000 expected from 28
+    // parcels still in transit, ₱4,000 for orders with no parcel yet.
+    expect(calculateBestCaseNetProfit(11737.57, 15000, 4000)).toBeCloseTo(30737.57, 2);
+  });
+
+  it("leaves a settled day alone", () => {
+    expect(calculateBestCaseNetProfit(5000, 0, 0)).toBe(5000);
+    expect(calculateBestCaseNetProfit(5000, undefined, null)).toBe(5000);
+  });
+
+  it("never lands below the projected figure", () => {
+    // A negative estimate would be a bug upstream; it must not drag the best case down.
+    expect(calculateBestCaseNetProfit(5000, -200, -100)).toBe(5000);
+  });
+
+  it("can turn a projected loss into a gain, which is the point", () => {
+    expect(calculateBestCaseNetProfit(-3000, 8000, 1000)).toBe(6000);
   });
 });

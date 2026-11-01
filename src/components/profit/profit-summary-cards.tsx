@@ -8,6 +8,8 @@ interface Props {
   returnsProjected?: boolean;
   shippingProjected?: boolean;
   voidAdjusted?: boolean;
+  /** Net profit if every parcel still moving delivers; shown when it beats the projection. */
+  bestCaseNetProfit?: number;
 }
 
 export function ProfitSummaryCards({
@@ -16,11 +18,15 @@ export function ProfitSummaryCards({
   returnsProjected,
   shippingProjected,
   voidAdjusted,
+  bestCaseNetProfit,
 }: Props) {
   const formatCurrency = (val: number) =>
     `₱${val.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const isPositive = summary.net_profit >= 0;
+  const anyProjected = !!(returnsProjected || shippingProjected || voidAdjusted);
+  const bestCase = bestCaseNetProfit ?? summary.net_profit;
+  const showBestCase = anyProjected && bestCase - summary.net_profit >= 0.005;
 
   const metrics = [
     {
@@ -94,9 +100,12 @@ export function ProfitSummaryCards({
       accent: returnsProjected ? "border-yellow-700/50" : "",
     },
     {
-      label: "Net Profit",
-      value: formatCurrency(summary.net_profit),
+      label: anyProjected ? "Net Profit (PROJECTED)" : "Net Profit",
+      value: `${anyProjected ? "≈" : ""}${formatCurrency(summary.net_profit)}`,
       subtitle: `${summary.margin_pct.toFixed(1)}% margin`,
+      note: showBestCase
+        ? `up to ${formatCurrency(bestCase)} if all parcels deliver`
+        : undefined,
       icon: <span className={`font-bold text-lg leading-none ${isPositive ? "text-green-400" : "text-red-400"}`}>₱</span>,
       bg: isPositive ? "bg-green-600/20" : "bg-red-600/20",
       accent: isPositive ? "border-green-700/50" : "border-red-700/50",
@@ -128,6 +137,9 @@ export function ProfitSummaryCards({
                 <p className={`text-xs mt-0.5 ${"subtitleColor" in m && m.subtitleColor ? m.subtitleColor : isPositive ? "text-green-400" : "text-red-400"}`}>
                   {m.subtitle}
                 </p>
+              )}
+              {"note" in m && m.note && (
+                <p className="text-xs mt-0.5 text-gray-500">{m.note}</p>
               )}
             </>
           )}

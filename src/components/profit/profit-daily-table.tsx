@@ -1,6 +1,8 @@
 import { ChevronUp, ChevronDown } from "lucide-react";
 import type { DailyPnlRow } from "@/lib/profit/types";
 import { formatOrderCount } from "@/lib/profit/format";
+import { calculateBestCaseNetProfit } from "@/lib/profit/formulas";
+import { formatJtAsOf, isJtDataStale } from "@/lib/profit/freshness";
 
 interface Props {
   rows: DailyPnlRow[];
@@ -8,6 +10,15 @@ interface Props {
   sortKey: string;
   sortDir: "asc" | "desc";
   onSort: (key: string) => void;
+  /** When the J&T parcel statuses were last uploaded; in-transit figures are as of then. */
+  jtDataAsOf?: string | null;
+}
+
+/** What a cell needs to know beyond its own row. */
+interface CellContext {
+  jtDataAsOf: string | null;
+  /** The last upload is old enough that open parcels have probably settled since. */
+  jtStale: boolean;
 }
 
 const COLUMNS: { key: string; label: string }[] = [
@@ -42,7 +53,7 @@ function profitColor(val: number) {
  * J&T fact plus two kinds of estimate, and a reader deciding whether a day
  * is really negative needs to know which part is which.
  */
-function returnsBreakdown(row: DailyPnlRow): string {
+function returnsBreakdown(row: DailyPnlRow, ctx: CellContext): string {
   const parts: string[] = [];
   const actual = row.returns_actual ?? 0;
   const inTransit = row.returns_in_transit_est ?? 0;
@@ -50,7 +61,8 @@ function returnsBreakdown(row: DailyPnlRow): string {
   parts.push(`${formatCurrency(actual)} confirmed returned by J&T`);
   if (row.in_transit_count > 0) {
     parts.push(
-      `${formatCurrency(inTransit)} expected from ${row.in_transit_count} parcel${row.in_transit_count === 1 ? "" : "s"} still in transit (each × its chance of coming back, by region and days out)`
+      `${formatCurrency(inTransit)} expected from ${row.in_transit_count} parcel${row.in_transit_count === 1 ? "" : "s"} still in transit (each × its chance of coming back, by region and days out)` +
+        (ctx.jtDataAsOf ? `; status as of the ${formatJtAsOf(ctx.jtDataAsOf)} upload` : "")
     );
   }
   if (unshipped > 0) {
@@ -63,7 +75,7 @@ function isProjected(row: DailyPnlRow): boolean {
   return row.shipping_projected || row.returns_projected || row.void_adjusted;
 }
 
-function renderCell(key: string, row: DailyPnlRow) {
+function renderCell(key: string, row: DailyPnlRow, ctx: CellContext) {
   switch (key) {
     case "date":
       return formatDate(row.date);
@@ -91,11 +103,15 @@ function renderCell(key: string, row: DailyPnlRow) {
     case "returns_value": {
       const unshippedOnly = row.in_transit_count === 0 && (row.returns_unshipped_est ?? 0) > 0;
       return (
-        <span title={returnsBreakdown(row)}>
+        <span title={returnsBreakdown(row, ctx)}>
           {formatCurrency(row.returns_value)}
           {row.in_transit_count > 0 && (
             <span className="text-yellow-400 text-xs ml-1.5">
-              ({row.in_transit_count} in transit)
+              ({row.in_transit_count} in transit
+              {ctx.jtStale && ctx.jtDataAsOf
+                ? ` as of ${formatJtAsOf(ctx.jtDataAsOf, { dateOnly: true })}`
+                : ""}
+              )
             </span>
           )}
           {unshippedOnly && (
@@ -118,20 +134,39 @@ function renderCell(key: string, row: DailyPnlRow) {
           )}
         </span>
       );
-    case "net_profit":
+    case "net_profit": {
+      const projected = isProjected(row);
+      const bestCase = calculateBestCaseNetProfit(
+        row.net_profit,
+        row.returns_in_transit_est,
+        row.returns_unshipped_est
+      );
+      // Only worth a line when estimates are actually holding the figure down.
+      const showBestCase = projected && bestCase - row.net_profit >= 0.005;
       return (
-        <span
-          className={profitColor(row.net_profit)}
-          title={
-            isProjected(row)
-              ? "Projected — revenue, COGS and ad spend are actual; shipping and returns include estimates for parcels still moving or not yet shipped. Final once every parcel is delivered or returned."
-              : "Final — every parcel for this day is delivered or returned"
-          }
-        >
-          {isProjected(row) && <span className="text-gray-500 mr-0.5">≈</span>}
-          {formatCurrency(row.net_profit)}
+        <span className="inline-flex flex-col">
+          <span
+            className={profitColor(row.net_profit)}
+            title={
+              projected
+                ? "Projected — revenue, COGS and ad spend are actual; shipping and returns include estimates for parcels still moving or not yet shipped. Final once every parcel is delivered or returned."
+                : "Final — every parcel for this day is delivered or returned"
+            }
+          >
+            {projected && <span className="text-gray-500 mr-0.5">≈</span>}
+            {formatCurrency(row.net_profit)}
+          </span>
+          {showBestCase && (
+            <span
+              className="text-xs font-normal text-gray-500"
+              title="If every parcel still in transit delivers and every unshipped order ships and delivers. Confirmed returns and the cancellation holdback stay. The ≈ figure is the expected outcome; the day lands between a worse case and this."
+            >
+              up to {formatCurrency(bestCase)} if all deliver
+            </span>
+          )}
         </span>
       );
+    }
     case "margin_pct":
       return (
         <span className={profitColor(row.margin_pct)}>
@@ -143,7 +178,12 @@ function renderCell(key: string, row: DailyPnlRow) {
   }
 }
 
-export function ProfitDailyTable({ rows, totals, sortKey, sortDir, onSort }: Props) {
+export function ProfitDailyTable({ rows, totals, sortKey, sortDir, onSort, jtDataAsOf }: Props) {
+  const ctx: CellContext = {
+    jtDataAsOf: jtDataAsOf ?? null,
+    jtStale: isJtDataStale(jtDataAsOf),
+  };
+
   if (rows.length === 0) {
     return (
       <div className="text-center py-16 text-gray-500">
@@ -183,7 +223,7 @@ export function ProfitDailyTable({ rows, totals, sortKey, sortDir, onSort }: Pro
           <tr className="bg-gray-800 font-bold border-b border-gray-700">
             {COLUMNS.map((col) => (
               <td key={col.key} className="px-4 py-3 whitespace-nowrap text-white">
-                {col.key === "date" ? "Total" : renderCell(col.key, totals)}
+                {col.key === "date" ? "Total" : renderCell(col.key, totals, ctx)}
               </td>
             ))}
           </tr>
@@ -203,7 +243,7 @@ export function ProfitDailyTable({ rows, totals, sortKey, sortDir, onSort }: Pro
                     col.key === "date" ? "font-medium text-white" : "text-gray-300"
                   }`}
                 >
-                  {renderCell(col.key, row)}
+                  {renderCell(col.key, row, ctx)}
                 </td>
               ))}
             </tr>
