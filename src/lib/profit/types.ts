@@ -68,6 +68,24 @@ export interface DailyPnlRow {
   returns_unshipped_est?: number;
   /** J&T parcels on file for the day's orders. */
   parcel_count?: number;
+  /**
+   * Returns if every parcel still in transit comes back at the store's
+   * current RTS rate instead of at the chance its age implies, and unshipped
+   * orders at that same rate. Confirmed returns are the same as above.
+   */
+  returns_at_rate?: number;
+  /** Net profit on that basis. Equals net_profit once the day is settled. */
+  net_profit_at_rate?: number;
+}
+
+/** A store's RTS rate as the P&L charges it, and where it was read from. */
+export interface StoreRtsRate {
+  /** Share of settled parcels that came back, 0 to 1. */
+  rate: number;
+  /** Settled parcels the rate was read from. */
+  settled: number;
+  /** true when read from the trailing window, false when it fell back to all-time. */
+  windowed: boolean;
 }
 
 export interface ProfitSummary {

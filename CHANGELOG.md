@@ -1,5 +1,26 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-11-03: Net Profit — the second line is "at current RTS", not best case
+
+The "up to ₱X if all deliver" line from 2026-11-01 is gone. It answered the
+wrong question: nobody expects every parcel to deliver. What was wanted
+beside the ≈ figure is the day as it most likely lands when a delay is just
+a delay. The line now reads "≈₱X at current RTS (22.1%)": the same confirmed
+returns, but every parcel still in transit charged at the store's current
+RTS rate instead of by how long it has been out, and unshipped orders at
+that same rate. The main ≈ figure is unchanged — it still reads a long-open
+parcel as a likely return, which is the better predictor on average — so
+the two lines bracket the day: the cautious one and the one at the store's
+normal rate. A store under the 200-settled threshold uses its thin actual
+rate on the second line rather than the 25% floor, so the floor's weight is
+visible. The Net Profit card shows the same for the period, and the
+tooltip lists every store's rate and where it was read from.
+
+`/api/profit/daily` now returns `returns_at_rate` and `net_profit_at_rate`
+per row and `store_rts_rates` at the top level.
+`calculateReturnsAtStoreRate` in `src/lib/profit/formulas.ts` replaces
+`calculateBestCaseNetProfit`.
+
 ## 2026-11-01: Net Profit — best case beside projected figures, stale J&T data warning
 
 **Best case.** A projected row's net profit now carries a second line,

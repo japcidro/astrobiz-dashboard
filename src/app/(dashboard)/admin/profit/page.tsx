@@ -6,10 +6,11 @@ import type {
   DailyPnlRow,
   ProfitSummary,
   ProfitDateFilter,
+  StoreRtsRate,
 } from "@/lib/profit/types";
 import { ProfitSummaryCards } from "@/components/profit/profit-summary-cards";
 import { ProfitDailyTable } from "@/components/profit/profit-daily-table";
-import { calculateBestCaseNetProfit } from "@/lib/profit/formulas";
+import { describeRtsRates, rtsRateLabel } from "@/lib/profit/format";
 import {
   formatJtAsOf,
   formatJtDataAge,
@@ -65,6 +66,7 @@ export default function ProfitPage() {
   const [refreshedAt, setRefreshedAt] = useState<string | null>(null);
   const [fromCache, setFromCache] = useState(false);
   const [jtDataAsOf, setJtDataAsOf] = useState<string | null>(null);
+  const [storeRtsRates, setStoreRtsRates] = useState<Record<string, StoreRtsRate> | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [showHow, setShowHow] = useState(false);
 
@@ -93,6 +95,7 @@ export default function ProfitPage() {
       if (json.missing_cogs_skus) setMissingCogsSkus(json.missing_cogs_skus);
       if (json.refreshed_at) setRefreshedAt(json.refreshed_at);
       setJtDataAsOf(json.jt_data_as_of ?? null);
+      setStoreRtsRates(json.store_rts_rates ?? null);
       setWarnings(Array.isArray(json.warnings) ? json.warnings : []);
       setFromCache(!!json.from_cache);
     } catch (e) {
@@ -158,6 +161,8 @@ export default function ProfitPage() {
       returns_actual: 0,
       returns_in_transit_est: 0,
       returns_unshipped_est: 0,
+      returns_at_rate: 0,
+      net_profit_at_rate: 0,
       parcel_count: 0,
     };
     for (const row of daily) {
@@ -172,6 +177,10 @@ export default function ProfitPage() {
       totals.returns_actual! += row.returns_actual ?? 0;
       totals.returns_in_transit_est! += row.returns_in_transit_est ?? 0;
       totals.returns_unshipped_est! += row.returns_unshipped_est ?? 0;
+      // Rows from an older cached response lack the at-rate fields; a
+      // settled day's at-rate figure is its plain one anyway.
+      totals.returns_at_rate! += row.returns_at_rate ?? row.returns_value;
+      totals.net_profit_at_rate! += row.net_profit_at_rate ?? row.net_profit;
       totals.parcel_count! += row.parcel_count ?? 0;
       totals.void_adjusted = totals.void_adjusted || row.void_adjusted;
       totals.shipping_projected = totals.shipping_projected || row.shipping_projected;
@@ -192,11 +201,10 @@ export default function ProfitPage() {
   const jtAgeHours = jtDataAgeHours(jtDataAsOf);
   const jtStale = isJtDataStale(jtDataAsOf);
   const anyParcelProjection = daily.some((r) => r.returns_projected || r.shipping_projected);
-  const bestCaseNetProfit = calculateBestCaseNetProfit(
-    summary.net_profit,
-    computedTotals.returns_in_transit_est,
-    computedTotals.returns_unshipped_est
-  );
+  // One rate to print beside "at current RTS" when a single store covers
+  // the page; with several, each row mixes rates and the tooltip lists them.
+  const atRateLabel = rtsRateLabel(storeRtsRates, storeFilter);
+  const atRateDetail = describeRtsRates(storeRtsRates);
 
   return (
     <div>
@@ -235,6 +243,7 @@ export default function ProfitPage() {
                 if (json.missing_cogs_skus) setMissingCogsSkus(json.missing_cogs_skus);
                 if (json.refreshed_at) setRefreshedAt(json.refreshed_at);
                 setJtDataAsOf(json.jt_data_as_of ?? null);
+                setStoreRtsRates(json.store_rts_rates ?? null);
                 setWarnings(Array.isArray(json.warnings) ? json.warnings : []);
                 setFromCache(false);
               })
@@ -367,7 +376,8 @@ export default function ProfitPage() {
           returnsProjected={daily.some((r) => r.returns_projected)}
           shippingProjected={daily.some((r) => r.shipping_projected)}
           voidAdjusted={daily.some((r) => r.void_adjusted)}
-          bestCaseNetProfit={bestCaseNetProfit}
+          netProfitAtRate={computedTotals.net_profit_at_rate}
+          atRateLabel={atRateLabel}
         />
       </div>
 
@@ -378,6 +388,8 @@ export default function ProfitPage() {
             Revenue, COGS and ad spend are actual. Shipping and returns are actual for parcels on file
             {" "}and estimated for parcels still moving or not yet shipped — rows marked{" "}
             <span className="text-gray-300">≈</span> are projections of where the day will land.
+            {" "}The smaller line under a projected net profit charges parcels still in transit at the
+            current store RTS rate instead of by how long they have been out.
           </span>
           {jtDataAsOf && (
             <span className="text-gray-500">
@@ -419,6 +431,8 @@ export default function ProfitPage() {
           sortDir={sortDir}
           onSort={handleSort}
           jtDataAsOf={jtDataAsOf}
+          atRateLabel={atRateLabel}
+          atRateDetail={atRateDetail}
         />
       )}
 

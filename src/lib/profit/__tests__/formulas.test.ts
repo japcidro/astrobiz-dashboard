@@ -13,7 +13,12 @@ import {
   SETTLEMENT_WINDOW_DAYS,
 } from "../formulas";
 import { getProvinceCutoff, classifyJtDelivery } from "../province-tiers";
-import { formatOrderCount } from "../format";
+import {
+  formatOrderCount,
+  formatRtsRate,
+  rtsRateLabel,
+  describeRtsRates,
+} from "../format";
 import {
   calculateVoidAdjustmentFactor,
   settledFractionForAge,
@@ -24,7 +29,7 @@ import {
   buildCogsMap,
   applyAdSpendVat,
   AD_SPEND_VAT_RATE,
-  calculateBestCaseNetProfit,
+  calculateReturnsAtStoreRate,
 } from "../formulas";
 import {
   matchAdToStore,
@@ -1050,24 +1055,59 @@ describe("formatOrderCount", () => {
   });
 });
 
-describe("Best-case net profit", () => {
-  it("adds both return estimates back onto the projected figure", () => {
-    // Oct 29 on a Sunday: ≈₱11,737.57 projected, ₱15,000 expected from 28
-    // parcels still in transit, ₱4,000 for orders with no parcel yet.
-    expect(calculateBestCaseNetProfit(11737.57, 15000, 4000)).toBeCloseTo(30737.57, 2);
+describe("Returns at the store's current RTS rate", () => {
+  it("charges parcels still out at the rate, not by their age", () => {
+    // ₱3,000 confirmed, ₱50,000 COD still in transit, 22% store rate,
+    // ₱2,000 expected for orders with no parcel yet.
+    expect(calculateReturnsAtStoreRate(3000, 50000, 0.22, 2000)).toBeCloseTo(16000, 2);
   });
 
-  it("leaves a settled day alone", () => {
-    expect(calculateBestCaseNetProfit(5000, 0, 0)).toBe(5000);
-    expect(calculateBestCaseNetProfit(5000, undefined, null)).toBe(5000);
+  it("is just the confirmed returns once the day is settled", () => {
+    expect(calculateReturnsAtStoreRate(3000, 0, 0.22, 0)).toBe(3000);
   });
 
-  it("never lands below the projected figure", () => {
-    // A negative estimate would be a bug upstream; it must not drag the best case down.
-    expect(calculateBestCaseNetProfit(5000, -200, -100)).toBe(5000);
+  it("clamps a nonsense rate", () => {
+    expect(calculateReturnsAtStoreRate(0, 10000, -0.5, 0)).toBe(0);
+    expect(calculateReturnsAtStoreRate(0, 10000, 1.5, 0)).toBe(10000);
+    expect(calculateReturnsAtStoreRate(0, 10000, NaN, 0)).toBe(0);
   });
 
-  it("can turn a projected loss into a gain, which is the point", () => {
-    expect(calculateBestCaseNetProfit(-3000, 8000, 1000)).toBe(6000);
+  it("charges nothing for parcels out when the store has no settled history", () => {
+    expect(calculateReturnsAtStoreRate(500, 10000, 0, 0)).toBe(500);
+  });
+
+  it("is not a best case: a 25% store still loses a quarter of what is out", () => {
+    expect(calculateReturnsAtStoreRate(0, 40000, 0.25, 0)).toBe(10000);
+  });
+});
+
+describe("RTS rate labels", () => {
+  const rates = {
+    "I LOVE PATCHES": { rate: 0.2213, settled: 540, windowed: true },
+    "NEW STORE": { rate: 0.1, settled: 40, windowed: false },
+  };
+
+  it("formats a rate to one decimal", () => {
+    expect(formatRtsRate(0.2213)).toBe("22.1%");
+    expect(formatRtsRate(0.25)).toBe("25%");
+    expect(formatRtsRate(NaN)).toBe("0%");
+  });
+
+  it("names the selected store's rate, whatever its case", () => {
+    expect(rtsRateLabel(rates, "I LOVE PATCHES")).toBe("22.1%");
+    expect(rtsRateLabel(rates, "i love patches")).toBe("22.1%");
+  });
+
+  it("has no single rate when rows mix stores", () => {
+    expect(rtsRateLabel(rates, "ALL")).toBeNull();
+    expect(rtsRateLabel({ "ONLY STORE": rates["NEW STORE"] }, "ALL")).toBe("10%");
+    expect(rtsRateLabel(null, "ALL")).toBeNull();
+  });
+
+  it("describes every store with its basis, thin data marked", () => {
+    expect(describeRtsRates(rates)).toBe(
+      "I LOVE PATCHES 22.1% (trailing 60d, 540 settled); NEW STORE 10% (all-time, 40 settled, thin)"
+    );
+    expect(describeRtsRates(null)).toBe("");
   });
 });

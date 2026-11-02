@@ -8,8 +8,10 @@ interface Props {
   returnsProjected?: boolean;
   shippingProjected?: boolean;
   voidAdjusted?: boolean;
-  /** Net profit if every parcel still moving delivers; shown when it beats the projection. */
-  bestCaseNetProfit?: number;
+  /** Net profit with parcels still moving charged at the store's current RTS rate. */
+  netProfitAtRate?: number;
+  /** "22.1%" when one store's rate covers the page. */
+  atRateLabel?: string | null;
 }
 
 export function ProfitSummaryCards({
@@ -18,15 +20,16 @@ export function ProfitSummaryCards({
   returnsProjected,
   shippingProjected,
   voidAdjusted,
-  bestCaseNetProfit,
+  netProfitAtRate,
+  atRateLabel,
 }: Props) {
   const formatCurrency = (val: number) =>
     `₱${val.toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const isPositive = summary.net_profit >= 0;
   const anyProjected = !!(returnsProjected || shippingProjected || voidAdjusted);
-  const bestCase = bestCaseNetProfit ?? summary.net_profit;
-  const showBestCase = anyProjected && bestCase - summary.net_profit >= 0.005;
+  const atRate = netProfitAtRate ?? summary.net_profit;
+  const showAtRate = anyProjected && Math.abs(atRate - summary.net_profit) >= 0.005;
 
   const metrics = [
     {
@@ -103,8 +106,8 @@ export function ProfitSummaryCards({
       label: anyProjected ? "Net Profit (PROJECTED)" : "Net Profit",
       value: `${anyProjected ? "≈" : ""}${formatCurrency(summary.net_profit)}`,
       subtitle: `${summary.margin_pct.toFixed(1)}% margin`,
-      note: showBestCase
-        ? `up to ${formatCurrency(bestCase)} if all parcels deliver`
+      note: showAtRate
+        ? `≈${formatCurrency(atRate)} at current RTS${atRateLabel ? ` (${atRateLabel})` : ""}`
         : undefined,
       icon: <span className={`font-bold text-lg leading-none ${isPositive ? "text-green-400" : "text-red-400"}`}>₱</span>,
       bg: isPositive ? "bg-green-600/20" : "bg-red-600/20",

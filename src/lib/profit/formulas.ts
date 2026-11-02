@@ -372,23 +372,30 @@ export function calculateCpp(adSpend: number, orderCount: number): number {
 }
 
 /**
- * Where a projected day lands if every parcel still in transit delivers and
- * every unshipped order ships and delivers: the projected net profit with
- * both return estimates added back. Confirmed returns and the cancellation
- * holdback stay, since those are not going to reverse. Shipping stays too:
- * J&T charges the fee whether the parcel delivers or comes back.
+ * Returns for a date and store if every parcel still in transit comes back
+ * at the store's own RTS rate, rather than at the chance its age implies.
  *
- * Shown beside the ≈ figure so a young date reads as a range with an
- * expected value, not a verdict. The 25% worst case on a new store, or 28
- * parcels still out on a Sunday with no upload since Friday, can make a
- * good day look like a bad one until the next extract is loaded.
+ * The age-based figure (jt-settlement.ts) is the better predictor on
+ * average: a Luzon parcel still unsigned at day 3 really is more likely to
+ * bounce than a fresh one. But after a weekend with no upload, or a slow
+ * courier week, "still open" says more about the file than the parcel, and
+ * the age-based figure reads every delay as a return. This is the view shown
+ * beside it: the same confirmed returns, the parcels still out charged at
+ * the store's normal rate, and unshipped orders at that same rate. Not a
+ * best case. A store with 25% RTS still loses a quarter of what is out.
  */
-export function calculateBestCaseNetProfit(
-  netProfit: number,
-  returnsInTransitEst: number | null | undefined,
-  returnsUnshippedEst: number | null | undefined
+export function calculateReturnsAtStoreRate(
+  confirmedReturns: number,
+  inTransitCod: number,
+  storeRtsRate: number,
+  unshippedAtRate: number
 ): number {
-  const inTransit = Math.max(0, Number(returnsInTransitEst) || 0);
-  const unshipped = Math.max(0, Number(returnsUnshippedEst) || 0);
-  return netProfit + inTransit + unshipped;
+  const rate = Number.isFinite(storeRtsRate)
+    ? Math.min(1, Math.max(0, storeRtsRate))
+    : 0;
+  return (
+    Math.max(0, confirmedReturns) +
+    Math.max(0, inTransitCod) * rate +
+    Math.max(0, unshippedAtRate)
+  );
 }

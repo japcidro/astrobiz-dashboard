@@ -4,6 +4,7 @@ import { getEmployee } from "@/lib/supabase/get-employee";
 import { matchAdToStore } from "@/lib/profit/store-matching";
 import {
   calculateNetProfit,
+  calculateReturnsAtStoreRate,
   calculateMarginPct,
   calculateUnshippedOrderReturns,
   calculateVoidAdjustmentFactor,
@@ -648,6 +649,8 @@ export async function GET(request: Request) {
   const returnsActualByDateStore = new Map<string, number>();
   const returnsInTransitByDateStore = new Map<string, number>();
   const returnsUnshippedByDateStore = new Map<string, number>();
+  // COD still out on parcels in transit, for the "at current RTS" view.
+  const inTransitCodByDateStore = new Map<string, number>();
   const inTransitByDate = new Map<string, number>();
   let jtDataAsOf: string | null = null;
   const returnsProjectedDates = new Set<string>();
@@ -823,6 +826,7 @@ export async function GET(request: Request) {
           returnsProjectedDates.add(dateStr);
         }
         inTransitByDate.set(dateStr, (inTransitByDate.get(dateStr) || 0) + 1);
+        inTransitCodByDateStore.set(key, (inTransitCodByDateStore.get(key) || 0) + lostRevenue);
         const o = openByStore.get(store) || { count: 0, expected: 0 };
         o.count++;
         o.expected += expected;
@@ -959,6 +963,52 @@ export async function GET(request: Request) {
     if (isProjected) shippingProjectedDates.add(dateStr);
   }
 
+  // --- 5d. The same returns at the store's current RTS rate ----------------
+  //
+  // The figures above charge each open parcel by how long it has been out,
+  // which is the better predictor but reads a slow week, or a weekend with
+  // no upload, as a wave of returns. This is the view shown beside it:
+  // confirmed returns as they are, parcels still in transit at the store's
+  // own rate, and unshipped orders at that same rate. A store under the
+  // 200-settled threshold uses its thin actual rate here rather than the
+  // 25% floor, so the two lines show what the floor weighs.
+  const returnsAtRateByDateStore = new Map<string, number>();
+  {
+    const keys = new Set<string>([
+      ...revenueByDateStore.keys(),
+      ...returnsActualByDateStore.keys(),
+      ...inTransitCodByDateStore.keys(),
+      ...returnsUnshippedByDateStore.keys(),
+    ]);
+    for (const key of keys) {
+      const [date, store] = key.split("::");
+      const stats = storeStats.get(store);
+      const rate = stats?.rate.rate ?? 0;
+      const settled = (stats?.delivered || 0) + (stats?.returned || 0);
+      let unshippedAtRate = returnsUnshippedByDateStore.get(key) || 0;
+      if (settled < RTS_MIN_DELIVERED) {
+        const avgReturnCod =
+          stats && stats.returned > 0 ? stats.totalReturnCod / stats.returned : 0;
+        unshippedAtRate = calculateUnshippedOrderReturns(
+          orderCountByDateStore.get(key) || 0,
+          parcelCountByDateStore.get(key) || 0,
+          rate,
+          avgReturnCod,
+          ageDaysForDate(date)
+        ).projectedReturns;
+      }
+      returnsAtRateByDateStore.set(
+        key,
+        calculateReturnsAtStoreRate(
+          returnsActualByDateStore.get(key) || 0,
+          inTransitCodByDateStore.get(key) || 0,
+          rate,
+          unshippedAtRate
+        )
+      );
+    }
+  }
+
   // --- 6. Aggregate per day ---
   const allDates = new Set<string>();
   const allStoreNames = new Set<string>();
@@ -989,6 +1039,7 @@ export async function GET(request: Request) {
       returns_actual: number;
       returns_in_transit_est: number;
       returns_unshipped_est: number;
+      returns_at_rate: number;
       parcel_count: number;
     }
   >();
@@ -1005,6 +1056,7 @@ export async function GET(request: Request) {
         returns_actual: 0,
         returns_in_transit_est: 0,
         returns_unshipped_est: 0,
+        returns_at_rate: 0,
         parcel_count: 0,
       });
     }
@@ -1041,10 +1093,11 @@ export async function GET(request: Request) {
     const row = dailyMap.get(date);
     if (row) row.returns_value += value;
   }
-  const breakdowns: [Map<string, number>, "returns_actual" | "returns_in_transit_est" | "returns_unshipped_est" | "parcel_count"][] = [
+  const breakdowns: [Map<string, number>, "returns_actual" | "returns_in_transit_est" | "returns_unshipped_est" | "returns_at_rate" | "parcel_count"][] = [
     [returnsActualByDateStore, "returns_actual"],
     [returnsInTransitByDateStore, "returns_in_transit_est"],
     [returnsUnshippedByDateStore, "returns_unshipped_est"],
+    [returnsAtRateByDateStore, "returns_at_rate"],
     [parcelCountByDateStore, "parcel_count"],
   ];
   for (const [map, field] of breakdowns) {
@@ -1088,6 +1141,10 @@ export async function GET(request: Request) {
       returns_actual: roundCurrency(row.returns_actual),
       returns_in_transit_est: roundCurrency(row.returns_in_transit_est),
       returns_unshipped_est: roundCurrency(row.returns_unshipped_est),
+      returns_at_rate: roundCurrency(row.returns_at_rate),
+      net_profit_at_rate: roundCurrency(
+        calculateNetProfit(row.revenue, row.cogs, row.ad_spend, row.shipping, row.returns_at_rate)
+      ),
       parcel_count: row.parcel_count,
     });
   }
@@ -1133,6 +1190,13 @@ export async function GET(request: Request) {
   summary.aov = roundCurrency(calculateAov(summary.revenue, summary.order_count));
   summary.cpp = roundCurrency(calculateCpp(summary.ad_spend, summary.order_count));
 
+  // Each store's RTS rate as the "at current RTS" line charges it, for the label.
+  const storeRtsRates: Record<string, { rate: number; settled: number; windowed: boolean }> = {};
+  for (const store of allStoreNames) {
+    const stats = storeStats.get(store);
+    if (stats) storeRtsRates[store] = stats.rate;
+  }
+
   const responseData = {
     summary,
     daily,
@@ -1143,6 +1207,7 @@ export async function GET(request: Request) {
     // parcel is judged at the age it had in its last upload, so this is the
     // date the "in transit" estimates are really about.
     jt_data_as_of: jtDataAsOf,
+    store_rts_rates: storeRtsRates,
     warnings,
   };
 

@@ -1,7 +1,6 @@
 import { ChevronUp, ChevronDown } from "lucide-react";
 import type { DailyPnlRow } from "@/lib/profit/types";
 import { formatOrderCount } from "@/lib/profit/format";
-import { calculateBestCaseNetProfit } from "@/lib/profit/formulas";
 import { formatJtAsOf, isJtDataStale } from "@/lib/profit/freshness";
 
 interface Props {
@@ -12,6 +11,10 @@ interface Props {
   onSort: (key: string) => void;
   /** When the J&T parcel statuses were last uploaded; in-transit figures are as of then. */
   jtDataAsOf?: string | null;
+  /** "22.1%" when one store's rate covers the page; null when rows mix stores. */
+  atRateLabel?: string | null;
+  /** Every store's rate and where it came from, for the tooltip. */
+  atRateDetail?: string;
 }
 
 /** What a cell needs to know beyond its own row. */
@@ -19,6 +22,15 @@ interface CellContext {
   jtDataAsOf: string | null;
   /** The last upload is old enough that open parcels have probably settled since. */
   jtStale: boolean;
+  atRateLabel: string | null;
+  atRateDetail: string;
+}
+
+/** Tooltip for the "at current RTS" line under a projected net profit. */
+function atRateTitle(ctx: CellContext): string {
+  const base =
+    "Same confirmed returns, but parcels still in transit are charged at the store's current RTS rate instead of by how long they have been out, and unshipped orders at that same rate. The main ≈ figure reads a long delay as a likely return; this line reads it as a slow courier.";
+  return ctx.atRateDetail ? `${base}\nRates: ${ctx.atRateDetail}` : base;
 }
 
 const COLUMNS: { key: string; label: string }[] = [
@@ -136,13 +148,11 @@ function renderCell(key: string, row: DailyPnlRow, ctx: CellContext) {
       );
     case "net_profit": {
       const projected = isProjected(row);
-      const bestCase = calculateBestCaseNetProfit(
-        row.net_profit,
-        row.returns_in_transit_est,
-        row.returns_unshipped_est
-      );
-      // Only worth a line when estimates are actually holding the figure down.
-      const showBestCase = projected && bestCase - row.net_profit >= 0.005;
+      // The same day with parcels still out charged at the store's current
+      // RTS rate rather than by their age. Only worth a line while the two
+      // disagree. Rows from an older cached response lack the field.
+      const atRate = row.net_profit_at_rate ?? row.net_profit;
+      const showAtRate = projected && Math.abs(atRate - row.net_profit) >= 0.005;
       return (
         <span className="inline-flex flex-col">
           <span
@@ -156,12 +166,10 @@ function renderCell(key: string, row: DailyPnlRow, ctx: CellContext) {
             {projected && <span className="text-gray-500 mr-0.5">≈</span>}
             {formatCurrency(row.net_profit)}
           </span>
-          {showBestCase && (
-            <span
-              className="text-xs font-normal text-gray-500"
-              title="If every parcel still in transit delivers and every unshipped order ships and delivers. Confirmed returns and the cancellation holdback stay. The ≈ figure is the expected outcome; the day lands between a worse case and this."
-            >
-              up to {formatCurrency(bestCase)} if all deliver
+          {showAtRate && (
+            <span className="text-xs font-normal text-gray-400" title={atRateTitle(ctx)}>
+              ≈{formatCurrency(atRate)} at current RTS
+              {ctx.atRateLabel ? ` (${ctx.atRateLabel})` : ""}
             </span>
           )}
         </span>
@@ -178,10 +186,21 @@ function renderCell(key: string, row: DailyPnlRow, ctx: CellContext) {
   }
 }
 
-export function ProfitDailyTable({ rows, totals, sortKey, sortDir, onSort, jtDataAsOf }: Props) {
+export function ProfitDailyTable({
+  rows,
+  totals,
+  sortKey,
+  sortDir,
+  onSort,
+  jtDataAsOf,
+  atRateLabel,
+  atRateDetail,
+}: Props) {
   const ctx: CellContext = {
     jtDataAsOf: jtDataAsOf ?? null,
     jtStale: isJtDataStale(jtDataAsOf),
+    atRateLabel: atRateLabel ?? null,
+    atRateDetail: atRateDetail ?? "",
   };
 
   if (rows.length === 0) {
