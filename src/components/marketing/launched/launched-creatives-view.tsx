@@ -153,6 +153,14 @@ function sortValue(ad: LaunchedAd, key: SortKey): number | string {
   }
 }
 
+/** Safe images are often stored under their upload id; only a real name is worth showing. */
+function safeImageLabel(name: string | null): string {
+  if (!name || /^hf_\d{6,}/i.test(name) || /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}/i.test(name)) {
+    return "the safe image";
+  }
+  return `the safe image “${name}”`;
+}
+
 /** Purchases (and CPP, spend) for one window, as a table cell. */
 function WindowCell({ w, days }: { w: WindowTotals; days?: number }) {
   const empty = w.spend === 0 && w.purchases === 0;
@@ -166,7 +174,7 @@ function WindowCell({ w, days }: { w: WindowTotals; days?: number }) {
           {w.purchases > 0 ? peso.format(w.cpp) : "no sale"} · {peso.format(w.spend)}
         </div>
       )}
-      {days !== undefined && !w.complete && w.days_elapsed > 0 && (
+      {days !== undefined && !empty && !w.complete && w.days_elapsed > 0 && (
         <div className="font-mono text-[11px] text-dim whitespace-nowrap">
           {w.days_elapsed}/{days} days
         </div>
@@ -745,10 +753,14 @@ function DetailDrawer({ ad, cppBar, onClose }: { ad: LaunchedAd; cppBar: number;
                 {ad.fix && (
                   <div className="border-t border-line pt-3">
                     <div className="text-fg">
-                      Swapped to the safe image{ad.fix.safe_image_name ? ` “${ad.fix.safe_image_name}”` : ""} on{" "}
-                      {shortStamp(ad.fix.fixed_at)}
+                      Swapped to {safeImageLabel(ad.fix.safe_image_name)} on {shortStamp(ad.fix.fixed_at)}
                       {ad.fix.by_name ? ` by ${ad.fix.by_name}` : ""}.
                     </div>
+                    {!ad.rejection && (
+                      <div className="mt-1 text-xs text-muted">
+                        Meta&apos;s reason was not kept at the time; it is now recorded before every swap.
+                      </div>
+                    )}
                     {ad.before_fix && afterFix && (
                       <div className="mt-1 text-xs text-muted">
                         Original creative: {num.format(ad.before_fix.purchases)} sales on{" "}
