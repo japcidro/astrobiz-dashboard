@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
 import { matchAdToStore } from "@/lib/profit/store-matching";
 import type { SubmittedAd } from "@/lib/marketing/submitted-videos";
+import { attributeMarketer } from "@/lib/marketing/launched-creatives";
 
 export const dynamic = "force-dynamic";
 
@@ -10,25 +11,6 @@ const DEFAULT_DAYS = 30;
 const MAX_DAYS = 120;
 const MAX_PAGES_PER_ACCOUNT = 15; // safety cap (~1500 ads/account)
 const PAGE_SIZE = 100;
-
-// Ad-name prefix → marketer. Names look like "ILP-060726JO1", "CAP-043026LIN1".
-const MARKETERS: { code: string; name: string }[] = [
-  { code: "LIN", name: "Linette" },
-  { code: "JO", name: "Jhoanna" },
-];
-
-function attributeMarketer(adName: string): {
-  code: string | null;
-  name: string;
-} {
-  const found: string[] = [];
-  const re = /(LIN|JO)\d*/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(adName)) !== null) found.push(m[1].toUpperCase());
-  const code = found[0] ?? null;
-  const marketer = code ? MARKETERS.find((x) => x.code === code) : null;
-  return { code, name: marketer?.name ?? (code ? code : "Unknown") };
-}
 
 // In-memory cache per (accounts+days) scope. Serverless instances are
 // ephemeral, but this still spares the FB API on repeated loads within an

@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
 import { fbPost, fbGet } from "@/lib/fb-ads-module/fb-api";
 import { isNurseryCampaign } from "@/lib/facebook/nursery";
+import { createServiceClient } from "@/lib/supabase/service";
+import { recordRejections } from "@/lib/marketing/ad-rejections";
 
 export const dynamic = "force-dynamic";
 
@@ -149,6 +151,17 @@ export async function POST(request: Request) {
   const actorId = employee.id;
 
   const warnings: string[] = [];
+
+  // Keep Meta's reason before the swap erases it: once the safe image is
+  // approved, ad_review_feedback is gone, and Launched Creatives would only
+  // know that the ad was fixed, not why it was rejected.
+  try {
+    await recordRejections(createServiceClient(), token, [
+      { ad_id: adId, account_id: adAccountId, effective_status: "DISAPPROVED" },
+    ]);
+  } catch {
+    // Non-fatal: the fix must go on even if the log cannot be written.
+  }
 
   // Records the attempt regardless of outcome so the CEO has a trail.
   async function logAction(fields: {

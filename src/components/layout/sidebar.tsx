@@ -49,6 +49,7 @@ import {
   Film,
   Headphones,
   BookOpen,
+  Rocket,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -475,6 +476,13 @@ const ownerNavEntries: NavEntry[] = [
     label: "Marketing Board",
     href: "/owner/marketing-board",
     icon: <Kanban size={20} />,
+    roles: ownerRoles,
+  },
+  {
+    // Every launched ad with its first days of results and Meta's verdict.
+    label: "Launched Creatives",
+    href: "/owner/launched-creatives",
+    icon: <Rocket size={20} />,
     roles: ownerRoles,
   },
   {
