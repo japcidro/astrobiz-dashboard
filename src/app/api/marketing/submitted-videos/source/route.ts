@@ -120,7 +120,7 @@ export async function GET(request: Request) {
         : `https://www.facebook.com${rawPermalink}`
       : null;
 
-    let source = (json?.source as string) ?? fallbackUrl;
+    let source: string | null = (json?.source as string | undefined) ?? fallbackUrl;
     // A dark-post video often answers with no `source` to the user token;
     // with the ad account known, walk the Page-token and advideos
     // fallbacks the Ad Performance path already uses. Launched Creatives
