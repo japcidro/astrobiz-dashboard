@@ -62,11 +62,37 @@ export interface AdRejection {
   cleared_at: string | null;
 }
 
+/** The creative that ran before Fix Rejections swapped in the safe image. */
+export interface OriginalCreative {
+  creative_id: string;
+  creative_type: "video" | "image";
+  thumbnail_url: string | null;
+  image_url: string | null;
+  video_id: string | null;
+  preview_url: string | null;
+}
+
 export interface AdFix {
   fixed_at: string;
   safe_image_name: string | null;
   by_name: string | null;
   status: string; // success | partial
+  /** Null when the swap did not record the old creative, or Facebook no longer returns it. */
+  original: OriginalCreative | null;
+}
+
+/**
+ * Green, yellow or red for a day's (or a window's) cost per purchase against
+ * the bar: within the bar is good, up to half again over is in doubt, and
+ * anything past that, or spend with no sale at all, is bad. No spend: nothing.
+ */
+export function cppTone(spend: number, purchases: number, cppBar: number): "good" | "warn" | "bad" | "none" {
+  if (spend <= 0 && purchases <= 0) return "none";
+  if (purchases <= 0) return "bad";
+  const cpp = spend / purchases;
+  if (cpp <= cppBar) return "good";
+  if (cpp <= cppBar * 1.5) return "warn";
+  return "bad";
 }
 
 export type ReviewState =

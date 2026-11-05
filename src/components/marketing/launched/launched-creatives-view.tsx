@@ -27,13 +27,51 @@ import {
   VERDICT_LABEL,
   WINDOW_OPTIONS,
   adsManagerUrl,
+  cppTone,
   verdictOf,
   type LaunchedAd,
   type LaunchedCreativesResponse,
+  type OriginalCreative,
   type ReviewState,
   type Verdict,
   type WindowTotals,
 } from "@/lib/marketing/launched-creatives";
+import { Play } from "lucide-react";
+
+type CppTone = ReturnType<typeof cppTone>;
+
+const CPP_TEXT: Record<CppTone, string> = {
+  good: "text-good",
+  warn: "text-warn",
+  bad: "text-bad",
+  none: "text-dim",
+};
+const CPP_ROW: Record<CppTone, string> = {
+  good: "bg-good-soft",
+  warn: "bg-warn-soft",
+  bad: "bg-bad-soft",
+  none: "",
+};
+const CPP_BAR_CLASS: Record<CppTone, string> = {
+  good: "text-good",
+  warn: "text-warn",
+  bad: "text-bad",
+  none: "text-dim",
+};
+
+/** What a creative looks like, for the thumbnail and the player. */
+interface CreativeLook {
+  creative_type: "video" | "image";
+  thumbnail_url: string | null;
+  image_url: string | null;
+  video_id: string | null;
+  preview_url: string | null;
+}
+
+/** The creative the marketer actually made: the swapped-out one when there was a swap. */
+function originalLook(ad: LaunchedAd): CreativeLook {
+  return ad.fix?.original ?? ad;
+}
 
 const LIST_URL = "/api/marketing/launched-creatives";
 const CPP_BAR_KEY = "launched-creatives.cpp-bar";
@@ -161,9 +199,10 @@ function safeImageLabel(name: string | null): string {
   return `the safe image “${name}”`;
 }
 
-/** Purchases (and CPP, spend) for one window, as a table cell. */
-function WindowCell({ w, days }: { w: WindowTotals; days?: number }) {
+/** Purchases (and CPP, spend) for one window, as a table cell. CPP carries the bar's color. */
+function WindowCell({ w, days, cppBar }: { w: WindowTotals; days?: number; cppBar: number }) {
   const empty = w.spend === 0 && w.purchases === 0;
+  const tone = cppTone(w.spend, w.purchases, cppBar);
   return (
     <div className="text-right">
       <div className={cn("font-num text-base", empty ? "text-dim" : "text-fg")}>
@@ -171,7 +210,10 @@ function WindowCell({ w, days }: { w: WindowTotals; days?: number }) {
       </div>
       {!empty && (
         <div className="text-xs text-muted whitespace-nowrap">
-          {w.purchases > 0 ? peso.format(w.cpp) : "no sale"} · {peso.format(w.spend)}
+          <span className={cn("font-medium", CPP_TEXT[tone])}>
+            {w.purchases > 0 ? peso.format(w.cpp) : "no sale"}
+          </span>{" "}
+          · {peso.format(w.spend)}
         </div>
       )}
       {days !== undefined && !empty && !w.complete && w.days_elapsed > 0 && (
@@ -183,44 +225,44 @@ function WindowCell({ w, days }: { w: WindowTotals; days?: number }) {
   );
 }
 
-/** Daily purchases as bars; spend as dim bars when nothing sold yet. */
-function Sparkline({ ad }: { ad: LaunchedAd }) {
+/** One bar per day, height by spend, color by that day's cost per purchase. */
+function Sparkline({ ad, cppBar }: { ad: LaunchedAd; cppBar: number }) {
   const rows = ad.daily.slice(0, 14);
   if (rows.length === 0) return <span className="text-dim">—</span>;
-  const sold = rows.some((r) => r.purchases > 0);
-  const values = rows.map((r) => (sold ? r.purchases : r.spend));
-  const max = Math.max(...values, 1);
-  const w = 4;
+  const max = Math.max(...rows.map((r) => r.spend), 1);
+  const w = 5;
   const gap = 2;
   const h = 22;
   return (
-    <svg
-      width={rows.length * (w + gap)}
-      height={h}
-      className={sold ? "text-accent" : "text-dim"}
-      aria-label={sold ? "Daily purchases" : "Daily spend"}
-    >
-      {values.map((v, i) => {
-        const bh = v > 0 ? Math.max(2, (v / max) * h) : 1;
+    <svg width={rows.length * (w + gap)} height={h} aria-label="Daily cost per purchase">
+      {rows.map((r, i) => {
+        const bh = r.spend > 0 ? Math.max(3, (r.spend / max) * h) : 1;
+        const tone = cppTone(r.spend, r.purchases, cppBar);
         return (
           <rect
-            key={i}
+            key={r.date}
             x={i * (w + gap)}
             y={h - bh}
             width={w}
             height={bh}
             rx={1}
             fill="currentColor"
-            opacity={v > 0 ? 1 : 0.35}
-          />
+            className={CPP_BAR_CLASS[tone]}
+            opacity={tone === "none" ? 0.4 : 1}
+          >
+            <title>
+              {shortDate(r.date)}: {r.purchases} sale{r.purchases === 1 ? "" : "s"},{" "}
+              {r.purchases > 0 ? peso.format(r.spend / r.purchases) : "no sale"}, {peso.format(r.spend)}
+            </title>
+          </rect>
         );
       })}
     </svg>
   );
 }
 
-function Thumb({ ad, size = 44 }: { ad: LaunchedAd; size?: number }) {
-  const src = ad.thumbnail_url ?? ad.image_url;
+function Thumb({ look, size = 44 }: { look: CreativeLook; size?: number }) {
+  const src = look.thumbnail_url ?? look.image_url;
   return (
     <div
       className="relative shrink-0 overflow-hidden rounded-control border border-line bg-raised"
@@ -231,8 +273,83 @@ function Thumb({ ad, size = 44 }: { ad: LaunchedAd; size?: number }) {
         <img src={src} alt="" className="h-full w-full object-cover" loading="lazy" />
       ) : (
         <div className="flex h-full w-full items-center justify-center text-dim">
-          {ad.creative_type === "video" ? <Video size={16} /> : <ImageIcon size={16} />}
+          {look.creative_type === "video" ? <Video size={16} /> : <ImageIcon size={16} />}
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The creative itself: the image at full size, or the video with a player
+ * once Play is pressed (the playable URL is resolved on demand, the way the
+ * Submitted Ad Videos screen does it).
+ */
+function CreativePlayer({ look, label }: { look: CreativeLook; label?: string }) {
+  const [source, setSource] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const poster = look.thumbnail_url ?? look.image_url;
+
+  useEffect(() => {
+    setSource(null);
+    setError(null);
+  }, [look.video_id, look.image_url]);
+
+  const play = async () => {
+    if (!look.video_id) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/marketing/submitted-videos/source?video_id=${look.video_id}`);
+      const json = (await res.json()) as { source?: string | null; error?: string };
+      if (!res.ok || !json.source) throw new Error(json.error || "Facebook did not give a playable video.");
+      setSource(json.source);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load the video.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="grid gap-1.5">
+      {label && <div className="text-label text-muted">{label}</div>}
+      <div className="relative overflow-hidden rounded-control border border-line bg-raised">
+        {look.creative_type === "video" && source ? (
+          <video src={source} poster={poster ?? undefined} controls autoPlay playsInline className="max-h-[420px] w-full bg-canvas" />
+        ) : poster ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={poster} alt="" className="max-h-[420px] w-full object-contain bg-canvas" />
+        ) : (
+          <div className="flex h-40 items-center justify-center text-dim">
+            {look.creative_type === "video" ? <Video size={24} /> : <ImageIcon size={24} />}
+          </div>
+        )}
+        {look.creative_type === "video" && !source && look.video_id && (
+          <button
+            type="button"
+            onClick={play}
+            disabled={loading}
+            className="absolute inset-0 flex cursor-pointer items-center justify-center bg-canvas/40 transition-colors hover:bg-canvas/25"
+            aria-label="Play video"
+          >
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-accent text-accent-ink">
+              {loading ? <RefreshCw size={20} className="animate-spin" /> : <Play size={20} fill="currentColor" />}
+            </span>
+          </button>
+        )}
+      </div>
+      {error && <p className="text-xs text-bad">{error}</p>}
+      {look.preview_url && (
+        <a
+          href={look.preview_url}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 text-xs text-accent hover:underline"
+        >
+          View post <ExternalLink size={11} />
+        </a>
       )}
     </div>
   );
@@ -531,7 +648,7 @@ export function LaunchedCreativesView() {
                 >
                   <TableCell className="max-w-[360px]">
                     <div className="flex items-center gap-3">
-                      <Thumb ad={ad} />
+                      <Thumb look={originalLook(ad)} />
                       <div className="min-w-0">
                         <div className="truncate font-mono text-sm text-fg">{ad.ad_name}</div>
                         <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted">
@@ -558,16 +675,16 @@ export function LaunchedCreativesView() {
                     <StatusCell ad={ad} />
                   </TableCell>
                   <TableCell num>
-                    <WindowCell w={ad.first_3_days} days={3} />
+                    <WindowCell w={ad.first_3_days} days={3} cppBar={cppBar} />
                   </TableCell>
                   <TableCell num>
-                    <WindowCell w={ad.first_7_days} days={7} />
+                    <WindowCell w={ad.first_7_days} days={7} cppBar={cppBar} />
                   </TableCell>
                   <TableCell num>
-                    <WindowCell w={ad.lifetime} />
+                    <WindowCell w={ad.lifetime} cppBar={cppBar} />
                   </TableCell>
                   <TableCell>
-                    <Sparkline ad={ad} />
+                    <Sparkline ad={ad} cppBar={cppBar} />
                   </TableCell>
                   <TableCell>
                     <Pill tone={VERDICT_TONE[verdict]}>{VERDICT_LABEL[verdict]}</Pill>
@@ -595,12 +712,15 @@ function Fact({ label, children }: { label: string; children: React.ReactNode })
   );
 }
 
-function WindowRow({ label, w }: { label: string; w: WindowTotals }) {
+function WindowRow({ label, w, cppBar }: { label: string; w: WindowTotals; cppBar: number }) {
+  const tone = cppTone(w.spend, w.purchases, cppBar);
   return (
     <TableRow>
       <TableCell className="text-muted">{label}</TableCell>
       <TableCell num>{num.format(w.purchases)}</TableCell>
-      <TableCell num>{w.purchases > 0 ? peso.format(w.cpp) : "—"}</TableCell>
+      <TableCell num className={cn("font-medium", CPP_TEXT[tone])}>
+        {w.purchases > 0 ? peso.format(w.cpp) : w.spend > 0 ? "no sale" : "—"}
+      </TableCell>
       <TableCell num>{peso.format(w.spend)}</TableCell>
       <TableCell num>{w.spend > 0 ? `${w.roas.toFixed(2)}×` : "—"}</TableCell>
       <TableCell num>{num.format(w.add_to_cart)}</TableCell>
@@ -618,7 +738,8 @@ function DetailDrawer({ ad, cppBar, onClose }: { ad: LaunchedAd; cppBar: number;
   }, [onClose]);
 
   const verdict = verdictOf(ad.lifetime, cppBar);
-  const src = ad.image_url ?? ad.thumbnail_url;
+  const original: OriginalCreative | null = ad.fix?.original ?? null;
+  const src = originalLook(ad).thumbnail_url ?? originalLook(ad).image_url;
   const rejectedNow = ad.review_state === "rejected" || ad.review_state === "issues";
   const afterFix =
     ad.fix && ad.before_fix
@@ -684,16 +805,6 @@ function DetailDrawer({ ad, cppBar, onClose }: { ad: LaunchedAd; cppBar: number;
                 >
                   Ads Manager <ExternalLink size={11} />
                 </a>
-                {ad.preview_url && (
-                  <a
-                    href={ad.preview_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-accent hover:underline"
-                  >
-                    View post <ExternalLink size={11} />
-                  </a>
-                )}
                 {rejectedNow && ad.is_nursery && (
                   <a href="/marketing/fix-rejections" className="text-accent hover:underline">
                     Fix rejections
@@ -702,6 +813,30 @@ function DetailDrawer({ ad, cppBar, onClose }: { ad: LaunchedAd; cppBar: number;
               </div>
             </div>
           </div>
+
+          {/* The ad as the marketer made it. After a swap, the safe image is the small one. */}
+          <CreativePlayer look={original ?? ad} label={original ? "Original creative" : "The ad"} />
+          {original && (
+            <div className="flex items-center gap-3">
+              <Thumb look={ad} size={56} />
+              <div className="text-xs text-muted">
+                Now running: the safe image, since {shortStamp(ad.fix?.fixed_at ?? null)}.
+                {ad.preview_url && (
+                  <>
+                    {" "}
+                    <a href={ad.preview_url} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                      View post
+                    </a>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+          {ad.fix && !original && (
+            <p className="text-xs text-muted">
+              The original creative was not recorded for this swap, so only the safe image can be shown.
+            </p>
+          )}
 
           <div className="grid grid-cols-2 gap-x-4 gap-y-3">
             <Fact label="Campaign">
@@ -790,9 +925,9 @@ function DetailDrawer({ ad, cppBar, onClose }: { ad: LaunchedAd; cppBar: number;
                 </TableRow>
               </TableHead>
               <TableBody>
-                <WindowRow label={ad.first_3_days.complete ? "First 3 days" : `First 3 days (${ad.first_3_days.days_elapsed}/3)`} w={ad.first_3_days} />
-                <WindowRow label={ad.first_7_days.complete ? "First 7 days" : `First 7 days (${ad.first_7_days.days_elapsed}/7)`} w={ad.first_7_days} />
-                <WindowRow label="Lifetime" w={ad.lifetime} />
+                <WindowRow label={ad.first_3_days.complete ? "First 3 days" : `First 3 days (${ad.first_3_days.days_elapsed}/3)`} w={ad.first_3_days} cppBar={cppBar} />
+                <WindowRow label={ad.first_7_days.complete ? "First 7 days" : `First 7 days (${ad.first_7_days.days_elapsed}/7)`} w={ad.first_7_days} cppBar={cppBar} />
+                <WindowRow label="Lifetime" w={ad.lifetime} cppBar={cppBar} />
               </TableBody>
             </Table>
           </Panel>
@@ -813,19 +948,24 @@ function DetailDrawer({ ad, cppBar, onClose }: { ad: LaunchedAd; cppBar: number;
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {ad.daily.map((d, i) => (
-                    <TableRow key={d.date}>
+                  {ad.daily.map((d, i) => {
+                    const tone = cppTone(d.spend, d.purchases, cppBar);
+                    return (
+                    <TableRow key={d.date} className={CPP_ROW[tone]}>
                       <TableCell>
                         <span className="font-num">{shortDate(d.date)}</span>
                         <span className="ml-1.5 text-xs text-dim">d{i + 1}</span>
                       </TableCell>
                       <TableCell num>{d.purchases > 0 ? num.format(d.purchases) : <span className="text-dim">0</span>}</TableCell>
-                      <TableCell num>{d.purchases > 0 ? peso.format(d.spend / d.purchases) : "—"}</TableCell>
+                      <TableCell num className={cn("font-medium", CPP_TEXT[tone])}>
+                        {d.purchases > 0 ? peso.format(d.spend / d.purchases) : d.spend > 0 ? "no sale" : "—"}
+                      </TableCell>
                       <TableCell num>{peso.format(d.spend)}</TableCell>
                       <TableCell num>{num.format(d.add_to_cart)}</TableCell>
                       <TableCell num>{num.format(d.landing_page_views)}</TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
             )}

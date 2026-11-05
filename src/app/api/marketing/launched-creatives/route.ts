@@ -16,6 +16,7 @@ import {
   reviewStateOf,
   type AdFix,
   type LaunchedAd,
+  type OriginalCreative,
   type LaunchedCreativesResponse,
 } from "@/lib/marketing/launched-creatives";
 import { loadDailySeries, syncDailyInsights } from "@/lib/marketing/ad-daily-sync";
@@ -293,7 +294,7 @@ export async function GET(request: Request) {
       return new Map();
     }),
     loadRejections(db, adIds),
-    loadFixes(db, adIds),
+    loadFixes(db, token, adIds),
   ]);
 
   const today = phtToday(now);
@@ -345,17 +346,19 @@ export async function GET(request: Request) {
   return Response.json(body);
 }
 
-/** The latest successful Fix Rejections swap per ad. */
+/** The latest successful Fix Rejections swap per ad, with the creative it replaced. */
 async function loadFixes(
   db: ReturnType<typeof createServiceClient>,
+  token: string,
   adIds: string[]
 ): Promise<Map<string, AdFix>> {
   const out = new Map<string, AdFix>();
+  const oldCreativeOf = new Map<string, string>();
   for (let i = 0; i < adIds.length; i += 200) {
     const { data } = await db
       .from("fix_rejection_actions")
       .select(
-        "ad_id, status, created_at, safe_image:fix_rejection_safe_images!safe_image_id(name), actor:employees!actor_id(full_name)"
+        "ad_id, status, created_at, old_creative_id, safe_image:fix_rejection_safe_images!safe_image_id(name), actor:employees!actor_id(full_name)"
       )
       .in("ad_id", adIds.slice(i, i + 200))
       .in("status", ["success", "partial"])
@@ -363,13 +366,81 @@ async function loadFixes(
     for (const r of (data ?? []) as Array<Record<string, unknown>>) {
       const id = r.ad_id as string;
       if (out.has(id)) continue; // newest first; keep the latest swap
+      if (r.old_creative_id) oldCreativeOf.set(id, r.old_creative_id as string);
       out.set(id, {
         fixed_at: r.created_at as string,
         status: r.status as string,
         safe_image_name: ((r.safe_image as { name?: string } | null)?.name as string) ?? null,
         by_name: ((r.actor as { full_name?: string } | null)?.full_name as string) ?? null,
+        original: null,
       });
     }
   }
+  if (oldCreativeOf.size > 0) {
+    const originals = await loadOriginalCreatives(db, token, [...new Set(oldCreativeOf.values())]);
+    for (const [adId, creativeId] of oldCreativeOf) {
+      const fix = out.get(adId);
+      if (fix) fix.original = originals.get(creativeId) ?? null;
+    }
+  }
   return out;
+}
+
+const ORIGINALS_CACHE_KEY = "launched_original_creatives_v1";
+
+/**
+ * The swapped-out creatives, by creative id. A creative never changes once
+ * made, so each is read from Facebook once and kept in one cache blob;
+ * only ids not yet in it cost a call (50 per call).
+ */
+async function loadOriginalCreatives(
+  db: ReturnType<typeof createServiceClient>,
+  token: string,
+  creativeIds: string[]
+): Promise<Map<string, OriginalCreative>> {
+  const { data: row } = await db
+    .from("cached_api_data")
+    .select("response_data")
+    .eq("cache_key", ORIGINALS_CACHE_KEY)
+    .maybeSingle();
+  const known = ((row?.response_data as Record<string, OriginalCreative> | null) ?? {}) as Record<
+    string,
+    OriginalCreative
+  >;
+  const missing = creativeIds.filter((id) => !known[id]);
+  let added = 0;
+  for (let i = 0; i < missing.length; i += 50) {
+    const chunk = missing.slice(i, i + 50);
+    const params = new URLSearchParams({
+      ids: chunk.join(","),
+      fields: "thumbnail_url,image_url,video_id,effective_object_story_id,object_story_spec",
+      access_token: token,
+    });
+    try {
+      const res = await fetch(`${FB_API_BASE}/?${params}`, { cache: "no-store" });
+      if (!res.ok) continue;
+      const json = (await res.json()) as Record<string, RawCreative & { id?: string }>;
+      for (const [id, c] of Object.entries(json)) {
+        if (!c || typeof c !== "object") continue;
+        const oss = c.object_story_spec ?? {};
+        const videoId = oss.video_data?.video_id ?? c.video_id ?? null;
+        const storyId = c.effective_object_story_id;
+        known[id] = {
+          creative_id: id,
+          creative_type: videoId ? "video" : "image",
+          thumbnail_url: c.thumbnail_url ?? null,
+          image_url: c.image_url ?? oss.link_data?.picture ?? null,
+          video_id: videoId,
+          preview_url: storyId ? `https://www.facebook.com/${storyId.replace("_", "/posts/")}` : null,
+        };
+        added += 1;
+      }
+    } catch {
+      // Left out of the map; the next load tries again.
+    }
+  }
+  if (added > 0) {
+    void setCachedResponse(db, "launched_ads", ORIGINALS_CACHE_KEY, known).catch(() => {});
+  }
+  return new Map(Object.entries(known));
 }

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   addDays,
+  cppTone,
   computeMetrics,
   daysBetween,
   launchDateOf,
@@ -164,5 +165,15 @@ describe("verdictOf", () => {
 
   it("says no delivery when nothing ran", () => {
     expect(verdictOf(totals(0, 0, 0), 400)).toBe("no_delivery");
+  });
+});
+
+describe("cppTone", () => {
+  it("is green within the bar, yellow up to half again over, red past that or with no sale", () => {
+    expect(cppTone(800, 2, 400)).toBe("good");
+    expect(cppTone(1000, 2, 400)).toBe("warn");
+    expect(cppTone(1300, 2, 400)).toBe("bad");
+    expect(cppTone(150, 0, 400)).toBe("bad");
+    expect(cppTone(0, 0, 400)).toBe("none");
   });
 });
