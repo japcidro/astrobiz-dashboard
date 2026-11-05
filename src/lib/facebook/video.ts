@@ -97,7 +97,7 @@ function summarize(val: unknown): string {
 // Even System User tokens with full page control often get source=null
 // from /{video_id} because Meta requires a *Page* Access Token for the
 // raw MP4. We fetch one on the fly for the page that owns the video.
-async function resolveVideoSource(
+export async function resolveVideoSource(
   videoId: string,
   accountId: string,
   storyId: string | null,

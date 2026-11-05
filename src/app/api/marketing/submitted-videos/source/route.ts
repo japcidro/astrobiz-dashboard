@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
-import { resolveAdVideo } from "@/lib/facebook/video";
+import { resolveAdVideo, resolveVideoSource } from "@/lib/facebook/video";
 import type { SubmittedVideoSource } from "@/lib/marketing/submitted-videos";
 
 export const dynamic = "force-dynamic";
@@ -120,8 +120,22 @@ export async function GET(request: Request) {
         : `https://www.facebook.com${rawPermalink}`
       : null;
 
+    let source = (json?.source as string) ?? fallbackUrl;
+    // A dark-post video often answers with no `source` to the user token;
+    // with the ad account known, walk the Page-token and advideos
+    // fallbacks the Ad Performance path already uses. Launched Creatives
+    // sends video_id + account_id for swapped-out creatives, which have no
+    // ad to resolve from.
+    if (!source && videoId && accountId) {
+      try {
+        source = (await resolveVideoSource(videoId, accountId, null, token)).source;
+      } catch {
+        // Keep the null; the screen offers View post instead.
+      }
+    }
+
     const result: SubmittedVideoSource = {
-      source: (json?.source as string) ?? fallbackUrl,
+      source,
       thumbnail: (json?.picture as string) ?? fallbackThumb,
       permalink,
       status: videoStatus,

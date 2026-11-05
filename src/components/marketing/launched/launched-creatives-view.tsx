@@ -285,7 +285,16 @@ function Thumb({ look, size = 44 }: { look: CreativeLook; size?: number }) {
  * once Play is pressed (the playable URL is resolved on demand, the way the
  * Submitted Ad Videos screen does it).
  */
-function CreativePlayer({ look, label }: { look: CreativeLook; label?: string }) {
+function CreativePlayer({
+  look,
+  label,
+  accountId,
+}: {
+  look: CreativeLook;
+  label?: string;
+  /** The ad account ("act_…"); lets the server fall back to the account's video list. */
+  accountId?: string;
+}) {
   const [source, setSource] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -301,10 +310,14 @@ function CreativePlayer({ look, label }: { look: CreativeLook; label?: string })
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/marketing/submitted-videos/source?video_id=${look.video_id}`);
-      const json = (await res.json()) as { source?: string | null; error?: string };
-      if (!res.ok || !json.source) throw new Error(json.error || "Facebook did not give a playable video.");
-      setSource(json.source);
+      const params = new URLSearchParams({ video_id: look.video_id });
+      if (accountId) params.set("account_id", accountId);
+      const res = await fetch(`/api/marketing/submitted-videos/source?${params}`);
+      const json = (await res.json()) as { data?: { source?: string | null }; error?: string };
+      if (!res.ok || !json.data?.source) {
+        throw new Error(json.error || "Facebook did not give a playable video. Try View post.");
+      }
+      setSource(json.data.source);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load the video.");
     } finally {
@@ -815,7 +828,11 @@ function DetailDrawer({ ad, cppBar, onClose }: { ad: LaunchedAd; cppBar: number;
           </div>
 
           {/* The ad as the marketer made it. After a swap, the safe image is the small one. */}
-          <CreativePlayer look={original ?? ad} label={original ? "Original creative" : "The ad"} />
+          <CreativePlayer
+            look={original ?? ad}
+            label={original ? "Original creative" : "The ad"}
+            accountId={ad.account_id}
+          />
           {original && (
             <div className="flex items-center gap-3">
               <Thumb look={ad} size={56} />
