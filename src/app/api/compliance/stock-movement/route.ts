@@ -188,7 +188,8 @@ export async function GET(request: Request) {
   const { data: storesData, error: storesError } = await supabase
     .from("shopify_stores")
     .select("id, name, store_url, api_token")
-    .eq("is_active", true);
+    .eq("is_active", true)
+    .not("api_token", "is", null) // registered, not yet connected;
 
   if (storesError || !storesData || storesData.length === 0) {
     return Response.json(

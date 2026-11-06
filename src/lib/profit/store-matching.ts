@@ -14,6 +14,7 @@ function matchStoreKeyword(text: string): string {
   if (upper.includes("CAPSULED")) return "CAPSULED";
   if (upper.includes("FOLIQ")) return "FOLIQ";
   if (upper.includes("NURTELLE")) return "NURTELLE";
+  if (upper.includes("HALORINNA")) return "HALORINNA";
 
   return "";
 }
@@ -46,7 +47,7 @@ export function matchAdToStore(
 /**
  * Stores we currently ship for. Drives every store picker in the UI.
  */
-export const ACTIVE_STORES = ["I LOVE PATCHES", "CAPSULED", "FOLIQ", "NURTELLE"] as const;
+export const ACTIVE_STORES = ["I LOVE PATCHES", "CAPSULED", "FOLIQ", "NURTELLE", "HALORINNA"] as const;
 
 /**
  * Stores we no longer ship for. Kept only so their historical parcels
@@ -76,9 +77,15 @@ export function isMaskedSenderName(senderName: string): boolean {
 
 /**
  * Recover the store behind a redacted sender name from the letters J&T left
- * behind. Resolves only when exactly one known store shares that prefix —
- * a tie means we genuinely can't tell, and guessing would silently file
- * parcels under the wrong store's RTS rate.
+ * behind. Resolves only when exactly one store shares that prefix — a tie
+ * means we genuinely can't tell, and guessing would silently file parcels
+ * under the wrong store's RTS rate.
+ *
+ * Active stores are tried first: an "H******" parcel in a fresh export is
+ * HALORINNA, which ships today, not HIBI, which does not. A retired store
+ * only resolves when no active store shares its prefix. (For a masked name
+ * the Shopify order link wins anyway — see jt-upload — so a re-uploaded old
+ * HIBI export still files correctly when its orders are linked.)
  */
 function resolveMaskedSender(upperName: string): string {
   const match = upperName.match(MASKED_SENDER_RE);
@@ -86,10 +93,16 @@ function resolveMaskedSender(upperName: string): string {
   const prefix = match[1].trim();
   if (!prefix) return ""; // "******" carries no signal at all
 
-  const candidates = (KNOWN_STORES as readonly string[]).filter((store) =>
+  const active = (ACTIVE_STORES as readonly string[]).filter((store) =>
     store.startsWith(prefix)
   );
-  return candidates.length === 1 ? candidates[0] : "";
+  if (active.length === 1) return active[0];
+  if (active.length > 1) return "";
+
+  const retired = (RETIRED_STORES as readonly string[]).filter((store) =>
+    store.startsWith(prefix)
+  );
+  return retired.length === 1 ? retired[0] : "";
 }
 
 /**
@@ -109,6 +122,7 @@ export function matchSenderToStore(senderName: string): string {
   if (upper.includes("CAPSULED")) return "CAPSULED";
   if (upper.includes("FOLIQ")) return "FOLIQ";
   if (upper.includes("NURTELLE")) return "NURTELLE";
+  if (upper.includes("HALORINNA")) return "HALORINNA";
   if (upper.includes("HIBI")) return "HIBI";
   if (upper.includes("SERINA")) return "SERINA";
 

@@ -1,5 +1,32 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-11-06: HALORINNA registered as a store
+
+The new skincare brand (Shopify `qivryv-zj.myshopify.com`, tryhalorinna.shop)
+is now a store everywhere the dashboard keys on one. `ACTIVE_STORES` and the
+P&L matchers in `src/lib/profit/store-matching.ts` know HALORINNA, so ad
+spend from the "TBM1 - HALORINNA" account (`act_413806304492069`, now in
+`fb_selected_accounts`) attributes to it by campaign name or, for generically
+named campaigns, by the account's name, and a J&T sender of HALORINNA files
+under it. A masked J&T sender ("H******") now resolves to the active store
+that carries the prefix before a retired one — HALORINNA, not HIBI; a prefix
+only a retired store carries still resolves to it.
+
+Migration `20261106000000_halorinna_store.sql` adds the `shopify_stores` row,
+its `store_ad_defaults` (ad account, pixel `413803164871787` from the
+storefront's web-pixel config, landing URL, Shop Now, ₱500/day, English
+copy), four COGS rows at ₱150 a box keyed `GBA-1/2/3/5` (the Shopify variants
+still need those SKUs set), and a Brand Kit profile and rules. The Science
+B-roll brand list includes it.
+
+**Registered but not yet connected.** The store row carries no Admin API
+token until its Shopify app is created and connected over OAuth from
+/admin/settings. Every multi-store Shopify fetcher (orders, fulfillment,
+inventory, pick list, locations, repeat buyers, compliance, P&L, void stats,
+tracking links, operations alerts, the AI tools) now skips a store whose
+`api_token` is null instead of failing on it, while the store pickers list
+it. No Facebook Page exists yet, so the page fields stay empty.
+
 ## 2026-11-03: Net Profit — the second line is "at current RTS", not best case
 
 The "up to ₱X if all deliver" line from 2026-11-01 is gone. It answered the

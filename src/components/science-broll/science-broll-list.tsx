@@ -10,7 +10,7 @@ import { Button, Chip, ConfirmButton, Label, Panel, Pill, api, credits, timeAgo 
 import { ClipVideo } from "@/components/remake/clip-video";
 
 const field = "w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-purple-500";
-const BRANDS = ["", "FOLIQ", "I Love Patches", "NURTELLE", "CAPSULED"];
+const BRANDS = ["", "FOLIQ", "I Love Patches", "NURTELLE", "CAPSULED", "HALORINNA"];
 
 export const PROJECT_STATUS: Record<CartoonHookSummary["status"], { tone: "run" | "ok" | "bad"; label: string }> = {
   planning: { tone: "run", label: "Claude is planning" },

@@ -650,6 +650,14 @@ describe("Ad Spend Store Attribution", () => {
     expect(matchAdToStore("RANDOM-CAMPAIGN", "RANDOM-ADSET")).toBe("");
   });
 
+  it("campaign or ad account naming HALORINNA = HALORINNA store", () => {
+    expect(matchAdToStore("HALORINNA-NURSERY", "ALL")).toBe("HALORINNA");
+    // Its own ad account: generically named campaigns attribute by account.
+    expect(matchAdToStore("CBO-TEST-1", "ADSET-1", "TBM1 - HALORINNA")).toBe(
+      "HALORINNA"
+    );
+  });
+
   it("falls back to the ad account name when the campaign names no brand", () => {
     // A dedicated account whose campaigns are named generically — without the
     // account-name fallback this spend is UNATTRIBUTED and the store's CPP
@@ -707,6 +715,11 @@ describe("J&T Sender → Store Matching", () => {
     expect(matchSenderToStore("FOLIQ OFFICIAL")).toBe("FOLIQ");
   });
 
+  it("HALORINNA sender → HALORINNA", () => {
+    expect(matchSenderToStore("Halorinna")).toBe("HALORINNA");
+    expect(matchSenderToStore("HALORINNA OFFICIAL")).toBe("HALORINNA");
+  });
+
   it("retired brands still normalize so historical parcels stay consistent", () => {
     expect(matchSenderToStore("Hibi")).toBe("HIBI");
     expect(matchSenderToStore("Serina")).toBe("SERINA");
@@ -718,6 +731,13 @@ describe("J&T Sender → Store Matching", () => {
     expect(matchSenderToStore("C******")).toBe("CAPSULED");
     expect(matchSenderToStore("F****")).toBe("FOLIQ");
     expect(matchSenderToStore("I LOVE P*****")).toBe("I LOVE PATCHES");
+  });
+
+  it("a prefix shared with a retired store resolves to the store that ships today", () => {
+    // "H" is HIBI (retired) and HALORINNA (active): a fresh export means HALORINNA.
+    expect(matchSenderToStore("H******")).toBe("HALORINNA");
+    // A prefix only a retired store carries still resolves to it.
+    expect(matchSenderToStore("HI**")).toBe("HIBI");
   });
 
   it("an unresolvable mask returns empty so the Shopify link can decide", () => {
@@ -746,7 +766,7 @@ describe("J&T Sender → Store Matching", () => {
 // ============================================================
 describe("Store roster", () => {
   it("pickers only offer stores we currently ship for", () => {
-    expect([...ACTIVE_STORES]).toEqual(["I LOVE PATCHES", "CAPSULED", "FOLIQ", "NURTELLE"]);
+    expect([...ACTIVE_STORES]).toEqual(["I LOVE PATCHES", "CAPSULED", "FOLIQ", "NURTELLE", "HALORINNA"]);
     expect(ACTIVE_STORES).not.toContain("HIBI");
     expect(ACTIVE_STORES).not.toContain("SERINA");
   });
