@@ -5,7 +5,25 @@ import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 
-const SCOPES = "read_orders,read_products,read_fulfillments";
+// Everything the dashboard calls: orders (with customers), products and
+// variants, inventory levels and adjustments, locations, fulfillments and
+// fulfillment orders. A Dev Dashboard app grants the scopes declared in its
+// version, so keep that list the same as this one.
+const SCOPES = [
+  "read_orders",
+  "read_all_orders",
+  "read_customers",
+  "read_products",
+  "read_inventory",
+  "write_inventory",
+  "read_locations",
+  "read_fulfillments",
+  "write_fulfillments",
+  "read_merchant_managed_fulfillment_orders",
+  "write_merchant_managed_fulfillment_orders",
+  "read_assigned_fulfillment_orders",
+  "write_assigned_fulfillment_orders",
+].join(",");
 
 export async function GET(request: Request) {
   const employee = await getEmployee();
