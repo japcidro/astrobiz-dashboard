@@ -8,10 +8,10 @@ export const dynamic = "force-dynamic";
 // Everything the dashboard calls: orders (with customers), products and
 // variants, inventory levels and adjustments, locations, fulfillments and
 // fulfillment orders. A Dev Dashboard app grants the scopes declared in its
-// version, so keep that list the same as this one.
+// version, so keep that list the same as this one. (read_all_orders is not
+// accepted there — the Dev Dashboard calls it an invalid scope.)
 const SCOPES = [
   "read_orders",
-  "read_all_orders",
   "read_customers",
   "read_products",
   "read_inventory",
