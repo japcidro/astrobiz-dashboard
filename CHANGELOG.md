@@ -1,5 +1,18 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-11-06: HALORINNA brand kit carries the launch logo
+
+The launch logo is the carton wordmark, the mark printed on the box and used
+on tryhalorinna.shop, traced to vector; its ink measures `#c10743`, a touch
+deeper than the site's accent `#d8175c`. The Facebook avatar is the
+wordmark's own H, dot and smile as a monogram, white on that magenta.
+Migration `20261106010000_halorinna_brand_kit_logo.sql` writes this into the
+HALORINNA Brand Kit: the profile's visual-identity paragraph now describes
+the logo and lists the settled palette (`#c10743`, `#d8175c`, `#93103f`,
+blush `#fbf4f6`, white), and the rules say the wordmark is reproduced exactly
+as printed, never retyped in a font or redrawn. The logo files, the Page
+cover, the first post and its copy live outside the repo's tracked tree.
+
 ## 2026-11-06: HALORINNA registered as a store
 
 The new skincare brand (Shopify `qivryv-zj.myshopify.com`, tryhalorinna.shop)
