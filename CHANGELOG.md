@@ -1,5 +1,19 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-11-07: Brand Kit — an ampoule is a product form, and HALORINNA ads show the box with it
+
+The first HALORINNA static ads reproduced the carton alone, which tells a
+shopper nothing about what is inside. "ampoule" joins the product forms the
+labeler, the Brand Kit dropdown and the Clipper's "holds" list know, and it
+counts as contents (like capsules, gummies and patches), so the Static Ad
+Generator attaches an ampoule photo for scenes that show one beside the box
+or in a hand; the planner's shows_contents line names that case.
+
+Migration `20261107000000_halorinna_box_with_ampoule.sql` makes the two
+box-with-ampoules photos HALORINNA's main pack, skips the box-only photos for
+static ads, relabels the ampoule shots, and adds the rule: every static ad
+shows the box together with at least one ampoule, never the box alone.
+
 ## 2026-11-06: HALORINNA brand kit carries the launch logo
 
 The launch logo is the carton wordmark, the mark printed on the box and used

@@ -3,8 +3,8 @@ import type { BrandCheck } from "@/lib/remake/types";
 export type AttachmentRole = "reference" | "model" | "product" | "look";
 export const ROLE_LABEL: Record<AttachmentRole, string> = { reference: "Reference · copy the layout", model: "Model · this face", product: "Product · exact label", look: "Look · style only" };
 
-/** Brand photos of what is inside the pack; the pack itself is any other kind (bottle, box, jar, …). */
-const CONTENT_KINDS = new Set(["capsules", "gummies", "patches"]);
+/** Brand photos of what is inside the pack (an ampoule comes in a box of them); the pack itself is any other kind (bottle, box, jar, …). */
+const CONTENT_KINDS = new Set(["capsules", "gummies", "patches", "ampoule"]);
 export const isContents = (kind: string | null | undefined) => CONTENT_KINDS.has(kind ?? "");
 
 /** A photo of the back or side of a pack, or a label close-up: shoppers do not recognise the product from it. */
