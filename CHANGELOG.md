@@ -1,5 +1,22 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-11-07: Static ads anchor the discount on the brand's highest regular price
+
+An adapted ad that showed ₱1,490 crossed out next to ₱990 made the offer
+look like 34% off when the brand runs a far bigger one. The planner now
+anchors every "was" price, "from" price and % off on the brand's highest
+regular price — the "Discount anchor" line in its profile, else the largest
+regular, compare-at or "was" figure the profile lists — against the entry
+price, computes the % off from that pair, and still never uses a figure
+the profile does not carry.
+
+Migration `20261107010000_discount_anchor_profiles.sql` writes the anchor
+line into each brand profile (I Love Patches ₱2,990 → ₱990 as the owner
+gave it; FOLIQ ₱1,980, NURTELLE ₱1,990 and HALORINNA ₱4,950 against ₱990),
+where the copy suggester and the Script Generator read it too. CAPSULED has
+no profile yet. `20261107020000_halorinna_cogs_sku.sql` keys HALORINNA's
+COGS to its real SKU, GLWAMP, now that the store is connected.
+
 ## 2026-11-07: Brand Kit — an ampoule is a product form, and HALORINNA ads show the box with it
 
 The first HALORINNA static ads reproduced the carton alone, which tells a
