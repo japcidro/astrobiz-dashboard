@@ -44,7 +44,9 @@ export function ImageStudio() {
   const [reference, setReference] = useState<Pic | null>(null);
   const [store, setStore] = useState("");
   const [notes, setNotes] = useState("");
-  const [versions, setVersions] = useState(4);
+  const [versions, setVersions] = useState(2);
+  /** Extra brands to adapt for in the same click; the dropdown store is always in. */
+  const [alsoFor, setAlsoFor] = useState<string[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [picker, setPicker] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -83,8 +85,10 @@ export function ImageStudio() {
 
   const runs = useMemo(() => page?.runs ?? [], [page]);
   const boardImages = page?.sources.board ?? [];
+  // One run per brand: the dropdown's store first, then every ticked brand, nothing twice.
+  const targets = useMemo(() => Array.from(new Set([store, ...alsoFor].filter(Boolean))), [store, alsoFor]);
   const cost = versions * STILL_CREDITS;
-  const canRun = !!reference && !!store && busy === null;
+  const canRun = !!reference && targets.length > 0 && busy === null;
 
   const upload = async (file: File) => {
     if (!ACCEPT.split(",").includes(file.type)) {
@@ -110,20 +114,33 @@ export function ImageStudio() {
     if (!reference) return;
     setBusy(changeFor ? `change:${changeFor.runId}` : "run");
     setError(null);
-    try {
-      const r = await api<{ id: string; runs: RunView[] }>("/api/owner/image-studio/adapt", {
+    const post = (forStore: string) =>
+      api<{ id: string; runs: RunView[] }>("/api/owner/image-studio/adapt", {
         method: "POST",
         body: JSON.stringify({
           item_id: itemId,
-          store,
+          store: forStore,
           reference: { bucket: reference.bucket, path: reference.path, label: reference.label },
           notes,
           versions,
           change: changeFor ? { run_id: changeFor.runId, note: changeFor.note } : null,
         }),
       });
-      setPage((p) => (p ? { ...p, runs: r.runs } : p));
-      setChange(null);
+    try {
+      if (changeFor) {
+        // A change reruns that one run's plan, for that run's brand only.
+        const r = await post(runs.find((x) => x.id === changeFor.runId)?.store ?? store);
+        setPage((p) => (p ? { ...p, runs: r.runs } : p));
+        setChange(null);
+        return;
+      }
+      // Every ticked brand gets its own run from the same reference, all started at once.
+      const settled = await Promise.allSettled(targets.map(post));
+      const failed = settled.flatMap((r, i) => (r.status === "rejected" ? [`${targets[i]}: ${r.reason instanceof Error ? r.reason.message : "could not start"}`] : []));
+      const last = settled.filter((r): r is PromiseFulfilledResult<{ id: string; runs: RunView[] }> => r.status === "fulfilled").at(-1);
+      if (last) setPage((p) => (p ? { ...p, runs: last.value.runs } : p));
+      if (failed.length) setError(failed.join(" · "));
+      await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not start");
     } finally {
@@ -244,31 +261,66 @@ export function ImageStudio() {
           <div className="space-y-3">
             <div>
               <Label>Adapt for</Label>
-              <select value={store} onChange={(e) => setStore(e.target.value)} className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-500">
-                {(page?.stores ?? []).map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-              {store && page && !page.sources.brand.some((b) => b.store === store) && (
-                <p className="text-[11px] text-amber-300 mt-1">
-                  No product photos for {store} yet, so our pack cannot go into the ad.{" "}
-                  <Link href={`/owner/brand-kit?store=${encodeURIComponent(store)}`} className="text-purple-300 hover:text-white">
-                    Upload them in the Brand Kit
-                  </Link>
-                  .
-                </p>
-              )}
-              {store && page && !page.profiled.includes(store) && (
-                <p className="text-[11px] text-amber-300 mt-1">
-                  No brand profile for {store} yet; the planner will only know what the product photos show.{" "}
-                  <Link href={`/owner/brand-kit?store=${encodeURIComponent(store)}`} className="text-purple-300 hover:text-white">
-                    Add one in the Brand Kit
-                  </Link>
-                  .
-                </p>
-              )}
+              <div className="flex items-center gap-3 flex-wrap">
+                <select value={store} onChange={(e) => setStore(e.target.value)} className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-500">
+                  {(page?.stores ?? []).map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+                {(page?.stores ?? []).length > 1 && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[11px] text-gray-500">also for</span>
+                    {(page?.stores ?? []).map((s) => {
+                      const main = s === store;
+                      const on = main || alsoFor.includes(s);
+                      return (
+                        <button
+                          key={s}
+                          type="button"
+                          disabled={main}
+                          onClick={() => setAlsoFor((v) => (v.includes(s) ? v.filter((x) => x !== s) : [...v, s]))}
+                          title={main ? "The brand picked above" : on ? "Click to skip this brand" : "Click to adapt for this brand too"}
+                          className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-semibold ${main ? "border-purple-500/60 bg-purple-500/20 text-purple-100 cursor-default" : on ? "border-purple-500/60 bg-purple-500/10 text-white cursor-pointer" : "border-gray-700 text-gray-400 hover:text-white cursor-pointer"}`}
+                        >
+                          {on ? <Check size={11} /> : <span className="w-[11px]" />}
+                          {s}
+                        </button>
+                      );
+                    })}
+                    {targets.length > 1 && (
+                      <button type="button" onClick={() => setAlsoFor([])} className="text-[11px] text-gray-500 hover:text-white cursor-pointer">
+                        only {store}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+              {page &&
+                targets
+                  .filter((s) => !page.sources.brand.some((b) => b.store === s))
+                  .map((s) => (
+                    <p key={`photos-${s}`} className="text-[11px] text-amber-300 mt-1">
+                      No product photos for {s} yet, so our pack cannot go into the ad.{" "}
+                      <Link href={`/owner/brand-kit?store=${encodeURIComponent(s)}`} className="text-purple-300 hover:text-white">
+                        Upload them in the Brand Kit
+                      </Link>
+                      .
+                    </p>
+                  ))}
+              {page &&
+                targets
+                  .filter((s) => !page.profiled.includes(s))
+                  .map((s) => (
+                    <p key={`profile-${s}`} className="text-[11px] text-amber-300 mt-1">
+                      No brand profile for {s} yet; the planner will only know what the product photos show.{" "}
+                      <Link href={`/owner/brand-kit?store=${encodeURIComponent(s)}`} className="text-purple-300 hover:text-white">
+                        Add one in the Brand Kit
+                      </Link>
+                      .
+                    </p>
+                  ))}
             </div>
             <div>
               <Label>Notes · optional</Label>
@@ -276,7 +328,8 @@ export function ImageStudio() {
             </div>
             <div className="flex items-center gap-3 flex-wrap">
               <Button primary onClick={() => void adapt()} busy={busy === "run"} disabled={!canRun}>
-                <Sparkles size={13} /> Adapt for {store || "…"} · {versions} {versions === 1 ? "version" : "versions"} · {credits(cost)}
+                <Sparkles size={13} /> Adapt for {targets.length > 1 ? `${targets.length} brands` : store || "…"} · {versions} {versions === 1 ? "version" : "versions"}
+                {targets.length > 1 ? " each" : ""} · {credits(cost * Math.max(1, targets.length))}
               </Button>
               <div className="flex items-center gap-1 rounded-lg bg-gray-900 border border-gray-700 p-0.5">
                 {[1, 2, 4].map((n) => (
@@ -285,7 +338,7 @@ export function ImageStudio() {
                   </button>
                 ))}
               </div>
-              <span className="text-xs text-gray-500">about 3 min: study → plan → generate → review</span>
+              <span className="text-xs text-gray-500">about 3 min{targets.length > 1 ? ", all brands at once" : ""}: study → plan → generate → review</span>
             </div>
           </div>
         </div>

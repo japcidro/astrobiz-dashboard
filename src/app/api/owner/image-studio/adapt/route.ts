@@ -29,7 +29,7 @@ export async function POST(request: Request) {
       store: typeof b.store === "string" ? b.store.trim().slice(0, 80) : "",
       reference,
       notes: typeof b.notes === "string" ? b.notes : "",
-      versions: typeof b.versions === "number" ? b.versions : 4,
+      versions: typeof b.versions === "number" ? b.versions : 2,
       model: pic(b.model),
       change,
     },
