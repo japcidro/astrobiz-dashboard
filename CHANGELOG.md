@@ -1,5 +1,21 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-11-08: YUMO registered as a store
+
+The bag brand (Shopify `xtcz8c-1i.myshopify.com`, www.wearyumo.shop) is a
+store everywhere the dashboard keys on one: `ACTIVE_STORES` and the P&L
+matchers, the Science B-roll brand list, and migration
+`20261108000000_yumo_store.sql`, which adds the `shopify_stores` row, its ad
+defaults (the YUMO Page, the "YUMO-SHOPIFY" pixel 325004377113740, the home
+page as landing URL, Shop Now, ₱500/day, English copy), COGS for LT-BLK and
+LT-CRM at the brand plan's assumed ₱250 landed cost, and a Brand Kit profile
+and rules written from the store and the launch notes. No ad account is
+named for YUMO yet, so spend attributes by campaign name until one is set.
+The same migration fills HALORINNA's Page, which exists now.
+
+"bag" joins the product forms (tote, handbag, clutch, pouch, backpack) so
+the labeler and the Clipper can name what a person holds.
+
 ## 2026-11-07: Static ads anchor the discount on the brand's highest regular price
 
 An adapted ad that showed ₱1,490 crossed out next to ₱990 made the offer

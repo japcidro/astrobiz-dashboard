@@ -15,6 +15,7 @@ function matchStoreKeyword(text: string): string {
   if (upper.includes("FOLIQ")) return "FOLIQ";
   if (upper.includes("NURTELLE")) return "NURTELLE";
   if (upper.includes("HALORINNA")) return "HALORINNA";
+  if (upper.includes("YUMO")) return "YUMO";
 
   return "";
 }
@@ -47,7 +48,7 @@ export function matchAdToStore(
 /**
  * Stores we currently ship for. Drives every store picker in the UI.
  */
-export const ACTIVE_STORES = ["I LOVE PATCHES", "CAPSULED", "FOLIQ", "NURTELLE", "HALORINNA"] as const;
+export const ACTIVE_STORES = ["I LOVE PATCHES", "CAPSULED", "FOLIQ", "NURTELLE", "HALORINNA", "YUMO"] as const;
 
 /**
  * Stores we no longer ship for. Kept only so their historical parcels
@@ -123,6 +124,7 @@ export function matchSenderToStore(senderName: string): string {
   if (upper.includes("FOLIQ")) return "FOLIQ";
   if (upper.includes("NURTELLE")) return "NURTELLE";
   if (upper.includes("HALORINNA")) return "HALORINNA";
+  if (upper.includes("YUMO")) return "YUMO";
   if (upper.includes("HIBI")) return "HIBI";
   if (upper.includes("SERINA")) return "SERINA";
 

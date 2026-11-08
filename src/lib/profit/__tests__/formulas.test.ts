@@ -658,6 +658,11 @@ describe("Ad Spend Store Attribution", () => {
     );
   });
 
+  it("campaign naming YUMO = YUMO store", () => {
+    expect(matchAdToStore("YUMO-NURSERY", "ALL")).toBe("YUMO");
+    expect(matchAdToStore("CBO-TEST-1", "ADSET-1", "TBM1 - YUMO")).toBe("YUMO");
+  });
+
   it("falls back to the ad account name when the campaign names no brand", () => {
     // A dedicated account whose campaigns are named generically — without the
     // account-name fallback this spend is UNATTRIBUTED and the store's CPP
@@ -720,6 +725,11 @@ describe("J&T Sender → Store Matching", () => {
     expect(matchSenderToStore("HALORINNA OFFICIAL")).toBe("HALORINNA");
   });
 
+  it("YUMO sender → YUMO, masked too", () => {
+    expect(matchSenderToStore("Yumo")).toBe("YUMO");
+    expect(matchSenderToStore("Y***")).toBe("YUMO");
+  });
+
   it("retired brands still normalize so historical parcels stay consistent", () => {
     expect(matchSenderToStore("Hibi")).toBe("HIBI");
     expect(matchSenderToStore("Serina")).toBe("SERINA");
@@ -766,7 +776,7 @@ describe("J&T Sender → Store Matching", () => {
 // ============================================================
 describe("Store roster", () => {
   it("pickers only offer stores we currently ship for", () => {
-    expect([...ACTIVE_STORES]).toEqual(["I LOVE PATCHES", "CAPSULED", "FOLIQ", "NURTELLE", "HALORINNA"]);
+    expect([...ACTIVE_STORES]).toEqual(["I LOVE PATCHES", "CAPSULED", "FOLIQ", "NURTELLE", "HALORINNA", "YUMO"]);
     expect(ACTIVE_STORES).not.toContain("HIBI");
     expect(ACTIVE_STORES).not.toContain("SERINA");
   });
