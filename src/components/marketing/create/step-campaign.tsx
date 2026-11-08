@@ -6,6 +6,7 @@ import type {
   BidStrategy,
 } from "@/lib/facebook/types";
 import { ShoppingCart, MousePointer, Heart, UserPlus } from "lucide-react";
+import { campaignStoreWarning } from "@/lib/marketing/campaign-store-check";
 
 const OBJECTIVES: {
   value: CampaignObjective;
@@ -60,9 +61,12 @@ const BID_STRATEGIES: { value: BidStrategy; label: string; desc: string }[] = [
 interface StepCampaignProps {
   data: CampaignFormData;
   onUpdate: (updates: Partial<CampaignFormData>) => void;
+  /** The store the ads are for: the name must carry it, or its spend never reaches that store. */
+  storeName?: string | null;
 }
 
-export function StepCampaign({ data, onUpdate }: StepCampaignProps) {
+export function StepCampaign({ data, onUpdate, storeName }: StepCampaignProps) {
+  const storeWarning = campaignStoreWarning(data.name, storeName);
   return (
     <div>
       <h2 className="text-xl font-semibold text-white mb-2">Campaign Setup</h2>
@@ -82,6 +86,9 @@ export function StepCampaign({ data, onUpdate }: StepCampaignProps) {
           placeholder="e.g. PH - Summer Sale 2026"
           className="w-full max-w-lg bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
+        {storeWarning && (
+          <p className="text-xs text-amber-400 mt-1.5 max-w-lg">{storeWarning}</p>
+        )}
       </div>
 
       {/* Objective */}

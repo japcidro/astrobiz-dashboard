@@ -138,6 +138,7 @@ export function AdCreateWizard() {
   const [saving, setSaving] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
+  const [selectedStoreName, setSelectedStoreName] = useState<string | null>(null);
 
   // Fetch accounts on mount + load draft if ?draft= param exists
   useEffect(() => {
@@ -380,6 +381,7 @@ export function AdCreateWizard() {
             existingCampaignId={state.existingCampaignId}
             existingAdsetId={state.existingAdsetId}
             accounts={accounts}
+            storeName={selectedStoreName}
             onUpdate={(updates) =>
               dispatch({ type: "SET_MODE", payload: updates })
             }
@@ -389,6 +391,7 @@ export function AdCreateWizard() {
         return (
           <StepCampaign
             data={state.campaign}
+            storeName={selectedStoreName}
             onUpdate={(updates) =>
               dispatch({ type: "SET_CAMPAIGN", payload: updates })
             }
@@ -458,8 +461,9 @@ export function AdCreateWizard() {
       <div className="mb-4" data-guide="create-ad.store">
         <StoreDefaultsSelector
           selectedStoreId={selectedStoreId}
-          onStoreChange={(id) => {
+          onStoreChange={(id, name) => {
             setSelectedStoreId(id);
+            setSelectedStoreName(name);
           }}
           onApply={handleApplyStoreDefaults}
           buildSnapshot={buildStoreDefaultsSnapshot}

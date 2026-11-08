@@ -18,6 +18,7 @@ import { StepAdset } from "@/components/marketing/create/step-adset";
 import { PageSelector } from "@/components/marketing/create/page-selector";
 import { StoreDefaultsSelector } from "../store-defaults-selector";
 import { GuideButton } from "@/components/guides/guide-button";
+import { campaignStoreWarning } from "@/lib/marketing/campaign-store-check";
 import {
   resolveNamePattern,
   type StoreAdDefaults,
@@ -186,7 +187,12 @@ export function BulkCreateWizard() {
 
   // Section 0: Store (drives per-store autofill; nullable)
   const [selectedStoreId, setSelectedStoreId] = useState<string | null>(null);
-  const [, setSelectedStoreName] = useState<string | null>(null);
+  const [selectedStoreName, setSelectedStoreName] = useState<string | null>(null);
+  // An existing campaign that names another store, or none, sends the spend elsewhere.
+  const existingCampaignWarning = campaignStoreWarning(
+    campaigns.find((c) => c.id === existingCampaignId)?.name,
+    selectedStoreName
+  );
 
   // Ad rows
   const [rows, setRows] = useState<BulkAdRow[]>(() => [
@@ -724,6 +730,7 @@ export function BulkCreateWizard() {
             <div className="bg-panel rounded-xl p-4 border border-line">
               <StepCampaign
                 data={campaign}
+                storeName={selectedStoreName}
                 onUpdate={(updates) =>
                   setCampaign((prev) => ({ ...prev, ...updates }))
                 }
@@ -753,6 +760,9 @@ export function BulkCreateWizard() {
                     </option>
                   ))}
                 </select>
+              )}
+              {existingCampaignWarning && (
+                <p className="text-xs text-amber-400 mt-1.5 max-w-md">{existingCampaignWarning}</p>
               )}
 
               {usingExistingAdset && (

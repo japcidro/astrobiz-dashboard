@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { campaignStoreWarning } from "@/lib/marketing/campaign-store-check";
 import { PlusCircle, FolderOpen, Loader2 } from "lucide-react";
 import type { WizardMode } from "@/lib/facebook/types";
 
@@ -38,6 +39,8 @@ interface StepModeSelectProps {
   existingCampaignId: string | null;
   existingAdsetId: string | null;
   accounts: AccountInfo[];
+  /** The store the ads are for, to warn when the chosen campaign names another store or none. */
+  storeName?: string | null;
   onUpdate: (updates: {
     mode?: WizardMode;
     adAccountId?: string;
@@ -52,6 +55,7 @@ export function StepModeSelect({
   existingCampaignId,
   existingAdsetId,
   accounts,
+  storeName,
   onUpdate,
 }: StepModeSelectProps) {
   const [campaigns, setCampaigns] = useState<CampaignInfo[]>([]);
@@ -269,6 +273,10 @@ export function StepModeSelect({
             {campaignsError && (
               <p className="text-xs text-red-400 mt-1.5">{campaignsError}</p>
             )}
+            {(() => {
+              const w = campaignStoreWarning(campaigns.find((c) => c.id === existingCampaignId)?.name, storeName);
+              return w ? <p className="text-xs text-amber-400 mt-1.5">{w}</p> : null;
+            })()}
           </div>
 
           {existingCampaignId && (

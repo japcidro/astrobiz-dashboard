@@ -1,5 +1,21 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-11-08: Two stores in one ad account — the wizards warn when a campaign name sends spend to the wrong store
+
+YUMO runs in the Chinkee account, where FOLIQ already runs, so that account
+carries two stores. Spend has always split by campaign and ad set name
+(`matchAdToStore`), never by account, and the account's own name carries
+neither brand, so a campaign that names no store stays unattributed rather
+than landing on the other brand. What was missing was a nudge at the moment
+the name is chosen: Create and Bulk Create now show, under the campaign name
+and under the existing-campaign picker, when the campaign names no store or
+another one ("FOLIQ-NURSERY 2" reads as a FOLIQ campaign, so its spend will
+count for FOLIQ, not YUMO). `campaignStoreWarning` in
+`src/lib/marketing/campaign-store-check.ts`, with tests.
+
+Migration `20261108010000_yumo_ad_account.sql` sets the Chinkee account as
+YUMO's default ad account and prefills "YUMO-NURSERY" as its campaign name.
+
 ## 2026-11-08: YUMO registered as a store
 
 The bag brand (Shopify `xtcz8c-1i.myshopify.com`, www.wearyumo.shop) is a
