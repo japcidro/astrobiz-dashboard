@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
-import { matchSenderToStore, isMaskedSenderName } from "@/lib/profit/store-matching";
+import { storeForParcel } from "@/lib/profit/store-matching";
 import { classifyJtDelivery, getProvinceCutoff } from "@/lib/profit/province-tiers";
 import type { JtClassification } from "@/lib/profit/types";
 import { buildTrackingToOrderMap, lookupOrderForWaybill } from "@/lib/shopify/tracking-to-order";
@@ -116,7 +116,6 @@ export async function POST(request: Request) {
         continue;
       }
       const rawSender = (row.sender_name || "").trim();
-      const storeName = matchSenderToStore(rawSender);
       const daysSinceSubmit = computeDaysSinceSubmit(row.submission_time);
       const province = (row.province || "").trim();
       const classification = classifyJtDelivery(
@@ -162,11 +161,10 @@ export async function POST(request: Request) {
         item_name: row.item_name || null,
         num_items: parseInt(String(row.num_items || 0)) || 0,
         item_value: parseFloat(String(row.item_value || 0)) || 0,
-        // For a redacted sender ("I******") the Shopify order link is the
-        // authoritative answer; the prefix resolution is only the fallback.
-        store_name: isMaskedSenderName(rawSender)
-          ? orderMatch?.store_name || storeName || null
-          : storeName || orderMatch?.store_name || null,
+        // A known sender decides; a redacted or unknown one (a sender
+        // profile not renamed for a new brand) defers to the Shopify order
+        // the waybill was fulfilled under.
+        store_name: storeForParcel(rawSender, orderMatch?.store_name),
         payment_method: row.payment_method || null,
         rts_reason: row.rts_reason || null,
         days_since_submit: daysSinceSubmit,

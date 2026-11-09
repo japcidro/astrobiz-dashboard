@@ -311,6 +311,42 @@ export function calculateVoidAdjustmentFactor(
   return Math.min(1, Math.max(0, factor));
 }
 
+export interface VoidStatRow {
+  void_rate: number | string | null;
+  settlement_curve: Array<number | string> | null;
+  sample_orders: number | string | null;
+}
+
+/**
+ * One cancellation profile from every store that has its own, for a store
+ * too new or too slow to have one (the nightly refresh needs 50 settled
+ * orders). The rate is weighted by each store's orders; each point of the
+ * settlement curve by its cancelled volume (orders × rate), since the curve
+ * describes cancellations. A shorter curve counts as settled past its end.
+ * Null when no store has stats yet.
+ */
+export function pooledVoidStat(rows: VoidStatRow[]): { rate: number; curve: number[] } | null {
+  const usable = rows
+    .map((r) => ({
+      rate: Number(r.void_rate),
+      n: Number(r.sample_orders),
+      curve: (r.settlement_curve ?? []).map(Number),
+    }))
+    .filter((r) => Number.isFinite(r.rate) && r.rate > 0 && r.rate < 1 && Number.isFinite(r.n) && r.n > 0);
+  if (usable.length === 0) return null;
+  const orders = usable.reduce((a, r) => a + r.n, 0);
+  const rate = usable.reduce((a, r) => a + r.rate * r.n, 0) / orders;
+  const length = Math.max(...usable.map((r) => r.curve.length));
+  const weight = usable.reduce((a, r) => a + r.rate * r.n, 0);
+  const curve = Array.from({ length }, (_, i) =>
+    usable.reduce((a, r) => {
+      const v = i < r.curve.length && Number.isFinite(r.curve[i]) ? r.curve[i] : 1;
+      return a + v * r.rate * r.n;
+    }, 0) / weight
+  );
+  return { rate, curve };
+}
+
 /**
  * Read s(A) out of a stored settlement curve, where curve[i] is the share of
  * void value settled by age i. Ages past the end of the curve are fully settled.

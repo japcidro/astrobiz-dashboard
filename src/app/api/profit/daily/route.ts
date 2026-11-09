@@ -8,6 +8,7 @@ import {
   calculateMarginPct,
   calculateUnshippedOrderReturns,
   calculateVoidAdjustmentFactor,
+  pooledVoidStat,
   settledFractionForAge,
   calculateShippingWithProjection,
   calculateAov,
@@ -477,9 +478,9 @@ export async function GET(request: Request) {
   try {
     const { data: voidStats } = await supabase
       .from("store_void_stats")
-      .select("store_name, void_rate, settlement_curve");
+      .select("store_name, void_rate, settlement_curve, sample_orders");
 
-    const statsByStore = new Map<string, { rate: number; curve: number[] }>();
+    const statsByStore = new Map<string, { rate: number; curve: number[]; pooled?: boolean }>();
     for (const row of voidStats || []) {
       statsByStore.set(String(row.store_name).toUpperCase(), {
         rate: Number(row.void_rate) || 0,
@@ -487,9 +488,17 @@ export async function GET(request: Request) {
       });
     }
 
+    // A store without its own stats yet (new, or under 50 settled orders)
+    // borrows the other stores' pooled profile instead of going unadjusted:
+    // its freshest days would otherwise count orders that will be cancelled.
+    const pooled = pooledVoidStat(voidStats || []);
+
     const adjustedByStore = new Map<string, number>();
     for (const key of Array.from(revenueByDateStore.keys())) {
       const [dateStr, storeName] = key.split("::");
+      if (!statsByStore.has(storeName) && pooled) {
+        statsByStore.set(storeName, { ...pooled, pooled: true });
+      }
       const stat = statsByStore.get(storeName);
       if (!stat || stat.rate <= 0) continue;
 
@@ -517,7 +526,7 @@ export async function GET(request: Request) {
       if (amount < 1) continue;
       const stat = statsByStore.get(storeName)!;
       warnings.push(
-        `${storeName}: -PHP ${Math.round(amount).toLocaleString()} revenue held back for expected cancellations (${(stat.rate * 100).toFixed(1)}% void rate)`
+        `${storeName}: -PHP ${Math.round(amount).toLocaleString()} revenue held back for expected cancellations (${(stat.rate * 100).toFixed(1)}% void rate${stat.pooled ? ", the other stores' average until it has 50 settled orders of its own" : ""})`
       );
     }
   } catch (err) {

@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
+import { normalizeLandingUrl } from "@/lib/marketing/landing-url";
 import type {
   WizardMode,
   CampaignFormData,
@@ -121,6 +122,9 @@ export async function POST(request: Request) {
   if (!ad_account_id || !ad_data) {
     return Response.json({ error: "Missing required fields" }, { status: 400 });
   }
+
+  // "www.brand.shop" would reach shoppers as http:// plus a redirect.
+  ad_data.website_url = normalizeLandingUrl(ad_data.website_url);
 
   if (!ad_data.page_id) {
     return Response.json({ error: "No Facebook Page selected. Please go back to the Ad step and select a page." }, { status: 400 });

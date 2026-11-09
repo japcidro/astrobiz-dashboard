@@ -107,6 +107,26 @@ function resolveMaskedSender(upperName: string): string {
 }
 
 /**
+ * The store a J&T parcel files under. The sender name on the waybill decides
+ * when it names a store we know. A redacted sender ("I******"), or one we do
+ * not know (a packer's own name, a sender profile not yet renamed for a new
+ * brand), falls back to the Shopify order the waybill was fulfilled under.
+ * Both answers come back in the same canonical form ("I LOVE PATCHES"), so
+ * the P&L groups them with the store's other parcels. With no order link an
+ * unknown sender keeps its own name, which the J&T dashboard flags.
+ */
+export function storeForParcel(
+  rawSender: string,
+  linkedStoreName: string | null | undefined
+): string | null {
+  const fromSender = matchSenderToStore(rawSender);
+  const fromOrder = linkedStoreName?.trim() ? matchSenderToStore(linkedStoreName) : "";
+  if (isMaskedSenderName(rawSender)) return fromOrder || fromSender || null;
+  if (isKnownStore(fromSender)) return fromSender;
+  return fromOrder || fromSender || null;
+}
+
+/**
  * Normalize a J&T sender name to a standard store name.
  * Uses contains-based matching to handle variations like
  * "Ilovepatches", "ILOVEPATCHES", "I Love Patches", etc.

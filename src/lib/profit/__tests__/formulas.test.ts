@@ -22,6 +22,7 @@ import {
 import {
   calculateVoidAdjustmentFactor,
   settledFractionForAge,
+  pooledVoidStat,
   calculateShippingWithProjection,
   calculateAov,
   calculateCpp,
@@ -36,6 +37,7 @@ import {
   matchSenderToStore,
   isKnownStore,
   isMaskedSenderName,
+  storeForParcel,
   ACTIVE_STORES,
 } from "../store-matching";
 
@@ -766,6 +768,19 @@ describe("J&T Sender → Store Matching", () => {
     expect(isMaskedSenderName("I**E PATCHES")).toBe(false);
   });
 
+  it("a parcel's store: a known sender decides, otherwise the Shopify order does", () => {
+    // Known sender wins, even over the order link (the label is what J&T billed).
+    expect(storeForParcel("FOLIQ OFFICIAL", "HALORINNA")).toBe("FOLIQ");
+    // An unknown sender (a profile not renamed for a new brand) defers to the order.
+    expect(storeForParcel("Santa Rosa Shop", "HALORINNA")).toBe("HALORINNA");
+    // The order link comes back canonical, like every other parcel of the store.
+    expect(storeForParcel("C******", "I Love Patches")).toBe("I LOVE PATCHES");
+    expect(storeForParcel("I******", null)).toBe("I LOVE PATCHES");
+    // No link: the unknown sender keeps its own name for the J&T dashboard to flag.
+    expect(storeForParcel("ATE JANE", null)).toBe("ATE JANE");
+    expect(storeForParcel("", undefined)).toBeNull();
+  });
+
   it("unknown sender returns original name (trimmed)", () => {
     expect(matchSenderToStore("  Some Random Seller  ")).toBe("Some Random Seller");
   });
@@ -1139,5 +1154,29 @@ describe("RTS rate labels", () => {
       "I LOVE PATCHES 22.1% (trailing 60d, 540 settled); NEW STORE 10% (all-time, 40 settled, thin)"
     );
     expect(describeRtsRates(null)).toBe("");
+  });
+});
+
+// ============================================================
+// POOLED VOID STATS (stores without their own yet)
+// ============================================================
+describe("pooledVoidStat", () => {
+  it("weights the rate by orders and the curve by cancelled volume", () => {
+    const p = pooledVoidStat([
+      { void_rate: 0.1, settlement_curve: [0, 0.5, 1], sample_orders: 300 },
+      { void_rate: "0.2", settlement_curve: ["0.2", "1"], sample_orders: "100" },
+    ])!;
+    // (0.1·300 + 0.2·100) / 400
+    expect(p.rate).toBeCloseTo(0.125, 6);
+    // weights 30 and 20; the shorter curve counts as settled past its end
+    expect(p.curve[0]).toBeCloseTo((0 * 30 + 0.2 * 20) / 50, 6);
+    expect(p.curve[1]).toBeCloseTo((0.5 * 30 + 1 * 20) / 50, 6);
+    expect(p.curve[2]).toBeCloseTo(1, 6);
+  });
+
+  it("ignores unusable rows and returns null with nothing to pool", () => {
+    expect(pooledVoidStat([])).toBeNull();
+    expect(pooledVoidStat([{ void_rate: 0, settlement_curve: [1], sample_orders: 80 }])).toBeNull();
+    expect(pooledVoidStat([{ void_rate: 0.1, settlement_curve: null, sample_orders: 0 }])).toBeNull();
   });
 });

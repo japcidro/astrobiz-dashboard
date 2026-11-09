@@ -1,5 +1,32 @@
 # Astrobiz Dashboard — Changelog
 
+## 2026-11-09: New stores — J&T parcels follow the Shopify order, cancellations borrowed until measured, https landing URLs
+
+Three gaps found while checking HALORINNA and YUMO end to end.
+
+**J&T parcels from an unknown sender follow their Shopify order.** A parcel
+whose sender name named no known store kept that name and ignored the
+Shopify order its waybill was fulfilled under, so a J&T sender profile not
+yet renamed for a new brand would have filed its parcels outside the store.
+`storeForParcel` in `src/lib/profit/store-matching.ts` now decides: a known
+sender wins (the label is what J&T billed), a redacted or unknown one defers
+to the order link, and both come back in the canonical store name. With no
+link an unknown sender still keeps its own name for the J&T dashboard to flag.
+
+**New stores borrow a cancellation rate.** The nightly refresh only writes a
+store's void rate once it has 50 settled orders, and until then the P&L left
+the store unadjusted, so its freshest days counted orders that would be
+cancelled. Such a store now uses the other stores' pooled profile (rate
+weighted by orders, settlement curve by cancelled volume, `pooledVoidStat`
+in `src/lib/profit/formulas.ts`), and the warning says it is borrowed. This
+covers HALORINNA, YUMO and CAPSULED today.
+
+**Landing URLs go to Meta with https.** A URL typed as "www.brand.shop" reached
+Meta without a scheme and every click went through http:// and a redirect.
+The create route and the saved store defaults now add https:// (or upgrade
+http://) via `normalizeLandingUrl`. Migration
+`20261109000000_halorinna_landing_url.sql` fixes HALORINNA's saved URL.
+
 ## 2026-11-08: Two stores in one ad account — the wizards warn when a campaign name sends spend to the wrong store
 
 YUMO runs in the Chinkee account, where FOLIQ already runs, so that account

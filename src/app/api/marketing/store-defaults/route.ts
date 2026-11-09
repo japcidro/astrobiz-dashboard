@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getEmployee } from "@/lib/supabase/get-employee";
+import { normalizeLandingUrl } from "@/lib/marketing/landing-url";
 import { NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
@@ -103,6 +104,9 @@ export async function PUT(request: Request) {
   };
   for (const field of WRITABLE_FIELDS) {
     if (field in body) payload[field] = body[field];
+  }
+  if (typeof payload.website_url === "string") {
+    payload.website_url = normalizeLandingUrl(payload.website_url) || null;
   }
 
   const supabase = await createClient();
