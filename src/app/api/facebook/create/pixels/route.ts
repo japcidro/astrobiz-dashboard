@@ -36,21 +36,28 @@ export async function GET(request: Request) {
     const params = new URLSearchParams({
       access_token: tokenSetting.value,
       fields: "id,name",
-      limit: "50",
+      limit: "200",
     });
 
-    const res = await fetch(
-      `${FB_API_BASE}/${accountId}/adspixels?${params}`,
-      { cache: "no-store" }
-    );
-
-    if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error?.message || `FB API error: ${res.status}`);
+    // An ad account can hold more pixels than one page returns (the Chinkee
+    // account has over 50), so follow paging until the list is complete.
+    // Otherwise a store's pixel past the first page is missing from the
+    // dropdown and its saved default cannot be selected.
+    const pixels: { id: string; name: string }[] = [];
+    let url = `${FB_API_BASE}/${accountId}/adspixels?${params}`;
+    for (let page = 0; url && page < 20; page++) {
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error?.message || `FB API error: ${res.status}`);
+      }
+      const json = await res.json();
+      pixels.push(...(json.data || []));
+      url = json.paging?.next ?? "";
     }
+    pixels.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 
-    const json = await res.json();
-    return Response.json({ data: json.data || [] });
+    return Response.json({ data: pixels });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Failed to fetch pixels";
     return Response.json({ error: message }, { status: 500 });
