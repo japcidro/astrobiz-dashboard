@@ -798,6 +798,7 @@ export function BulkCreateWizard() {
             campaignBudget={campaignBudget}
             // Every row names its own ad set, so the template's name is unused.
             hideName
+            pageId={pageId}
             budgetNote={
               budgetColumn
                 ? "Set per ad set in the Budget column of the table in Section C."

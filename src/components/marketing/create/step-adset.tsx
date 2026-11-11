@@ -9,6 +9,7 @@ import type {
 } from "@/lib/facebook/types";
 import { TargetingSearch } from "./targeting-search";
 import { PlacementPicker } from "./placement-picker";
+import { WarmAudiences } from "./warm-audiences";
 
 interface PixelInfo {
   id: string;
@@ -68,6 +69,8 @@ interface StepAdsetProps {
   // The budget is set somewhere else (e.g. per ad set in a table): show this
   // note instead of the budget box.
   budgetNote?: React.ReactNode;
+  // The Page the ads will run from, so a page-engagers audience can be made.
+  pageId?: string;
   onUpdate: (updates: Partial<AdSetFormData>) => void;
 }
 
@@ -78,6 +81,7 @@ export function StepAdset({
   campaignBudget = false,
   hideName = false,
   budgetNote,
+  pageId,
   onUpdate,
 }: StepAdsetProps) {
   const [pixels, setPixels] = useState<PixelInfo[]>([]);
@@ -385,6 +389,21 @@ export function StepAdset({
             label="Interests"
             selected={interests}
             onChange={setInterests}
+          />
+
+          {/* Warm audiences (retargeting) */}
+          <WarmAudiences
+            adAccountId={adAccountId}
+            pixelId={data.promoted_object?.pixel_id || ""}
+            pageId={pageId}
+            included={data.targeting.custom_audiences || []}
+            excluded={data.targeting.excluded_custom_audiences || []}
+            onChange={(included, excluded) =>
+              updateTargeting({
+                custom_audiences: included,
+                excluded_custom_audiences: excluded,
+              })
+            }
           />
         </div>
       </div>

@@ -6,6 +6,7 @@ import type {
   CampaignFormData,
   AdSetFormData,
   AdFormData,
+  TargetingSpec,
 } from "@/lib/facebook/types";
 
 export const dynamic = "force-dynamic";
@@ -63,6 +64,27 @@ async function fbPost(
     throw new Error(`${detail} [endpoint: ${endpoint}, code: ${fbErr?.code}, subcode: ${fbErr?.error_subcode}]`);
   }
   return json;
+}
+
+// Facebook wants custom audiences as bare {id} objects. With any warm
+// audience set, Advantage+ audience has to be off, or the audience is only a
+// suggestion and the ad set keeps reaching cold people.
+function targetingForFacebook(t: TargetingSpec): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...t };
+  const include = (t.custom_audiences || [])
+    .filter((a) => a && a.id)
+    .map((a) => ({ id: a.id }));
+  const exclude = (t.excluded_custom_audiences || [])
+    .filter((a) => a && a.id)
+    .map((a) => ({ id: a.id }));
+  if (include.length) out.custom_audiences = include;
+  else delete out.custom_audiences;
+  if (exclude.length) out.excluded_custom_audiences = exclude;
+  else delete out.excluded_custom_audiences;
+  if ((include.length || exclude.length) && !t.targeting_automation) {
+    out.targeting_automation = { advantage_audience: 0 };
+  }
+  return out;
 }
 
 // Does this campaign carry its own budget (CBO)? Then its ad sets must not.
@@ -208,7 +230,7 @@ export async function POST(request: Request) {
         optimization_goal: adset_data.optimization_goal,
         billing_event: adset_data.billing_event,
         bid_strategy: "LOWEST_COST_WITHOUT_CAP",
-        targeting: JSON.stringify(adset_data.targeting),
+        targeting: JSON.stringify(targetingForFacebook(adset_data.targeting)),
       };
 
       // Under a campaign budget (CBO) Facebook rejects an ad set budget.

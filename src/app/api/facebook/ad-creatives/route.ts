@@ -49,10 +49,15 @@ export async function GET(request: Request) {
     creative?: {
       effective_object_story_id?: string;
       thumbnail_url?: string;
+      video_id?: string;
+      body?: string;
     };
   };
 
-  const results: Record<string, { preview_url: string | null; thumbnail_url: string | null }> = {};
+  const results: Record<
+    string,
+    { preview_url: string | null; thumbnail_url: string | null; video_id: string | null; body: string | null }
+  > = {};
 
   const batches: string[][] = [];
   for (let i = 0; i < adIds.length; i += BATCH_SIZE) {
@@ -64,7 +69,7 @@ export async function GET(request: Request) {
       const params = new URLSearchParams({
         access_token: token,
         ids: batch.join(","),
-        fields: "creative{effective_object_story_id,thumbnail_url}",
+        fields: "creative{effective_object_story_id,thumbnail_url,video_id,body}",
       });
 
       const controller = new AbortController();
@@ -90,6 +95,8 @@ export async function GET(request: Request) {
           results[adId] = {
             preview_url: postUrl,
             thumbnail_url: node?.creative?.thumbnail_url || null,
+            video_id: node?.creative?.video_id || null,
+            body: node?.creative?.body ?? null,
           };
         }
       } catch (e) {

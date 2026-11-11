@@ -114,6 +114,12 @@ export interface TargetingSpec {
   publisher_platforms?: string[];
   facebook_positions?: string[];
   instagram_positions?: string[];
+  // Retargeting (warm) audiences to include and exclude. When either is set,
+  // the create route turns Advantage+ audience off, otherwise Facebook treats
+  // the audiences as a hint and still reaches outside them.
+  custom_audiences?: Array<{ id: string; name?: string }>;
+  excluded_custom_audiences?: Array<{ id: string; name?: string }>;
+  targeting_automation?: { advantage_audience: 0 | 1 };
 }
 
 export interface AdSetFormData {
