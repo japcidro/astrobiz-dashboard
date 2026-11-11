@@ -5,13 +5,16 @@ import { STILL_CREDITS } from "@/lib/remake/engines";
 import { askText, askVision, lastClaudeError } from "@/lib/remake/vision";
 import { loadBrandModels } from "@/lib/remake/views";
 import { aspectFor } from "./prompt";
-import { isContents, pickStaticAdPhotos, type AdaptPlan, type Attachment, type ImageFormat, type OutputMode, type ReviewScores } from "./types";
+import { isContents, photosForProduct, pickStaticAdPhotos, productsOf, type AdaptPlan, type Attachment, type ImageFormat, type OutputMode, type ReviewScores } from "./types";
 
 export { isContents };
 
 const UUID = /^[0-9a-f-]{36}$/;
 
-type BrandImageRow = { id: string; path: string; kind: string | null; description: string | null; pack_spec: string | null; ad_use: string | null };
+type BrandImageRow = { id: string; path: string; kind: string | null; description: string | null; pack_spec: string | null; ad_use: string | null; product: string | null };
+
+/** A bag is carried, not held in a palm, and its lettering is on the canvas and straps, not a label. */
+const isBag = (kind: string | null | undefined) => kind === "bag";
 
 /**
  * An exact description of a packshot, read once by Claude from the photo and
@@ -25,10 +28,15 @@ async function packSpecFor(db: SupabaseClient, img: BrandImageRow, url: string):
 - container: one sentence: the container type, proportions and cap or lid (e.g. "squat round plastic supplement bottle with a ribbed white screw cap").
 - colours: one sentence naming the colour of the body, the cap, the label background and every accent (stripes, icons, logo, text). Name each real colour; do not mention colours that are not there.
 - label_lines: every line of text on the front label, top to bottom, exact spelling and capitalisation, one string per line.`;
-  const out = await askVision<{ container?: unknown; colours?: unknown; label_lines?: unknown }>(db, system, [{ url, label: "The product packaging:" }], "Answer with JSON only.", 1200);
+  const bagSystem = `You describe a bag so an image model can reproduce it exactly. Describe only what you see; never guess or embellish. Answer with JSON only: {"container":string,"colours":string,"label_lines":string[]}.
+- container: one or two sentences: the kind of bag, its shape and proportions (wider than tall, slouchy or structured), the material, the straps or handles and how they attach or continue down the body, the closure and any hardware. When the photo shows two bags, say so and how they differ.
+- colours: one sentence naming the colour of the body, the straps, the print on the body, the lettering on the straps and any trim or zip. Name each real colour; do not mention colours that are not there.
+- label_lines: the lettering printed on the body, exact spelling and capitalisation, one string per line; then the word repeated along the straps, once, with any separator mark between repeats.`;
+  const bag = isBag(img.kind);
+  const out = await askVision<{ container?: unknown; colours?: unknown; label_lines?: unknown }>(db, bag ? bagSystem : system, [{ url, label: bag ? "The bag:" : "The product packaging:" }], "Answer with JSON only.", 1200);
   if (!out || typeof out.container !== "string" || typeof out.colours !== "string") return null;
   const lines = Array.isArray(out.label_lines) ? out.label_lines.filter((l): l is string => typeof l === "string" && !!l.trim()).slice(0, 14) : [];
-  const spec = `${out.container.trim().replace(/\.$/, "")}. ${out.colours.trim().replace(/\.$/, "")}.${lines.length ? ` Front label, top to bottom: ${lines.map((l) => `"${l.trim().replace(/"/g, "'")}"`).join(" / ")}.` : ""}`.slice(0, 900);
+  const spec = `${out.container.trim().replace(/\.$/, "")}. ${out.colours.trim().replace(/\.$/, "")}.${lines.length ? ` ${bag ? "Lettering printed on it (body first, then the straps)" : "Front label, top to bottom"}: ${lines.map((l) => `"${l.trim().replace(/"/g, "'")}"`).join(" / ")}.` : ""}`.slice(0, 900);
   await db.from("remake_brand_images").update({ pack_spec: spec }).eq("id", img.id);
   return spec;
 }
@@ -59,6 +67,8 @@ export async function planAdaptation(
     modelForced: boolean;
     /** Headlines of the brand's latest ads, so a new one does not repeat them. */
     recentHeadlines: string[];
+    /** The product this ad sells, when the brand has several; the others are named so their facts stay out. */
+    product?: { name: string; others: string[] } | null;
   }
 ): Promise<AdaptPlan | null> {
   const system = `You are a senior creative director for direct-response static ads in the Philippines. You adapt a competitor's winning ad for our brand: keep what makes it win (the angle, the structure, the hierarchy, the mood) and replace everything that is theirs (product, brand, claims, prices, people) with ours, using only facts from the brand profile. Never invent prices, claims or numbers. Never keep the competitor's name, product or logo. Keep required compliance lines. Taglish is welcome when the reference is casual. The result must look like a designed ad, not a product photo: strong type hierarchy, one clear message, breathing room, real texture.
@@ -75,9 +85,12 @@ Fill "plan" in this order: first decide who is in our image (needs_person, model
 - Prices and discounts: when the reference shows a crossed-out "was" price, a "from ₱X" or a % off, our version anchors on the brand's HIGHEST regular price — the "Discount anchor" line in the brand profile, else the largest regular, compare-at or "was" figure the profile lists — against the entry price, so the discount shown is the biggest the brand runs (₱2,990 → ₱990, 67% off; never ₱1,490 → ₱990 when ₱2,990 is listed). Compute the % off from that pair and round it down to a whole number. Never a figure that is not in the profile.
 - plan.final_text: all the text that will appear on our image, one block per line, in reading order. Exact wording, exact capitalisation. Every word that points at the person matches plan.person: a girl is "her", "she", "daughter", "anak na babae"; a boy is "his", "he", "son". When the reference's words point at someone of another gender (e.g. "TALL FOR HIS AGE" over our girl), change them ("TALL FOR HER AGE"); when nobody appears in our image or you are unsure, use words without gender ("your child", "anak", "siya").
 - plan.shows_contents: true only when what is inside our pack appears outside it in our design (loose capsules or gummies, scattered or in a hand; a patch worn on the skin or held up; an ampoule standing beside its box or held in a hand); label text that mentions it does not count.
-- plan.design_spec: 150–250 words for an image model: the composition zone by zone, where our product sits and how big — a real object in the scene, not a graphic: it rests on a surface or is held in a hand, at its true size next to the people and things around it (a supplement bottle or a small carton fits in an adult's hand), in the same light as the room with a soft contact shadow, the same perspective and the same focus; its FRONT, the side in its photo, is turned toward the camera (a slight angle is natural) with the front label readable, in the foreground or mid-ground, sharp, so someone scrolling a feed recognises it at a glance; never floating, never a flat cutout over the photo or a panel, never its back or side, never hidden in the background — the product described exactly as it looks in its photo (its real body, cap and label colours, never colours taken from the ad's palette; the palette is for background, panels and type), the person if any (when model is 0: who they are, with age, gender and look, keeping the reference person's role and age group and matching the brand's audience; when a model is picked, only their pose, expression and clothing, since the face comes from the photo), background and lighting in the reference's treatment (a gradient stays a gradient, light rays and a pedestal stay), palette with hex codes from the brand, typography in the reference's type style (hand-lettering stays hand-lettering; weight, case, colour, placement) for each text block quoting the exact words, each typeface named by its look ("bold geometric sans-serif"), never by a font name, which the image model prints as text, and a short line on finish (phone-real vs studio). Describe, do not list rules.`;
+- plan.design_spec: 150–250 words for an image model: the composition zone by zone, where our product sits and how big — a real object in the scene, not a graphic: it rests on a surface or is held in a hand, at its true size next to the people and things around it (a supplement bottle or a small carton fits in an adult's hand; a tote bag hangs from a shoulder, is carried by its straps or stands on a surface, as wide as a torso, never shrunk to fit a palm), in the same light as the room with a soft contact shadow, the same perspective and the same focus; its FRONT, the side in its photo, is turned toward the camera (a slight angle is natural) with the front label readable, in the foreground or mid-ground, sharp, so someone scrolling a feed recognises it at a glance; never floating, never a flat cutout over the photo or a panel, never its back or side, never hidden in the background — the product described exactly as it looks in its photo (its real body, cap and label colours, never colours taken from the ad's palette; the palette is for background, panels and type), the person if any (when model is 0: who they are, with age, gender and look, keeping the reference person's role and age group and matching the brand's audience; when a model is picked, only their pose, expression and clothing, since the face comes from the photo), background and lighting in the reference's treatment (a gradient stays a gradient, light rays and a pedestal stay), palette with hex codes from the brand, typography in the reference's type style (hand-lettering stays hand-lettering; weight, case, colour, placement) for each text block quoting the exact words, each typeface named by its look ("bold geometric sans-serif"), never by a font name, which the image model prints as text, and a short line on finish (phone-real vs studio). Describe, do not list rules.`;
   const facts = [
     `Brand profile for ${input.store}:\n${input.profile.trim() || "(no profile yet; use only what the product photos show)"}`,
+    input.product
+      ? `This ad sells ${input.product.name}, the product in the attached photo. The brand also sells ${input.product.others.join(", ")}: the profile covers every product, so take the name, features, colours, price, offer and proof points from the ${input.product.name} part only, and never show or describe another product.`
+      : "",
     input.rules.trim() ? `Brand rules: ${input.rules.trim()}` : "",
     input.packs.length
       ? `Our product pack, its front (photo attached): ${input.packs.map((p) => p.spec ?? `${p.kind ?? "product"}${p.description ? ` (${p.description})` : ""}`).join(" Also: ")}`
@@ -190,6 +203,7 @@ export function adaptPrompt(plan: AdaptPlan, attachments: Attachment[], rules: s
       return `Image ${k} is the competitor's ad: copy its layout, composition, hierarchy and mood exactly; do not copy its product, people, brand name, logo or words, and do not take its product's colours.${hasModel ? " Its person is only a placeholder for the pose and placement: our model takes their place completely (one person shown twice, as a before and an after, is our model both times), and nobody from this image appears in ours." : ""}`;
     }
     if (a.role === "product" && isContents(a.kind)) return `Image ${k} shows what is inside our pack (the ${a.kind}): wherever ${a.kind} appear outside the pack (loose, in a hand, a patch on the skin) they look exactly like this; it is not the packaging.`;
+    if (a.role === "product" && isBag(a.kind)) return `Image ${k} is our bag: reproduce it exactly, the same shape, canvas, colour, straps, zip and print, with the lettering on the body and along the straps copied letter for letter and legible, at its true size: a tote about as wide as a woman's torso, carried on a shoulder, held by its straps or standing on a surface, never shrunk to fit a palm. Photograph it inside the scene, not as a cutout: lit by the scene's own light with a soft contact shadow where it rests, matching the camera's perspective, focus and grain. Its printed front faces the camera (a slight angle is natural), sharp and readable. When the photo shows two colours of the bag, they are the only colours it comes in; show one or both as the design asks, and never invent another colour. Do not recolour it to match the ad.`;
     if (a.role === "product") return `Image ${k} is the front of our product pack: reproduce it exactly, same container, same body, cap and label colours, every word of the label copied letter for letter and legible, at true size (it fits in a hand). Photograph it inside the scene, not as a cutout: it rests on a surface or sits in a hand at its true size, lit by the scene's own light with a soft contact shadow, matching the camera's perspective, focus and grain. Its front faces the camera (a slight angle is natural), sharp and readable; never its back or side. Do not recolour it to match the ad.`;
     if (a.role === "model") return `Image ${k} is our model: the only person in the ad is this exact individual (same face, hair, skin tone and age), in the pose the reference's person had; never the reference's person.`;
     return `Image ${k} is a look reference: style only.`;
@@ -220,6 +234,8 @@ export interface AdaptInput {
   model: { bucket: string; path: string; label: string } | null;
   /** Rerun generate + review with a note, keeping an earlier run's plan. */
   change: { run_id: string; note: string } | null;
+  /** Which product the ad sells, for a brand whose photos are filed under more than one. */
+  product?: string | null;
 }
 
 type ModelPic = { bucket: string; path: string; label: string };
@@ -347,11 +363,24 @@ export async function createAdaptRun(db: SupabaseClient, input: AdaptInput, crea
   if (input.item_id && !UUID.test(input.item_id)) return { error: "Bad board card" };
   const [{ data: kit }, { data: productRows }] = await Promise.all([
     db.from("remake_brand_kits").select("rules, profile").eq("store", input.store).maybeSingle(),
-    db.from("remake_brand_images").select("id, path, kind, description, pack_spec, ad_use").eq("store", input.store).order("created_at"),
+    db.from("remake_brand_images").select("id, path, kind, description, pack_spec, ad_use, product").eq("store", input.store).order("created_at"),
   ]);
   const rules = (kit?.rules as string | undefined) ?? "";
   const profile = (kit?.profile as string | undefined) ?? "";
-  const brandImages = (productRows ?? []) as BrandImageRow[];
+  const allBrandImages = (productRows ?? []) as BrandImageRow[];
+  // A brand with several products: the one picked in the studio, else one the notes name, else the first; a change keeps its run's product.
+  const productNames = productsOf(allBrandImages);
+  let product: string | null = null;
+  if (productNames.length > 1) {
+    const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+    let wanted = input.product ?? null;
+    if (input.change) {
+      const { data: prevRun } = await db.from("image_studio_runs").select("plan").eq("id", input.change.run_id).maybeSingle();
+      wanted = ((prevRun?.plan as AdaptPlan | null)?.product as string | null | undefined) ?? wanted;
+    }
+    product = productNames.find((n) => wanted && same(n, wanted)) ?? productNames.find((n) => input.notes.toLowerCase().includes(n.toLowerCase())) ?? productNames[0];
+  }
+  const brandImages = photosForProduct(allBrandImages, product);
   // The pack is what gets reproduced; a close-up of the capsules is only for scenes that show them loose.
   const { packs: packRows, contents: contentRows } = pickStaticAdPhotos(brandImages);
   const packSigned = await signBoardPaths(db, [...packRows, ...contentRows].map((p) => p.path));
@@ -397,6 +426,7 @@ export async function createAdaptRun(db: SupabaseClient, input: AdaptInput, crea
       models: candidates.map((c) => ({ url: c.url, label: c.label })),
       modelForced: !!asked,
       recentHeadlines: recent,
+      product: product ? { name: product, others: productNames.filter((n) => n !== product) } : null,
     });
     if (!plan) return { error: `Claude could not study the reference: ${lastClaudeError() ?? "it gave no usable plan, try again"}` };
     plan = await genderFreeCopy(db, await avoidRepeatedHeadline(db, plan, { store: input.store, referenceUrl, notes: input.notes, profile, recent }));
@@ -406,6 +436,7 @@ export async function createAdaptRun(db: SupabaseClient, input: AdaptInput, crea
   }
   plan.model_label = modelPic?.label ?? null;
   plan.product_lock = productLock;
+  plan.product = product;
   const showsContents = plan.plan.shows_contents === true;
   const productAttachments: Attachment[] = plan.plan.needs_product
     ? [...packRows, ...(showsContents ? contentRows : [])].map((p) => ({ bucket: BOARD_BUCKET, path: p.path, role: "product" as const, label: `${input.store} · ${p.kind ?? "product"}`, kind: p.kind }))

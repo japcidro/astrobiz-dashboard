@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { pickStaticAdPhotos } from "@/lib/image-studio/types";
+import { pickStaticAdPhotosByProduct } from "@/lib/image-studio/types";
 import { PRODUCT_FORMS, type BrandImage, type BrandKit, type BrandKitSummary, type BrandModel } from "@/lib/remake/types";
 import { api } from "@/components/hook-studio/ui";
 import { Button } from "@/components/ui/button";
@@ -228,7 +228,7 @@ export function BrandKitPage() {
   const summary = stores?.find((s) => s.store === store) ?? null;
   const images = current?.images ?? [];
   const full = images.length >= MAX_PHOTOS;
-  const { packs, contents } = pickStaticAdPhotos(images);
+  const { packs, contents } = pickStaticAdPhotosByProduct(images);
   const roleOf = (img: BrandImage) => (packs.includes(img) ? "pack" : contents.includes(img) ? "contents" : null);
 
   return (
@@ -547,7 +547,7 @@ function ModelCard({ model, considered, onRemove }: { model: BrandModel; conside
   );
 }
 
-type PhotoPatch = { kind?: string; description?: string; ad_use?: "main" | "skip" | null };
+type PhotoPatch = { kind?: string; description?: string; ad_use?: "main" | "skip" | null; product?: string };
 
 function PhotoCard({
   img,
@@ -596,6 +596,16 @@ function PhotoCard({
           placeholder="One line: what it shows"
           aria-label="Description"
           onBlur={(e) => e.target.value.trim() !== (img.description ?? "") && void onPatch({ description: e.target.value })}
+          className="h-8 text-xs"
+        />
+        <Input
+          key={`product-${img.product ?? ""}`}
+          defaultValue={img.product ?? ""}
+          maxLength={60}
+          placeholder="Product name · only if the brand sells several"
+          aria-label="Product"
+          title="When a brand sells more than one product, file each photo under its product's name. The Static Ad Generator then asks which product the ad is for."
+          onBlur={(e) => e.target.value.trim() !== (img.product ?? "") && void onPatch({ product: e.target.value })}
           className="h-8 text-xs"
         />
         <Select

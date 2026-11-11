@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 /**
- * POST — the adapt skill: { item_id?, store, reference: {bucket, path, label}, notes?, versions?, model?, change?: {run_id, note} }.
+ * POST — the adapt skill: { item_id?, store, reference: {bucket, path, label}, notes?, versions?, model?, product?, change?: {run_id, note} }.
  * Studies the reference, plans our version, queues the renders; the reviewer runs when they land.
  */
 export async function POST(request: Request) {
@@ -31,6 +31,7 @@ export async function POST(request: Request) {
       notes: typeof b.notes === "string" ? b.notes : "",
       versions: typeof b.versions === "number" ? b.versions : 2,
       model: pic(b.model),
+      product: typeof b.product === "string" && b.product.trim() ? b.product.trim().slice(0, 60) : null,
       change,
     },
     auth.employee.id

@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { STILL_CREDITS } from "@/lib/remake/engines";
-import type { ResultView, RunView, StudioPage } from "@/lib/image-studio/types";
+import { productsOf, type ResultView, type RunView, type StudioPage } from "@/lib/image-studio/types";
 import { Button, ConfirmButton, Label, Panel, Pill, api, credits, downloadHref, timeAgo } from "@/components/hook-studio/ui";
 import { Lightbox } from "@/components/remake/clip-video";
 
@@ -44,6 +44,8 @@ export function ImageStudio() {
   const [reference, setReference] = useState<Pic | null>(null);
   const [store, setStore] = useState("");
   const [notes, setNotes] = useState("");
+  /** Which product the ad sells, for a brand whose Brand Kit photos are filed under several. */
+  const [product, setProduct] = useState("");
   const [versions, setVersions] = useState(2);
   /** Extra brands to adapt for in the same click; the dropdown store is always in. */
   const [alsoFor, setAlsoFor] = useState<string[]>([]);
@@ -87,6 +89,8 @@ export function ImageStudio() {
   const boardImages = page?.sources.board ?? [];
   // One run per brand: the dropdown's store first, then every ticked brand, nothing twice.
   const targets = useMemo(() => Array.from(new Set([store, ...alsoFor].filter(Boolean))), [store, alsoFor]);
+  const products = useMemo(() => productsOf((page?.sources.brand ?? []).filter((b) => b.store === store)), [page, store]);
+  const pickedProduct = products.length > 1 ? (products.includes(product) ? product : products[0]) : null;
   const cost = versions * STILL_CREDITS;
   const canRun = !!reference && targets.length > 0 && busy === null;
 
@@ -122,6 +126,7 @@ export function ImageStudio() {
           store: forStore,
           reference: { bucket: reference.bucket, path: reference.path, label: reference.label },
           notes,
+          product: forStore === store ? pickedProduct : null,
           versions,
           change: changeFor ? { run_id: changeFor.runId, note: changeFor.note } : null,
         }),
@@ -269,6 +274,15 @@ export function ImageStudio() {
                     </option>
                   ))}
                 </select>
+                {pickedProduct && (
+                  <select value={pickedProduct} onChange={(e) => setProduct(e.target.value)} aria-label="Which product the ad sells" title="This brand sells more than one product: pick the one this ad is for" className="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-purple-500">
+                    {products.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 {(page?.stores ?? []).length > 1 && (
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-[11px] text-gray-500">also for</span>
@@ -370,7 +384,7 @@ export function ImageStudio() {
                     {run.plan ? run.plan.study.angle : run.instruction || "Run"}
                   </p>
                   <p className="text-[11px] text-gray-500 mt-0.5">
-                    {timeAgo(run.created_at)} · {run.store}
+                    {timeAgo(run.created_at)} · {run.store}{run.plan?.product ? ` · ${run.plan.product}` : ""}
                     {run.instruction ? ` · ${run.instruction}` : ""}
                     {run.plan?.model_label ? ` · model: ${run.plan.model_label}` : ""}
                   </p>

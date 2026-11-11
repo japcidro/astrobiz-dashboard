@@ -26,12 +26,12 @@ async function loadSources(db: SupabaseClient): Promise<StudioSources> {
     db.from("remake_people").select("id, folder_id, name, bucket, path").order("created_at", { ascending: false }).limit(300),
     db.from("remake_people_folders").select("id, name"),
     db.from("talking_head_stills").select("id, title, clip_idx, path, preview_path").is("deleted_at", null).order("created_at", { ascending: false }).limit(200),
-    db.from("remake_brand_images").select("store, kind, path").order("store"),
+    db.from("remake_brand_images").select("store, kind, product, path").order("store").order("created_at"),
     db.from("marketing_board_items").select("id, title, image_path").eq("kind", "image").not("image_path", "is", null).order("created_at", { ascending: false }).limit(200),
   ]);
   type P = { id: string; folder_id: string | null; name: string; bucket: string; path: string };
   type S = { id: string; title: string; clip_idx: number | null; path: string; preview_path: string | null };
-  type B = { store: string; kind: string | null; path: string };
+  type B = { store: string; kind: string | null; product: string | null; path: string };
   type I = { id: string; title: string | null; image_path: string };
   const folderName = new Map(((folders ?? []) as Array<{ id: string; name: string }>).map((f) => [f.id, f.name]));
   const ps = (people ?? []) as P[];
@@ -47,7 +47,7 @@ async function loadSources(db: SupabaseClient): Promise<StudioSources> {
   return {
     people: ps.map((p) => ({ id: p.id, folder: p.folder_id ? folderName.get(p.folder_id) ?? null : null, name: p.name, bucket: p.bucket, path: p.path, url: signed.get(key(p.bucket, p.path)) ?? "" })).filter((p) => p.url),
     stills: ss.map((s) => ({ id: s.id, title: s.clip_idx !== null ? `${s.title} · clip ${s.clip_idx + 1}` : s.title, bucket: BOARD_BUCKET, path: s.path, url: signed.get(key(BOARD_BUCKET, s.preview_path ?? s.path)) ?? "" })).filter((s) => s.url),
-    brand: bs.map((b) => ({ store: b.store, kind: b.kind, bucket: BOARD_BUCKET, path: b.path, url: signed.get(key(BOARD_BUCKET, b.path)) ?? "" })).filter((b) => b.url),
+    brand: bs.map((b) => ({ store: b.store, kind: b.kind, product: b.product ?? null, bucket: BOARD_BUCKET, path: b.path, url: signed.get(key(BOARD_BUCKET, b.path)) ?? "" })).filter((b) => b.url),
     board: is.map((i) => ({ id: i.id, title: i.title ?? "Image", bucket: BOARD_BUCKET, path: i.image_path, url: signed.get(key(BOARD_BUCKET, i.image_path)) ?? "" })).filter((i) => i.url),
   };
 }

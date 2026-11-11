@@ -28,6 +28,28 @@ export function pickStaticAdPhotos<T extends { kind: string | null; description?
   return { packs, contents };
 }
 
+/** The products a brand's photos are filed under, in upload order; empty when the brand sells one thing and nothing is filed. */
+export function productsOf(images: Array<{ product?: string | null }>): string[] {
+  const out: string[] = [];
+  for (const i of images) {
+    const p = i.product?.trim();
+    if (p && !out.some((x) => x.toLowerCase() === p.toLowerCase())) out.push(p);
+  }
+  return out;
+}
+
+/** One product's photos: the ones filed under it, plus any filed under no product (shared by all). */
+export const photosForProduct = <T extends { product?: string | null }>(images: T[], product: string | null): T[] =>
+  product ? images.filter((i) => !i.product?.trim() || i.product.trim().toLowerCase() === product.toLowerCase()) : images;
+
+/** pickStaticAdPhotos for every product a brand sells, so the Brand Kit can mark each product's main photo. */
+export function pickStaticAdPhotosByProduct<T extends { kind: string | null; description?: string | null; ad_use?: string | null; product?: string | null }>(images: T[]): { packs: T[]; contents: T[] } {
+  const names = productsOf(images);
+  if (names.length < 2) return pickStaticAdPhotos(images);
+  const all = names.map((n) => pickStaticAdPhotos(photosForProduct(images, n)));
+  return { packs: [...new Set(all.flatMap((a) => a.packs))], contents: [...new Set(all.flatMap((a) => a.contents))] };
+}
+
 export interface Attachment {
   bucket: string;
   path: string;
@@ -68,6 +90,8 @@ export interface AdaptPlan {
   study: { angle: string; structure: string; style: string; why_it_works: string };
   plan: { text: Array<{ from: string; to: string }>; final_text: string; needs_person: boolean; /** Who appears, e.g. "girl, about 5"; the copy is written for them (older plans: unset). */ person?: string; /** Which of the brand's models the planner picked, 1-based; 0 = it cast the person itself (older plans: unset). */ model_pick?: number; needs_product: boolean; design_spec: string; /** Loose capsules or gummies outside the pack in the design. */ shows_contents?: boolean };
   model_label?: string | null;
+  /** Which of the brand's products the ad sells, when it has more than one (a Brand Kit photo's product). */
+  product?: string | null;
   /** The exact look of our pack (colours, every label line), from the brand photo; locks the product in the prompt and the review. */
   product_lock?: string | null;
 }
@@ -122,7 +146,7 @@ export interface RunView extends RunRow {
 export interface StudioSources {
   people: Array<{ id: string; folder: string | null; name: string; bucket: string; path: string; url: string }>;
   stills: Array<{ id: string; title: string; bucket: string; path: string; url: string }>;
-  brand: Array<{ store: string; kind: string | null; bucket: string; path: string; url: string }>;
+  brand: Array<{ store: string; kind: string | null; product: string | null; bucket: string; path: string; url: string }>;
   board: Array<{ id: string; title: string; bucket: string; path: string; url: string }>;
 }
 

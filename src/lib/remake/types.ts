@@ -129,6 +129,8 @@ export interface BrandImage {
   kind: ProductForm | null;
   description: string | null;
   ad_use: AdUse | null;
+  /** Which of the brand's products the photo shows, when it sells more than one; null = the brand's one product. */
+  product: string | null;
   url: string | null;
   created_at: string;
 }
