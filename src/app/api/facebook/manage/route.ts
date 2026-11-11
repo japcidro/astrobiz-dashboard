@@ -106,6 +106,60 @@ export async function POST(request: Request) {
       return Response.json({ success: true, entity_id, daily_budget, lifetime_budget });
     }
 
+    // Add warm audiences to an ad set that already exists (include and/or
+    // exclude), keeping what it has. Advantage+ audience is turned off so the
+    // audiences are limits, not hints, same as the create route.
+    if (action === "update_audiences") {
+      const { include, exclude } = body as { include?: string[]; exclude?: string[] };
+      const inc = (include || []).map(String).filter(Boolean);
+      const exc = (exclude || []).map(String).filter(Boolean);
+      if (inc.length === 0 && exc.length === 0) {
+        return Response.json({ error: "Provide include and/or exclude audience ids" }, { status: 400 });
+      }
+
+      const readRes = await fetch(
+        `${FB_API_BASE}/${entity_id}?${new URLSearchParams({ access_token: token, fields: "targeting" })}`,
+        { cache: "no-store" }
+      );
+      const readJson = await readRes.json();
+      if (!readRes.ok) {
+        throw new Error(readJson.error?.message || `FB API error: ${readRes.status}`);
+      }
+      const targeting = (readJson.targeting || {}) as Record<string, unknown>;
+      const merge = (current: unknown, ids: string[]) => {
+        const seen = new Set<string>();
+        const out: { id: string }[] = [];
+        const have = Array.isArray(current) ? (current as Array<{ id?: string }>) : [];
+        for (const a of [...have, ...ids.map((id) => ({ id }))]) {
+          if (!a?.id || seen.has(a.id)) continue;
+          seen.add(a.id);
+          out.push({ id: a.id });
+        }
+        return out;
+      };
+      const next: Record<string, unknown> = { ...targeting };
+      if (inc.length) next.custom_audiences = merge(targeting.custom_audiences, inc);
+      if (exc.length) next.excluded_custom_audiences = merge(targeting.excluded_custom_audiences, exc);
+      next.targeting_automation = { advantage_audience: 0 };
+
+      const res = await fetch(`${FB_API_BASE}/${entity_id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ access_token: token, targeting: JSON.stringify(next) }).toString(),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error?.error_user_msg || err.error?.message || `FB API error: ${res.status}`);
+      }
+
+      return Response.json({
+        success: true,
+        entity_id,
+        custom_audiences: next.custom_audiences ?? null,
+        excluded_custom_audiences: next.excluded_custom_audiences ?? null,
+      });
+    }
+
     return Response.json({ error: "Unknown action" }, { status: 400 });
   } catch (e) {
     const message = e instanceof Error ? e.message : "Facebook API error";
