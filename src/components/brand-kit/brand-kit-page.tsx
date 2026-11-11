@@ -26,7 +26,7 @@ const ENDPOINT = "/api/owner/remake/brand-kit";
 const MODELS_ENDPOINT = "/api/owner/remake/brand-kit/models";
 /** Matches PLANNER_MODELS in src/lib/image-studio/adapt.ts. */
 const PLANNER_MODELS = 8;
-const MAX_PHOTOS = 8;
+const MAX_PHOTOS = 16;
 const PROFILE_MAX = 6000;
 const RULES_MAX = 1500;
 const IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
