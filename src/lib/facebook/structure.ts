@@ -47,6 +47,9 @@ export interface FbAdsetRef {
   // budget (CBO) or the ad set has none of that kind.
   daily_budget: number | null;
   lifetime_budget: number | null;
+  // Read back after a launch, to check what the ad set actually targets.
+  start_time?: string | null;
+  targeting?: Record<string, unknown> | null;
 }
 
 interface GraphPage<T> {
@@ -152,8 +155,10 @@ export async function fetchAdsets(
     campaign_id?: string;
     daily_budget?: string;
     lifetime_budget?: string;
+    start_time?: string;
+    targeting?: Record<string, unknown>;
   }>(
-    `/${campaignId}/adsets?fields=id,name,status,effective_status,campaign_id,daily_budget,lifetime_budget`,
+    `/${campaignId}/adsets?fields=id,name,status,effective_status,campaign_id,daily_budget,lifetime_budget,start_time,targeting`,
     token
   );
 
@@ -167,6 +172,8 @@ export async function fetchAdsets(
       campaign_id: a.campaign_id ?? null,
       daily_budget: minorToPesos(a.daily_budget),
       lifetime_budget: minorToPesos(a.lifetime_budget),
+      start_time: a.start_time ?? null,
+      targeting: a.targeting ?? null,
     }));
 
   adsets.sort((a, b) => {
