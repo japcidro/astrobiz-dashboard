@@ -10,7 +10,8 @@ const DAY = 86400;
 // four kinds a retargeting ad set needs. Rule shapes follow Meta's audience
 // guides: pixel rules carry inclusions/event_sources/retention_seconds, a
 // Page rule uses the page as event source with the page_engaged event, and
-// a video rule is a list of {object_id, event_name}.
+// a video rule is a list of {object_id, event_name}. Only the video kind
+// sends subtype (ENGAGEMENT); the others are inferred from the rule.
 export type AudienceKind =
   | "website_visitors"
   | "website_event"
@@ -139,9 +140,10 @@ function buildParams(b: CreateBody): Record<string, string> {
     if (b.kind === "website_event" && !filters[0].value) {
       throw new Error("An event name (for example Purchase) is required");
     }
+    // No subtype here: Facebook rejects it for pixel-rule audiences ("not
+    // supported in the current API version", code 2654) and infers WEBSITE.
     return {
       ...base,
-      subtype: "WEBSITE",
       rule: JSON.stringify({
         inclusions: {
           operator: "or",
