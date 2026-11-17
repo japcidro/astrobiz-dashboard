@@ -19,13 +19,16 @@ The one idea: **do not start from what an ad looks like. Start from why that mes
 ## Workflow
 
 1. **Page first.** The plan is for one page. Read its Brand Kit profile, rules, product photos and its recent ad headlines. No profile → say so and plan only from what the photos show.
-2. **Find the hesitation.** Why does this buyer not buy today? That picks the approach (table below).
-3. **Write the plan** (4 concepts by default, each a different approach or person). For each: the one person, the insight, who they trust, headline, the picture, the format, why it works, what to test next.
-4. **Show it for approval.** Layout sketch with the real words, plus the reasoning. Nothing renders yet.
-5. **On approval, generate** only the approved concepts, then review each render (product check, text check, 1-second check).
-6. **After results:** judge by spend at an acceptable CPA, not ROAS on small spend. Winner → more executions of the same angle. No spend after several executions → drop the angle.
+2. **Read what is winning on that page now** (`src/lib/image-studio/evidence.ts`, Julius's rule 2026-11-17): the creatives that sold most in the last 90 days at or under the page's cost per purchase, with purchases, spend and CPP; their primary text and headline from Facebook; and for each winning video what is in it (avatar, angle, hook, promise, mechanism, proof, scenes, opening lines) from `ad_creative_analyses`. Winning videos nobody has watched are watched with Gemini during planning (two per plan). Also the creatives that spent without selling. An ad that Fix Rejection swapped to the safe picture is read from its original creative and marked as rejected.
+   - Most concepts carry a proven winner's angle into one frame (its hook, key moment or proof, in new words); at least one tries an untested angle; a loser's angle is never rebuilt.
+   - Every concept says what it is built on: the winner's name and numbers, or "New angle, not tested on this page yet".
+3. **Find the hesitation.** The winners show who buys and what they respond to; why does this buyer still not buy today? That picks the approach (table below).
+4. **Write the plan** (4 concepts by default, each a different approach or person). For each: the one person, the insight, who they trust, headline, the picture, the format, why it works, what to test next.
+5. **Show it for approval.** Layout sketch with the real words, plus the reasoning. Nothing renders yet.
+6. **On approval, generate** only the approved concepts, then review each render (product check, text check, 1-second check).
+7. **After results:** judge by spend at an acceptable CPA, not ROAS on small spend. Winner → more executions of the same angle. No spend after several executions → drop the angle.
 
-## Step 2: pick the approach from the hesitation
+## Step 3: pick the approach from the hesitation
 
 | The buyer's situation | Approach | What the ad does | Big-brand example |
 |---|---|---|---|
@@ -37,7 +40,7 @@ The one idea: **do not start from what an ad looks like. Start from why that mes
 
 The same brand can use more than one. A plan covers at least three different approaches.
 
-## Step 3: rules every concept must pass
+## Step 4: rules every concept must pass
 
 1. **Swap-the-brand test.** The idea must still work with no famous founder, no big shoot, no product ecosystem. If it only works because it is AG1 or Bobbi Brown, drop it.
 2. **One person.** The ad is for one specific person, named by a trait, habit or moment (not "women 25–45"). A headline about the person beats a headline about the product.
@@ -70,7 +73,7 @@ House rules (ours, on top of the video):
 | `meme` | White card, two simple line-drawn characters: one complains, one answers | headline = the complaint, subhead = the short answer, cta = small offer line |
 | `offer` | Clean product layout, benefit headline, proof line, one simple offer | headline = benefit, subhead = proof, callouts = offer items, cta |
 
-## Step 6: testing and reading results
+## Step 7: testing and reading results
 
 - **First test of a new concept:** two authority figures (or two persons), each with and without the headline = four versions. It shows whether the face or the line does the work.
 - **If it wins:** keep the winning figure and test new sorting lines, each aimed at a different villain or person; or keep the comparison and move it to other everyday situations (long flight → office chair → long drive → stadium seat).
@@ -80,4 +83,4 @@ House rules (ours, on top of the video):
 
 ## Output: the plan, per page
 
-For each concept give: title, approach, format, the one person, the insight (what they care about or what stops them), the authority figure if any, headline, subhead, other on-image lines, the picture in plain words, native or designed, why it should work, what it borrows and from whom, the next test. Then stop and wait for approval.
+For each concept give: title, approach, format, the one person, the insight (what they care about or what stops them), the authority figure if any, headline, subhead, other on-image lines, the picture in plain words, native or designed, why it should work, which winner it is built on (with numbers), what it borrows and from whom, the next test. Then stop and wait for approval.

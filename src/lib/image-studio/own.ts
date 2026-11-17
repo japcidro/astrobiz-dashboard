@@ -3,9 +3,10 @@ import { BOARD_BUCKET, signBoardPaths } from "@/lib/marketing-board/storage";
 import { STILL_CREDITS } from "@/lib/remake/engines";
 import { askText, askVision, lastClaudeError } from "@/lib/remake/vision";
 import { loadBrandModels } from "@/lib/remake/views";
+import { evidenceFacts, loadPageEvidence } from "./evidence";
 import { PLANNER_MODELS, isBag, isContents, lockLine, packSpecFor, pesoLikeCopy, recentHeadlines } from "./adapt";
 import { FORMAT_FINISH, OWN_PLAYBOOK } from "./playbook";
-import { OWN_APPROACHES, OWN_FORMATS, ownFinalText, photosForProduct, pickStaticAdPhotos, productsOf, type AdaptPlan, type Attachment, type OwnApproach, type OwnConcept, type OwnFormat, type OwnPlanRow } from "./types";
+import { OWN_APPROACHES, OWN_FORMATS, ownFinalText, photosForProduct, pickStaticAdPhotos, productsOf, type AdaptPlan, type Attachment, type OwnApproach, type OwnConcept, type OwnFormat, type OwnPlanRow, type PageEvidence } from "./types";
 
 /**
  * "Create your own": original static ads for one page, with no reference ad.
@@ -71,7 +72,7 @@ async function brandContext(db: SupabaseClient, store: string, wantedProduct: st
   };
 }
 
-const CONCEPT_SHAPE = `{"title":string,"approach":"offer"|"replacement"|"trust"|"identity"|"situation","format":"sorting_line"|"authority"|"replacement"|"native_comparison"|"story_post"|"meme"|"offer","audience":string,"insight":string,"authority":string,"headline":string,"subhead":string,"callouts":[string],"cta":string,"visual":string,"polish":"native"|"designed","why":string,"borrowed":string,"next_test":string,"needs_person":boolean,"model":number,"person":string,"needs_product":boolean,"shows_contents":boolean,"design_spec":string}`;
+const CONCEPT_SHAPE = `{"title":string,"approach":"offer"|"replacement"|"trust"|"identity"|"situation","format":"sorting_line"|"authority"|"replacement"|"native_comparison"|"story_post"|"meme"|"offer","audience":string,"insight":string,"authority":string,"headline":string,"subhead":string,"callouts":[string],"cta":string,"visual":string,"polish":"native"|"designed","why":string,"borrowed":string,"evidence":string,"next_test":string,"needs_person":boolean,"model":number,"person":string,"needs_product":boolean,"shows_contents":boolean,"design_spec":string}`;
 
 const CONCEPT_FIELDS = `Each concept:
 - title: three to five words that name the idea.
@@ -83,12 +84,13 @@ const CONCEPT_FIELDS = `Each concept:
 - polish: "native" when it should look like a real person's post, "designed" when it is a layout.
 - why: why this should work for this person, one or two sentences.
 - borrowed: which idea it uses and where it comes from (e.g. "Sorting line, as in Ridge's chain ad: the headline is about the person, not the product").
+- evidence: when the page's own results are given, which winner this builds on, with its numbers and what it takes from it (e.g. "Builds on DHT-0722 (127 purchases at ₱451): same cortisol angle, its 'follicles are asleep' line as the hook"), or "New angle, not tested on this page yet" and why; "" when no results are given.
 - next_test: the next version to test if this one gets spend, one sentence.
 - needs_person: true when a real human (face, body or hands) is in the picture. model: when a person is needed and OUR MODEL photos are attached, the number of the one who fits who the picture needs (same age group, gender and role); 0 when none fits, when none is attached, or when no person is needed. person: who appears, in a few words with gender and age, or "".
 - needs_product: true when our pack is in the picture (true for every format except, sometimes, a meme). shows_contents: true only when what is inside the pack appears outside it (loose capsules or gummies, a patch on skin).
 - design_spec: 130 to 220 words for an image model, a 4:5 portrait: the composition zone by zone; who is there (when model is 0: age, gender, build, look and clothing, a real Filipino who looks like the buyer; when a model is picked, only pose, expression and clothing); the place and its light; where our pack sits and how big, as a real object in the scene (resting on a surface or held in a hand at true size, lit by the scene with a soft contact shadow, its front toward the camera, sharp and readable, described exactly as in its photo with its real colours); each text block quoting its exact words with its look and position (name a typeface by its look, like "bold condensed sans-serif caps" or "uneven green marker handwriting", never by a font name); palette with hex codes from the brand for any designed type or panels. Describe, do not list rules.`;
 
-function plannerFacts(ctx: BrandContext, store: string, brief: string, avoid: string[]): string {
+function plannerFacts(ctx: BrandContext, store: string, brief: string, avoid: string[], evidence: PageEvidence | null): string {
   return [
     `The page: ${store}.\nBrand profile:\n${ctx.profile.trim() || "(no profile yet; use only what the product photos show, and keep claims generic)"}`,
     ctx.product ? `These ads sell ${ctx.product}, the product in the attached photo. The brand also sells ${ctx.otherProducts.join(", ")}: the profile covers every product, so take the name, features, price, offer and proof points from the ${ctx.product} part only, and never show or describe another product.` : "",
@@ -100,6 +102,7 @@ function plannerFacts(ctx: BrandContext, store: string, brief: string, avoid: st
     ctx.models.length
       ? `${ctx.models.length === 1 ? "One photo" : `${ctx.models.length} photos`} of the page's own models ${ctx.models.length === 1 ? "is" : "are"} attached (OUR MODEL 1${ctx.models.length > 1 ? `–${ctx.models.length}` : ""}). They look like the customer. Pick one only when the picture needs someone like them; an authority figure of another age or role is cast from your description (model 0).`
       : "No model photos for this page: set model to 0 and describe the person yourself.",
+    evidence ? evidenceFacts(evidence) : "No ad results are available for this page, so the plan stands on the brand profile alone; leave each concept's evidence empty.",
     avoid.length ? `Headlines this page already ran or was already offered: ${avoid.map((h) => `"${h}"`).join(", ")}. Every new headline is new: not one of these and not their key phrase reworded.` : "",
     brief.trim() ? `What the marketer asked for, which wins over your own preferences (but never over the brand's facts and compliance): ${brief.trim()}` : "The marketer gave no brief: choose the strongest angles for this page yourself.",
   ]
@@ -107,8 +110,13 @@ function plannerFacts(ctx: BrandContext, store: string, brief: string, avoid: st
     .join("\n\n");
 }
 
-function plannerImages(ctx: BrandContext): Array<{ url: string; label: string; maxSide?: number }> {
+function plannerImages(ctx: BrandContext, evidence: PageEvidence | null): Array<{ url: string; label: string; maxSide?: number }> {
   return [
+    // The page's best-selling statics, to see what a winning image looks like here; learned from, never copied.
+    ...(evidence?.winners ?? [])
+      .filter((w) => w.kind === "image" && w.image_url)
+      .slice(0, 2)
+      .map((w) => ({ url: w.image_url!, label: `A WINNING STATIC AD of this page, "${w.ad}" (${w.purchases} purchases${w.cpp ? ` at ₱${w.cpp}` : ""}). Study what it shows and says; do not copy its layout:`, maxSide: 1000 })),
     ...ctx.packs.filter((p) => p.url).slice(0, 1).map((p) => ({ url: p.url!, label: "OUR product pack, its front, as it really looks:" })),
     ...(ctx.contentUrl ? [{ url: ctx.contentUrl, label: "What is inside OUR pack, as it really looks:", maxSide: 800 }] : []),
     ...ctx.models.map((m, i) => ({ url: m.url, label: `OUR MODEL ${i + 1}${m.label ? ` (${m.label})` : ""}:`, maxSide: 640 })),
@@ -151,6 +159,7 @@ export function cleanConcept(raw: unknown, id: string, canShowProduct: boolean, 
     why: str(r.why, 500),
     borrowed: str(r.borrowed, 300),
     next_test: str(r.next_test, 300),
+    evidence: str(r.evidence, 400),
     needs_person: needsPerson,
     person: needsPerson ? str(r.person, 80) : "",
     model_pick: needsPerson && pick <= modelCount ? pick : 0,
@@ -166,8 +175,8 @@ export function cleanConcept(raw: unknown, id: string, canShowProduct: boolean, 
 const newId = () => `c${Math.random().toString(36).slice(2, 9)}`;
 
 /** Ask with the pack and model photos when there are any, in words alone otherwise. */
-async function askPlanner<T>(db: SupabaseClient, system: string, ctx: BrandContext, question: string, maxTokens: number): Promise<T | null> {
-  const images = plannerImages(ctx);
+async function askPlanner<T>(db: SupabaseClient, system: string, ctx: BrandContext, question: string, maxTokens: number, evidence: PageEvidence | null): Promise<T | null> {
+  const images = plannerImages(ctx, evidence);
   // A long JSON answer occasionally comes back malformed; one more try is cheap.
   for (let attempt = 0; attempt < 2; attempt++) {
     const out = images.length ? await askVision<T>(db, system, images, question, maxTokens, "medium") : await askText<T>(db, system, question, maxTokens, "medium");
@@ -179,22 +188,48 @@ async function askPlanner<T>(db: SupabaseClient, system: string, ctx: BrandConte
 const SYSTEM = `You are a senior creative strategist for direct-response static ads in the Philippines, planning ORIGINAL ads for one brand page. There is no reference ad to copy. You plan; nothing is generated until the marketer approves your plan, so each concept must be clear enough to judge from its words and a sketch.\n\n${OWN_PLAYBOOK}`;
 
 /** The creative plan for a page: the buyer's main hesitation and a set of concepts built on it. */
-export async function planOwnAds(db: SupabaseClient, ctx: BrandContext, input: { store: string; brief: string; count: number; avoid: string[] }): Promise<{ diagnosis: string; concepts: OwnConcept[] } | null> {
-  const question = `${plannerFacts(ctx, input.store, input.brief, input.avoid)}
+export async function planOwnAds(db: SupabaseClient, ctx: BrandContext, input: { store: string; brief: string; count: number; avoid: string[]; evidence?: PageEvidence | null }): Promise<{ diagnosis: string; concepts: OwnConcept[] } | null> {
+  const evidence = input.evidence ?? null;
+  const question = `${plannerFacts(ctx, input.store, input.brief, input.avoid, evidence)}
 
 Write the creative plan: exactly ${input.count} concepts for this page. Between them they use at least ${Math.min(3, input.count)} different approaches and at least ${Math.min(3, input.count)} different formats, and no two are written for the same person. Most are native. Leave out a format that does not suit this product rather than force it.
 
 Answer with JSON only, exactly this shape:
 {"diagnosis":string,"concepts":[${CONCEPT_SHAPE}]}
-- diagnosis: one or two sentences on why this page's buyer hesitates today and which approaches answer that. It is what the whole plan stands on.
+- diagnosis: two or three sentences, under 110 words in all: what the page's own winners prove about its buyer (name them with their numbers, when results are given), why this buyer still hesitates, and which approaches answer that. It is what the whole plan stands on.
 ${CONCEPT_FIELDS}
 
 JSON only, no markdown fences, no line breaks inside strings (use \\n).`;
-  const out = await askPlanner<{ diagnosis?: unknown; concepts?: unknown }>(db, SYSTEM, ctx, question, 24000);
+  const out = await askPlanner<{ diagnosis?: unknown; concepts?: unknown }>(db, SYSTEM, ctx, question, 24000, evidence);
   if (!out || !Array.isArray(out.concepts)) return null;
   const concepts = out.concepts.map((c) => cleanConcept(c, newId(), ctx.packs.length > 0, ctx.models.length)).filter((c): c is OwnConcept => !!c).slice(0, 8);
   if (concepts.length === 0) return null;
-  return { diagnosis: str(out.diagnosis, 600), concepts };
+  return { diagnosis: str(out.diagnosis, 1400), concepts: await tightenHeadlines(db, concepts) };
+}
+
+const PLAN_COLUMNS = "id, store, product, brief, diagnosis, concepts, evidence, status, created_at";
+
+const wordsIn = (s: string) => s.split(/\s+/).filter(Boolean).length;
+const MAX_HEADLINE_WORDS = 9;
+
+/** The planner sometimes runs a headline long; one quick call cuts those to nine words and the new line replaces the old one in the design too. */
+async function tightenHeadlines(db: SupabaseClient, concepts: OwnConcept[]): Promise<OwnConcept[]> {
+  const long = concepts.filter((c) => wordsIn(c.headline) > MAX_HEADLINE_WORDS);
+  if (long.length === 0) return concepts;
+  const out = await askText<{ headlines?: unknown }>(
+    db,
+    "You are a direct-response copywriter for static ads in the Philippines. You shorten headlines. Answer with JSON only.",
+    `Each headline below is too long to read in one second. Rewrite each in ${MAX_HEADLINE_WORDS} words or fewer (count them), keeping its meaning, its language (English or Taglish), its tone and its capitalisation style. Cut, do not squeeze; no em dashes.\n${long.map((c, i) => `${i + 1}. "${c.headline}"${c.subhead ? ` (the line under it stays: "${c.subhead}")` : ""}`).join("\n")}\n\nAnswer with JSON only: {"headlines":[string]}, in the same order.`,
+    3000,
+    "low"
+  );
+  const fresh = Array.isArray(out?.headlines) ? out.headlines : [];
+  const byId = new Map<string, string>();
+  long.forEach((c, i) => {
+    const f = typeof fresh[i] === "string" ? fresh[i].trim().replace(/\s*\n+\s*/g, " ").slice(0, 160) : "";
+    if (f && wordsIn(f) <= MAX_HEADLINE_WORDS) byId.set(c.id, f);
+  });
+  return concepts.map((c) => (byId.has(c.id) ? { ...c, headline: byId.get(c.id)!, design_spec: c.design_spec.split(c.headline).join(byId.get(c.id)!) } : c));
 }
 
 const toPlanRow = (r: Record<string, unknown>): OwnPlanRow => ({
@@ -204,13 +239,14 @@ const toPlanRow = (r: Record<string, unknown>): OwnPlanRow => ({
   brief: (r.brief as string | null) ?? "",
   diagnosis: (r.diagnosis as string | null) ?? "",
   concepts: Array.isArray(r.concepts) ? (r.concepts as OwnConcept[]) : [],
+  evidence: (r.evidence as PageEvidence | null) ?? null,
   status: r.status === "approved" ? "approved" : "draft",
   created_at: r.created_at as string,
 });
 
 /** The latest plans, newest first; empty when the table is not there yet. */
 export async function loadOwnPlans(db: SupabaseClient): Promise<OwnPlanRow[]> {
-  const { data } = await db.from("image_studio_plans").select("id, store, product, brief, diagnosis, concepts, status, created_at").order("created_at", { ascending: false }).limit(12);
+  const { data } = await db.from("image_studio_plans").select(PLAN_COLUMNS).order("created_at", { ascending: false }).limit(12);
   return ((data ?? []) as Array<Record<string, unknown>>).map(toPlanRow);
 }
 
@@ -230,13 +266,14 @@ export async function createOwnPlan(db: SupabaseClient, input: { store: string; 
   if (!store) return { error: "Pick a page" };
   const brief = input.brief.trim().slice(0, 3000);
   const count = Math.min(6, Math.max(2, Math.round(input.count || 4)));
-  const ctx = await brandContext(db, store, input.product, brief);
-  const planned = await planOwnAds(db, ctx, { store, brief, count, avoid: await headlinesToAvoid(db, store) });
+  // The page's own results first: what sold, at what cost, and what is in the winning videos.
+  const [ctx, evidence, avoid] = await Promise.all([brandContext(db, store, input.product, brief), loadPageEvidence(db, store).catch(() => null), headlinesToAvoid(db, store)]);
+  const planned = await planOwnAds(db, ctx, { store, brief, count, avoid, evidence });
   if (!planned) return { error: `Claude could not write the plan: ${lastClaudeError() ?? "it gave no usable plan, try again"}` };
   const { data, error } = await db
     .from("image_studio_plans")
-    .insert({ store, product: ctx.product, brief, diagnosis: planned.diagnosis, concepts: planned.concepts, created_by: createdBy })
-    .select("id, store, product, brief, diagnosis, concepts, status, created_at")
+    .insert({ store, product: ctx.product, brief, diagnosis: planned.diagnosis, concepts: planned.concepts, evidence, created_by: createdBy })
+    .select(PLAN_COLUMNS)
     .single();
   if (error || !data) return { error: error?.message ?? "Could not save the plan" };
   return { plan: toPlanRow(data as Record<string, unknown>) };
@@ -244,7 +281,7 @@ export async function createOwnPlan(db: SupabaseClient, input: { store: string; 
 
 async function loadPlan(db: SupabaseClient, id: string): Promise<OwnPlanRow | null> {
   if (!UUID.test(id)) return null;
-  const { data } = await db.from("image_studio_plans").select("id, store, product, brief, diagnosis, concepts, status, created_at").eq("id", id).maybeSingle();
+  const { data } = await db.from("image_studio_plans").select(PLAN_COLUMNS).eq("id", id).maybeSingle();
   return data ? toPlanRow(data as Record<string, unknown>) : null;
 }
 
@@ -261,7 +298,7 @@ export async function reviseOwnConcept(db: SupabaseClient, input: { planId: stri
   const { id: _id, run_id: _run, model_pick, ...rest } = old;
   void _id;
   void _run;
-  const question = `${plannerFacts(ctx, plan.store, plan.brief, others.map((c) => c.headline || c.subhead || c.callouts[0] || "").filter(Boolean))}
+  const question = `${plannerFacts(ctx, plan.store, plan.brief, others.map((c) => c.headline || c.subhead || c.callouts[0] || "").filter(Boolean), plan.evidence)}
 
 The plan's diagnosis: ${plan.diagnosis}
 The other concepts in this plan (stay different from them): ${others.map((c) => `"${c.title}" (${c.approach}, ${c.format}, for ${c.audience})`).join("; ") || "none"}
@@ -277,10 +314,12 @@ ${CONCEPT_SHAPE}
 ${CONCEPT_FIELDS}
 
 JSON only, no markdown fences, no line breaks inside strings (use \\n).`;
-  const out = await askPlanner<unknown>(db, SYSTEM, ctx, question, 8000);
+  const out = await askPlanner<unknown>(db, SYSTEM, ctx, question, 8000, plan.evidence);
   const fresh = cleanConcept(out, old.id, ctx.packs.length > 0, ctx.models.length);
   if (!fresh) return { error: `Claude could not rewrite the concept: ${lastClaudeError() ?? "try again"}` };
-  const concepts = plan.concepts.map((c) => (c.id === old.id ? fresh : c));
+  // Words the marketer quoted stay as written, however long.
+  const [tight] = /["“]/.test(note) ? [fresh] : await tightenHeadlines(db, [fresh]);
+  const concepts = plan.concepts.map((c) => (c.id === old.id ? tight : c));
   const { error } = await db.from("image_studio_plans").update({ concepts }).eq("id", plan.id);
   if (error) return { error: error.message };
   return { plan: { ...plan, concepts } };

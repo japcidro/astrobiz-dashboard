@@ -4,7 +4,7 @@ import { AlertTriangle, ArrowDown, Check, Loader2, PenLine, Sparkles, Trash2 } f
 import Link from "next/link";
 import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { STILL_CREDITS } from "@/lib/remake/engines";
-import { APPROACH_HINT, APPROACH_LABEL, FORMAT_LABEL, isContents, productsOf, type OwnConcept, type OwnPlanRow, type RunView, type StudioPage } from "@/lib/image-studio/types";
+import { APPROACH_HINT, APPROACH_LABEL, FORMAT_LABEL, isContents, productsOf, type OwnConcept, type OwnPlanRow, type PageEvidence, type RunView, type StudioPage } from "@/lib/image-studio/types";
 import { Button, ConfirmButton, Label, Panel, api, credits, timeAgo } from "@/components/hook-studio/ui";
 
 const field = "w-full bg-canvas border border-line-strong rounded-control px-3 py-2 text-sm text-fg placeholder:text-dim focus:outline-none focus:border-accent";
@@ -278,6 +278,7 @@ function ConceptCard({ concept: c, packUrl, brand, picked, onPick, onRevise, bus
           </div>
           <Row label="The picture">{c.visual}</Row>
           <Row label="Why it should work">{c.why}</Row>
+          {c.evidence && <Row label="Built on">{c.evidence}</Row>}
           {c.borrowed && <Row label="Borrowed idea">{c.borrowed}</Row>}
           {c.next_test && <Row label="If it gets spend, test next">{c.next_test}</Row>}
         </div>
@@ -301,6 +302,93 @@ function ConceptCard({ concept: c, packUrl, brand, picked, onPick, onRevise, bus
             </button>
           )}
         </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── What the plan was written from: the page's own winners ─── */
+
+const peso = (n: number | null) => (n === null ? "no sale" : `₱${n.toLocaleString("en-US")}`);
+
+function Winners({ evidence: e }: { evidence: PageEvidence }) {
+  const [open, setOpen] = useState<string | null>(null);
+  return (
+    <div className="mb-4">
+      <p className="text-xs text-muted mb-2">
+        Written from this page&apos;s own ads, last {e.days} days: <span className="text-fg font-num">{e.purchases.toLocaleString("en-US")}</span> purchases at <span className="text-fg font-num">{peso(e.store_cpp)}</span> average.
+        {e.watched > 0 ? ` Watched ${e.watched} winning ${e.watched === 1 ? "video" : "videos"} for this plan.` : ""}
+        {!e.copy_read ? " Facebook could not be read, so only names and numbers were used." : ""}
+      </p>
+      {e.winners.length === 0 ? (
+        <p className="text-xs text-warn">No creative on this page has sold yet, so the plan stands on the brand profile.</p>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
+          {e.winners.map((w) => {
+            const on = open === w.ad_id;
+            const cheap = w.cpp !== null && e.store_cpp !== null && w.cpp <= e.store_cpp;
+            return (
+              <button key={w.ad_id} type="button" onClick={() => setOpen(on ? null : w.ad_id)} aria-expanded={on} title="Click to see what is in this ad" className={`text-left rounded-control border p-2 cursor-pointer ${on ? "border-accent bg-accent-soft" : "border-line bg-raised hover:border-line-strong"}`}>
+                <div className="flex items-start gap-2">
+                  {w.thumbnail_url || w.image_url ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={(w.image_url ?? w.thumbnail_url)!} alt="" className="w-10 h-10 rounded-control object-cover shrink-0 bg-canvas" loading="lazy" onError={(ev) => (ev.currentTarget.style.visibility = "hidden")} />
+                  ) : (
+                    <div className="w-10 h-10 rounded-control bg-canvas shrink-0" />
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-[11px] text-fg font-num truncate" title={w.ad}>
+                      {w.ad}
+                    </p>
+                    <p className="text-[11px] text-muted">
+                      {w.kind === "video" ? "Video" : w.kind === "image" ? "Static" : "Ad"}
+                      {w.swapped ? " · rejected later" : ""}
+                    </p>
+                  </div>
+                </div>
+                <p className="text-xs mt-1.5">
+                  <span className="text-fg font-num font-semibold">{w.purchases}</span> <span className="text-muted">buys at</span> <span className={`font-num font-semibold ${cheap ? "text-good" : "text-fg"}`}>{peso(w.cpp)}</span>
+                </p>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {e.winners
+        .filter((w) => w.ad_id === open)
+        .map((w) => (
+          <div key={w.ad_id} className="mt-2 rounded-control border border-line bg-raised p-3 space-y-1.5">
+            <p className="text-xs text-fg font-semibold">
+              {w.ad} · {peso(w.spend)} spent
+            </p>
+            {w.headline && <Row label="Headline">{w.headline}</Row>}
+            {w.primary_text && <Row label="Primary text opens">{w.primary_text}</Row>}
+            {w.video ? (
+              <>
+                {w.video.avatar && <Row label="Speaks to">{w.video.avatar}</Row>}
+                {w.video.angle && <Row label="Angle">{w.video.angle}</Row>}
+                {w.video.hook && <Row label="Hook">{w.video.hook}</Row>}
+                {w.video.promise && <Row label="Promise">{w.video.promise}</Row>}
+                {w.video.proof && <Row label="Proof">{w.video.proof}</Row>}
+                {w.video.scenes.length > 0 && <Row label="On screen">{w.video.scenes.join(" · ")}</Row>}
+                {w.video.opening && <Row label="Spoken, from the start">{w.video.opening}</Row>}
+              </>
+            ) : w.kind === "video" ? (
+              <p className="text-xs text-warn">{w.swapped ? "This video was swapped out after a rejection, so it could not be watched; only its numbers and copy were used." : "This video has not been watched yet; only its numbers and copy were used. The next plan watches up to two more."}</p>
+            ) : null}
+            {w.swapped && <p className="text-xs text-warn">Meta rejected this creative after it sold. The plan keeps its angle but is told to use safer words and pictures.</p>}
+          </div>
+        ))}
+      {e.losers.length > 0 && (
+        <p className="text-[11px] text-muted mt-2">
+          Spent without earning it, so not repeated:{" "}
+          {e.losers.map((l, i) => (
+            <span key={l.ad}>
+              {i > 0 ? " · " : ""}
+              <span className="font-num text-fg">{l.ad}</span> ({peso(l.spend)}, {l.purchases} {l.purchases === 1 ? "buy" : "buys"})
+            </span>
+          ))}
+        </p>
       )}
     </div>
   );
@@ -374,7 +462,7 @@ export function OwnAds({ page, itemId, onChange, setError }: { page: StudioPage;
                 </select>
               )}
             </div>
-            <p className="text-[11px] text-muted mt-2 leading-relaxed">The plan is written for this page only, from its Brand Kit profile, its product photos and the ads it already ran.</p>
+            <p className="text-[11px] text-muted mt-2 leading-relaxed">The plan is written for this page only: from its own winning ads on Facebook (purchases, cost per purchase, the copy, and what is in the winning videos), its Brand Kit profile and its product photos.</p>
             {!page.profiled.includes(store) && store && (
               <p className="text-[11px] text-warn mt-1">
                 No brand profile for {store} yet, so the plan will only know what the product photos show.{" "}
@@ -410,7 +498,7 @@ export function OwnAds({ page, itemId, onChange, setError }: { page: StudioPage;
                   </button>
                 ))}
               </div>
-              <span className="text-xs text-muted">{busy === "plan" ? "Writing the plan, about a minute…" : "About a minute. No image credits are used until you approve."}</span>
+              <span className="text-xs text-muted">{busy === "plan" ? "Reading this page's winning ads, then writing the plan: 1 to 3 minutes…" : "1 to 3 minutes: it reads the page's winning ads first. No image credits are used until you approve."}</span>
             </div>
           </div>
         </div>
@@ -424,7 +512,7 @@ export function OwnAds({ page, itemId, onChange, setError }: { page: StudioPage;
       {busy === "plan" && (
         <Panel>
           <p className="text-sm text-muted my-6 flex items-center justify-center gap-2">
-            <Loader2 size={15} className="animate-spin" /> Studying {store}: why its buyer hesitates, who to speak to, what to show.
+            <Loader2 size={15} className="animate-spin" /> Studying {store}: what sold in the last 90 days and at what cost, what is in the winning videos, then why its buyer still hesitates.
           </p>
         </Panel>
       )}
@@ -451,9 +539,10 @@ export function OwnAds({ page, itemId, onChange, setError }: { page: StudioPage;
                 <Trash2 size={11} />
               </ConfirmButton>
             </div>
+            {plan.evidence && <Winners evidence={plan.evidence} />}
             {plan.diagnosis && (
               <p className="text-xs text-fg leading-relaxed border-l-2 border-accent pl-3 mb-4">
-                <span className="text-muted">Why this buyer hesitates: </span>
+                <span className="text-muted">What the winners prove, and why this buyer still hesitates: </span>
                 {plan.diagnosis}
               </p>
             )}

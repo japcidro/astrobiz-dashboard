@@ -148,6 +148,8 @@ export interface OwnConcept {
   /** Which idea it borrows and from whom. */
   borrowed: string;
   next_test: string;
+  /** Which of the page's winning ads this builds on, with its numbers, or that it is a new angle (older plans: unset). */
+  evidence?: string;
   needs_person: boolean;
   person: string;
   /** Which of the brand's models was picked, 1-based; 0 = cast from the description. */
@@ -163,6 +165,40 @@ export interface OwnConcept {
 export const ownFinalText = (c: Pick<OwnConcept, "headline" | "subhead" | "callouts" | "cta">): string =>
   [c.headline, c.subhead, ...c.callouts, c.cta].map((l) => l.trim()).filter(Boolean).join("\n");
 
+/** One of the page's best-selling creatives: its numbers, its copy and, for a video, what is in it. */
+export interface WinnerAd {
+  ad_id: string;
+  ad: string;
+  kind: "video" | "image" | null;
+  /** Meta rejected it and Fix Rejection swapped it for the safe picture; the copy and image here are the original's. */
+  swapped?: boolean;
+  purchases: number;
+  spend: number;
+  /** Cost per purchase, pesos; null with no sale. */
+  cpp: number | null;
+  primary_text: string;
+  headline: string;
+  thumbnail_url: string | null;
+  /** The full image of a static winner, which the planner looks at. */
+  image_url: string | null;
+  video: { avatar: string; angle: string; hook: string; promise: string; mechanism: string; proof: string; format: string; look: string; scenes: string[]; opening: string } | null;
+}
+
+/** What is working on a page now: what a plan is grounded in. */
+export interface PageEvidence {
+  days: number;
+  store_cpp: number | null;
+  purchases: number;
+  spend: number;
+  ads: number;
+  winners: WinnerAd[];
+  losers: Array<{ ad: string; kind: "video" | "image" | null; purchases: number; spend: number; cpp: number | null; primary_text: string }>;
+  /** Winning videos watched with Gemini while this plan was written. */
+  watched: number;
+  /** False when Facebook could not be read, so only names and numbers are known. */
+  copy_read: boolean;
+}
+
 export interface OwnPlanRow {
   id: string;
   store: string;
@@ -171,6 +207,8 @@ export interface OwnPlanRow {
   /** One line on the buyer's main hesitation, which the plan is built around. */
   diagnosis: string;
   concepts: OwnConcept[];
+  /** The page's winners the plan was written from; null when the page had no ad data (or on older plans). */
+  evidence: PageEvidence | null;
   status: "draft" | "approved";
   created_at: string;
 }
