@@ -6,9 +6,10 @@ import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { STILL_CREDITS } from "@/lib/remake/engines";
-import { productsOf, type ResultView, type RunView, type StudioPage } from "@/lib/image-studio/types";
+import { APPROACH_LABEL, FORMAT_LABEL, ownFinalText, productsOf, type ResultView, type RunView, type StudioPage } from "@/lib/image-studio/types";
 import { Button, ConfirmButton, Label, Panel, Pill, api, credits, downloadHref, timeAgo } from "@/components/hook-studio/ui";
 import { Lightbox } from "@/components/remake/clip-video";
+import { OwnAds } from "./own-ads";
 
 const field = "w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-purple-500";
 const ACCEPT = "image/png,image/jpeg,image/webp";
@@ -35,11 +36,14 @@ const overall = (x: ResultView) => {
  * behind the button studies the reference, plans our version from the brand
  * profile, generates the versions and reviews them with scores. Notes are
  * optional; everything else is decided for you and shown under the results.
+ * A second mode, "Create your own", needs no reference: it plans original ads
+ * for a page and generates only the concepts that get approved (./own-ads).
  */
 export function ImageStudio() {
   const params = useSearchParams();
   const itemId = params.get("item");
   const [page, setPage] = useState<StudioPage | null>(null);
+  const [mode, setMode] = useState<"adapt" | "own">("adapt");
   const [error, setError] = useState<string | null>(null);
   const [reference, setReference] = useState<Pic | null>(null);
   const [store, setStore] = useState("");
@@ -114,7 +118,23 @@ export function ImageStudio() {
     }
   };
 
+  /** Run an original (no reference) again with a note, keeping its concept. */
+  const changeOwn = async (c: { runId: string; note: string }) => {
+    setBusy(`change:${c.runId}`);
+    setError(null);
+    try {
+      const r = await api<{ runs: RunView[] }>("/api/owner/image-studio/own", { method: "POST", body: JSON.stringify({ action: "change", run_id: c.runId, note: c.note, versions, item_id: itemId }) });
+      setPage((p) => (p ? { ...p, runs: r.runs } : p));
+      setChange(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const adapt = async (changeFor?: { runId: string; note: string }) => {
+    if (changeFor && runs.find((x) => x.id === changeFor.runId)?.plan?.own) return changeOwn(changeFor);
     if (!reference) return;
     setBusy(changeFor ? `change:${changeFor.runId}` : "run");
     setError(null);
@@ -194,9 +214,21 @@ export function ImageStudio() {
               </Link>
             </>
           ) : (
-            "A competitor's static ad in, our ad out. The skill studies it, plans our version from the brand profile, generates and reviews."
+            mode === "own" ? "No reference needed. Pick a page, get a creative plan with every ad sketched and explained, and generate only what you approve." : "A competitor's static ad in, our ad out. The skill studies it, plans our version from the brand profile, generates and reviews."
           )}
         </p>
+        <div className="inline-flex items-center gap-1 rounded-control bg-canvas border border-line-strong p-0.5 mt-3" role="tablist" aria-label="How to make the ad">
+          {(
+            [
+              ["adapt", "Adapt a reference"],
+              ["own", "Create your own"],
+            ] as const
+          ).map(([id, label]) => (
+            <button key={id} type="button" role="tab" aria-selected={mode === id} onClick={() => setMode(id)} className={`px-3 py-1.5 rounded-control text-xs font-semibold cursor-pointer ${mode === id ? "bg-accent text-accent-ink" : "text-muted hover:text-fg"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
       {error && (
         <p className="text-xs text-red-300 inline-flex items-center gap-1.5">
@@ -204,6 +236,9 @@ export function ImageStudio() {
         </p>
       )}
 
+      {mode === "own" && page && <OwnAds page={page} itemId={itemId} setError={setError} onChange={(next) => setPage((p) => (p ? { ...p, plans: next.plans, runs: next.runs ?? p.runs } : p))} />}
+
+      {mode === "adapt" && (
       <Panel>
         <div className="grid grid-cols-1 md:grid-cols-[300px_minmax(0,1fr)] gap-5 items-start">
           <div>
@@ -357,12 +392,13 @@ export function ImageStudio() {
           </div>
         </div>
       </Panel>
+      )}
 
       {page === null ? (
         <Loader2 size={20} className="mx-auto my-10 animate-spin text-gray-500" />
       ) : runs.length === 0 ? (
         <Panel>
-          <p className="text-sm text-gray-500 text-center my-6">Nothing adapted yet.</p>
+          <p className="text-sm text-gray-500 text-center my-6">{mode === "own" ? "Nothing generated yet. Approved concepts appear here." : "Nothing adapted yet."}</p>
         </Panel>
       ) : (
         runs.map((run) => {
@@ -372,6 +408,7 @@ export function ImageStudio() {
           const planOpen = openPlan === run.id;
           const changing = change?.runId === run.id;
           const ref = run.attachments.find((a) => a.role === "reference");
+          const own = run.plan?.own ?? null;
           return (
             <Panel key={run.id}>
               <div className="flex items-start gap-3 flex-wrap mb-3">
@@ -381,6 +418,7 @@ export function ImageStudio() {
                 )}
                 <div className="flex-1 min-w-64">
                   <p className="text-sm text-white">
+                    {own && <span className="text-[11px] font-semibold text-accent mr-1.5">Own concept</span>}
                     {run.plan ? run.plan.study.angle : run.instruction || "Run"}
                   </p>
                   <p className="text-[11px] text-gray-500 mt-0.5">
@@ -399,7 +437,50 @@ export function ImageStudio() {
                 </ConfirmButton>
               </div>
 
-              {planOpen && run.plan && (
+              {planOpen && own && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4 text-xs">
+                  <div className="rounded-lg bg-gray-950 border border-gray-800 p-3 space-y-1.5">
+                    <p className="text-white font-semibold">1 · The thinking</p>
+                    <p className="text-gray-400">
+                      <span className="text-gray-500">Approach:</span> {APPROACH_LABEL[own.approach]} · {FORMAT_LABEL[own.format]}
+                    </p>
+                    <p className="text-gray-400">
+                      <span className="text-gray-500">For:</span> {own.audience}
+                    </p>
+                    <p className="text-gray-400">
+                      <span className="text-gray-500">Why this message:</span> {own.insight}
+                    </p>
+                    <p className="text-gray-400">
+                      <span className="text-gray-500">Why it should work:</span> {own.why}
+                    </p>
+                    {own.next_test && (
+                      <p className="text-gray-400">
+                        <span className="text-gray-500">Test next:</span> {own.next_test}
+                      </p>
+                    )}
+                  </div>
+                  <div className="rounded-lg bg-gray-950 border border-gray-800 p-3 space-y-1.5">
+                    <p className="text-white font-semibold">2 · The words and the picture</p>
+                    {ownFinalText(own)
+                      .split("\n")
+                      .map((l, i) => (
+                        <p key={i} className="text-white font-semibold">
+                          “{l}”
+                        </p>
+                      ))}
+                    <p className="text-gray-400">{own.visual}</p>
+                    <p className="text-gray-500">
+                      {own.needs_person ? `Person: ${run.plan?.model_label ? `the brand's model, ${run.plan.model_label}` : own.person || "cast by the planner"}` : "Person: none"} · {run.product_mode === "in" ? "Product: in" : "Product: none"}
+                    </p>
+                  </div>
+                  <div className="rounded-lg bg-gray-950 border border-gray-800 p-3 space-y-1.5">
+                    <p className="text-white font-semibold">3 · Design spec given to the image model</p>
+                    <p className="text-gray-400 leading-relaxed max-h-48 overflow-y-auto">{own.design_spec}</p>
+                  </div>
+                </div>
+              )}
+
+              {planOpen && run.plan && !own && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4 text-xs">
                   <div className="rounded-lg bg-gray-950 border border-gray-800 p-3 space-y-1.5">
                     <p className="text-white font-semibold">1 · Studied the reference</p>

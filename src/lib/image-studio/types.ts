@@ -68,7 +68,7 @@ export type PersonMode = "model" | "none" | "new";
 export type OutputMode = "single" | "pair" | "set3";
 export type ImageFormat = "1:1" | "4:5" | "9:16" | "1.91:1";
 export type TextStyle = "reference" | "clean";
-export type PresetId = "adapt" | "before_after" | "product_only" | "model_only" | "testimonial" | "blank";
+export type PresetId = "adapt" | "own" | "before_after" | "product_only" | "model_only" | "testimonial" | "blank";
 
 export interface RunInput {
   item_id: string | null;
@@ -94,6 +94,85 @@ export interface AdaptPlan {
   product?: string | null;
   /** The exact look of our pack (colours, every label line), from the brand photo; locks the product in the prompt and the review. */
   product_lock?: string | null;
+  /** Set on a "create your own" run: the approved concept it was generated from (no reference ad). */
+  own?: OwnConcept | null;
+}
+
+/** Why the buyer would act: the reason the message was chosen, before any design. */
+export type OwnApproach = "offer" | "replacement" | "trust" | "identity" | "situation";
+export const APPROACH_LABEL: Record<OwnApproach, string> = { offer: "Offer", replacement: "Replacement", trust: "Trust", identity: "Identity", situation: "Situation" };
+export const APPROACH_HINT: Record<OwnApproach, string> = {
+  offer: "Gives a reason to start now",
+  replacement: "Makes what they use today feel outdated",
+  trust: "Borrows credibility from who they look up to",
+  identity: "Names the person, so they stop scrolling",
+  situation: "Shows the exact moment the problem bites",
+};
+
+/** How a concept is laid out. */
+export type OwnFormat = "sorting_line" | "authority" | "replacement" | "native_comparison" | "story_post" | "meme" | "offer";
+export const FORMAT_LABEL: Record<OwnFormat, string> = {
+  sorting_line: "Sorting line",
+  authority: "Authority figure",
+  replacement: "Not this, not that",
+  native_comparison: "Handwritten comparison",
+  story_post: "Story post",
+  meme: "Meme",
+  offer: "Product + simple offer",
+};
+export const OWN_APPROACHES = Object.keys(APPROACH_LABEL) as OwnApproach[];
+export const OWN_FORMATS = Object.keys(FORMAT_LABEL) as OwnFormat[];
+
+/** One ad in a creative plan: the thinking, the words and the picture, before anything is generated. */
+export interface OwnConcept {
+  id: string;
+  title: string;
+  approach: OwnApproach;
+  format: OwnFormat;
+  /** The one person the ad is for, by trait, habit or moment. */
+  audience: string;
+  /** What they care about, or what stops them buying today. */
+  insight: string;
+  /** Who they look up to and who appears as that figure; "" when the ad has none. */
+  authority: string;
+  headline: string;
+  subhead: string;
+  /** Other lines on the image: pills, handwritten notes, story text boxes, offer items. */
+  callouts: string[];
+  cta: string;
+  /** The picture in plain words. */
+  visual: string;
+  /** native = looks like a person's post; designed = looks like a layout. */
+  polish: "native" | "designed";
+  why: string;
+  /** Which idea it borrows and from whom. */
+  borrowed: string;
+  next_test: string;
+  needs_person: boolean;
+  person: string;
+  /** Which of the brand's models was picked, 1-based; 0 = cast from the description. */
+  model_pick: number;
+  needs_product: boolean;
+  shows_contents: boolean;
+  design_spec: string;
+  /** The run generated from this concept, once approved. */
+  run_id?: string | null;
+}
+
+/** Every line that goes on the image, in reading order. */
+export const ownFinalText = (c: Pick<OwnConcept, "headline" | "subhead" | "callouts" | "cta">): string =>
+  [c.headline, c.subhead, ...c.callouts, c.cta].map((l) => l.trim()).filter(Boolean).join("\n");
+
+export interface OwnPlanRow {
+  id: string;
+  store: string;
+  product: string | null;
+  brief: string;
+  /** One line on the buyer's main hesitation, which the plan is built around. */
+  diagnosis: string;
+  concepts: OwnConcept[];
+  status: "draft" | "approved";
+  created_at: string;
 }
 
 export interface ReviewScores {
@@ -157,6 +236,8 @@ export interface StudioPage {
   profiled: string[];
   sources: StudioSources;
   runs: RunView[];
+  /** Creative plans from "create your own", newest first. */
+  plans: OwnPlanRow[];
 }
 
 export const PRESETS: Array<{ id: PresetId; label: string; instruction: string; product: ProductMode; person: PersonMode; output: OutputMode }> = [

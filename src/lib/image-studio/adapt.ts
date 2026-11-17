@@ -14,7 +14,7 @@ const UUID = /^[0-9a-f-]{36}$/;
 type BrandImageRow = { id: string; path: string; kind: string | null; description: string | null; pack_spec: string | null; ad_use: string | null; product: string | null };
 
 /** A bag is carried, not held in a palm, and its lettering is on the canvas and straps, not a label. */
-const isBag = (kind: string | null | undefined) => kind === "bag";
+export const isBag = (kind: string | null | undefined) => kind === "bag";
 
 /**
  * An exact description of a packshot, read once by Claude from the photo and
@@ -22,7 +22,7 @@ const isBag = (kind: string | null | undefined) => kind === "bag";
  * Saved descriptions are short and can be wrong ("gold accents" on a bottle
  * with none), and the image model drifts toward the ad's palette without it.
  */
-async function packSpecFor(db: SupabaseClient, img: BrandImageRow, url: string): Promise<string | null> {
+export async function packSpecFor(db: SupabaseClient, img: BrandImageRow, url: string): Promise<string | null> {
   if (img.pack_spec?.trim()) return img.pack_spec;
   const system = `You describe product packaging so an image model can reproduce it exactly. Describe only what you see; never guess or embellish. Answer with JSON only: {"container":string,"colours":string,"label_lines":string[]}.
 - container: one sentence: the container type, proportions and cap or lid (e.g. "squat round plastic supplement bottle with a ribbed white screw cap").
@@ -42,7 +42,7 @@ async function packSpecFor(db: SupabaseClient, img: BrandImageRow, url: string):
 }
 
 /** The pack's lock line for prompts and reviews: what it must look like, whatever the ad's colours. */
-const lockLine = (spec: string) => `Our product pack, exactly as in its photo: ${spec} It keeps these exact colours and label whatever the ad's palette: the palette is for the background, panels and type, never for the product. Every pack shown is this same pack. Its look comes from the photo, its light does not: it is photographed in this scene, never cut out of its photo and laid on top.`;
+export const lockLine = (spec: string) => `Our product pack, exactly as in its photo: ${spec} It keeps these exact colours and label whatever the ad's palette: the palette is for the background, panels and type, never for the product. Every pack shown is this same pack. Its look comes from the photo, its light does not: it is photographed in this scene, never cut out of its photo and laid on top.`;
 
 /**
  * The "adapt an ad" skill, step 1 + 2: read the competitor's static ad like
@@ -153,10 +153,18 @@ Fill "plan" in this order: first decide who is in our image (needs_person, model
   };
 }
 
+/** An original concept has no IMAGE B: structure is scored against the planned design, and a native ad is not marked down for looking unpolished. */
+const ownReviewNote = (planned: { spec: string; native: boolean }) =>
+  `This is an original concept: there is no reference ad and no IMAGE B. Score "structure" on how faithfully IMAGE A follows the planned design below (its zones, who and what is shown, where each text block sits); 4 or less when its key visual is missing or replaced by something else.${
+    planned.native
+      ? ' It is deliberately low-polish: it must look like a real person\'s own phone photo or post (handwriting, plain story text boxes or a simple meme), with no logo, button or designed layout. Score "design" on whether the message is understood in one second and whether it passes for a real post; never mark it down for lacking polish, a logo or a call to action, and mark it down when it looks like a glossy designed ad or a stock photo.'
+      : ""
+  }\nPlanned design: ${planned.spec.slice(0, 1800)}\n\n`;
+
 /** Step 4: score a result against the reference, the plan and the brand; say what to fix. */
 export async function reviewAdaptation(
   db: SupabaseClient,
-  input: { resultUrl: string; referenceUrl: string | null; productUrls: string[]; productLock: string | null; finalText: string; profile: string; modelUrl?: string | null }
+  input: { resultUrl: string; referenceUrl: string | null; productUrls: string[]; productLock: string | null; finalText: string; profile: string; modelUrl?: string | null; /** An original concept (no reference): what was planned, and whether it is meant to look like a person's post. */ planned?: { spec: string; native: boolean } | null }
 ): Promise<{ ok: boolean; notes: string; scores: ReviewScores; fixable: boolean; productOk: boolean | null; productIssue: string; personOk: boolean | null } | null> {
   const system = `You are an art director reviewing an AI-generated static ad before it ships. Score 0–10: "design" (hierarchy, readability, balance, polish, does it look like a real ad), "brand" (our product reproduced faithfully with legible correct label text, brand colours, no competitor branding, compliance line present when the bottle label is visible), "structure" (keeps the reference's winning structure and angle; its key visual, such as a before/after pair or a timeline of a face or body changing, is there in the same form, carried over to our angle: swapped for icons or objects, a person or figure missing, or moved into another kind of scene, structure is 4 or less). ok=false when any text on the image is garbled, misspelled or different from the planned text, when the product label is wrong or unreadable, when a competitor name or logo appears, when the person is deformed, or when design < 6 or structure < 5. "fixable" is true when a regeneration with a note could fix it (text, label, small artefacts, a wrong product), false when the whole concept is off. "notes": one or two short sentences, the most important fix first, or "Looks great."
 Product check, strictest of all because a wrong product wastes the ad: compare EVERY pack in IMAGE A with OUR PRODUCT photo and its description: the container shape, the body colour, the cap colour, the label colour, the stripes and accents, the logo, the label wording, and the artwork printed on the front (its illustrations, shapes and graphic elements, and where each one sits). A pack is its printed design, not just its colours and words. "product_ok" is false if any pack differs in any of these (a body recoloured to match the ad, a different logo or icon, label lines invented, missing or reworded, a different kind of container, or the front redesigned: an illustration, shape or graphic element that ours does not have, one of ours missing, swapped for another or moved, e.g. a row of letter blocks on a box that has none, a different cloud, different fruit). An illustration drawn a little differently in its detail is fine; a different design is not. or if our product is missing when the ad shows a product, or if our pack is seen only from the back or side, or is so small, cropped or hidden that someone scrolling a feed would not recognise it at a glance, or if it looks pasted on: floating, a flat cutout laid over the photo or over a design panel, lit differently from the scene, without a shadow where it touches a surface, in a different perspective or sharpness, or at a size that is not true to life next to the people and things around it (say "looks pasted on" in product_issue and how). The words that must be right are the ones a shopper reads on a phone: the brand name, the product name and the big label lines. Small print on the pack (a usage strip, ingredient text, a footer line) that is a few pixels tall in the ad does not fail the product check even when it comes out garbled; this is about tiny text only, never the artwork; a wrong colour, or a wrong word in the brand name, product name or big label lines, does. When product_ok is false, ok is false and fixable is true, and "product_issue" says concretely what differs (e.g. "the bottles are dark green; ours is white with thin teal stripes"). When there is no product photo, product_ok is null.
@@ -170,7 +178,7 @@ Answer with JSON only: {"ok":boolean,"fixable":boolean,"design":number,"brand":n
     db,
     system,
     images,
-    `${input.productLock ? `Our product, described: ${input.productLock}\n\n` : ""}Planned text on the image, which must appear exactly:\n${input.finalText || "(no text planned)"}\n\nBrand profile excerpt: ${input.profile.slice(0, 1200)}\n\nAnswer with JSON only.`,
+    `${input.productLock ? `Our product, described: ${input.productLock}\n\n` : ""}${input.planned ? ownReviewNote(input.planned) : ""}Planned text on the image, which must appear exactly:\n${input.finalText || "(no text planned)"}\n\nBrand profile excerpt: ${input.profile.slice(0, 1200)}\n\nAnswer with JSON only.`,
     // The model thinks first; 2000 left little room for the answer once the pack check got longer.
     6000
   );
@@ -241,14 +249,14 @@ export interface AdaptInput {
 type ModelPic = { bucket: string; path: string; label: string };
 
 /** How many of the brand's models (newest first) the planner chooses from. */
-const PLANNER_MODELS = 8;
+export const PLANNER_MODELS = 8;
 
 /** An ad's headline: the first line of its text that is not just the brand's wordmark. */
 const headlineOf = (text: string | null, store: string) =>
   (text ?? "").split("\n").map((l) => l.trim()).find((l) => l && l.replace(/[™®]/g, "").trim().toLowerCase() !== store.toLowerCase()) ?? "";
 
 /** The headlines of the brand's recent ads, newest first, no repeats. */
-function recentHeadlines(runs: Array<{ text_on_image: string | null }>, store: string): string[] {
+export function recentHeadlines(runs: Array<{ text_on_image: string | null }>, store: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const r of runs) {
@@ -313,7 +321,7 @@ async function avoidRepeatedHeadline(
 }
 
 /** The spec sometimes spells a price "PHP 990" while the copy says "₱990"; the image model draws the spec's version and the reviewer fails it. */
-const pesoLikeCopy =(spec: string, finalText: string) => spec.replace(/\bPHP\s?(\d[\d,.]*\d|\d)/g, (m, n: string) => (finalText.includes(`₱${n}`) ? `₱${n}` : m));
+export const pesoLikeCopy = (spec: string, finalText: string) => spec.replace(/\bPHP\s?(\d[\d,.]*\d|\d)/g, (m, n: string) => (finalText.includes(`₱${n}`) ? `₱${n}` : m));
 
 /** Puts new wording in place of old lines everywhere the plan carries them: the image's text, the text list and the design spec. */
 function swapLines(plan: AdaptPlan, swaps: Map<string, string>): AdaptPlan {

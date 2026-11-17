@@ -4,6 +4,7 @@ import { BOARD_BUCKET, signBoardPaths } from "@/lib/marketing-board/storage";
 import { STILL_CREDITS } from "@/lib/remake/engines";
 import { brandCheck, lastClaudeError } from "@/lib/remake/vision";
 import { isContents, recoverFailedRenders, retryResult, reviewAdaptation } from "./adapt";
+import { loadOwnPlans } from "./own";
 import { aspectFor, studioPrompt } from "./prompt";
 import type { AdaptPlan, Attachment, AttachmentView, ResultRow, ResultView, RunInput, RunRow, RunView, StudioPage, StudioSources } from "./types";
 
@@ -77,12 +78,13 @@ async function loadRuns(db: SupabaseClient, itemId: string | null): Promise<RunV
 }
 
 export async function loadStudioPage(db: SupabaseClient, itemId: string | null): Promise<StudioPage> {
-  const [itemRow, { data: storeRows }, { data: kits }, sources, runs] = await Promise.all([
+  const [itemRow, { data: storeRows }, { data: kits }, sources, runs, plans] = await Promise.all([
     itemId ? db.from("marketing_board_items").select("id, title, store, image_path").eq("id", itemId).maybeSingle().then((r) => r.data) : Promise.resolve(null),
     db.from("shopify_stores").select("name").eq("is_active", true).order("name"),
     db.from("remake_brand_kits").select("store, profile"),
     loadSources(db),
     loadRuns(db, itemId),
+    loadOwnPlans(db),
   ]);
   let item: StudioPage["item"] = null;
   if (itemRow) {
@@ -96,6 +98,7 @@ export async function loadStudioPage(db: SupabaseClient, itemId: string | null):
     profiled: ((kits ?? []) as Array<{ store: string; profile: string | null }>).filter((k) => k.profile?.trim()).map((k) => k.store),
     sources,
     runs,
+    plans,
   };
 }
 
@@ -233,6 +236,7 @@ export async function runPendingChecks(db: SupabaseClient, itemId: string | null
           finalText: run.plan.plan.final_text,
           profile: profiles.get(run.store ?? "") ?? "",
           modelUrl: model ? signed.get(key(model.bucket, model.path)) ?? null : null,
+          planned: run.plan.own ? { spec: run.plan.plan.design_spec, native: run.plan.own.polish === "native" } : null,
         });
         // A wrong product or person gets two more tries (they are what make an ad unusable); anything else one.
         const tries = review && (review.productOk === false || review.personOk === false) ? 3 : 2;
@@ -243,7 +247,7 @@ export async function runPendingChecks(db: SupabaseClient, itemId: string | null
                 ? `${review.productIssue} Photograph our pack inside the scene: resting on a surface or in a hand at its true size, lit by the scene's light with a soft contact shadow, matching perspective, focus and grain, front label toward the camera; never a cutout laid on top.`
                 : `${review.productIssue || "The product does not match our pack."} Every pack must look exactly like our product photo${run.plan.product_lock ? `: ${run.plan.product_lock}` : "."} Keep its own colours and the exact artwork printed on its front; do not recolour it to match the ad or add, drop or redraw anything on it.`
               : review.personOk === false
-                ? `${review.notes} The person must be our model from the model photo (same face, hair, skin tone and age), replacing the reference's person entirely.`
+                ? `${review.notes} The person must be our model from the model photo (same face, hair, skin tone and age)${ref ? ", replacing the reference's person entirely" : ""}.`
                 : review.notes;
           await retryResult(db, r.id, fix, { ok: false, notes: review.notes, scores: review.scores, product_ok: review.productOk });
           return;
