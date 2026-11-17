@@ -4,7 +4,7 @@ import { AlertTriangle, ArrowDown, Check, Loader2, PenLine, Sparkles, Trash2 } f
 import Link from "next/link";
 import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { STILL_CREDITS } from "@/lib/remake/engines";
-import { APPROACH_HINT, APPROACH_LABEL, FORMAT_LABEL, isContents, productsOf, type OwnConcept, type OwnPlanRow, type PageEvidence, type RunView, type StudioPage } from "@/lib/image-studio/types";
+import { APPROACH_HINT, APPROACH_LABEL, FORMAT_LABEL, photosForProduct, pickStaticAdPhotos, productsOf, type OwnConcept, type OwnPlanRow, type PageEvidence, type RunView, type StudioPage } from "@/lib/image-studio/types";
 import { Button, ConfirmButton, Label, Panel, api, credits, timeAgo } from "@/components/hook-studio/ui";
 
 const field = "w-full bg-canvas border border-line-strong rounded-control px-3 py-2 text-sm text-fg placeholder:text-dim focus:outline-none focus:border-accent";
@@ -38,7 +38,7 @@ function Pack({ url, className = "", style }: { url: string | null; className?: 
         // eslint-disable-next-line @next/next/no-img-element
         <img src={url} alt="" className="w-full h-full object-contain drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)]" />
       ) : (
-        <div className="w-full h-full rounded-[2cqw] border border-dashed flex items-center justify-center" style={{ borderColor: "rgba(255,255,255,0.6)", color: "rgba(255,255,255,0.8)", fontSize: "3.4cqw", backgroundColor: "rgba(0,0,0,0.25)" }}>
+        <div className="w-full h-full rounded-[2cqw] border border-dashed flex items-center justify-center" style={{ borderColor: "rgba(255,255,255,0.7)", color: "#fff", fontSize: "3.4cqw", backgroundColor: "rgba(0,0,0,0.45)" }}>
           pack
         </div>
       )}
@@ -255,7 +255,7 @@ function ConceptCard({ concept: c, packUrl, brand, picked, onPick, onRevise, bus
       <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,15rem)_minmax(0,1fr)] gap-4 items-start">
         <div>
           <AdSketch concept={c} packUrl={packUrl} brand={brand} />
-          <p className="text-[10px] text-dim mt-1">Layout sketch with the real words. The image is made only after you approve.</p>
+          <p className="text-[10px] text-dim mt-1">Layout sketch with the real words{packUrl && c.needs_product ? " and the pack photo the image will reproduce" : ""}. The image is made only after you approve.</p>
         </div>
         <div className="space-y-1.5 min-w-0">
           <Row label="For">{c.audience}</Row>
@@ -415,10 +415,8 @@ export function OwnAds({ page, itemId, onChange, setError }: { page: StudioPage;
   const products = useMemo(() => productsOf(page.sources.brand.filter((b) => b.store === store)), [page, store]);
   const pickedProduct = products.length > 1 ? (products.includes(product) ? product : products[0]) : null;
 
-  const packFor = (plan: OwnPlanRow) => {
-    const photos = page.sources.brand.filter((b) => b.store === plan.store && !isContents(b.kind) && (!plan.product || !b.product || b.product.toLowerCase() === plan.product.toLowerCase()));
-    return photos[0]?.url ?? null;
-  };
+  // The same photo the render will reproduce: the Brand Kit's "main pack" (the front), never one marked skip (the back of a box).
+  const packFor = (plan: OwnPlanRow) => pickStaticAdPhotos(photosForProduct(page.sources.brand.filter((b) => b.store === plan.store), plan.product)).packs[0]?.url ?? null;
 
   const call = async (tag: string, init: RequestInit & { url?: string }) => {
     setBusy(tag);

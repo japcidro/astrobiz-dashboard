@@ -263,7 +263,7 @@ export interface RunView extends RunRow {
 export interface StudioSources {
   people: Array<{ id: string; folder: string | null; name: string; bucket: string; path: string; url: string }>;
   stills: Array<{ id: string; title: string; bucket: string; path: string; url: string }>;
-  brand: Array<{ store: string; kind: string | null; product: string | null; bucket: string; path: string; url: string }>;
+  brand: Array<{ store: string; kind: string | null; product: string | null; /** What the photo shows ("front of the packaging box"). */ description?: string | null; /** "main" = the pack ads reproduce; "skip" = never used in ads. */ ad_use?: string | null; bucket: string; path: string; url: string }>;
   board: Array<{ id: string; title: string; bucket: string; path: string; url: string }>;
 }
 

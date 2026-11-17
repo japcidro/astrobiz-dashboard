@@ -24,3 +24,16 @@ describe("brand photos filed under products", () => {
     expect(pickStaticAdPhotosByProduct([img("x", null, "main"), img("y", null)]).packs.map((p) => p.id)).toEqual(["x"]);
   });
 });
+
+describe("the pack a sketch and a render show", () => {
+  it("is the photo marked main, never one marked skip, whatever the upload order", () => {
+    const photos = [
+      { kind: "patches", description: "sheet of patches", ad_use: null, product: null, url: "patches" },
+      { kind: "box", description: "back of the packaging box", ad_use: "skip", product: null, url: "back" },
+      { kind: "box", description: "front of the packaging box", ad_use: "main", product: null, url: "front" },
+    ];
+    expect(pickStaticAdPhotosByProduct(photos).packs.map((p) => p.url)).toEqual(["front"]);
+    // Unmarked: the front still wins over the back.
+    expect(pickStaticAdPhotosByProduct(photos.map((p) => ({ ...p, ad_use: null }))).packs.map((p) => p.url)).toEqual(["front"]);
+  });
+});
