@@ -108,10 +108,14 @@ export async function GET(request: Request) {
     );
   }
 
-  const targetStores =
+  // "ALL" or a comma-separated list of store ids (the page's multi-select).
+  const selectedIds =
     storeFilter === "ALL"
-      ? storesData
-      : storesData.filter((s) => s.id === storeFilter);
+      ? null
+      : new Set(storeFilter.split(",").map((s) => s.trim()).filter(Boolean));
+  const targetStores = selectedIds
+    ? storesData.filter((s) => selectedIds.has(s.id))
+    : storesData;
 
   // COGS lookup — built by the same helper as the P&L tab, so keying and the
   // VAT gross-up are identical and the two reconcile.

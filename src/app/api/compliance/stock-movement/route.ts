@@ -199,10 +199,14 @@ export async function GET(request: Request) {
   }
 
   const storeNameById = new Map(storesData.map((s) => [s.id, s.name]));
-  const targetStores =
+  // "ALL" or a comma-separated list of store ids (the page's multi-select).
+  const selectedIds =
     storeFilter === "ALL"
-      ? storesData
-      : storesData.filter((s) => s.id === storeFilter);
+      ? null
+      : new Set(storeFilter.split(",").map((s) => s.trim()).filter(Boolean));
+  const targetStores = selectedIds
+    ? storesData.filter((s) => selectedIds.has(s.id))
+    : storesData;
 
   const warnings: string[] = [];
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   RefreshCw,
   Download,
@@ -9,6 +9,7 @@ import {
   Package,
   FileSpreadsheet,
   Receipt,
+  Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { AdSpendRow } from "@/app/api/compliance/ad-spend/route";
@@ -86,10 +87,42 @@ export default function CompliancePage() {
     date_to: string;
   } | null>(null);
   const [stores, setStores] = useState<{ id: string; name: string }[]>([]);
+  // Pages (stores) to extract. Empty = all. `storeFilter` trails the chips by
+  // a beat so ticking several pages fires one Shopify fetch, not one per click.
+  const [selectedStores, setSelectedStores] = useState<string[]>([]);
   const [storeFilter, setStoreFilter] = useState("ALL");
+  const salesCogsReq = useRef(0);
+  const stockReq = useRef(0);
   const [stockLoading, setStockLoading] = useState(false);
   const [stockError, setStockError] = useState<string | null>(null);
   const [stockWarnings, setStockWarnings] = useState<string[]>([]);
+
+  useEffect(() => {
+    const t = setTimeout(
+      () => setStoreFilter(selectedStores.length ? [...selectedStores].sort().join(",") : "ALL"),
+      600
+    );
+    return () => clearTimeout(t);
+  }, [selectedStores]);
+
+  const toggleStore = (id: string) =>
+    setSelectedStores((prev) =>
+      prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]
+    );
+
+  const selectedStoreNames = stores
+    .filter((s) => selectedStores.includes(s.id))
+    .map((s) => s.name);
+
+  // True between a chip click and the refetch it triggers.
+  const storePending =
+    (selectedStores.length ? [...selectedStores].sort().join(",") : "ALL") !== storeFilter;
+
+  // Names of the pages the loaded data actually covers (for export filenames).
+  const appliedStoreNames =
+    storeFilter === "ALL"
+      ? []
+      : stores.filter((s) => storeFilter.split(",").includes(s.id)).map((s) => s.name);
 
   const dateParams = useCallback(() => {
     const p = new URLSearchParams({ date_filter: dateFilter });
@@ -124,6 +157,7 @@ export default function CompliancePage() {
 
   const fetchSalesCogs = useCallback(async () => {
     if (dateFilter === "custom" && (!customFrom || !customTo)) return;
+    const req = ++salesCogsReq.current;
     setSalesCogsLoading(true);
     setSalesCogsError(null);
     try {
@@ -133,22 +167,25 @@ export default function CompliancePage() {
         cache: "no-store",
       });
       const json = await res.json();
+      if (req !== salesCogsReq.current) return; // a newer pick superseded this
       if (!res.ok) throw new Error(json.error || "Failed to load sales & COGS");
       setSalesCogsRows(json.rows || []);
       setSalesCogsSummary(json.summary || null);
       if (json.stores) setStores(json.stores);
       setSalesCogsWarnings(json.warnings || []);
     } catch (e) {
+      if (req !== salesCogsReq.current) return;
       setSalesCogsError(e instanceof Error ? e.message : "Failed to load sales & COGS");
       setSalesCogsRows([]);
       setSalesCogsSummary(null);
     } finally {
-      setSalesCogsLoading(false);
+      if (req === salesCogsReq.current) setSalesCogsLoading(false);
     }
   }, [dateFilter, customFrom, customTo, storeFilter, dateParams]);
 
   const fetchStock = useCallback(async () => {
     if (dateFilter === "custom" && (!customFrom || !customTo)) return;
+    const req = ++stockReq.current;
     setStockLoading(true);
     setStockError(null);
     try {
@@ -158,6 +195,7 @@ export default function CompliancePage() {
         cache: "no-store",
       });
       const json = await res.json();
+      if (req !== stockReq.current) return; // a newer pick superseded this
       if (!res.ok) throw new Error(json.error || "Failed to load stock movement");
       setMovements(json.movements || []);
       setSalesOut(json.salesOut || []);
@@ -166,13 +204,14 @@ export default function CompliancePage() {
       if (json.stores) setStores(json.stores);
       setStockWarnings(json.warnings || []);
     } catch (e) {
+      if (req !== stockReq.current) return;
       setStockError(e instanceof Error ? e.message : "Failed to load stock movement");
       setMovements([]);
       setSalesOut([]);
       setSnapshot([]);
       setStockSummary(null);
     } finally {
-      setStockLoading(false);
+      if (req === stockReq.current) setStockLoading(false);
     }
   }, [dateFilter, customFrom, customTo, storeFilter, dateParams]);
 
@@ -201,7 +240,11 @@ export default function CompliancePage() {
     }
     exportStockMovement(
       { movements, salesOut, snapshot },
-      { from: stockSummary?.date_from || "", to: stockSummary?.date_to || "" }
+      {
+        from: stockSummary?.date_from || "",
+        to: stockSummary?.date_to || "",
+        pages: appliedStoreNames,
+      }
     );
     toast.success("Na-download ang Excel file (3 sheets).");
   };
@@ -214,6 +257,7 @@ export default function CompliancePage() {
     exportSalesCogs(salesCogsRows, {
       from: salesCogsSummary?.date_from || "",
       to: salesCogsSummary?.date_to || "",
+      pages: appliedStoreNames,
     });
     toast.success("Na-download ang Excel file.");
   };
@@ -327,20 +371,49 @@ export default function CompliancePage() {
       )}
 
       {tab !== "ad_spend" && stores.length > 0 && (
-        <div className="flex items-center gap-2 mb-4">
-          <label className="text-sm text-gray-400">Store:</label>
-          <select
-            value={storeFilter}
-            onChange={(e) => setStoreFilter(e.target.value)}
-            className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="ALL">All Stores</option>
-            {stores.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+        <div className="mb-4">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm text-gray-400 mr-1">Pages:</span>
+            <button
+              onClick={() => setSelectedStores([])}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors cursor-pointer ${
+                selectedStores.length === 0
+                  ? "bg-white text-gray-900"
+                  : "bg-gray-800 text-gray-400 hover:text-white"
+              }`}
+            >
+              All Pages
+            </button>
+            {stores.map((s) => {
+              const on = selectedStores.includes(s.id);
+              return (
+                <button
+                  key={s.id}
+                  onClick={() => toggleStore(s.id)}
+                  aria-pressed={on}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-colors cursor-pointer border ${
+                    on
+                      ? "bg-blue-600/20 border-blue-500 text-white"
+                      : "bg-gray-800 border-transparent text-gray-400 hover:text-white"
+                  }`}
+                >
+                  <span
+                    className={`inline-flex items-center justify-center w-3.5 h-3.5 rounded-sm border ${
+                      on ? "bg-blue-500 border-blue-500" : "border-gray-500"
+                    }`}
+                  >
+                    {on && <Check size={10} strokeWidth={3} className="text-white" />}
+                  </span>
+                  {s.name}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-xs text-gray-500 mt-2">
+            {selectedStoreNames.length === 0
+              ? "Kasama lahat ng pages sa extract."
+              : `Extract lang para sa: ${selectedStoreNames.join(", ")}`}
+          </p>
         </div>
       )}
 
@@ -469,7 +542,7 @@ export default function CompliancePage() {
           <div className="flex justify-end mb-3">
             <button
               onClick={handleExportSalesCogs}
-              disabled={salesCogsLoading || salesCogsRows.length === 0}
+              disabled={salesCogsLoading || storePending || salesCogsRows.length === 0}
               className="flex items-center gap-2 bg-white text-gray-900 font-medium text-sm px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-40 cursor-pointer"
             >
               <Download size={16} />
@@ -555,6 +628,7 @@ export default function CompliancePage() {
               onClick={handleExportStock}
               disabled={
                 stockLoading ||
+                storePending ||
                 (movements.length === 0 && salesOut.length === 0 && snapshot.length === 0)
               }
               className="flex items-center gap-2 bg-white text-gray-900 font-medium text-sm px-4 py-2 rounded-lg hover:bg-gray-100 transition-colors disabled:opacity-40 cursor-pointer"

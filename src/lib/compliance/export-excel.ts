@@ -11,6 +11,12 @@ import type {
   SnapshotRow,
 } from "@/app/api/compliance/stock-movement/route";
 
+// "_FOLIQ_ILP" when the extract covers only some pages; "" for all pages.
+function pagesSuffix(pages?: string[]) {
+  if (!pages || pages.length === 0) return "";
+  return "_" + pages.map((p) => p.replace(/[^A-Za-z0-9]+/g, "")).join("_");
+}
+
 function downloadWorkbook(wb: XLSX.WorkBook, filename: string) {
   XLSX.writeFile(wb, filename);
 }
@@ -65,7 +71,7 @@ export function exportAdSpend(
 
 export function exportSalesCogs(
   rows: SalesCogsRow[],
-  range: { from: string; to: string }
+  range: { from: string; to: string; pages?: string[] }
 ) {
   const r2 = (n: number) => Math.round(n * 100) / 100;
   const formatted: Record<string, unknown>[] = rows.map((r) => ({
@@ -90,7 +96,7 @@ export function exportSalesCogs(
     sheetFrom(formatted.length ? formatted : [{ Note: "No sales in range" }]),
     "Sales & COGS"
   );
-  downloadWorkbook(wb, `Sales_COGS_${range.from}_to_${range.to}.xlsx`);
+  downloadWorkbook(wb, `Sales_COGS${pagesSuffix(range.pages)}_${range.from}_to_${range.to}.xlsx`);
 }
 
 export function exportStockMovement(
@@ -99,7 +105,7 @@ export function exportStockMovement(
     salesOut: SalesOutRow[];
     snapshot: SnapshotRow[];
   },
-  range: { from: string; to: string }
+  range: { from: string; to: string; pages?: string[] }
 ) {
   const wb = XLSX.utils.book_new();
 
@@ -147,5 +153,5 @@ export function exportStockMovement(
     "Current Stock"
   );
 
-  downloadWorkbook(wb, `Stock_Movement_${range.from}_to_${range.to}.xlsx`);
+  downloadWorkbook(wb, `Stock_Movement${pagesSuffix(range.pages)}_${range.from}_to_${range.to}.xlsx`);
 }
